@@ -1,0 +1,27 @@
+{
+  "name": "@conversia/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@conversia/agents": "workspace:*",
+    "@conversia/config": "workspace:*",
+    "@conversia/database": "workspace:*",
+    "@conversia/scheduling": "workspace:*",
+    "@conversia/types": "workspace:*",
+    "@conversia/workflows": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

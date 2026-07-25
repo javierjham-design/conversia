@@ -1,0 +1,162 @@
+{
+  "$comment": "Configuración del tenant piloto Digital Dent. SOLO DATOS: cualquier otro tenant se crea con un JSON equivalente sin tocar código. Valores marcados PLACEHOLDER deben reemplazarse con datos reales de la clínica antes de producción.",
+  "organization": {
+    "name": "Digital Dent",
+    "slug": "digital-dent",
+    "country": "CL",
+    "timezone": "America/Santiago",
+    "locale": "es",
+    "currency": "CLP",
+    "settings": {
+      "brand": { "primaryColor": "#0e7490", "logoUrl": null },
+      "businessHours": { "mon-fri": "09:00-19:00", "sat": "09:00-14:00" }
+    }
+  },
+  "clinics": [
+    {
+      "name": "Digital Dent Temuco",
+      "slug": "temuco",
+      "address": "PLACEHOLDER — dirección real de la clínica",
+      "city": "Temuco",
+      "timezone": "America/Santiago"
+    }
+  ],
+  "teams": [
+    { "name": "Recepción", "description": "Atención inicial y agendamiento" },
+    { "name": "Ventas", "description": "Seguimiento comercial de leads" },
+    { "name": "Clínico", "description": "Profesionales y postoperatorio" }
+  ],
+  "leadStatuses": [
+    { "code": "nuevo", "name": "Nuevo", "category": "OPEN", "order": 0 },
+    { "code": "contactado", "name": "Contactado", "category": "OPEN", "order": 1 },
+    { "code": "en_conversacion", "name": "En conversación", "category": "OPEN", "order": 2 },
+    { "code": "calificando", "name": "Calificando", "category": "OPEN", "order": 3 },
+    { "code": "hot_lead", "name": "Hot lead", "category": "OPEN", "order": 4 },
+    { "code": "pendiente_respuesta", "name": "Pendiente de respuesta", "category": "OPEN", "order": 5 },
+    { "code": "agenda", "name": "Agendó", "category": "OPEN", "order": 6 },
+    { "code": "confirmado", "name": "Confirmado", "category": "OPEN", "order": 7 },
+    { "code": "reagendar", "name": "Reagendar", "category": "OPEN", "order": 8 },
+    { "code": "cancelado", "name": "Cancelado", "category": "LOST", "order": 9 },
+    { "code": "no_asistio", "name": "No asistió", "category": "OPEN", "order": 10 },
+    { "code": "en_tratamiento", "name": "En tratamiento", "category": "WON", "order": 11 },
+    { "code": "ganado", "name": "Ganado", "category": "WON", "order": 12 },
+    { "code": "perdido", "name": "Perdido", "category": "LOST", "order": 13 },
+    { "code": "cold_lead", "name": "Cold lead", "category": "FROZEN", "order": 14 },
+    { "code": "no_contactar", "name": "No contactar", "category": "FROZEN", "order": 15 },
+    { "code": "cerrado", "name": "Cerrado", "category": "LOST", "order": 16 }
+  ],
+  "services": [
+    { "code": "evaluacion", "name": "Evaluación inicial", "category": "general", "durationMin": 30, "price": 15000 },
+    { "code": "limpieza", "name": "Limpieza dental (profilaxis)", "category": "higiene", "durationMin": 45, "price": 45000 },
+    { "code": "implante_unitario", "name": "Implante unitario", "category": "implantes", "durationMin": 90, "price": 950000 },
+    { "code": "ortodoncia_evaluacion", "name": "Evaluación de ortodoncia", "category": "ortodoncia", "durationMin": 45, "price": 25000 },
+    { "code": "endodoncia", "name": "Endodoncia", "category": "endodoncia", "durationMin": 60, "price": 180000 },
+    { "code": "corona", "name": "Corona de porcelana", "category": "rehabilitacion", "durationMin": 60, "price": 350000 },
+    { "code": "urgencia", "name": "Urgencia dental", "category": "urgencias", "durationMin": 30, "price": 30000 }
+  ],
+  "professionals": [
+    { "name": "PLACEHOLDER Dr. Implantólogo", "specialty": "Implantología", "services": ["implante_unitario", "evaluacion"] },
+    { "name": "PLACEHOLDER Dra. Odontóloga General", "specialty": "Odontología general", "services": ["evaluacion", "limpieza", "endodoncia", "corona", "urgencia"] },
+    { "name": "PLACEHOLDER Dr. Ortodoncista", "specialty": "Ortodoncia", "services": ["ortodoncia_evaluacion", "evaluacion"] }
+  ],
+  "tags": [
+    { "name": "implantes", "color": "#0ea5e9" },
+    { "name": "urgencia", "color": "#ef4444" },
+    { "name": "convenio", "color": "#8b5cf6" },
+    { "name": "financiamiento", "color": "#f59e0b" }
+  ],
+  "agents": [
+    {
+      "slug": "recepcionista",
+      "name": "Recepcionista",
+      "kind": "orchestrator",
+      "description": "Primer contacto: saluda, entiende la necesidad, deriva al especialista correcto o agenda directamente.",
+      "systemPrompt": "Eres {{agent.name}}, asistente virtual de {{organization.name}} ({{clinic.name}}, {{clinic.city}}). Atiendes por WhatsApp de forma cercana, profesional y breve (máx. 2-3 frases por mensaje, una pregunta a la vez). Tu objetivo: entender qué necesita la persona, responder con información REAL obtenida de tus herramientas y guiar hacia el agendamiento sin presionar. Reglas estrictas: nunca inventes precios, promociones, horarios ni profesionales — usa siempre las herramientas; si no sabes algo, dilo y ofrece que un humano contacte; nunca entregues diagnósticos ni indiques tratamientos o medicamentos; si detectas urgencia con dolor intenso, frustración o solicitud expresa de hablar con una persona, usa transferToHuman; si preguntan directamente si eres un bot, reconócelo con naturalidad.",
+      "config": { "model": "claude-opus-4-8", "maxTokens": 400, "language": "es", "maxToolRounds": 5 },
+      "tools": ["getServices", "getServicePrice", "getProfessionals", "getAvailability", "createAppointment", "updateLeadStatus", "addTag", "transferToHuman", "transferToAgent"]
+    },
+    {
+      "slug": "agendamiento",
+      "name": "Agente de Agendamiento",
+      "kind": "scheduler",
+      "description": "Especialista en reservar, confirmar, mover y cancelar horas.",
+      "systemPrompt": "Eres el asistente de agendamiento de {{organization.name}}. Tu única misión es concretar la cita: identifica servicio y sede, pide los datos mínimos (nombre y teléfono ya los tienes por WhatsApp), consulta disponibilidad REAL con getAvailability, ofrece máximo 3 horarios, y al confirmar usa createAppointment. Verifica disponibilidad justo antes de reservar. Confirma siempre: fecha, hora, profesional, sede y dirección. Nunca inventes disponibilidad. Si el paciente duda más de 2 veces, ofrece que recepción lo llame (transferToHuman).",
+      "config": { "model": "claude-opus-4-8", "maxTokens": 350, "language": "es", "maxToolRounds": 6 },
+      "tools": ["getServices", "getProfessionals", "getAvailability", "createAppointment", "updateLeadStatus", "transferToHuman"]
+    },
+    {
+      "slug": "implantes",
+      "name": "Agente de Implantes",
+      "kind": "sales",
+      "description": "Especialista comercial en implantes, cirugía y rehabilitación.",
+      "systemPrompt": "Eres el especialista en implantes de {{organization.name}}. Conoces el proceso (evaluación con imagenología, cirugía, oseointegración, corona) y respondes dudas frecuentes con empatía, sin tecnicismos innecesarios y sin prometer resultados clínicos. Usa getServicePrice para valores reales y menciona opciones de financiamiento solo si existen en la base de conocimiento. Detecta miedo al dolor y respóndelo con información general tranquilizadora, no clínica. Tu meta es agendar la evaluación inicial: cuando haya interés, deriva con transferToAgent al agente de agendamiento.",
+      "config": { "model": "claude-opus-4-8", "maxTokens": 450, "language": "es", "maxToolRounds": 4 },
+      "tools": ["getServices", "getServicePrice", "searchKnowledgeBase", "updateLeadStatus", "addTag", "transferToAgent", "transferToHuman"]
+    }
+  ],
+  "workflows": [
+    {
+      "templateKey": "lead-nuevo-whatsapp",
+      "name": "Lead nuevo por WhatsApp",
+      "description": "Primer contacto: crea lead, responde con IA y hace seguimiento si no contesta.",
+      "definition": {
+        "trigger": { "type": "conversation_started", "config": {} },
+        "variables": {},
+        "nodes": [
+          { "id": "n1", "type": "update_lead_status", "config": { "statusCode": "nuevo" } },
+          { "id": "n2", "type": "run_agent", "config": { "agentSlug": "recepcionista" } },
+          { "id": "n3", "type": "wait", "config": { "minutes": 5, "cancelOn": "contact_reply" } },
+          { "id": "n4", "type": "condition", "config": { "kind": "no_reply" } },
+          { "id": "n5", "type": "send_text", "config": { "text": "¿Sigues por ahí? 😊 Si quieres te cuento valores o buscamos una hora que te acomode." } },
+          { "id": "n6", "type": "wait", "config": { "hours": 12, "cancelOn": "contact_reply" } },
+          { "id": "n7", "type": "condition", "config": { "kind": "no_reply" } },
+          { "id": "n8", "type": "update_lead_status", "config": { "statusCode": "cold_lead" } }
+        ],
+        "edges": [
+          { "from": "n1", "to": "n2" },
+          { "from": "n2", "to": "n3" },
+          { "from": "n3", "to": "n4" },
+          { "from": "n4", "to": "n5", "when": "true" },
+          { "from": "n5", "to": "n6" },
+          { "from": "n6", "to": "n7" },
+          { "from": "n7", "to": "n8", "when": "true" }
+        ]
+      }
+    },
+    {
+      "templateKey": "confirmacion-cita",
+      "name": "Confirmación de cita",
+      "description": "Recordatorio 24h antes con confirmación; libera la hora si cancela.",
+      "definition": {
+        "trigger": { "type": "appointment_upcoming", "config": { "hoursBefore": 24 } },
+        "variables": {},
+        "nodes": [
+          { "id": "n1", "type": "send_text", "config": { "text": "Hola {{contact.firstName}} 👋 Te recordamos tu hora en {{clinic.name}} el {{appointment.date}} a las {{appointment.time}}. ¿Confirmas tu asistencia? Responde SÍ para confirmar o CAMBIAR para reagendar." } },
+          { "id": "n2", "type": "wait", "config": { "hours": 6, "cancelOn": "contact_reply" } },
+          { "id": "n3", "type": "run_agent", "config": { "agentSlug": "agendamiento" } }
+        ],
+        "edges": [
+          { "from": "n1", "to": "n2" },
+          { "from": "n2", "to": "n3" }
+        ]
+      }
+    }
+  ],
+  "knowledge": [
+    {
+      "baseName": "Información general",
+      "documents": [
+        {
+          "title": "Preguntas frecuentes",
+          "sourceType": "faq",
+          "content": "PLACEHOLDER — cargar FAQ real de Digital Dent: formas de pago (efectivo, tarjetas, transferencia), convenios vigentes, financiamiento en cuotas, política de cancelación (avisar con 24h), estacionamiento, primera visita incluye evaluación y plan de tratamiento."
+        }
+      ]
+    }
+  ],
+  "channel": {
+    "type": "MOCK",
+    "name": "WhatsApp Digital Dent (mock)",
+    "defaultAgentSlug": "recepcionista"
+  }
+}

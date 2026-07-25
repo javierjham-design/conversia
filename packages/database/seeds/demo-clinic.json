@@ -1,0 +1,47 @@
+{
+  "$comment": "Segundo tenant de prueba para validar aislamiento multi-tenant (criterio 45.1 y 45.26 del MVP). Estructura mínima.",
+  "organization": {
+    "name": "Clínica Demo Salud",
+    "slug": "clinica-demo",
+    "country": "CL",
+    "timezone": "America/Santiago",
+    "locale": "es",
+    "currency": "CLP",
+    "settings": {}
+  },
+  "clinics": [
+    { "name": "Sede Central", "slug": "central", "address": "Av. Demo 123", "city": "Santiago", "timezone": "America/Santiago" }
+  ],
+  "teams": [{ "name": "Recepción", "description": "Atención general" }],
+  "leadStatuses": [
+    { "code": "nuevo", "name": "Nuevo", "category": "OPEN", "order": 0 },
+    { "code": "agenda", "name": "Agendó", "category": "OPEN", "order": 1 },
+    { "code": "ganado", "name": "Ganado", "category": "WON", "order": 2 },
+    { "code": "perdido", "name": "Perdido", "category": "LOST", "order": 3 }
+  ],
+  "services": [
+    { "code": "consulta", "name": "Consulta médica general", "category": "general", "durationMin": 30, "price": 25000 }
+  ],
+  "professionals": [
+    { "name": "Dra. Demo", "specialty": "Medicina general", "services": ["consulta"] }
+  ],
+  "tags": [],
+  "agents": [
+    {
+      "slug": "asistente",
+      "name": "Asistente Virtual",
+      "kind": "receptionist",
+      "description": "Asistente genérico de la clínica demo.",
+      "systemPrompt": "Eres el asistente virtual de {{organization.name}}. Responde con amabilidad, entrega solo información obtenida de tus herramientas y ofrece agendar una consulta cuando corresponda. Nunca inventes datos ni entregues indicaciones médicas.",
+      "config": { "model": "claude-opus-4-8", "maxTokens": 300, "language": "es", "maxToolRounds": 4 },
+      "tools": ["getServices", "getAvailability", "createAppointment", "transferToHuman"]
+    }
+  ],
+  "workflows": [],
+  "knowledge": [],
+  "channel": {
+    "type": "MOCK",
+    "name": "WhatsApp Demo (mock)",
+    "defaultAgentSlug": "asistente"
+  }
+}

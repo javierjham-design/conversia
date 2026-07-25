@@ -1,0 +1,356 @@
+import { withTenant } from "@conversia/database";
+import {
+  executeFrom,
+  findStartNode,
+  matchesTrigger,
+  resumeAfterWait,
+  type EngineDeps,
+  type RunCtx,
+} from "@conversia/workflows";
+import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
+import { runAgentTurn } from "./agent-turn";
+import { getChannelProvider } from "./channel-providers";
+
+/** Implementación de efectos del motor sobre la plataforma real. */
+function makeDeps(): EngineDeps {
+  return {
+    async sendText(ctx, text) {
+      if (!ctx.conversationId) return;
+      const data = await withTenant(ctx.organizationId, async (tx) => {
+        const conversation = await tx.conversation.findUnique({
+          where: { id: ctx.conversationId! },
+          include: { contact: true },
+        });
+        if (!conversation?.contact.phone) return null;
+        const message = await tx.message.create({
+          data: {
+            organizationId: ctx.organizationId,
+            conversationId: ctx.conversationId!,
+            direction: "OUTBOUND",
+            type: "TEXT",
+            body: text,
+            authorType: "SYSTEM",
+            status: "PENDING",
+            payload: { workflowRunId: ctx.runId },
+          },
+        });
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { lastMessageAt: new Date(), lastMessagePreview: text.slice(0, 120) },
+        });
+        return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
+      });
+      if (!data) return;
+      const sent = await getChannelProvider().send(`wf:${ctx.organizationId}`, {
+        to: data.phone,
+        type: "text",
+        text,
+      });
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.message.update({
+          where: { id: data.message.id },
+          data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
+        }),
+      );
+    },
+
+    async runAgent(ctx, agentSlug) {
+      if (!ctx.conversationId) return;
+      await runAgentTurn({ organizationId: ctx.organizationId, conversationId: ctx.conversationId, agentSlug });
+    },
+
+    async updateLeadStatus(ctx, statusCode) {
+      if (!ctx.contactId) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        const status = await tx.leadStatus.findUnique({
+          where: { organizationId_code: { organizationId: ctx.organizationId, code: statusCode } },
+        });
+        if (!status) return;
+        const lead = await tx.lead.findFirst({ where: { contactId: ctx.contactId! }, orderBy: { createdAt: "desc" } });
+        if (lead) {
+          await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
+          await tx.leadEvent.create({
+            data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { to: statusCode }, actorType: "workflow", actorId: ctx.workflowId },
+          });
+        } else {
+          await tx.lead.create({
+            data: { organizationId: ctx.organizationId, contactId: ctx.contactId!, statusId: status.id },
+          });
+        }
+      });
+    },
+
+    async addTag(ctx, tagName) {
+      await withTenant(ctx.organizationId, async (tx) => {
+        const tag = await tx.tag.upsert({
+          where: { organizationId_name: { organizationId: ctx.organizationId, name: tagName } },
+          update: {},
+          create: { organizationId: ctx.organizationId, name: tagName },
+        });
+        if (ctx.conversationId) {
+          await tx.tagAssignment.upsert({
+            where: {
+              organizationId_tagId_entityType_entityId: {
+                organizationId: ctx.organizationId,
+                tagId: tag.id,
+                entityType: "conversation",
+                entityId: ctx.conversationId,
+              },
+            },
+            update: {},
+            create: {
+              organizationId: ctx.organizationId,
+              tagId: tag.id,
+              entityType: "conversation",
+              entityId: ctx.conversationId,
+            },
+          });
+        }
+      });
+    },
+
+    async transferHuman(ctx, reason) {
+      if (!ctx.conversationId) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        await tx.conversation.update({ where: { id: ctx.conversationId! }, data: { aiEnabled: false } });
+        await tx.humanHandoff.create({
+          data: {
+            organizationId: ctx.organizationId,
+            conversationId: ctx.conversationId!,
+            requestedBy: "rule",
+            reason: reason ?? "workflow",
+            status: "PENDING",
+          },
+        });
+      });
+    },
+
+    async setAiEnabled(ctx, enabled) {
+      if (!ctx.conversationId) return;
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.conversation.update({ where: { id: ctx.conversationId! }, data: { aiEnabled: enabled } }),
+      );
+    },
+
+    async closeConversation(ctx) {
+      if (!ctx.conversationId) return;
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.conversation.update({ where: { id: ctx.conversationId! }, data: { status: "CLOSED" } }),
+      );
+    },
+
+    async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {
+      await withTenant(ctx.organizationId, async (tx) => {
+        await tx.scheduledJob.upsert({
+          where: {
+            organizationId_uniqueKey: {
+              organizationId: ctx.organizationId,
+              uniqueKey: `${ctx.runId}:${nodeId}`,
+            },
+          },
+          update: { dueAt, status: "PENDING" },
+          create: {
+            organizationId: ctx.organizationId,
+            kind: "workflow_timer",
+            runId: ctx.runId,
+            dueAt,
+            uniqueKey: `${ctx.runId}:${nodeId}`,
+            payload: {
+              nodeId,
+              conversationId: ctx.conversationId ?? null,
+              contactId: ctx.contactId ?? null,
+              cancelOn: cancelOn ?? null,
+            },
+          },
+        });
+        await tx.workflowRun.update({
+          where: { id: ctx.runId },
+          data: { status: "WAITING", currentNodeId: nodeId },
+        });
+      });
+    },
+
+    async evaluateCondition(ctx, config) {
+      const kind = String(config.kind ?? "");
+      if (kind === "no_reply" && ctx.conversationId) {
+        return withTenant(ctx.organizationId, async (tx) => {
+          const run = await tx.workflowRun.findUnique({ where: { id: ctx.runId } });
+          const reply = await tx.message.findFirst({
+            where: {
+              conversationId: ctx.conversationId!,
+              direction: "INBOUND",
+              createdAt: { gt: run?.startedAt ?? new Date(0) },
+            },
+          });
+          return reply === null; // true = NO respondió
+        });
+      }
+      // Condición por defecto/desconocida: false (rama segura)
+      return false;
+    },
+
+    async persistStep(ctx, step) {
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.workflowRunStep.create({
+          data: {
+            organizationId: ctx.organizationId,
+            runId: ctx.runId,
+            nodeId: step.nodeId,
+            nodeType: step.nodeType,
+            status: step.status,
+            output: (step.output ?? {}) as object,
+            error: step.error,
+            finishedAt: new Date(),
+          },
+        }),
+      );
+    },
+
+    now: () => new Date(),
+  };
+}
+
+const deps = makeDeps();
+
+/** Despacha un evento de plataforma: inicia los workflows cuyo trigger coincide. */
+export async function dispatchEvent(event: PlatformEvent): Promise<void> {
+  const candidates = await withTenant(event.organizationId, (tx) =>
+    tx.workflow.findMany({
+      where: { active: true, deletedAt: null },
+      include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
+    }),
+  );
+
+  for (const wf of candidates) {
+    const versionRow = wf.versions[0];
+    if (!versionRow) continue;
+    const parsed = workflowDefinitionSchema.safeParse(versionRow.definition);
+    if (!parsed.success) continue;
+    const def: WorkflowDefinition = parsed.data;
+    if (!matchesTrigger(def, event)) continue;
+
+    // Idempotencia: un run por workflow+conversación+tipo de evento
+    const idempotencyKey = `${wf.id}:${event.conversationId ?? event.contactId ?? "global"}:${event.type}`;
+    const run = await withTenant(event.organizationId, async (tx) => {
+      const existing = await tx.workflowRun.findUnique({
+        where: { organizationId_idempotencyKey: { organizationId: event.organizationId, idempotencyKey } },
+      });
+      if (existing) return null;
+      return tx.workflowRun.create({
+        data: {
+          organizationId: event.organizationId,
+          workflowId: wf.id,
+          versionId: versionRow.id,
+          status: "RUNNING",
+          contactId: event.contactId,
+          conversationId: event.conversationId,
+          triggerEvent: (event.data ?? {}) as object,
+          idempotencyKey,
+          variables: {},
+        },
+      });
+    });
+    if (!run) continue;
+
+    const ctx: RunCtx = {
+      organizationId: event.organizationId,
+      runId: run.id,
+      workflowId: wf.id,
+      versionId: versionRow.id,
+      conversationId: event.conversationId,
+      contactId: event.contactId,
+      variables: await buildRunVars(event),
+    };
+    const start = findStartNode(def);
+    if (!start) continue;
+    const result = await executeFrom(deps, ctx, def, start.id);
+    await finishRun(event.organizationId, run.id, result);
+  }
+}
+
+/** Reanuda un run cuyo timer venció (invocado por el scheduler). */
+export async function resumeRun(organizationId: string, runId: string, nodeId: string): Promise<void> {
+  const data = await withTenant(organizationId, async (tx) => {
+    const run = await tx.workflowRun.findUnique({ where: { id: runId } });
+    if (!run || run.status !== "WAITING") return null;
+    const versionRow = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+    if (!versionRow) return null;
+    await tx.workflowRun.update({ where: { id: runId }, data: { status: "RUNNING" } });
+    return { run, versionRow };
+  });
+  if (!data) return;
+
+  const parsed = workflowDefinitionSchema.safeParse(data.versionRow.definition);
+  if (!parsed.success) return;
+
+  const ctx: RunCtx = {
+    organizationId,
+    runId,
+    workflowId: data.run.workflowId,
+    versionId: data.run.versionId,
+    conversationId: data.run.conversationId ?? undefined,
+    contactId: data.run.contactId ?? undefined,
+    variables: (data.run.variables as Record<string, string>) ?? {},
+  };
+  const result = await resumeAfterWait(deps, ctx, parsed.data, nodeId);
+  await finishRun(organizationId, runId, result);
+}
+
+/** Cancela esperas (y sus runs) cuando el contacto responde. */
+export async function cancelTimersOnReply(organizationId: string, conversationId: string): Promise<void> {
+  await withTenant(organizationId, async (tx) => {
+    const jobs = await tx.scheduledJob.findMany({
+      where: { status: "PENDING", kind: "workflow_timer" },
+    });
+    const toCancel = jobs.filter((j) => {
+      const p = j.payload as Record<string, unknown>;
+      return p.conversationId === conversationId && p.cancelOn === "contact_reply";
+    });
+    for (const job of toCancel) {
+      await tx.scheduledJob.update({ where: { id: job.id }, data: { status: "CANCELLED" } });
+      if (job.runId) {
+        await tx.workflowRun.update({
+          where: { id: job.runId },
+          data: { status: "CANCELLED", finishedAt: new Date() },
+        });
+      }
+    }
+  });
+}
+
+async function buildRunVars(event: PlatformEvent): Promise<Record<string, string>> {
+  return withTenant(event.organizationId, async (tx) => {
+    const vars: Record<string, string> = {};
+    const org = await tx.organization.findUnique({ where: { id: event.organizationId } });
+    if (org) vars["organization.name"] = org.name;
+    const clinic = await tx.clinic.findFirst({ where: { active: true } });
+    if (clinic) {
+      vars["clinic.name"] = clinic.name;
+      vars["clinic.address"] = clinic.address ?? "";
+    }
+    if (event.contactId) {
+      const contact = await tx.contact.findUnique({ where: { id: event.contactId } });
+      if (contact) vars["contact.firstName"] = contact.firstName ?? "";
+    }
+    return vars;
+  });
+}
+
+async function finishRun(
+  organizationId: string,
+  runId: string,
+  result: { status: string; nodeId?: string; error?: string },
+): Promise<void> {
+  if (result.status === "waiting") return; // scheduleTimer ya dejó el run en WAITING
+  await withTenant(organizationId, (tx) =>
+    tx.workflowRun.update({
+      where: { id: runId },
+      data: {
+        status: result.status === "completed" ? "COMPLETED" : "FAILED",
+        error: result.error,
+        currentNodeId: result.nodeId,
+        finishedAt: new Date(),
+      },
+    }),
+  );
+}
