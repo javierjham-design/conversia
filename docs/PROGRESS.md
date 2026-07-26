@@ -1,5 +1,16 @@
 # Registro de progreso
 
+## 2026-07-25 (2) — Despliegue a Railway
+
+- Preparación: Dockerfiles por servicio (monorepo pnpm), soporte `PORT`, `.dockerignore`, migración inicial de Prisma generada offline (`migrate diff --from-empty`).
+- Proyecto Railway `conversia`: Postgres 18 (pgvector confirmado) + Redis + servicios api/worker/web con variables y referencias cruzadas (detalle en DEPLOYMENT.md).
+- BD productiva: `migrate deploy` + `sql/setup.sql` (RLS/FKs/rol app con contraseña fuerte) + seed de 2 tenants ejecutados contra el proxy público.
+- Dominios: api-production-cf8e / web-production-d50dd (.up.railway.app).
+- Smoke test E2E en producción OK (webhook → tenant → agente mock → respuesta visible por API autenticada). Dos bugs encontrados y corregidos en el proceso:
+  1. Express 5: `req.path` relativo en middleware montado → rutas públicas daban 401; fix con `originalUrl`.
+  2. Respuesta duplicada cuando un workflow con nodo `run_agent` corre en `conversation_started` además del turno directo del inbound; fix: el turno directo se omite si un workflow ya ejecutó al agente (ventana 60s).
+- Pendiente inmediato: providers en mock (activar Anthropic con API key), pre-deploy de migraciones automatizado, conectar repo GitHub para autodeploy.
+
 ## 2026-07-25 — Sesión fundacional
 
 **Creado el monorepo completo desde cero** (arquitectura + código funcional):

@@ -2,21 +2,28 @@
 
 ## Entornos
 
-- **dev**: local (docker compose: pgvector/pg16 + redis 7). Sin Docker: usar Postgres/Redis de Railway apuntando `.env`.
-- **staging/producción MVP**: Railway (el equipo ya lo opera para Cláriva).
+- **dev**: local (docker compose: pgvector/pg16 + redis 7). Sin Docker: usar el Postgres/Redis de Railway apuntando `.env`.
+- **producción MVP**: Railway — **DESPLEGADO 2026-07-25** (proyecto `conversia`, workspace javierjham-design, región sfo).
 
-## Railway (MVP)
+## Railway (estado real)
 
-Servicios: `api` (apps/api), `worker` (apps/worker), `web` (apps/web) + addons Postgres y Redis. `mock-clariva` solo en dev.
+| Servicio | Origen | URL |
+|---|---|---|
+| Postgres | template postgres-ssl:18 (incluye pgvector ✔) | interno + proxy público |
+| Redis | template | interno |
+| api | Dockerfile `apps/api/Dockerfile` (upload CLI) | https://api-production-cf8e.up.railway.app |
+| worker | Dockerfile `apps/worker/Dockerfile` | — (sin dominio) |
+| web | Dockerfile `apps/web/Dockerfile` | https://web-production-d50dd.up.railway.app |
 
-Build (monorepo pnpm): root `pnpm install && pnpm build`; start por servicio:
-- api: `node apps/api/dist/main.js`
-- worker: `node apps/worker/dist/main.js`
-- web: `pnpm --filter @conversia/web start`
+Claves de la configuración:
+- Cada servicio usa `RAILWAY_DOCKERFILE_PATH` y se despliega con `railway up --service <n> --ci` desde la raíz (el contexto respeta .gitignore).
+- `PORT=8080` fijado en api/web y dominios generados con `--port 8080`.
+- Referencias cruzadas: `WEB_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}` (CORS de la api) y `API_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (build arg del panel — queda inlined en el bundle Next).
+- `REDIS_URL=${{Redis.REDIS_URL}}?family=0` — la red privada de Railway es IPv6; `family=0` hace que ioredis resuelva dual-stack.
+- IA/WhatsApp/agenda en `mock` hasta cargar credenciales reales (`AI_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` cuando se decida).
+- Conexión a BD de los servicios: usuario `postgres` (admin) por ahora — el cambio a rol `conversia_app` + cliente admin separado es el ticket de hardening #3 del ROADMAP. El rol ya existe con contraseña fuerte y RLS aplicado.
 
-Pasos de release: `prisma migrate deploy` → `db:setup` (RLS/FKs, idempotente) → arrancar servicios. Variables según `.env.example` (JWT_SECRET y CREDENTIALS_ENCRYPTION_KEY obligatorios; DATABASE_URL con rol `conversia_app`, DIRECT_DATABASE_URL admin para migraciones).
-
-Postgres en Railway: verificar soporte pgvector (imagen con extensión) — alternativa: Neon/Supabase para la BD manteniendo el resto en Railway.
+Release de cambios: `railway up --service <n> --ci` por servicio tocado. Migraciones: desde local contra `DATABASE_PUBLIC_URL` → `prisma migrate deploy` + `pnpm db:setup` (idempotente) — automatizar como pre-deploy es mejora pendiente.
 
 ## Costos aproximados MVP (mensual, USD)
 

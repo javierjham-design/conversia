@@ -8,8 +8,10 @@ async function bootstrap() {
   // rawBody: necesario para verificar la firma HMAC de los webhooks de Meta
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableCors({ origin: [env.WEB_URL], credentials: true });
-  await app.listen(env.API_PORT);
-  console.log(`✔ API Conversia en http://localhost:${env.API_PORT} (${env.NODE_ENV})`);
+  // Railway/PaaS inyectan PORT; en local se usa API_PORT
+  const port = Number(process.env.PORT ?? env.API_PORT);
+  await app.listen(port, "0.0.0.0");
+  console.log(`✔ API Conversia en puerto ${port} (${env.NODE_ENV})`);
 }
 
 void bootstrap();

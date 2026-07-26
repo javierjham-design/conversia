@@ -212,11 +212,24 @@ export async function processInbound(job: InboundJob): Promise<void> {
     }
     await dispatchEvent({ ...base, type: "message_received" });
 
-    // Respuesta del agente activo (si la IA está habilitada)
-    try {
-      await runAgentTurn({ organizationId, conversationId: result.conversationId });
-    } catch (err) {
-      console.error(`✖ Error en turno de agente (${result.conversationId}):`, (err as Error).message);
+    // Respuesta del agente activo — salvo que un workflow ya lo haya
+    // ejecutado para esta conversación en este ciclo (evita doble respuesta).
+    const agentAlreadyRan = await withTenant(organizationId, (tx) =>
+      tx.workflowRunStep.findFirst({
+        where: {
+          nodeType: "run_agent",
+          status: "COMPLETED",
+          startedAt: { gte: new Date(Date.now() - 60_000) },
+          run: { conversationId: result.conversationId },
+        },
+      }),
+    );
+    if (!agentAlreadyRan) {
+      try {
+        await runAgentTurn({ organizationId, conversationId: result.conversationId });
+      } catch (err) {
+        console.error(`✖ Error en turno de agente (${result.conversationId}):`, (err as Error).message);
+      }
     }
   }
 }

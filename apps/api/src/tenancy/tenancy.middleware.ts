@@ -17,7 +17,8 @@ export interface JwtPayload {
 @Injectable()
 export class TenancyMiddleware implements NestMiddleware {
   use(req: Request, _res: Response, next: NextFunction) {
-    const path = req.path;
+    // originalUrl: req.path es relativo al punto de montaje en Express 5
+    const path = (req.originalUrl ?? req.url ?? "").split("?")[0];
     if (PUBLIC_PREFIXES.some((p) => path.startsWith(p))) {
       return next();
     }
