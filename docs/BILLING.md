@@ -35,7 +35,7 @@ Contrato: `createCheckout({organizationId, planCode, amount, currency, successUr
 | Panel tenant (plan/uso/checkout/facturas) | Implementado |
 | Límite de IA por plan | Implementado |
 | Checkout real + webhooks Stripe | **Pendiente de credenciales** (mock en dev) |
-| Enforcement duro de límites (bloquear al exceder) | Parcial (IA sí; agentes/canales/usuarios: sólo visualización) |
+| Enforcement duro de límites (bloquear al exceder) | Implementado (IA + agentes/canales/flujos/usuarios → 403 al exceder) |
 | Prorrateo, overage, notas de crédito, impuestos (IVA) | Pendiente |
 | Cobro CLP local (Transbank/Webpay/Flow) | Pendiente (decisión de pasarela CL) |
 

@@ -13,6 +13,7 @@ import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
+import { enforcePlanLimit } from "../common/plan-limits";
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
 
@@ -91,6 +92,11 @@ export class ChannelsController {
     const ctx = requirePermission("channels:write");
     const input = parse(createChannelSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await enforcePlanLimit(
+        tx,
+        "channels",
+        await tx.channelConnection.count({ where: { status: { not: "inactive" } } }),
+      );
       if (input.type === "WHATSAPP_CLOUD") {
         if (!input.phoneNumberId || !input.wabaId || !input.accessToken) {
           throw new BadRequestException("WhatsApp Cloud requiere phoneNumberId, wabaId y accessToken");

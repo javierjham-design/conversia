@@ -13,6 +13,7 @@ import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
+import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -97,6 +98,7 @@ export class UsersController {
     const ctx = requirePermission("users:write");
     const input = parse(inviteSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await enforcePlanLimit(tx, "users", await tx.organizationUser.count({ where: { active: true } }));
       const role = await tx.role.findUnique({
         where: { organizationId_code: { organizationId: ctx.organizationId, code: input.roleCode } },
       });

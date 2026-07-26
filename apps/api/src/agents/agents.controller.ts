@@ -13,6 +13,7 @@ import { z } from "zod";
 import { buildCoreTools } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { enforcePlanLimit } from "../common/plan-limits";
 
 const createAgentSchema = z.object({
   name: z.string().min(2).max(60),
@@ -104,6 +105,7 @@ export class AgentsController {
     const ctx = requireContext();
     const input = parse(createAgentSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await enforcePlanLimit(tx, "agents", await tx.agent.count({ where: { deletedAt: null } }));
       let slug = slugify(input.name) || "agente";
       const existing = await tx.agent.findUnique({
         where: { organizationId_slug: { organizationId: ctx.organizationId, slug } },

@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { workflowDefinitionSchema } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
+import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -104,6 +105,7 @@ export class WorkflowsController {
     const ctx = requirePermission("workflows:write");
     const input = parse(createSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await enforcePlanLimit(tx, "workflows", await tx.workflow.count({ where: { deletedAt: null } }));
       const workflow = await tx.workflow.create({
         data: { organizationId: ctx.organizationId, name: input.name, description: input.description, active: false },
       });

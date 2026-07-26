@@ -87,7 +87,7 @@ La verificación de negocio en Meta demora; iniciarla temprano en paralelo.
 - [ ] 🤖 Implementar el **adaptador real** (`StripePaymentProvider`): crear productos/precios espejo de los 4 planes, `createCheckout` → Stripe Checkout Session.
 - [ ] 🤖 **Webhook receiver** de la pasarela (`checkout.session.completed`, `invoice.paid`, `subscription.updated`) firmado → activa/renueva la suscripción y sincroniza facturas.
 - [ ] 🤖 Setear `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (el mock se desactiva solo en prod).
-- [ ] 🤖 **Enforcement duro de límites**: bloquear crear agentes/canales/usuarios al exceder el plan (hoy la IA sí se corta por plan; el resto es solo visual).
+- [x] 🤖 **Enforcement duro de límites**: crear agentes/canales/flujos/usuarios por encima del plan devuelve 403 (además del corte de IA por tope diario). Falta el resto de la pasarela real.
 - [ ] 🧑 **Boletas/IVA** (Chile, SII) y numeración fiscal — pendiente.
 
 ---
