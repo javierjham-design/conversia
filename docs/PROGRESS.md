@@ -9,7 +9,18 @@
 - Smoke test E2E en producción OK (webhook → tenant → agente mock → respuesta visible por API autenticada). Dos bugs encontrados y corregidos en el proceso:
   1. Express 5: `req.path` relativo en middleware montado → rutas públicas daban 401; fix con `originalUrl`.
   2. Respuesta duplicada cuando un workflow con nodo `run_agent` corre en `conversation_started` además del turno directo del inbound; fix: el turno directo se omite si un workflow ya ejecutó al agente (ventana 60s).
-- Pendiente inmediato: providers en mock (activar Anthropic con API key), pre-deploy de migraciones automatizado, conectar repo GitHub para autodeploy.
+- Pendiente inmediato: providers en mock (activar Anthropic con API key), pre-deploy de migraciones automatizado.
+
+## 2026-07-25 (3) — GitHub + fix del login del panel
+
+- Repo privado `javierjham-design/conversia` creado y pusheado; servicios api/worker/web conectados a `main` → **autodeploy en cada push**. (Push desde PowerShell background se cuelga pidiendo credenciales → usar token de gh directo.)
+- Saga del login ("Failed to fetch") — 3 causas encadenadas, todas corregidas:
+  1. `WEB_URL` de la api resolvió vacía (referencia creada antes de que existiera el servicio web) → CORS sin allow-origin. Fix: valor literal.
+  2. Railway NO pasa variables como build-args al Dockerfile → `NEXT_PUBLIC_API_URL` horneó `localhost:4000` en el bundle.
+  3. Intento con `rewrites()` de Next falló porque los rewrites se **serializan en el build** (routes-manifest), no se leen en runtime.
+  - **Fix definitivo**: route handler `apps/web/src/app/backend/[...path]/route.ts` — proxy same-origin `/backend/*` que lee `API_URL` del entorno en cada request (`force-dynamic`). Elimina CORS y cualquier dependencia de build-time env. Verificado: login vía dominio del panel devuelve token.
+- Lección adicional: la api escucha en `0.0.0.0` (IPv4) → inaccesible por la red privada IPv6 de Railway; usar URL pública en el proxy hasta cambiar a `app.listen(port)` dual-stack (mejora anotada).
+- Mejora pendiente: watch paths por servicio para no recompilar los 3 en cada push.
 
 ## 2026-07-25 — Sesión fundacional
 
