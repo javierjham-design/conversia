@@ -9,6 +9,7 @@ import { getEnv } from "@conversia/config";
 import { getPrisma, withTenant } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { getChannelProvider } from "./channel-providers";
+import { emitPlatformEvent } from "./platform-events";
 import { buildToolServices } from "./tool-services";
 
 const registry = new ToolRegistry();
@@ -199,6 +200,11 @@ export async function runAgentTurn(opts: {
           data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
         }),
       );
+      await emitPlatformEvent(organizationId, "message.sent", {
+        conversationId,
+        agentSlug: agent.slug,
+        text: (persisted.body ?? "").slice(0, 200),
+      });
     } catch (err) {
       await withTenant(organizationId, (tx) =>
         tx.message.update({

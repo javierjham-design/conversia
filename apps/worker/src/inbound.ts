@@ -1,6 +1,8 @@
-import { getPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
 import { runAgentTurn } from "./agent-turn";
+import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
+import { emitPlatformEvent } from "./platform-events";
 import { cancelTimersOnReply, dispatchEvent } from "./workflow-runtime";
 
 interface ParsedInbound {
@@ -56,7 +58,7 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
 async function resolveTenant(
   phoneNumberId: string,
 ): Promise<{ organizationId: string; channelConnectionId: string | null; clinicId: string | null } | null> {
-  const prisma = getPrisma();
+  const prisma = getAdminPrisma();
   if (phoneNumberId.startsWith("mock:")) {
     const slug = phoneNumberId.slice(5);
     const org = await prisma.organization.findUnique({ where: { slug } });
@@ -76,6 +78,15 @@ async function resolveTenant(
 }
 
 export async function processInbound(job: InboundJob): Promise<void> {
+  // Leads de Meta Lead Ads (object=page, field=leadgen) — mismo webhook de Meta
+  for (const change of parseLeadgenChanges(job.raw)) {
+    try {
+      await processLeadgen(change);
+    } catch (err) {
+      console.error(`✖ Error procesando leadgen ${change.leadgen_id}:`, (err as Error).message);
+    }
+  }
+
   const { messages, statuses } = parseWebhook(job.raw);
 
   for (const status of statuses) {
@@ -209,8 +220,16 @@ export async function processInbound(job: InboundJob): Promise<void> {
     };
     if (result.started) {
       await dispatchEvent({ ...base, type: "conversation_started" });
+      await emitPlatformEvent(organizationId, "conversation.started", {
+        conversationId: result.conversationId,
+        contactId: result.contactId,
+      });
     }
     await dispatchEvent({ ...base, type: "message_received" });
+    await emitPlatformEvent(organizationId, "message.received", {
+      conversationId: result.conversationId,
+      text: (msg.text ?? "").slice(0, 200),
+    });
 
     // Respuesta del agente activo — salvo que un workflow ya lo haya
     // ejecutado para esta conversación en este ciclo (evita doble respuesta).

@@ -1,5 +1,17 @@
 # Registro de progreso
 
+## 2026-07-26 — Iteración: identidad visual + Centro Meta + integraciones profundas
+
+- **Fix de seguridad crítico**: los servicios conectaban como superusuario (bypasea RLS) → fuga real entre tenants detectada (agentes del demo visibles en Digital Dent). Ahora cliente dual: rol `conversia_app` (RLS activo) para datos de tenant + cliente admin SOLO para registro/login/ruteo/scheduler.
+- **Sistema visual**: tokens (@theme: navy/eléctrico/cian, tipografía 15px), lucide-react, `components/ui.tsx` (PageHeader, MetricCard, StatusBadge con icono+texto, EmptyState, Skeleton, Modal, Drawer, ConfirmDialog, SecretField, Tabs, Toasts) y shell nuevo: sidebar navy agrupado y colapsable con tenant activo, topbar con breadcrumbs + salud del API.
+- **Integraciones rediseñada**: métricas reales (activas, atención, eventos 24h, errores webhooks 7d, última sync), sección Conectadas con salud/estado/acciones, catálogo por 4 categorías con estados Disponible/Beta/Próximamente ("Avisarme" registra interés), buscador + filtros, drawer de actividad.
+- **Centro Meta Business Suite** (`/integrations/meta`): mapa de activos, checklist, wizard 5 pasos (Embedded Signup marcado pendiente de aprobación de app; conexión manual real; simulación dev SIEMPRE etiquetada), pestañas Lead Ads (mapeo de campos + prueba por pipeline real) y Conversions API (reglas evento→evento, dataset, test) + actividad.
+- **Nuevas tablas**: meta_business_connections, meta_assets, meta_field_mappings, meta_event_mappings, integration_events (logs sanitizados), oauth_states; columnas de webhooks (description/headers/timeout/max_retries).
+- **Webhooks salientes REALES**: entregas firmadas HMAC-SHA256 con reintentos/backoff y SSRF-guard (worker), tabla de entregas, prueba, reintento manual, rotación de secreto, pausar/eliminar.
+- **Eventos de plataforma** emitidos desde el pipeline (conversation.started/closed, message.received/sent, lead.created/status_changed, appointment.created, human_handoff.requested, workflow.completed/failed) → alimentan webhooks + CAPI + actividad.
+- **Lead Ads ingesta real**: webhook leadgen → mapeo → contacto (dedupe) → lead + etiquetas → workflows lead_created; camino Graph implementado (pendiente de credenciales) y prueba simulada end-to-end.
+- **CAPI**: envío real a graph (hash SHA-256 de teléfonos, event_id dedup, test_event_code); en modo simulación registra [SIMULADO] sin salir a Meta.
+
 ## 2026-07-25 (2) — Despliegue a Railway
 
 - Preparación: Dockerfiles por servicio (monorepo pnpm), soporte `PORT`, `.dockerignore`, migración inicial de Prisma generada offline (`migrate diff --from-empty`).

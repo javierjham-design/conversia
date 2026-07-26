@@ -103,11 +103,11 @@ export class UsersController {
       if (!role) throw new BadRequestException("Rol desconocido");
 
       // Usuario global: puede existir por pertenecer a otra organización
-      let user = await this.prisma.client.user.findUnique({ where: { email: input.email } });
+      let user = await this.prisma.admin.user.findUnique({ where: { email: input.email } });
       let tempPassword: string | null = null;
       if (!user) {
         tempPassword = randomBytes(6).toString("base64url");
-        user = await this.prisma.client.user.create({
+        user = await this.prisma.admin.user.create({
           data: { email: input.email, name: input.name, passwordHash: bcrypt.hashSync(tempPassword, 10) },
         });
       }

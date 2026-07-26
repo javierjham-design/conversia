@@ -1,5 +1,6 @@
 import { getEnv } from "@conversia/config";
-import { getPrisma, withTenant } from "@conversia/database";
+import { withTenant } from "@conversia/database";
+import { emitPlatformEvent } from "./platform-events";
 import type { ToolServices } from "@conversia/agents";
 import { ClarivaSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
@@ -155,6 +156,11 @@ export async function buildToolServices(orgId: string, t: ToolTargets): Promise<
           },
         });
       });
+      await emitPlatformEvent(orgId, "appointment.created", {
+        externalId: appt.id,
+        start: appt.start,
+        conversationId: t.conversationId,
+      });
     },
 
     async updateLeadStatus(code: string) {
@@ -183,7 +189,17 @@ export async function buildToolServices(orgId: string, t: ToolTargets): Promise<
             actorType: "agent",
           },
         });
+        return lead.id;
       });
+      const contact = await withTenant(orgId, (tx) =>
+        tx.contact.findUnique({ where: { id: t.contactId }, select: { phone: true } }),
+      );
+      await emitPlatformEvent(
+        orgId,
+        "lead.status_changed",
+        { statusCode: code, contactId: t.contactId, conversationId: t.conversationId },
+        { contactPhone: contact?.phone ?? null },
+      );
     },
 
     async addTag(name: string) {
@@ -258,6 +274,10 @@ export async function buildToolServices(orgId: string, t: ToolTargets): Promise<
             after: { reason },
           },
         });
+      });
+      await emitPlatformEvent(orgId, "human_handoff.requested", {
+        conversationId: t.conversationId,
+        reason,
       });
     },
   };

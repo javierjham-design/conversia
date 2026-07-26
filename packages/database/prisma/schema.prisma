@@ -1095,10 +1095,15 @@ model IntegrationCredential {
 model WebhookEndpoint {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
+  clinicId       String?  @map("clinic_id")
   name           String
+  description    String?
   url            String
   secret         String // para firmar HMAC salidas
   events         Json     @default("[]")
+  headers        Json     @default("{}") // headers personalizados
+  timeoutMs      Int      @default(10000) @map("timeout_ms")
+  maxRetries     Int      @default(4) @map("max_retries")
   active         Boolean  @default(true)
   createdAt      DateTime @default(now()) @map("created_at")
 
@@ -1121,6 +1126,116 @@ model WebhookDelivery {
 
   @@index([organizationId, status])
   @@map("webhook_deliveries")
+}
+
+// ------------------------- Ecosistema Meta -------------------------
+
+enum MetaConnectionMode {
+  EMBEDDED // Embedded Signup oficial (requiere app aprobada por Meta)
+  MANUAL // ids + token de sistema cargados manualmente
+  MOCK // simulación de desarrollo — SIEMPRE visible como tal en la UI
+}
+
+enum MetaConnectionStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+// Conexión Meta del tenant (una por organización en v1)
+model MetaBusinessConnection {
+  id             String               @id @default(cuid())
+  organizationId String               @map("organization_id")
+  status         MetaConnectionStatus @default(PENDING)
+  mode           MetaConnectionMode   @default(MANUAL)
+  businessId     String?              @map("business_id")
+  businessName   String?              @map("business_name")
+  appScopes      Json                 @default("[]") @map("app_scopes")
+  credentialId   String?              @map("credential_id")
+  connectedById  String?              @map("connected_by_id")
+  lastError      String?              @map("last_error")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  @@unique([organizationId])
+  @@map("meta_business_connections")
+}
+
+// Activos de Meta del tenant: páginas, ad accounts, WABA, números,
+// instagram, datasets y formularios de Lead Ads (kind=lead_form).
+model MetaAsset {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  connectionId   String   @map("connection_id")
+  kind           String // page | ad_account | waba | phone_number | instagram | dataset | lead_form
+  externalId     String   @map("external_id")
+  name           String
+  enabled        Boolean  @default(true)
+  meta           Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, kind, externalId])
+  @@map("meta_assets")
+}
+
+// Mapeo campo Meta → campo Conversia por formulario (null = default)
+model MetaFieldMapping {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  formExternalId String?  @map("form_external_id")
+  mappings       Json     @default("[]") // [{source, target}]
+  config         Json     @default("{}") // {clinicId, teamId, agentSlug, leadStatusCode, tags[], workflowTemplateKey}
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, formExternalId])
+  @@map("meta_field_mappings")
+}
+
+// Reglas evento Conversia → evento Meta (Conversions API)
+model MetaEventMapping {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  datasetId      String?  @map("dataset_id")
+  testEventCode  String?  @map("test_event_code")
+  rules          Json     @default("[]") // [{source, dest, value, currency, active, dedup}]
+  active         Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId])
+  @@map("meta_event_mappings")
+}
+
+// Actividad/logs de integraciones (payloads SIEMPRE sanitizados)
+model IntegrationEvent {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  provider       String // meta | whatsapp | clariva | webhook | capi | lead_ads
+  type           String // lead.received | capi.sent | webhook.delivered | sync.ok | …
+  status         String   @default("ok") // ok | warning | error
+  message        String?
+  payload        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, provider, createdAt])
+  @@map("integration_events")
+}
+
+// Estados OAuth (CSRF) para flujos de conexión oficiales
+model OAuthState {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  provider       String
+  state          String    @unique
+  redirectUri    String    @map("redirect_uri")
+  expiresAt      DateTime  @map("expires_at")
+  usedAt         DateTime? @map("used_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("oauth_states")
 }
 
 // ------------------------- Operación / auditoría -------------------------

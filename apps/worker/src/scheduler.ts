@@ -1,5 +1,5 @@
 import { getEnv } from "@conversia/config";
-import { getPrisma } from "@conversia/database";
+import { getAdminPrisma } from "@conversia/database";
 import { resumeRun } from "./workflow-runtime";
 
 /**
@@ -8,7 +8,7 @@ import { resumeRun } from "./workflow-runtime";
  * workers tomen el mismo job.
  */
 export function startScheduler(): () => void {
-  const prisma = getPrisma();
+  const prisma = getAdminPrisma();
   const intervalMs = getEnv().SCHEDULER_POLL_MS;
 
   const tick = async () => {

@@ -5,23 +5,40 @@ export { Prisma };
 
 export type TenantTx = Prisma.TransactionClient;
 
-let singleton: PrismaClient | undefined;
+let tenantClient: PrismaClient | undefined;
+let adminClient: PrismaClient | undefined;
 
-/** Cliente Prisma singleton (conexión DATABASE_URL — rol de app en prod). */
+/**
+ * Cliente de TENANT (DATABASE_URL). En producción debe conectar como rol
+ * `conversia_app` (sin BYPASSRLS): las políticas RLS son la barrera real.
+ * Úsalo SOLO a través de withTenant().
+ */
 export function getPrisma(): PrismaClient {
-  if (!singleton) {
-    singleton = new PrismaClient();
+  if (!tenantClient) {
+    tenantClient = new PrismaClient();
   }
-  return singleton;
+  return tenantClient;
 }
 
 /**
- * Ejecuta `fn` dentro de una transacción con el contexto de tenant aplicado:
- * setea `app.org_id` (local a la transacción) para que las políticas RLS
- * de Postgres filtren toda lectura/escritura por organización.
- *
- * Es la ÚNICA vía autorizada para tocar datos de tenant. El orgId debe venir
- * del JWT autenticado o del canal receptor del webhook — jamás del cliente.
+ * Cliente ADMIN (DIRECT_DATABASE_URL, superusuario). EXCLUSIVO para
+ * operaciones de plataforma que cruzan tenants por diseño:
+ * registro de organizaciones, login (usuarios globales), resolución de
+ * tenant por canal receptor y el scheduler de timers. Nada más.
+ */
+export function getAdminPrisma(): PrismaClient {
+  if (!adminClient) {
+    const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+    adminClient = new PrismaClient({ datasources: { db: { url } } });
+  }
+  return adminClient;
+}
+
+/**
+ * Ejecuta `fn` en una transacción con contexto de tenant: setea `app.org_id`
+ * (local a la transacción) para que las políticas RLS filtren toda
+ * lectura/escritura. Única vía autorizada para tocar datos de tenant.
+ * El orgId debe venir del JWT o del canal receptor — jamás del cliente.
  */
 export async function withTenant<T>(
   orgId: string,

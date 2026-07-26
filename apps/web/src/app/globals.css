@@ -1,9 +1,64 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Conversia — tokens de diseño
+   Identidad: azul noche (sidebar) + azul eléctrico (acción) +
+   cian tecnológico (acento). Escala de espaciado múltiplos de 4.
+   ============================================================ */
+@theme {
+  /* Azul noche — superficies de navegación */
+  --color-navy-950: #060b1a;
+  --color-navy-900: #0a1226;
+  --color-navy-800: #101c3a;
+  --color-navy-700: #1a2b55;
+  --color-navy-600: #243970;
+  --color-navy-300: #8ea3d8;
+  --color-navy-200: #b9c6e8;
+
+  /* Azul eléctrico — acciones principales */
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dce7ff;
+  --color-brand-200: #b9cfff;
+  --color-brand-300: #8aadff;
+  --color-brand-500: #3b76ff;
+  --color-brand-600: #2e63f0;
+  --color-brand-700: #2450cd;
+  --color-brand-800: #1f42a6;
+
+  /* Cian tecnológico — acentos y estados activos */
+  --color-accent-300: #67e8f9;
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+  --color-accent-600: #0891b2;
+
+  /* Sombras suaves */
+  --shadow-card: 0 1px 2px 0 rgb(10 18 38 / 0.05), 0 1px 3px 0 rgb(10 18 38 / 0.08);
+  --shadow-pop: 0 4px 12px -2px rgb(10 18 38 / 0.12), 0 2px 6px -2px rgb(10 18 38 / 0.08);
+
+  --radius-card: 0.75rem;
+}
+
 :root {
   color-scheme: light;
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-slate-100 text-slate-900 antialiased;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* Barras de scroll discretas en paneles */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

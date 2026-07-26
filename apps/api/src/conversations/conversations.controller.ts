@@ -78,6 +78,15 @@ export class ConversationsController {
         },
       });
       return { ok: true };
+    }).then(async (r) => {
+      await this.queues.events.add("emit", {
+        organizationId: ctx.organizationId,
+        type: "conversation.closed",
+        conversationId: id,
+        data: { conversationId: id },
+        occurredAt: new Date().toISOString(),
+      });
+      return r;
     });
   }
 

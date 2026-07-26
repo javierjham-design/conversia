@@ -10,6 +10,7 @@ import {
 import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
 import { runAgentTurn } from "./agent-turn";
 import { getChannelProvider } from "./channel-providers";
+import { emitPlatformEvent } from "./platform-events";
 
 /** Implementación de efectos del motor sobre la plataforma real. */
 function makeDeps(): EngineDeps {
@@ -78,6 +79,15 @@ function makeDeps(): EngineDeps {
           });
         }
       });
+      const contact = await withTenant(ctx.organizationId, (tx) =>
+        tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true } }),
+      );
+      await emitPlatformEvent(
+        ctx.organizationId,
+        "lead.status_changed",
+        { statusCode, contactId: ctx.contactId, conversationId: ctx.conversationId },
+        { contactPhone: contact?.phone ?? null },
+      );
     },
 
     async addTag(ctx, tagName) {
@@ -137,6 +147,7 @@ function makeDeps(): EngineDeps {
       await withTenant(ctx.organizationId, (tx) =>
         tx.conversation.update({ where: { id: ctx.conversationId! }, data: { status: "CLOSED" } }),
       );
+      await emitPlatformEvent(ctx.organizationId, "conversation.closed", { conversationId: ctx.conversationId });
     },
 
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {
@@ -352,5 +363,10 @@ async function finishRun(
         finishedAt: new Date(),
       },
     }),
+  );
+  await emitPlatformEvent(
+    organizationId,
+    result.status === "completed" ? "workflow.completed" : "workflow.failed",
+    { runId, error: result.error ?? null },
   );
 }

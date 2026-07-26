@@ -7,6 +7,7 @@ import { WhatsappController } from "./channels/whatsapp.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { HealthController } from "./health.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
+import { MetaController } from "./integrations/meta.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
@@ -25,6 +26,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ChannelsController,
     UsersController,
     IntegrationsController,
+    MetaController,
     WorkflowsController,
     ReportsController,
     WhatsappController,

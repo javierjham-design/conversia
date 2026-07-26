@@ -45,7 +45,7 @@ export class AuthController {
   async me() {
     const ctx = requireContext();
     const [user, org] = await Promise.all([
-      this.prisma.client.user.findUnique({
+      this.prisma.admin.user.findUnique({
         where: { id: ctx.userId },
         select: { id: true, email: true, name: true },
       }),

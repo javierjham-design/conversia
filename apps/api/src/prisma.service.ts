@@ -1,19 +1,20 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { getPrisma, withTenant, type TenantTx } from "@conversia/database";
+import { getAdminPrisma, getPrisma, withTenant, type TenantTx } from "@conversia/database";
 
 @Injectable()
 export class PrismaService implements OnModuleDestroy {
   /**
-   * Cliente directo: SOLO para operaciones de plataforma (registro de
-   * organizaciones, login por email). Datos de tenant → withTenant().
+   * Cliente ADMIN (superusuario): SOLO operaciones de plataforma que cruzan
+   * tenants por diseño (registro de organizaciones, login de usuarios
+   * globales). Todo dato de tenant va por withTenant().
    */
-  readonly client = getPrisma();
+  readonly admin = getAdminPrisma();
 
   withTenant<T>(orgId: string, fn: (tx: TenantTx) => Promise<T>): Promise<T> {
-    return withTenant(orgId, fn, this.client);
+    return withTenant(orgId, fn);
   }
 
-  onModuleDestroy() {
-    return this.client.$disconnect();
+  async onModuleDestroy() {
+    await Promise.all([getPrisma().$disconnect(), this.admin.$disconnect()]);
   }
 }

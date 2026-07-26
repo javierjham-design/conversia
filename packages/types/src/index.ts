@@ -358,7 +358,88 @@ export const QUEUE_NAMES = {
   orchestrate: "orchestrate",
   workflow: "workflow-steps",
   events: "platform-events",
+  webhooks: "webhook-deliveries",
+  capi: "capi-events",
 } as const;
+
+/** Eventos públicos que Conversia emite hacia webhooks salientes y CAPI. */
+export const PLATFORM_PUBLIC_EVENTS = [
+  "conversation.started",
+  "conversation.closed",
+  "message.received",
+  "message.sent",
+  "lead.created",
+  "lead.status_changed",
+  "appointment.created",
+  "appointment.updated",
+  "appointment.cancelled",
+  "human_handoff.requested",
+  "workflow.started",
+  "workflow.completed",
+  "workflow.failed",
+  "agent.changed",
+] as const;
+export type PlatformPublicEvent = (typeof PLATFORM_PUBLIC_EVENTS)[number];
+
+export interface WebhookDeliveryJob {
+  organizationId: string;
+  deliveryId: string;
+}
+
+// ============================================================
+// Guard SSRF para URLs configurables por tenants (webhooks, APIs).
+// v1: bloquea esquemas no-HTTP, IPs privadas/loopback literales y hosts
+// internos. Limitación documentada: sin re-resolución DNS al enviar.
+// ============================================================
+
+const PRIVATE_V4 = [/^10\./, /^127\./, /^169\.254\./, /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./, /^0\./];
+
+export function validateOutboundUrl(
+  raw: string,
+  opts: { allowLocalhost?: boolean } = {},
+): { ok: true } | { ok: false; reason: string } {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, reason: "URL inválida" };
+  }
+  const host = url.hostname.toLowerCase();
+  const isLocalhost = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, reason: "Solo se permiten URLs http(s)" };
+  }
+  if (url.protocol === "http:" && !(isLocalhost && opts.allowLocalhost)) {
+    return { ok: false, reason: "La URL debe usar https" };
+  }
+  if (isLocalhost && !opts.allowLocalhost) {
+    return { ok: false, reason: "No se permiten direcciones locales" };
+  }
+  if (url.username || url.password) {
+    return { ok: false, reason: "No se permiten credenciales en la URL" };
+  }
+  if (PRIVATE_V4.some((re) => re.test(host))) {
+    return { ok: false, reason: "No se permiten IPs privadas" };
+  }
+  if (host.endsWith(".internal") || host.endsWith(".local")) {
+    return { ok: false, reason: "No se permiten hosts internos" };
+  }
+  if (/^\[?f[cd][0-9a-f]{2}:/i.test(host) || /^\[?fe80:/i.test(host)) {
+    return { ok: false, reason: "No se permiten IPs privadas IPv6" };
+  }
+  return { ok: true };
+}
+
+export interface CapiJob {
+  organizationId: string;
+  /** evento origen, p.ej. "lead.status_changed:agenda" o "lead.created" */
+  source: string;
+  contactPhone?: string | null;
+  leadId?: string | null;
+  test?: boolean;
+  occurredAt: string;
+}
 
 export interface InboundJob {
   raw: unknown; // payload completo del webhook (se resuelve tenant por phone_number_id)

@@ -28,7 +28,7 @@ export class AuthService {
    * organización es una operación de plataforma, fuera del RLS del tenant).
    */
   async register(input: { email: string; password: string; name: string; organizationName: string }) {
-    const db = this.prisma.client;
+    const db = this.prisma.admin;
     const existing = await db.user.findUnique({ where: { email: input.email } });
     if (existing) throw new ConflictException("El email ya está registrado");
 
@@ -95,7 +95,7 @@ export class AuthService {
   }
 
   async login(input: { email: string; password: string }) {
-    const user = await this.prisma.client.user.findUnique({
+    const user = await this.prisma.admin.user.findUnique({
       where: { email: input.email },
       include: { memberships: { where: { active: true } } },
     });
@@ -104,7 +104,7 @@ export class AuthService {
     }
     const membership = user.memberships[0];
     if (!membership) throw new UnauthorizedException("El usuario no pertenece a ninguna organización");
-    const role = await this.prisma.client.role.findUnique({ where: { id: membership.roleId } });
+    const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
   }
