@@ -48,7 +48,11 @@ const payload = {
 
 const res = await fetch(`${apiUrl}/webhooks/whatsapp`, {
   method: "POST",
-  headers: { "content-type": "application/json" },
+  headers: {
+    "content-type": "application/json",
+    // Los canales mock exigen este token (MOCK_INBOUND_TOKEN del API)
+    "x-conversia-mock-token": process.env.MOCK_INBOUND_TOKEN ?? "dev-mock-inbound-token",
+  },
   body: JSON.stringify(payload),
 });
 

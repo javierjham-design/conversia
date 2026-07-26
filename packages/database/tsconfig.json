@@ -4,5 +4,7 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "comment": "seed y verify-isolation se ejecutan con tsx (no forman parte del paquete compilado)",
+  "exclude": ["src/seed.ts", "src/verify-isolation.ts"]
 }

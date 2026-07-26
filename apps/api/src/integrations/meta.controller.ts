@@ -336,7 +336,12 @@ export class MetaController {
         },
       ],
     };
-    await this.queues.inbound.add("meta-lead-test", { raw: payload, receivedAt: new Date().toISOString() });
+    // internal:true — único camino autorizado para organization_hint
+    await this.queues.inbound.add("meta-lead-test", {
+      raw: payload,
+      receivedAt: new Date().toISOString(),
+      internal: true,
+    });
     return { ok: true, detail: "Lead de prueba encolado — revisa Contactos, la actividad y los workflows con trigger lead_created" };
   }
 

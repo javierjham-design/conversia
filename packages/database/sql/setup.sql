@@ -69,6 +69,27 @@ CREATE POLICY org_self ON public.organizations
 -- Nota: crear organizaciones (registro) se hace con la conexión admin
 -- (DIRECT_DATABASE_URL) — ver AuthService.
 
+-- users (identidad global): el rol de app solo ve usuarios que son miembros
+-- de la organización del contexto. Login/registro/invitaciones usan admin.
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS users_member_visibility ON public.users;
+CREATE POLICY users_member_visibility ON public.users
+  USING (EXISTS (
+    SELECT 1 FROM public.organization_users ou
+    WHERE ou.user_id = users.id
+      AND ou.organization_id = current_setting('app.org_id', true)
+  ));
+
+-- platform_admins: invisible e inmodificable para el rol de app
+-- (RLS habilitado sin políticas = deny-all para no-bypass).
+ALTER TABLE public.platform_admins ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS deny_app ON public.platform_admins;
+
+-- plans: solo lectura para el rol de app
+ALTER TABLE public.plans ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plans_read ON public.plans;
+CREATE POLICY plans_read ON public.plans FOR SELECT USING (true);
+
 -- 4. FK organization_id -> organizations(id) donde no exista ya una FK
 DO $$
 DECLARE r RECORD;

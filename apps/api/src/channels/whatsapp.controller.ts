@@ -40,10 +40,19 @@ export class WhatsappController {
   async receive(@Req() req: Request & { rawBody?: Buffer }) {
     const env = getEnv();
     const signature = req.headers["x-hub-signature-256"] as string | undefined;
+    const rawText = JSON.stringify(req.body ?? {});
 
-    // Con proveedor meta + app secret configurado, la firma es OBLIGATORIA.
-    if (env.WHATSAPP_PROVIDER === "meta" && env.META_APP_SECRET) {
-      const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), "utf-8");
+    // Aislamiento: los payloads que apuntan a canales simulados ("mock:<slug>")
+    // exigen el token del simulador — nadie puede inyectar mensajes a un
+    // tenant ajeno conociendo solo su slug.
+    if (rawText.includes('"mock:')) {
+      const mockToken = req.headers["x-conversia-mock-token"];
+      if (mockToken !== env.MOCK_INBOUND_TOKEN) {
+        throw new ForbiddenException("Token de simulación inválido");
+      }
+    } else if (env.META_APP_SECRET) {
+      // Tráfico real de Meta: firma HMAC OBLIGATORIA si hay app secret.
+      const raw = req.rawBody ?? Buffer.from(rawText, "utf-8");
       if (!verifyMetaSignature(raw, signature, env.META_APP_SECRET)) {
         throw new ForbiddenException("Firma de webhook inválida");
       }

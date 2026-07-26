@@ -66,6 +66,9 @@ export class ConversationsController {
   close(@Param("id") id: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // findUnique bajo RLS → null si es de otro tenant (404 limpio, no 500)
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
       await tx.conversation.update({ where: { id }, data: { status: "CLOSED" } });
       await tx.auditLog.create({
         data: {
@@ -94,6 +97,8 @@ export class ConversationsController {
   reopen(@Param("id") id: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
       await tx.conversation.update({ where: { id }, data: { status: "OPEN" } });
       return { ok: true };
     });
@@ -106,6 +111,8 @@ export class ConversationsController {
     const parsed = z.object({ userId: z.string().nullable() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("userId requerido (o null)");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
       if (parsed.data.userId) {
         const member = await tx.organizationUser.findUnique({
           where: { organizationId_userId: { organizationId: ctx.organizationId, userId: parsed.data.userId } },
@@ -207,6 +214,8 @@ export class ConversationsController {
   release(@Param("id") id: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
       await tx.conversation.update({ where: { id }, data: { aiEnabled: true } });
       await tx.humanHandoff.updateMany({
         where: { conversationId: id, status: "ACTIVE" },

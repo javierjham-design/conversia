@@ -444,6 +444,12 @@ export interface CapiJob {
 export interface InboundJob {
   raw: unknown; // payload completo del webhook (se resuelve tenant por phone_number_id)
   receivedAt: string;
+  /**
+   * true SOLO cuando el job fue encolado por un endpoint interno autenticado
+   * (p.ej. lead de prueba). Los webhooks públicos JAMÁS lo setean — habilita
+   * campos de confianza como organization_hint.
+   */
+  internal?: boolean;
 }
 
 export interface OutboundJob {

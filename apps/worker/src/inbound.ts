@@ -81,7 +81,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
   // Leads de Meta Lead Ads (object=page, field=leadgen) — mismo webhook de Meta
   for (const change of parseLeadgenChanges(job.raw)) {
     try {
-      await processLeadgen(change);
+      await processLeadgen(change, job.internal === true);
     } catch (err) {
       console.error(`✖ Error procesando leadgen ${change.leadgen_id}:`, (err as Error).message);
     }

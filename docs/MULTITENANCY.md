@@ -36,7 +36,21 @@ Requisito no negociable: ningún tenant puede ver, usar o afectar datos de otro.
 
 - `audit_logs` con actor, acción, entidad y contexto de organización.
 - `ai_requests` + `usage_events` registran consumo/costo por tenant.
-- Pruebas de aislamiento pendientes de automatizar (ver TESTING.md): crear 2 tenants (los seeds ya crean `digital-dent` y `clinica-demo`) y verificar que consultas cruzadas devuelven vacío bajo el rol `conversia_app`.
+- **Verificador ejecutable** `pnpm --filter @conversia/database verify:isolation` (código en `packages/database/src/verify-isolation.ts`): se conecta con el **rol real de la app** (`conversia_app`, sin BYPASSRLS) y corre una matriz de 19 pruebas — lecturas filtradas tabla por tabla, acceso directo por id ajeno (→ null), UPDATE cruzado (→ 0 filas), INSERT con `organization_id` ajeno (→ rechazado por WITH CHECK), lectura sin contexto (→ 0 filas) y tablas globales (`platform_admins` invisible, `users` solo miembros). Ejecutado contra producción: **19/19 OK**.
+- **Sondeo por API**: con dos sesiones (tenant A y B), B intentando leer/escribir/cerrar recursos de A recibe **404** en todos los casos (RLS filtra la fila → `findUnique` null → NotFound).
+
+## Tablas globales (sin organization_id) — cómo se protegen
+
+- `organizations`: política `org_self` (la app solo ve su propia fila).
+- `users`: política `users_member_visibility` — el rol de app solo ve usuarios que son miembros de la organización del contexto (login/registro/invitaciones usan el cliente admin).
+- `platform_admins`: RLS habilitado **sin políticas** = deny-all para el rol de app (invisible por completo).
+- `plans`: RLS con política de solo lectura (catálogo público de planes).
+
+## Superficies de inyección cerradas
+
+- **`organization_hint`** (leads de prueba): solo se acepta desde jobs encolados por endpoints internos autenticados (`InboundJob.internal = true`); un webhook público jamás puede elegir tenant.
+- **Canal simulado `mock:<slug>`**: el webhook público exige la cabecera `x-conversia-mock-token` (= `MOCK_INBOUND_TOKEN`) para aceptar payloads dirigidos a canales mock — conocer el slug de otra organización no basta para inyectarle mensajes.
+- **Tráfico real de Meta**: firma HMAC-SHA256 obligatoria cuando hay `META_APP_SECRET`.
 
 ## Por qué esquema compartido y no BD-por-tenant
 

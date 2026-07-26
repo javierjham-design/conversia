@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:setup": "prisma db execute --file ./sql/setup.sql --schema ./prisma/schema.prisma",
-    "db:seed": "tsx src/seed.ts"
+    "db:seed": "tsx src/seed.ts",
+    "verify:isolation": "tsx src/verify-isolation.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

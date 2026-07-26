@@ -15,7 +15,7 @@ interface LeadgenChange {
 }
 
 /** Resuelve el tenant dueño de la página/formulario (lookup global de ruteo). */
-async function resolveLeadTenant(change: LeadgenChange): Promise<string | null> {
+async function resolveLeadTenant(change: LeadgenChange, internal: boolean): Promise<string | null> {
   const prisma = getAdminPrisma();
   const byForm = await prisma.metaAsset.findFirst({
     where: { kind: "lead_form", externalId: change.form_id },
@@ -23,8 +23,9 @@ async function resolveLeadTenant(change: LeadgenChange): Promise<string | null> 
   if (byForm) return byForm.organizationId;
   const byPage = await prisma.metaAsset.findFirst({ where: { kind: "page", externalId: change.page_id } });
   if (byPage) return byPage.organizationId;
-  // hint solo válido para payloads de prueba internos
-  return change.organization_hint ?? null;
+  // organization_hint SOLO se acepta de encolados internos autenticados
+  // (lead de prueba del panel). Un webhook público jamás puede elegir tenant.
+  return internal ? (change.organization_hint ?? null) : null;
 }
 
 /** Obtiene los campos del lead desde Graph (camino real, requiere token). */
@@ -55,8 +56,8 @@ async function fetchLeadFromGraph(
  * mapeo de campos → contacto (dedupe por teléfono) → lead + etiquetas →
  * actividad → workflows con trigger lead_created → webhooks/CAPI.
  */
-export async function processLeadgen(change: LeadgenChange): Promise<void> {
-  const organizationId = await resolveLeadTenant(change);
+export async function processLeadgen(change: LeadgenChange, internal = false): Promise<void> {
+  const organizationId = await resolveLeadTenant(change, internal);
   if (!organizationId) {
     console.warn(`⚠ Leadgen para página desconocida ${change.page_id} — descartado`);
     return;
