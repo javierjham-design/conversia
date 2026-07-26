@@ -1,5 +1,10 @@
 # Seguridad
 
+> **Documentos de seguridad**: [SECURITY_STATUS.md](SECURITY_STATUS.md) (matriz de controles y veredicto por área) · [THREAT_MODEL.md](THREAT_MODEL.md) (STRIDE + DFD) · [RISK_REGISTER.md](RISK_REGISTER.md) · [SECURITY_ROADMAP.md](SECURITY_ROADMAP.md) (30/60/90) · [DATA_CLASSIFICATION.md](DATA_CLASSIFICATION.md) · [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) · [MULTITENANCY.md](MULTITENANCY.md) (aislamiento + verificador).
+>
+> Verificar aislamiento con el rol real de la app: `pnpm --filter @conversia/database verify:isolation` (también corre en CI, job `tenant-isolation`, bloqueante).
+
+
 ## Implementado
 
 - **Aislamiento de tenants**: RLS + `withTenant` + colas con tenant (ver MULTITENANCY.md).

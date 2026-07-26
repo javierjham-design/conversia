@@ -82,6 +82,50 @@ export async function runAgentTurn(opts: {
   if (!loaded) return;
   const { conversation, agent, version, org, clinic, rawMessages } = loaded;
 
+  // Controles de consumo de IA (LLM10 — Unbounded Consumption):
+  // 1. Kill switch global (env) o por tenant (org.settings.aiKillSwitch).
+  // 2. Tope diario de tokens por organización.
+  const env = getEnv();
+  const orgSettings = (org?.settings ?? {}) as Record<string, any>;
+  if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
+    await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: {
+          organizationId,
+          provider: "ai",
+          type: "ai.kill_switch",
+          status: "warning",
+          message: env.AI_GLOBAL_KILL_SWITCH ? "IA pausada globalmente" : "IA pausada por la organización",
+        },
+      }),
+    );
+    return;
+  }
+  if (env.AI_DAILY_TOKEN_BUDGET_PER_ORG > 0) {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const spent = await withTenant(organizationId, (tx) =>
+      tx.usageEvent.aggregate({
+        where: { type: "ai_tokens", occurredAt: { gte: startOfDay } },
+        _sum: { quantity: true },
+      }),
+    );
+    if (Number(spent._sum.quantity ?? 0) >= env.AI_DAILY_TOKEN_BUDGET_PER_ORG) {
+      await withTenant(organizationId, (tx) =>
+        tx.integrationEvent.create({
+          data: {
+            organizationId,
+            provider: "ai",
+            type: "ai.budget_exceeded",
+            status: "warning",
+            message: `Tope diario de tokens IA alcanzado (${env.AI_DAILY_TOKEN_BUDGET_PER_ORG})`,
+          },
+        }),
+      );
+      return;
+    }
+  }
+
   // 2. Historial ventaneado (el primer mensaje debe ser del usuario)
   const history: AIChatMessage[] = rawMessages.map((m) => ({
     role: m.direction === "INBOUND" ? ("user" as const) : ("assistant" as const),

@@ -21,7 +21,21 @@ const envSchema = z.object({
   API_URL: z.string().default("http://localhost:4000"),
   JWT_SECRET: z.string().default("dev-secret-change-me"),
   JWT_EXPIRES_IN: z.string().default("12h"),
+  JWT_ISSUER: z.string().default("conversia"),
+  JWT_AUDIENCE: z.string().default("conversia-api"),
   CREDENTIALS_ENCRYPTION_KEY: z.string().length(64).default("0".repeat(64)),
+
+  // --- Rate limiting (fuerza bruta / credential stuffing / abuso) ---
+  LOGIN_MAX_PER_WINDOW: z.coerce.number().default(20),
+  LOGIN_WINDOW_SECONDS: z.coerce.number().default(900),
+  API_MAX_PER_MINUTE: z.coerce.number().default(600),
+
+  // --- Controles de IA (LLM Top 10: consumo, kill switch) ---
+  AI_GLOBAL_KILL_SWITCH: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  AI_DAILY_TOKEN_BUDGET_PER_ORG: z.coerce.number().default(3_000_000), // 0 = ilimitado
 
   AI_PROVIDER: z.enum(["anthropic", "mock"]).default("mock"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),

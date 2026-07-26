@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Put } from "@n
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 
 const createClinicSchema = z.object({
   name: z.string().min(2),
@@ -99,6 +100,30 @@ export class OrganizationsController {
         },
       });
       return channel;
+    });
+  }
+
+  /** Kill switch de IA por organización (LLM10). Requiere permiso de config. */
+  @Put("me/ai-killswitch")
+  aiKillSwitch(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("enabled (boolean) requerido");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const settings = { ...((org?.settings as object) ?? {}), aiKillSwitch: parsed.data.enabled };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: parsed.data.enabled ? "ai.kill_switch.on" : "ai.kill_switch.off",
+          entityType: "organization",
+          entityId: ctx.organizationId,
+        },
+      });
+      return { ok: true, aiKillSwitch: parsed.data.enabled };
     });
   }
 

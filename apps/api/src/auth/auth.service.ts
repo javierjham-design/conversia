@@ -1,12 +1,12 @@
 import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import * as bcryptMod from "bcryptjs";
-import * as jwt from "jsonwebtoken";
-import { getEnv } from "@conversia/config";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
-import type { JwtPayload } from "../tenancy/tenancy.middleware";
+import { signAppToken } from "./jwt";
 
 const bcrypt = (bcryptMod as any).default ?? bcryptMod;
+/** Costo bcrypt (ASVS 2.4): 12 es el mínimo recomendado actual. */
+export const BCRYPT_COST = 12;
 
 function slugify(name: string): string {
   return name
@@ -30,7 +30,9 @@ export class AuthService {
   async register(input: { email: string; password: string; name: string; organizationName: string }) {
     const db = this.prisma.admin;
     const existing = await db.user.findUnique({ where: { email: input.email } });
-    if (existing) throw new ConflictException("El email ya está registrado");
+    // Anti-enumeración (ASVS 2.2 / OWASP): mensaje genérico + rate limit en el
+    // controlador. No confirmamos si el correo ya existe.
+    if (existing) throw new ConflictException("No se pudo completar el registro con esos datos");
 
     let slug = slugify(input.organizationName) || "organizacion";
     if (await db.organization.findUnique({ where: { slug } })) {
@@ -61,7 +63,7 @@ export class AuthService {
       const user = await tx.user.create({
         data: {
           email: input.email,
-          passwordHash: bcrypt.hashSync(input.password, 10),
+          passwordHash: bcrypt.hashSync(input.password, BCRYPT_COST),
           name: input.name,
         },
       });
@@ -110,11 +112,7 @@ export class AuthService {
   }
 
   private issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
-    const env = getEnv();
-    const payload: JwtPayload = { sub: userId, orgId, role: roleCode, perms };
-    const token = jwt.sign(payload as object, env.JWT_SECRET, {
-      expiresIn: env.JWT_EXPIRES_IN,
-    } as jwt.SignOptions);
+    const token = signAppToken({ sub: userId, orgId, role: roleCode, perms });
     return { token, organizationId: orgId, role: roleCode };
   }
 }

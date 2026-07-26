@@ -8,6 +8,9 @@ import type {
   ToolContext,
 } from "@conversia/types";
 import { ToolRegistry } from "./tools.js";
+import { sanitizeVar } from "./sanitize.js";
+
+export { sanitizeVar };
 
 /** Configuración efectiva del agente (viene de agent_versions.config). */
 export interface AgentRuntime {
@@ -50,9 +53,9 @@ export interface OrchestrateResult {
   humanHandoff?: boolean;
 }
 
-/** Renderiza {{path.de.variable}} desde el diccionario de vars. */
+/** Renderiza {{path.de.variable}} sanitizando cada valor interpolado. */
 export function renderTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => vars[key] ?? "");
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => sanitizeVar(vars[key] ?? ""));
 }
 
 /**

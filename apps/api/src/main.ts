@@ -1,13 +1,42 @@
 import "reflect-metadata";
+import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { getEnv } from "@conversia/config";
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 
 async function bootstrap() {
   const env = getEnv();
   // rawBody: necesario para verificar la firma HMAC de los webhooks de Meta
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+
+  // Límites de tamaño de cuerpo (anti-DoS por payloads gigantes) sin doble parseo
+  app.useBodyParser("json", { limit: "512kb" });
+  app.useBodyParser("urlencoded", { limit: "512kb", extended: false });
+
+  // Detrás del proxy de Railway/Next: honra X-Forwarded-* (IP, proto)
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
+
+  // Cabeceras de seguridad. La API sólo devuelve JSON → CSP restrictiva.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+        },
+      },
+      hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+      referrerPolicy: { policy: "no-referrer" },
+      crossOriginResourcePolicy: { policy: "same-site" },
+    }),
+  );
+
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors({ origin: [env.WEB_URL], credentials: true });
+
   // Railway/PaaS inyectan PORT; en local se usa API_PORT
   const port = Number(process.env.PORT ?? env.API_PORT);
   await app.listen(port, "0.0.0.0");

@@ -11,6 +11,8 @@ import { MetaController } from "./integrations/meta.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
+import { RateLimitService } from "./common/rate-limit";
+import { RateLimitMiddleware } from "./common/rate-limit.middleware";
 import { ReportsController } from "./reports/reports.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
@@ -31,10 +33,11 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ReportsController,
     WhatsappController,
   ],
-  providers: [PrismaService, AuthService, QueueService, TenancyMiddleware],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(TenancyMiddleware).forRoutes("*");
+    // Orden: primero resuelve el tenant (JWT), luego aplica rate limit por usuario.
+    consumer.apply(TenancyMiddleware, RateLimitMiddleware).forRoutes("*");
   }
 }

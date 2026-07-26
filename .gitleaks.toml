@@ -1,0 +1,21 @@
+# Config Gitleaks — usa las reglas por defecto + allowlist de placeholders.
+# Objetivo: bloquear secretos REALES sin falsear por valores de ejemplo.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders de desarrollo y documentación (no son secretos reales)"
+paths = [
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+  '''.*\.example$''',
+]
+regexes = [
+  '''change-me-in-real-env''',
+  '''dev-clariva-key''',
+  '''dev-clariva-webhook-secret''',
+  '''dev-mock-inbound-token''',
+  '''conversia-verify-token-dev''',
+  '''0000000000000000000000000000000000000000000000000000000000000000''',
+  '''conversia_app_dev_password''',
+]

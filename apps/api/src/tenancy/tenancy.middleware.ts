@@ -1,18 +1,13 @@
 import { Injectable, NestMiddleware, UnauthorizedException } from "@nestjs/common";
 import type { NextFunction, Request, Response } from "express";
-import * as jwt from "jsonwebtoken";
-import { getEnv } from "@conversia/config";
+import { verifyAppToken, type AppTokenClaims } from "../auth/jwt";
 import { runWithContext, type RequestContext } from "./context";
 
 /** Rutas sin JWT: auth, webhooks (firma propia) y health. */
 const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/webhooks", "/health"];
 
-export interface JwtPayload {
-  sub: string;
-  orgId: string;
-  role: string;
-  perms: string[];
-}
+/** @deprecated usar AppTokenClaims de auth/jwt */
+export type JwtPayload = AppTokenClaims;
 
 @Injectable()
 export class TenancyMiddleware implements NestMiddleware {
@@ -27,9 +22,9 @@ export class TenancyMiddleware implements NestMiddleware {
     if (!header?.startsWith("Bearer ")) {
       throw new UnauthorizedException("Falta token Bearer");
     }
-    let payload: JwtPayload;
+    let payload: AppTokenClaims;
     try {
-      payload = jwt.verify(header.slice(7), getEnv().JWT_SECRET) as JwtPayload;
+      payload = verifyAppToken(header.slice(7)); // HS256 fijo + iss/aud validados
     } catch {
       throw new UnauthorizedException("Token inválido o expirado");
     }
