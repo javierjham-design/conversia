@@ -60,6 +60,10 @@ const envSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().default(5),
   SCHEDULER_POLL_MS: z.coerce.number().default(15000),
   MOCK_CLARIVA_PORT: z.coerce.number().default(4010),
+
+  // --- Facturación / pasarela de pago (opcional; mock si vacío) ---
+  STRIPE_SECRET_KEY: z.string().optional().default(""),
+  STRIPE_WEBHOOK_SECRET: z.string().optional().default(""),
 });
 
 export type Env = z.infer<typeof envSchema>;

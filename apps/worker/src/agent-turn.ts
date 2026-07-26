@@ -101,7 +101,21 @@ export async function runAgentTurn(opts: {
     );
     return;
   }
-  if (env.AI_DAILY_TOKEN_BUDGET_PER_ORG > 0) {
+  // El tope efectivo sale del plan del tenant (limits.aiTokensDaily) si existe;
+  // si no, del default de la plataforma. 0 = ilimitado.
+  const budget = await withTenant(organizationId, async (tx) => {
+    const sub = await tx.subscription.findFirst({
+      where: { status: { in: ["ACTIVE", "TRIALING"] } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (sub) {
+      const plan = await tx.plan.findUnique({ where: { id: sub.planId } });
+      const planLimit = (plan?.limits as Record<string, number> | undefined)?.aiTokensDaily;
+      if (typeof planLimit === "number") return planLimit;
+    }
+    return env.AI_DAILY_TOKEN_BUDGET_PER_ORG;
+  });
+  if (budget > 0) {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const spent = await withTenant(organizationId, (tx) =>
@@ -110,7 +124,7 @@ export async function runAgentTurn(opts: {
         _sum: { quantity: true },
       }),
     );
-    if (Number(spent._sum.quantity ?? 0) >= env.AI_DAILY_TOKEN_BUDGET_PER_ORG) {
+    if (Number(spent._sum.quantity ?? 0) >= budget) {
       await withTenant(organizationId, (tx) =>
         tx.integrationEvent.create({
           data: {

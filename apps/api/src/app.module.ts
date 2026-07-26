@@ -11,8 +11,11 @@ import { MetaController } from "./integrations/meta.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
+import { BillingController } from "./billing/billing.controller";
 import { RateLimitService } from "./common/rate-limit";
 import { RateLimitMiddleware } from "./common/rate-limit.middleware";
+import { PlatformAuthController } from "./platform/platform-auth.controller";
+import { PlatformController } from "./platform/platform.controller";
 import { ReportsController } from "./reports/reports.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
@@ -31,13 +34,22 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     MetaController,
     WorkflowsController,
     ReportsController,
+    BillingController,
     WhatsappController,
+    // Plataforma (super-admin) — autenticación y audiencia separadas
+    PlatformAuthController,
+    PlatformController,
   ],
   providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Orden: primero resuelve el tenant (JWT), luego aplica rate limit por usuario.
-    consumer.apply(TenancyMiddleware, RateLimitMiddleware).forRoutes("*");
+    // Las rutas /platform/* NO llevan tenant (son cross-tenant, con su propio
+    // guard y auth); se excluyen del middleware de tenancy.
+    consumer
+      .apply(TenancyMiddleware, RateLimitMiddleware)
+      .exclude("platform/(.*)", "platform")
+      .forRoutes("*");
   }
 }

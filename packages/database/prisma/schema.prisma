@@ -198,14 +198,67 @@ model Plan {
   code      String   @unique
   name      String
   // Límites por plan: usuarios, sedes, canales, agentes, workflows,
-  // ejecuciones/mes, tokens/mes, contactos, almacenamiento, etc.
+  // ejecuciones/mes, aiTokensDaily, contactos, almacenamiento, etc.
   limits    Json     @default("{}")
   features  Json     @default("{}")
   priceUsd  Decimal  @default(0) @map("price_usd") @db.Decimal(10, 2)
+  priceClp  Decimal  @default(0) @map("price_clp") @db.Decimal(12, 0)
+  interval  String   @default("monthly") // monthly | yearly
+  trialDays Int      @default(0) @map("trial_days")
+  isPublic  Boolean  @default(true) @map("is_public")
+  order     Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("plans")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+// Factura de la plataforma hacia el tenant (cobro por uso de Conversia).
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  subscriptionId String?       @map("subscription_id")
+  number         String // CONV-2026-000123
+  status         InvoiceStatus @default(DRAFT)
+  currency       String        @default("CLP")
+  amountDue      Decimal       @map("amount_due") @db.Decimal(12, 2)
+  lines          Json          @default("[]")
+  periodStart    DateTime?     @map("period_start")
+  periodEnd      DateTime?     @map("period_end")
+  dueAt          DateTime?     @map("due_at")
+  paidAt         DateTime?     @map("paid_at")
+  provider       String        @default("mock")
+  providerRef    String?       @map("provider_ref")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+  @@map("invoices")
+}
+
+// Método de pago del tenant. NUNCA se guardan datos de tarjeta: sólo el
+// token/referencia del proveedor (Stripe, etc.) y metadatos no sensibles.
+model PaymentMethod {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  provider       String   @default("mock")
+  kind           String // card | transfer | manual
+  brand          String?
+  last4          String?
+  providerRef    String?  @map("provider_ref")
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId])
+  @@map("payment_methods")
 }
 
 // Identidad global de usuario (puede pertenecer a varias organizaciones)

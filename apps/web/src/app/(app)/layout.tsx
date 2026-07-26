@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Contact2,
+  CreditCard,
   LogOut,
   MessageSquare,
   Plug,
@@ -66,6 +67,7 @@ const NAV_GROUPS: Array<{
       { href: "/channels", label: "Canales", icon: Smartphone },
       { href: "/integrations", label: "Integraciones", icon: Plug },
       { href: "/users", label: "Usuarios", icon: Users },
+      { href: "/billing", label: "Plan y facturación", icon: CreditCard },
     ],
   },
 ];
@@ -79,6 +81,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/integrations": ["Configuración", "Integraciones"],
   "/integrations/meta": ["Configuración", "Integraciones", "Meta Business Suite"],
   "/users": ["Configuración", "Usuarios"],
+  "/billing": ["Configuración", "Plan y facturación"],
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

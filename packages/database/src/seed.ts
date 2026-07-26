@@ -304,24 +304,70 @@ async function seedTenant(fileName: string, adminEmail: string) {
   return org;
 }
 
+const PLANS = [
+  {
+    code: "free",
+    name: "Free",
+    priceClp: 0,
+    priceUsd: 0,
+    order: 0,
+    limits: { users: 2, clinics: 1, channels: 1, agents: 2, workflows: 3, aiTokensDaily: 200_000 },
+    features: { whiteLabel: false, api: false },
+  },
+  {
+    code: "starter",
+    name: "Starter",
+    priceClp: 29_990,
+    priceUsd: 39,
+    order: 1,
+    limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensDaily: 1_000_000 },
+    features: { whiteLabel: false, api: true },
+  },
+  {
+    code: "pro",
+    name: "Pro",
+    priceClp: 79_990,
+    priceUsd: 99,
+    order: 2,
+    limits: { users: 20, clinics: 5, channels: 3, agents: 20, workflows: 50, aiTokensDaily: 5_000_000 },
+    features: { whiteLabel: true, api: true },
+  },
+  {
+    code: "enterprise",
+    name: "Enterprise",
+    priceClp: 0,
+    priceUsd: 0,
+    order: 3,
+    isPublic: false,
+    limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = ilimitado
+    features: { whiteLabel: true, api: true, sso: true },
+  },
+];
+
 async function main() {
-  // Plan por defecto de la plataforma
-  await prisma.plan.upsert({
-    where: { code: "starter" },
+  // Catálogo de planes de la plataforma
+  for (const p of PLANS) {
+    await prisma.plan.upsert({
+      where: { code: p.code },
+      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic ?? true },
+      create: p as any,
+    });
+  }
+
+  // Administrador de PLATAFORMA (super-admin). Identidad separada de los tenants.
+  const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "conversia-platform-dev";
+  const platformEmail = process.env.PLATFORM_ADMIN_EMAIL ?? "superadmin@conversia.local";
+  await prisma.platformAdmin.upsert({
+    where: { email: platformEmail },
     update: {},
-    create: {
-      code: "starter",
-      name: "Starter",
-      limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensMonthly: 5_000_000 },
-      features: { whiteLabel: false, api: true },
-      priceUsd: 0,
-    },
+    create: { email: platformEmail, name: "Super Admin", passwordHash: bcrypt.hashSync(platformPassword, 12) },
   });
+  console.log(`✔ Admin de plataforma ${platformEmail} (password: valor de PLATFORM_ADMIN_PASSWORD o 'conversia-platform-dev')`);
 
   await seedTenant("digital-dent.json", "admin@digital-dent.local");
   await seedTenant("demo-clinic.json", "admin@clinica-demo.local");
 
-  console.log("✔ Seed completo (2 tenants). Aislamiento verificable entre ambos.");
+  console.log("✔ Seed completo (4 planes + super-admin + 2 tenants).");
 }
 
 main()
