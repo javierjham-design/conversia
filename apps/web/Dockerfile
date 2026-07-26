@@ -7,9 +7,7 @@ WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
 
-# API_URL se inyecta en build (NEXT_PUBLIC_API_URL queda inlined en el bundle)
-ARG API_URL
-ENV API_URL=$API_URL
+# API_URL se lee en RUNTIME (rewrites de next.config) — no se necesita en build
 RUN pnpm exec turbo run build --filter=@conversia/web
 
 ENV NODE_ENV=production

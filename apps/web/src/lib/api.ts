@@ -1,4 +1,6 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Same-origin: Next reescribe /backend/* hacia la API (ver next.config.mjs).
+// Sin URL inyectada en build y sin CORS.
+export const API_URL = "/backend";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
