@@ -8,6 +8,11 @@ import { clearToken, getToken } from "@/lib/api";
 const NAV = [
   { href: "/inbox", label: "Bandeja", icon: "💬" },
   { href: "/agents", label: "Agentes IA", icon: "🤖" },
+  { href: "/workflows", label: "Flujos", icon: "🔀" },
+  { href: "/reports", label: "Reportes", icon: "📊" },
+  { href: "/channels", label: "Canales", icon: "📱" },
+  { href: "/users", label: "Usuarios", icon: "👥" },
+  { href: "/integrations", label: "Integraciones", icon: "🔌" },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

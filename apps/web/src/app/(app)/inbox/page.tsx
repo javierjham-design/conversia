@@ -13,6 +13,7 @@ interface Conversation {
   id: string;
   status: string;
   aiEnabled: boolean;
+  assignedUserId: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   contact: Contact;
@@ -25,17 +26,31 @@ interface Message {
   status: string;
   createdAt: string;
 }
+interface Assignable {
+  userId: string;
+  name: string;
+}
 
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
+  const [users, setUsers] = useState<Assignable[]>([]);
+  const [fStatus, setFStatus] = useState("open");
+  const [fAi, setFAi] = useState("all");
+  const [fAssigned, setFAssigned] = useState("all");
+  const [q, setQ] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadConversations = useCallback(async () => {
-    setConversations(await api<Conversation[]>("/conversations"));
-  }, []);
+    const params = new URLSearchParams();
+    params.set("status", fStatus);
+    if (fAi !== "all") params.set("ai", fAi);
+    if (fAssigned !== "all") params.set("assigned", fAssigned);
+    if (q.trim()) params.set("q", q.trim());
+    setConversations(await api<Conversation[]>(`/conversations?${params.toString()}`));
+  }, [fStatus, fAi, fAssigned, q]);
 
   const loadMessages = useCallback(async (id: string) => {
     const res = await api<{ conversation: Conversation; messages: Message[] }>(`/conversations/${id}/messages`);
@@ -46,6 +61,10 @@ export default function InboxPage() {
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
+
+  useEffect(() => {
+    void api<Assignable[]>("/users/assignable").then(setUsers).catch(() => setUsers([]));
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -77,22 +96,63 @@ export default function InboxPage() {
     await loadConversations();
   }
 
+  async function toggleClosed() {
+    if (!selected) return;
+    const action = selected.status === "CLOSED" ? "reopen" : "close";
+    await api(`/conversations/${selected.id}/${action}`, { method: "POST" });
+    await loadMessages(selected.id);
+    await loadConversations();
+  }
+
+  async function assign(userId: string) {
+    if (!selected) return;
+    await api(`/conversations/${selected.id}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ userId: userId || null }),
+    });
+    await loadMessages(selected.id);
+  }
+
   function displayName(c: Contact) {
     return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.phone || "Sin nombre";
   }
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-80 flex-col border-r border-slate-200 bg-white">
-        <header className="border-b border-slate-200 p-4">
-          <h1 className="font-semibold">Bandeja</h1>
+      <aside className="flex w-96 flex-col border-r border-slate-200 bg-white">
+        <header className="space-y-2 border-b border-slate-200 p-3">
+          <div className="flex items-center justify-between">
+            <h1 className="font-semibold">Bandeja</h1>
+            <span className="text-xs text-slate-400">{conversations.length}</span>
+          </div>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar nombre o teléfono…"
+            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <div className="flex gap-1.5 text-xs">
+            <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              <option value="open">Abiertas</option>
+              <option value="pending">Pendientes</option>
+              <option value="closed">Cerradas</option>
+              <option value="all">Todas</option>
+            </select>
+            <select value={fAi} onChange={(e) => setFAi(e.target.value)} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              <option value="all">IA y humano</option>
+              <option value="on">Con IA</option>
+              <option value="off">Control humano</option>
+            </select>
+            <select value={fAssigned} onChange={(e) => setFAssigned(e.target.value)} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              <option value="all">Cualquiera</option>
+              <option value="me">Mías</option>
+              <option value="unassigned">Sin asignar</option>
+            </select>
+          </div>
         </header>
         <div className="flex-1 overflow-y-auto">
           {conversations.length === 0 && (
-            <p className="p-4 text-sm text-slate-400">
-              Sin conversaciones. Simula una con:{" "}
-              <code className="text-xs">node scripts/simulate-inbound.mjs</code>
-            </p>
+            <p className="p-4 text-sm text-slate-400">Sin conversaciones con estos filtros.</p>
           )}
           {conversations.map((c) => (
             <button
@@ -105,7 +165,7 @@ export default function InboxPage() {
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">{displayName(c.contact)}</span>
                 <span className={`text-[10px] ${c.aiEnabled ? "text-cyan-600" : "text-amber-600"}`}>
-                  {c.aiEnabled ? "IA" : "Humano"}
+                  {c.status === "CLOSED" ? "cerrada" : c.aiEnabled ? "IA" : "Humano"}
                 </span>
               </div>
               <p className="truncate text-xs text-slate-500">{c.lastMessagePreview ?? "—"}</p>
@@ -121,21 +181,40 @@ export default function InboxPage() {
           </div>
         ) : (
           <>
-            <header className="flex items-center justify-between border-b border-slate-200 bg-white p-4">
+            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white p-3">
               <div>
                 <h2 className="font-medium">{displayName(selected.contact)}</h2>
                 <p className="text-xs text-slate-400">{selected.contact.phone}</p>
               </div>
-              <button
-                onClick={() => void toggleAi()}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                  selected.aiEnabled
-                    ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                    : "bg-cyan-100 text-cyan-800 hover:bg-cyan-200"
-                }`}
-              >
-                {selected.aiEnabled ? "Tomar control" : "Devolver a IA"}
-              </button>
+              <div className="flex items-center gap-2">
+                <select
+                  value={selected.assignedUserId ?? ""}
+                  onChange={(e) => void assign(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                  title="Asignar a"
+                >
+                  <option value="">👤 Sin asignar</option>
+                  {users.map((u) => (
+                    <option key={u.userId} value={u.userId}>👤 {u.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => void toggleAi()}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                    selected.aiEnabled
+                      ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                      : "bg-cyan-100 text-cyan-800 hover:bg-cyan-200"
+                  }`}
+                >
+                  {selected.aiEnabled ? "Tomar control" : "Devolver a IA"}
+                </button>
+                <button
+                  onClick={() => void toggleClosed()}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+                >
+                  {selected.status === "CLOSED" ? "Reabrir" : "Cerrar"}
+                </button>
+              </div>
             </header>
             <div className="flex-1 space-y-2 overflow-y-auto p-4">
               {messages.map((m) => (

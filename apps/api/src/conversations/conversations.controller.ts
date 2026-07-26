@@ -25,12 +25,23 @@ export class ConversationsController {
   ) {}
 
   @Get()
-  list(@Query("status") status?: string, @Query("q") q?: string) {
+  list(
+    @Query("status") status?: string,
+    @Query("q") q?: string,
+    @Query("ai") ai?: string,
+    @Query("assigned") assigned?: string,
+  ) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.conversation.findMany({
         where: {
-          ...(status ? { status: status.toUpperCase() as any } : {}),
+          ...(status && status !== "all" ? { status: status.toUpperCase() as any } : {}),
+          ...(ai === "on" ? { aiEnabled: true } : ai === "off" ? { aiEnabled: false } : {}),
+          ...(assigned === "me"
+            ? { assignedUserId: ctx.userId }
+            : assigned === "unassigned"
+              ? { assignedUserId: null }
+              : {}),
           ...(q
             ? {
                 contact: {
@@ -48,6 +59,53 @@ export class ConversationsController {
         take: 50,
       }),
     );
+  }
+
+  /** Cierra la conversación (los workflows con trigger de cierre se disparan en fase 4). */
+  @Post(":id/close")
+  close(@Param("id") id: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.conversation.update({ where: { id }, data: { status: "CLOSED" } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "conversation.close",
+          entityType: "conversation",
+          entityId: id,
+        },
+      });
+      return { ok: true };
+    });
+  }
+
+  @Post(":id/reopen")
+  reopen(@Param("id") id: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.conversation.update({ where: { id }, data: { status: "OPEN" } });
+      return { ok: true };
+    });
+  }
+
+  /** Asigna la conversación a un usuario del equipo (null = sin asignar). */
+  @Post(":id/assign")
+  assign(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ userId: z.string().nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("userId requerido (o null)");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      if (parsed.data.userId) {
+        const member = await tx.organizationUser.findUnique({
+          where: { organizationId_userId: { organizationId: ctx.organizationId, userId: parsed.data.userId } },
+        });
+        if (!member || !member.active) throw new BadRequestException("El usuario no pertenece a la organización");
+      }
+      await tx.conversation.update({ where: { id }, data: { assignedUserId: parsed.data.userId } });
+      return { ok: true };
+    });
   }
 
   @Get(":id/messages")
