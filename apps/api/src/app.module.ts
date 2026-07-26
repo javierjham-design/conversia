@@ -1,4 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
+import { AgentsController } from "./agents/agents.controller";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { WhatsappController } from "./channels/whatsapp.controller";
@@ -14,6 +15,7 @@ import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
     HealthController,
     AuthController,
     OrganizationsController,
+    AgentsController,
     ConversationsController,
     WhatsappController,
   ],

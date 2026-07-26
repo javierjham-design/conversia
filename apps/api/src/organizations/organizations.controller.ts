@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
@@ -61,6 +61,45 @@ export class OrganizationsController {
         include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
       }),
     );
+  }
+
+  /** Canales del tenant con su agente por defecto. */
+  @Get("me/channels")
+  channels() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.channelConnection.findMany({ orderBy: { createdAt: "asc" } }),
+    );
+  }
+
+  /** Define qué agente atiende por defecto las conversaciones nuevas del canal. */
+  @Put("me/channels/:id/default-agent")
+  async setChannelDefaultAgent(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ agentId: z.string().nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("agentId requerido (o null)");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      if (parsed.data.agentId) {
+        const agent = await tx.agent.findFirst({ where: { id: parsed.data.agentId, deletedAt: null } });
+        if (!agent) throw new BadRequestException("Agente no encontrado");
+      }
+      const channel = await tx.channelConnection.update({
+        where: { id },
+        data: { defaultAgentId: parsed.data.agentId },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "channel.set_default_agent",
+          entityType: "channel_connection",
+          entityId: id,
+          after: { agentId: parsed.data.agentId },
+        },
+      });
+      return channel;
+    });
   }
 
   @Get("me/usage")

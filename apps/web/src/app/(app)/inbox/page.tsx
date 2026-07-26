@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API_URL, api, clearToken, getToken } from "@/lib/api";
+import { api } from "@/lib/api";
 
 interface Contact {
   id: string;
@@ -34,8 +34,7 @@ export default function InboxPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadConversations = useCallback(async () => {
-    const items = await api<Conversation[]>("/conversations");
-    setConversations(items);
+    setConversations(await api<Conversation[]>("/conversations"));
   }, []);
 
   const loadMessages = useCallback(async (id: string) => {
@@ -48,7 +47,6 @@ export default function InboxPage() {
     void loadConversations();
   }, [loadConversations]);
 
-  // Tiempo real v0: SSE (EventSource no soporta headers → refresco por polling del stream vía fetch)
   useEffect(() => {
     const interval = setInterval(() => {
       void loadConversations();
@@ -83,25 +81,11 @@ export default function InboxPage() {
     return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.phone || "Sin nombre";
   }
 
-  if (typeof window !== "undefined" && !getToken()) {
-    window.location.href = "/login";
-    return null;
-  }
-
   return (
-    <main className="flex h-screen">
+    <div className="flex h-full">
       <aside className="flex w-80 flex-col border-r border-slate-200 bg-white">
-        <header className="flex items-center justify-between border-b border-slate-200 p-4">
+        <header className="border-b border-slate-200 p-4">
           <h1 className="font-semibold">Bandeja</h1>
-          <button
-            onClick={() => {
-              clearToken();
-              window.location.href = "/login";
-            }}
-            className="text-xs text-slate-400 hover:text-slate-600"
-          >
-            Salir
-          </button>
         </header>
         <div className="flex-1 overflow-y-auto">
           {conversations.length === 0 && (
@@ -188,6 +172,6 @@ export default function InboxPage() {
           </>
         )}
       </section>
-    </main>
+    </div>
   );
 }
