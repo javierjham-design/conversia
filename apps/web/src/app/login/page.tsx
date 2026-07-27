@@ -33,7 +33,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <div>
-          <h1 className="text-xl font-semibold">Conversia</h1>
+          <h1 className="text-xl font-semibold">TuBot</h1>
           <p className="text-sm text-slate-500">Panel de atención conversacional</p>
         </div>
         <label className="block text-sm">

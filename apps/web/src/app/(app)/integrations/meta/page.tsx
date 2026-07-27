@@ -237,7 +237,7 @@ export default function MetaCenterPage() {
                   <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
                     <h2 className="mb-1 font-semibold">Mapeo de campos</h2>
                     <p className="mb-4 text-[13px] text-slate-500">
-                      Cómo se transforma cada campo del formulario de Meta en datos de Conversia. Se aplica sede, estado
+                      Cómo se transforma cada campo del formulario de Meta en datos de TuBot. Se aplica sede, estado
                       inicial, etiquetas y dispara los workflows con trigger <code className="text-xs">lead_created</code>.
                     </p>
                     <FieldMappingEditor initial={data.leadMapping} leadStatuses={leadStatuses} onSaved={() => void load()} />

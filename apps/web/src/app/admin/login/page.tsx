@@ -38,7 +38,7 @@ export default function PlatformLoginPage() {
             <ShieldCheck size={18} />
           </div>
           <div>
-            <h1 className="font-semibold text-white">Conversia · Plataforma</h1>
+            <h1 className="font-semibold text-white">TuBot · Plataforma</h1>
             <p className="text-[11px] text-navy-300">Administración de la plataforma</p>
           </div>
         </div>
@@ -54,7 +54,7 @@ export default function PlatformLoginPage() {
         <button type="submit" disabled={loading} className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50">
           {loading ? "Entrando…" : "Entrar"}
         </button>
-        <p className="text-[11px] text-navy-300">Acceso exclusivo para administradores de la plataforma Conversia.</p>
+        <p className="text-[11px] text-navy-300">Acceso exclusivo para administradores de la plataforma TuBot.</p>
       </form>
     </main>
   );

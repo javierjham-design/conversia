@@ -144,7 +144,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
               {!collapsed && (
                 <div className="leading-tight">
-                  <p className="font-semibold tracking-tight text-white">Conversia</p>
+                  <p className="font-semibold tracking-tight text-white">TuBot</p>
                   <p className="text-[11px] text-navy-300">Atención conversacional</p>
                 </div>
               )}

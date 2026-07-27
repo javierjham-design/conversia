@@ -166,7 +166,7 @@ export function MetaWizard({
       {step === 1 && (
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Activa los activos que Conversia puede usar. {data.connection?.mode === "MOCK" && (
+            Activa los activos que TuBot puede usar. {data.connection?.mode === "MOCK" && (
               <span className="font-medium text-violet-700">Estás viendo activos DEMO de la simulación de desarrollo.</span>
             )}
           </p>
@@ -211,7 +211,7 @@ export function MetaWizard({
 
       {step === 2 && (
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">Funcionalidades del ecosistema Meta en Conversia:</p>
+          <p className="text-sm text-slate-600">Funcionalidades del ecosistema Meta en TuBot:</p>
           {[
             ["WhatsApp Cloud API", "Mensajería con agentes IA en tu número oficial", true, "Se gestiona en Canales"],
             ["Recepción de leads (Lead Ads)", "Formularios instantáneos → contactos y workflows", data.checklist.leadMappingReady, "Configura el mapeo en la pestaña Lead Ads"],
@@ -343,7 +343,7 @@ export function FieldMappingEditor({
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-2 text-sm font-medium">Campo de Meta → Campo de Conversia</p>
+        <p className="mb-2 text-sm font-medium">Campo de Meta → Campo de TuBot</p>
         <div className="space-y-2">
           {rows.map((row, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -359,7 +359,7 @@ export function FieldMappingEditor({
                 value={LEAD_TARGETS.some(([v]) => v === row.target) ? row.target : "custom"}
                 onChange={(e) => setRows((r) => r.map((x, idx) => (idx === i ? { ...x, target: e.target.value === "custom" ? row.source : e.target.value } : x)))}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                aria-label="Campo de Conversia"
+                aria-label="Campo de TuBot"
               >
                 {LEAD_TARGETS.map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
@@ -463,7 +463,7 @@ export function EventMappingEditor({
       </div>
 
       <div>
-        <p className="mb-2 text-sm font-medium">Evento de Conversia → Evento de Meta</p>
+        <p className="mb-2 text-sm font-medium">Evento de TuBot → Evento de Meta</p>
         <div className="space-y-2">
           {rules.map((rule, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-2">

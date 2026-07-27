@@ -46,7 +46,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             </div>
             <div className="leading-tight">
               <p className="font-semibold text-white">Plataforma</p>
-              <p className="text-[11px] text-navy-300">Conversia admin</p>
+              <p className="text-[11px] text-navy-300">TuBot admin</p>
             </div>
           </div>
           <div className="flex-1 space-y-0.5 p-2">

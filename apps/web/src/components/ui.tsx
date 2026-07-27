@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Componentes base de Conversia — sistema visual compartido.
+ * Componentes base de TuBot — sistema visual compartido.
  * Sin dependencias más allá de lucide-react.
  */
 import { createContext, useCallback, useContext, useEffect, useState } from "react";

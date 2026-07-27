@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Conversia — Panel",
+  title: "TuBot — Panel",
   description: "Atención conversacional multi-tenant con agentes de IA",
 };
 

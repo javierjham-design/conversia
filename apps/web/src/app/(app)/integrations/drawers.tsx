@@ -324,7 +324,7 @@ export function WebhooksDrawer({
       {mode === "list" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-500">Recibe eventos de Conversia en tus sistemas, firmados y con reintentos.</p>
+            <p className="text-sm text-slate-500">Recibe eventos de TuBot en tus sistemas, firmados y con reintentos.</p>
             <Button onClick={() => setMode("new")}><Plus size={14} /> Nuevo</Button>
           </div>
           {webhooks.length === 0 && (

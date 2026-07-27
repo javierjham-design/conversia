@@ -26,7 +26,7 @@ export default function BillingPage() {
   const toast = useToast();
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [orgs, setOrgs] = useState<Org[]>([]);
-  const [form, setForm] = useState({ organizationId: "", amount: 0, currency: "CLP", concept: "Suscripción Conversia" });
+  const [form, setForm] = useState({ organizationId: "", amount: 0, currency: "CLP", concept: "Suscripción TuBot" });
 
   const load = useCallback(async () => {
     const [inv, o] = await Promise.all([padmin<Invoice[]>("/platform/invoices"), padmin<Org[]>("/platform/organizations")]);
