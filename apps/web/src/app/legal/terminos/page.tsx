@@ -8,7 +8,7 @@ export default function TerminosPage() {
 
       <p>
         Estos términos regulan el uso de <strong>TuBot</strong> (“la Plataforma”), un servicio de atención
-        conversacional multi-tenant con WhatsApp Business y agentes de IA, operado por [Razón social] (Chile). Al
+        conversacional multi-tenant con WhatsApp Business y agentes de IA, operado por Servicios DigitalDent SpA (Chile). Al
         crear una cuenta o usar el servicio, la empresa cliente (“Tenant”) acepta estos términos.
       </p>
 
@@ -78,7 +78,7 @@ export default function TerminosPage() {
 
       <h2>11. Contacto</h2>
       <p>
-        [Razón social] · <a href="mailto:soporte@tubot.cl">soporte@tubot.cl</a>
+        Servicios DigitalDent SpA · <a href="mailto:soporte@tubot.cl">soporte@tubot.cl</a>
       </p>
     </>
   );
