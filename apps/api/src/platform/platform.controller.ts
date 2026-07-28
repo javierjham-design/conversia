@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -186,6 +187,28 @@ export class PlatformController {
       org: { id: org.id, name: org.name },
       expiresInMinutes: 30,
     };
+  }
+
+  // ------------------------------ Auditoría ------------------------------
+
+  /** Registro de acciones del super-admin (login, MFA, impersonación, suspensiones, planes). */
+  @Get("audit")
+  async auditList(@Query("limit") limit?: string) {
+    const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
+    const [rows, admins] = await Promise.all([
+      this.prisma.admin.auditLog.findMany({ where: { actorType: "platform_admin" }, orderBy: { createdAt: "desc" }, take }),
+      this.prisma.admin.platformAdmin.findMany({ select: { id: true, email: true } }),
+    ]);
+    const emailById = new Map(admins.map((a) => [a.id, a.email]));
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      entityType: r.entityType,
+      entityId: r.entityId,
+      actor: r.actorId ? emailById.get(r.actorId) ?? r.actorId : "—",
+      after: r.after,
+      createdAt: r.createdAt,
+    }));
   }
 
   // ------------------------------- Planes -------------------------------

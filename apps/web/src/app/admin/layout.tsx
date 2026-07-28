@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Building2, CreditCard, KeyRound, LayoutDashboard, LogOut, Package, ShieldCheck } from "lucide-react";
+import { Building2, CreditCard, KeyRound, LayoutDashboard, LogOut, Package, ScrollText, ShieldCheck } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 import { ToastProvider, cn } from "@/components/ui";
 
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/admin/plans", label: "Planes", icon: Package },
   { href: "/admin/billing", label: "Facturación", icon: CreditCard },
   { href: "/admin/security", label: "Seguridad", icon: KeyRound },
+  { href: "/admin/audit", label: "Auditoría", icon: ScrollText },
 ];
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
