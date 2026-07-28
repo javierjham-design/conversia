@@ -13,6 +13,7 @@ import {
   Contact2,
   CreditCard,
   LogOut,
+  Menu,
   MessageSquare,
   Plug,
   Smartphone,
@@ -99,8 +100,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [apiOk, setApiOk] = useState<boolean | null>(null);
+
+  // Cierra el menú móvil al navegar.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -143,11 +150,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <ToastProvider>
       <MeContext.Provider value={me}>
         <div className="flex h-screen overflow-hidden">
+          {/* Backdrop del drawer en móvil */}
+          {mobileOpen && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />}
           {/* ------------------------------ Sidebar ------------------------------ */}
           <nav
             className={cn(
-              "flex shrink-0 flex-col bg-navy-900 text-navy-200 transition-[width] duration-200",
-              collapsed ? "w-[68px]" : "w-60",
+              "fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col bg-navy-900 text-navy-200 transition-transform md:static md:z-auto md:translate-x-0 md:transition-[width] md:duration-200",
+              mobileOpen ? "translate-x-0" : "-translate-x-full",
+              collapsed ? "md:w-[68px]" : "md:w-60",
             )}
             aria-label="Navegación principal"
           >
@@ -214,6 +224,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       <Link
                         key={item.href}
                         href={item.href}
+                        onClick={() => setMobileOpen(false)}
                         title={collapsed ? item.label : undefined}
                         className={cn(
                           "mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors",
@@ -238,7 +249,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <button
                 onClick={toggleCollapsed}
                 className={cn(
-                  "mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white",
+                  "mb-1 hidden w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white md:flex",
                   collapsed && "justify-center",
                 )}
                 aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
@@ -270,15 +281,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* ------------------------------ Contenido ------------------------------ */}
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Barra superior */}
-            <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5">
-              <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-slate-400">
-                {crumbs.map((c, i) => (
-                  <span key={i} className="flex items-center gap-1.5">
-                    {i > 0 && <span aria-hidden>/</span>}
-                    <span className={i === crumbs.length - 1 ? "font-medium text-slate-700" : ""}>{c}</span>
-                  </span>
-                ))}
-              </nav>
+            <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 md:px-5">
+              <div className="flex items-center gap-2">
+                <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-navy-900 md:hidden">
+                  <Menu size={22} />
+                </button>
+                <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-slate-400">
+                  {crumbs.map((c, i) => (
+                    <span key={i} className="flex items-center gap-1.5">
+                      {i > 0 && <span aria-hidden>/</span>}
+                      <span className={i === crumbs.length - 1 ? "font-medium text-slate-700" : ""}>{c}</span>
+                    </span>
+                  ))}
+                </nav>
+              </div>
               <div className="flex items-center gap-4">
                 <span className="flex items-center gap-1.5 text-xs text-slate-500" title="Estado del API">
                   <HealthDot level={apiOk === null ? "off" : apiOk ? "ok" : "error"} />

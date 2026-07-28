@@ -135,7 +135,7 @@ export default function BillingPage() {
             {data.invoices.length === 0 ? (
               <p className="text-sm text-slate-400">Aún no hay facturas.</p>
             ) : (
-              <div className="overflow-hidden rounded-card border border-slate-200 bg-white shadow-card">
+              <div className="overflow-x-auto rounded-card border border-slate-200 bg-white shadow-card">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs text-slate-500">
                     <tr><th className="p-3">Número</th><th className="p-3">Monto</th><th className="p-3">Estado</th><th className="p-3">Fecha</th></tr>

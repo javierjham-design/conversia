@@ -177,7 +177,7 @@ export default function InboxPage() {
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-96 flex-col border-r border-slate-200 bg-white">
+      <aside className={`${selected ? "hidden md:flex" : "flex"} w-full flex-col border-r border-slate-200 bg-white md:w-96`}>
         <header className="space-y-2 border-b border-slate-200 p-3">
           <div className="flex items-center justify-between">
             <h1 className="font-semibold">Bandeja</h1>
@@ -232,7 +232,7 @@ export default function InboxPage() {
         </div>
       </aside>
 
-      <section className="flex flex-1 flex-col">
+      <section className={`${selected ? "flex" : "hidden md:flex"} flex-1 flex-col`}>
         {!selected ? (
           <div className="flex flex-1 items-center justify-center text-slate-400">
             Selecciona una conversación
@@ -240,9 +240,12 @@ export default function InboxPage() {
         ) : (
           <>
             <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white p-3">
-              <div>
-                <h2 className="font-medium">{displayName(selected.contact)}</h2>
-                <p className="text-xs text-slate-400">{selected.contact.phone}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelected(null)} className="text-lg text-slate-500 hover:text-slate-800 md:hidden" aria-label="Volver a la lista">←</button>
+                <div>
+                  <h2 className="font-medium">{displayName(selected.contact)}</h2>
+                  <p className="text-xs text-slate-400">{selected.contact.phone}</p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <select

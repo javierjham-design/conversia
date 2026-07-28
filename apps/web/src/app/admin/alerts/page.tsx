@@ -32,7 +32,7 @@ export default function AlertsPage() {
       {!rows ? (
         <Skeleton className="h-64" />
       ) : (
-        <div className="overflow-hidden rounded-card border border-slate-200 bg-white shadow-card">
+        <div className="overflow-x-auto rounded-card border border-slate-200 bg-white shadow-card">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
