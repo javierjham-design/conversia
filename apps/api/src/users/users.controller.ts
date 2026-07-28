@@ -12,10 +12,30 @@ import {
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { z } from "zod";
+import { PERMISSION_CATALOG, isAssignablePermission } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+
+const RESERVED_ROLE_CODES = ["owner", "admin"];
+const roleSchema = z.object({
+  code: z.string().regex(/^[a-z][a-z0-9_-]{1,29}$/, "Código inválido (minúsculas, sin espacios)"),
+  name: z.string().min(2).max(40),
+  permissions: z.array(z.string()).max(60),
+});
+const roleUpdateSchema = z.object({
+  name: z.string().min(2).max(40).optional(),
+  permissions: z.array(z.string()).max(60).optional(),
+});
+
+/** Deduplica y valida que todos los permisos existan en el catálogo. */
+function sanitizePerms(perms: string[]): string[] {
+  const deduped = Array.from(new Set(perms.map((p) => p.trim()).filter(Boolean)));
+  const bad = deduped.filter((p) => !isAssignablePermission(p));
+  if (bad.length) throw new BadRequestException(`Permisos no válidos: ${bad.join(", ")}`);
+  return deduped;
+}
 
 const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 
@@ -59,8 +79,75 @@ export class UsersController {
   roles() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.role.findMany({ orderBy: { code: "asc" }, select: { code: true, name: true, permissions: true } }),
+      tx.role.findMany({ orderBy: { code: "asc" }, select: { code: true, name: true, permissions: true, system: true } }),
     );
+  }
+
+  /** Catálogo de permisos asignables (para la UI de roles). */
+  @Get("permissions")
+  permissionsCatalog() {
+    requireContext();
+    return PERMISSION_CATALOG;
+  }
+
+  /** Crea un rol personalizado con un subconjunto de permisos del catálogo. */
+  @Post("roles")
+  createRole(@Body() body: unknown) {
+    const ctx = requirePermission("users:write");
+    const input = parse(roleSchema, body);
+    if (RESERVED_ROLE_CODES.includes(input.code)) throw new BadRequestException("Ese código está reservado");
+    const perms = sanitizePerms(input.permissions);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const exists = await tx.role.findUnique({
+        where: { organizationId_code: { organizationId: ctx.organizationId, code: input.code } },
+      });
+      if (exists) throw new BadRequestException("Ya existe un rol con ese código");
+      const role = await tx.role.create({
+        data: { organizationId: ctx.organizationId, code: input.code, name: input.name, permissions: perms, system: false },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "role.create", entityType: "role", entityId: role.id, after: { code: input.code, permissions: perms } },
+      });
+      return { code: role.code, name: role.name, permissions: perms, system: false };
+    });
+  }
+
+  /** Edita nombre/permisos de un rol. Los roles owner/admin (acceso total) no se editan. */
+  @Patch("roles/:code")
+  updateRole(@Param("code") code: string, @Body() body: unknown) {
+    const ctx = requirePermission("users:write");
+    if (RESERVED_ROLE_CODES.includes(code)) throw new BadRequestException("Los roles de administración no se editan");
+    const input = parse(roleUpdateSchema, body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const role = await tx.role.findUnique({ where: { organizationId_code: { organizationId: ctx.organizationId, code } } });
+      if (!role) throw new NotFoundException("Rol no encontrado");
+      const data: { name?: string; permissions?: string[] } = {};
+      if (input.name) data.name = input.name;
+      if (input.permissions) data.permissions = sanitizePerms(input.permissions);
+      const updated = await tx.role.update({ where: { id: role.id }, data });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "role.update", entityType: "role", entityId: role.id, after: data },
+      });
+      return { code: updated.code, name: updated.name, permissions: updated.permissions, system: updated.system };
+    });
+  }
+
+  /** Elimina un rol personalizado (no del sistema y sin usuarios asignados). */
+  @Delete("roles/:code")
+  deleteRole(@Param("code") code: string) {
+    const ctx = requirePermission("users:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const role = await tx.role.findUnique({ where: { organizationId_code: { organizationId: ctx.organizationId, code } } });
+      if (!role) throw new NotFoundException("Rol no encontrado");
+      if (role.system) throw new BadRequestException("No se puede eliminar un rol del sistema");
+      const inUse = await tx.organizationUser.count({ where: { roleId: role.id } });
+      if (inUse > 0) throw new BadRequestException("Hay usuarios con este rol. Reasígnalos antes de eliminarlo.");
+      await tx.role.delete({ where: { id: role.id } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "role.delete", entityType: "role", entityId: role.id },
+      });
+      return { ok: true };
+    });
   }
 
   @Get()

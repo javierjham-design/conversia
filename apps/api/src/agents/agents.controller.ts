@@ -13,6 +13,7 @@ import { z } from "zod";
 import { buildCoreTools } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 import { enforcePlanLimit } from "../common/plan-limits";
 
 const createAgentSchema = z.object({
@@ -72,7 +73,7 @@ export class AgentsController {
 
   @Get()
   list() {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:read");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const agents = await tx.agent.findMany({
         where: { deletedAt: null },
@@ -102,7 +103,7 @@ export class AgentsController {
 
   @Post()
   create(@Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:write");
     const input = parse(createAgentSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await enforcePlanLimit(tx, "agents", await tx.agent.count({ where: { deletedAt: null } }));
@@ -151,7 +152,7 @@ export class AgentsController {
 
   @Get(":id")
   detail(@Param("id") id: string) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:read");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const agent = await tx.agent.findFirst({
         where: { id, deletedAt: null },
@@ -195,7 +196,7 @@ export class AgentsController {
   /** Guarda el borrador: actualiza el DRAFT vigente o crea la versión siguiente. */
   @Put(":id/draft")
   saveDraft(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:write");
     const input = parse(draftSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const agent = await tx.agent.findFirst({ where: { id, deletedAt: null } });
@@ -244,7 +245,7 @@ export class AgentsController {
   /** Publica el borrador: pasa a PRODUCCIÓN inmediatamente para nuevas respuestas. */
   @Post(":id/publish")
   publish(@Param("id") id: string) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const draft = await tx.agentVersion.findFirst({
         where: { agentId: id, status: "DRAFT" },
@@ -273,7 +274,7 @@ export class AgentsController {
 
   @Post(":id/active")
   setActive(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:write");
     const input = parse(z.object({ active: z.boolean() }), body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.agent.update({ where: { id }, data: { active: input.active } });
@@ -283,7 +284,7 @@ export class AgentsController {
 
   @Delete(":id")
   remove(@Param("id") id: string) {
-    const ctx = requireContext();
+    const ctx = requirePermission("agents:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const usedAsDefault = await tx.channelConnection.findFirst({ where: { defaultAgentId: id } });
       if (usedAsDefault) {

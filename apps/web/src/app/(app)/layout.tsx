@@ -26,11 +26,20 @@ interface Me {
   user: { id: string; email: string; name: string } | null;
   organization: { id: string; name: string; slug: string } | null;
   role: string;
+  permissions: string[];
 }
 
 const MeContext = createContext<Me | null>(null);
 export function useMe() {
   return useContext(MeContext);
+}
+
+/** ¿El usuario tiene el permiso? owner/admin llevan "*". Espeja hasPermission del backend. */
+export function can(perms: string[] | null | undefined, required: string): boolean {
+  if (!perms) return false;
+  if (perms.includes("*")) return true;
+  if (perms.includes(required)) return true;
+  return perms.includes(`${required.split(":")[0]}:*`);
 }
 
 const NAV_GROUPS: Array<{
@@ -40,12 +49,13 @@ const NAV_GROUPS: Array<{
     label: string;
     icon: React.ComponentType<{ size?: number | string; className?: string }>;
     soon?: boolean;
+    perm?: string; // permiso requerido para ver el módulo (undefined = visible para todos)
   }>;
 }> = [
   {
     label: "Operación",
     items: [
-      { href: "/inbox", label: "Bandeja", icon: MessageSquare },
+      { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
       { label: "Contactos", icon: Contact2, soon: true },
       { label: "Agenda", icon: CalendarDays, soon: true },
     ],
@@ -53,21 +63,21 @@ const NAV_GROUPS: Array<{
   {
     label: "Automatización",
     items: [
-      { href: "/agents", label: "Agentes IA", icon: Bot },
-      { href: "/workflows", label: "Flujos", icon: Workflow },
+      { href: "/agents", label: "Agentes IA", icon: Bot, perm: "agents:read" },
+      { href: "/workflows", label: "Flujos", icon: Workflow, perm: "workflows:read" },
     ],
   },
   {
     label: "Análisis",
-    items: [{ href: "/reports", label: "Reportes", icon: BarChart3 }],
+    items: [{ href: "/reports", label: "Reportes", icon: BarChart3, perm: "reports:read" }],
   },
   {
     label: "Configuración",
     items: [
-      { href: "/channels", label: "Canales", icon: Smartphone },
-      { href: "/integrations", label: "Integraciones", icon: Plug },
-      { href: "/users", label: "Usuarios", icon: Users },
-      { href: "/billing", label: "Plan y facturación", icon: CreditCard },
+      { href: "/channels", label: "Canales", icon: Smartphone, perm: "channels:read" },
+      { href: "/integrations", label: "Integraciones", icon: Plug, perm: "integrations:read" },
+      { href: "/users", label: "Usuarios", icon: Users, perm: "users:read" },
+      { href: "/billing", label: "Plan y facturación", icon: CreditCard, perm: "billing:read" },
     ],
   },
 ];
@@ -125,6 +135,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     BREADCRUMBS[Object.keys(BREADCRUMBS).filter((k) => pathname.startsWith(k)).sort((a, b) => b.length - a.length)[0] ?? ""] ??
     [];
 
+  // Permisos del usuario para segmentar la navegación. null = aún cargando (muestra todo).
+  const perms = me?.permissions ?? null;
+  const canSee = (perm?: string) => !perm || perms === null || can(perms, perm);
+
   return (
     <ToastProvider>
       <MeContext.Provider value={me}>
@@ -163,14 +177,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
             {/* Grupos */}
             <div className="flex-1 overflow-y-auto px-2 pb-2">
-              {NAV_GROUPS.map((group) => (
+              {NAV_GROUPS.map((group) => {
+                const items = group.items.filter((item) => canSee(item.perm));
+                if (items.length === 0) return null;
+                return (
                 <div key={group.label} className="mb-1.5">
                   {!collapsed && (
                     <p className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-navy-300/70">
                       {group.label}
                     </p>
                   )}
-                  {group.items.map((item) => {
+                  {items.map((item) => {
                     const Icon = item.icon;
                     const active = item.href ? pathname.startsWith(item.href) : false;
                     if (!item.href) {
@@ -212,7 +229,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Pie: colapsar + usuario */}

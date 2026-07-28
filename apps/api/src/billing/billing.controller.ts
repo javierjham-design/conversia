@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 import { createPaymentProvider, flowSign, verifyStripeSignature } from "./payment-provider";
 
 /**
@@ -67,7 +68,7 @@ export class BillingController {
   /** Inicia el checkout de cambio de plan (mock en dev, Stripe en prod). */
   @Post("checkout")
   async checkout(@Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("billing:write");
     const parsed = z.object({ planCode: z.string() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });

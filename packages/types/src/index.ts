@@ -490,6 +490,128 @@ export const DEFAULT_ROLES = [
   { code: "viewer", name: "Solo lectura", permissions: ["inbox:read", "contacts:read", "leads:read", "reports:read"] },
 ] as const;
 
+// ============================================================
+// Catálogo de permisos (fuente única para el backend y la UI de roles)
+// ============================================================
+
+export interface PermissionActionDef {
+  key: string; // "modulo:accion"
+  label: string;
+}
+export interface PermissionModuleDef {
+  module: string;
+  label: string;
+  description: string;
+  actions: PermissionActionDef[];
+}
+
+/**
+ * Permisos que un tenant puede asignar a sus roles/usuarios. `read` = ver,
+ * `write` = crear/editar/eliminar dentro del módulo. Los roles "owner"/"admin"
+ * llevan "*" (todo) y no se editan aquí.
+ */
+export const PERMISSION_CATALOG: PermissionModuleDef[] = [
+  {
+    module: "inbox",
+    label: "Bandeja de conversaciones",
+    description: "Atender y responder mensajes de los clientes.",
+    actions: [
+      { key: "inbox:read", label: "Ver conversaciones" },
+      { key: "inbox:write", label: "Responder y gestionar conversaciones" },
+    ],
+  },
+  {
+    module: "contacts",
+    label: "Contactos",
+    description: "Directorio de personas que escriben.",
+    actions: [
+      { key: "contacts:read", label: "Ver contactos" },
+      { key: "contacts:write", label: "Crear y editar contactos" },
+    ],
+  },
+  {
+    module: "leads",
+    label: "Leads / CRM",
+    description: "Seguimiento de oportunidades de venta.",
+    actions: [
+      { key: "leads:read", label: "Ver leads" },
+      { key: "leads:write", label: "Gestionar leads y su estado" },
+    ],
+  },
+  {
+    module: "agents",
+    label: "Agentes de IA",
+    description: "Configurar los asistentes que responden solos.",
+    actions: [
+      { key: "agents:read", label: "Ver agentes" },
+      { key: "agents:write", label: "Crear, editar y publicar agentes" },
+    ],
+  },
+  {
+    module: "workflows",
+    label: "Flujos / automatizaciones",
+    description: "Reglas y secuencias automáticas.",
+    actions: [
+      { key: "workflows:read", label: "Ver flujos" },
+      { key: "workflows:write", label: "Crear y editar flujos" },
+    ],
+  },
+  {
+    module: "channels",
+    label: "Canales (WhatsApp…)",
+    description: "Conexión de números y canales de mensajería.",
+    actions: [
+      { key: "channels:read", label: "Ver canales" },
+      { key: "channels:write", label: "Conectar y configurar canales" },
+    ],
+  },
+  {
+    module: "integrations",
+    label: "Integraciones",
+    description: "Conexiones con sistemas externos.",
+    actions: [
+      { key: "integrations:read", label: "Ver integraciones" },
+      { key: "integrations:write", label: "Configurar integraciones" },
+    ],
+  },
+  {
+    module: "reports",
+    label: "Reportes",
+    description: "Métricas de atención, conversión y costos.",
+    actions: [{ key: "reports:read", label: "Ver reportes" }],
+  },
+  {
+    module: "users",
+    label: "Usuarios y equipos",
+    description: "Quién entra al panel, con qué rol.",
+    actions: [
+      { key: "users:read", label: "Ver usuarios y roles" },
+      { key: "users:write", label: "Invitar usuarios y gestionar roles" },
+    ],
+  },
+  {
+    module: "billing",
+    label: "Plan y facturación",
+    description: "Plan contratado, facturas y pagos.",
+    actions: [
+      { key: "billing:read", label: "Ver plan y facturas" },
+      { key: "billing:write", label: "Cambiar de plan y pagar" },
+    ],
+  },
+];
+
+const CATALOG_MODULES = new Set(PERMISSION_CATALOG.map((m) => m.module));
+
+/** Todas las claves de permiso asignables (planas). */
+export const ALL_PERMISSIONS: string[] = PERMISSION_CATALOG.flatMap((m) => m.actions.map((a) => a.key));
+
+/** Valida que un permiso sea asignable: clave del catálogo o comodín de módulo "mod:*". */
+export function isAssignablePermission(p: string): boolean {
+  if (ALL_PERMISSIONS.includes(p)) return true;
+  if (p.endsWith(":*")) return CATALOG_MODULES.has(p.slice(0, -2));
+  return false;
+}
+
 /** Estados de lead mínimos para organizaciones creadas por registro self-service. */
 export const DEFAULT_LEAD_STATUSES = [
   { code: "nuevo", name: "Nuevo", category: "OPEN", order: 0 },
