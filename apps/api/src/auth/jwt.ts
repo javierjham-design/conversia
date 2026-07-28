@@ -18,13 +18,18 @@ export interface AppTokenClaims {
 
 const ALGO: jwt.Algorithm = "HS256";
 
-export function signAppToken(claims: AppTokenClaims): string {
+export function signAppToken(
+  claims: AppTokenClaims,
+  opts?: { expiresIn?: string | number; extra?: Record<string, unknown> },
+): string {
   const env = getEnv();
-  return jwt.sign({ ...claims, jti: randomUUID() }, env.JWT_SECRET, {
+  // `extra` permite marcar un token de impersonación (claim `imp` = id del super
+  // admin) con expiración corta, sin abrir la superficie del token normal.
+  return jwt.sign({ ...claims, ...(opts?.extra ?? {}), jti: randomUUID() }, env.JWT_SECRET, {
     algorithm: ALGO,
     issuer: env.JWT_ISSUER,
     audience: env.JWT_AUDIENCE,
-    expiresIn: env.JWT_EXPIRES_IN,
+    expiresIn: opts?.expiresIn ?? env.JWT_EXPIRES_IN,
   } as jwt.SignOptions);
 }
 

@@ -61,6 +61,18 @@ export default function OrganizationsPage() {
     setDetail(await padmin(`/platform/organizations/${id}`));
   }
 
+  async function impersonate(id: string) {
+    if (!window.confirm("Entrarás como el usuario de este tenant para dar soporte. La sesión dura 30 min y queda registrada en auditoría. ¿Continuar?")) return;
+    try {
+      const res = await padmin<{ token: string; user: { email: string } }>(`/platform/organizations/${id}/impersonate`, { method: "POST" });
+      window.localStorage.setItem("conversia_token", res.token);
+      toast.push(`Entrando como ${res.user.email}…`, "ok");
+      window.open("/", "_blank");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1300px] px-6 py-6 lg:px-8">
       <PageHeader title="Organizaciones" description="Todos los tenants de la plataforma. Suspende, activa y asigna planes." />
@@ -122,6 +134,11 @@ export default function OrganizationsPage() {
               <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
             <p className="text-sm text-slate-500">{detail.organization.slug} · {detail.organization.status} · {detail.subscription?.planName ?? "sin plan"} ({detail.subscription?.status ?? "—"})</p>
+            <div className="mt-3">
+              <Button variant="secondary" onClick={() => void impersonate(detail.organization.id)}>
+                Entrar como este tenant (soporte)
+              </Button>
+            </div>
 
             <h3 className="mt-4 mb-1 text-sm font-semibold">Consumo (últimos 30 días)</h3>
             <div className="grid grid-cols-3 gap-2">

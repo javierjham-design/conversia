@@ -1,5 +1,6 @@
 import { ForbiddenException } from "@nestjs/common";
 import type { TenantTx } from "@conversia/database";
+import { getContext } from "../tenancy/context";
 
 /**
  * MOTOR DE ENTITLEMENTS (Fase B) — punto ÚNICO de verdad de los límites y
@@ -65,10 +66,26 @@ export async function getSubscriptionStatus(tx: TenantTx): Promise<string | null
 }
 
 /**
+ * Suspensión real en la escritura: si la organización está SUSPENDED/CANCELLED,
+ * se bloquea la creación de recursos. Lee el estado por id explícito del contexto
+ * (RLS-safe). Sin contexto (worker/webhooks) no aplica aquí — el worker tiene su
+ * propio corte de IA.
+ */
+export async function assertOrgActive(tx: TenantTx): Promise<void> {
+  const orgId = getContext()?.organizationId;
+  if (!orgId) return;
+  const org = await tx.organization.findUnique({ where: { id: orgId }, select: { status: true } });
+  if (org && (org.status === "SUSPENDED" || org.status === "CANCELLED")) {
+    throw new ForbiddenException("Tu cuenta está suspendida. Regulariza tu plan para volver a crear o modificar recursos.");
+  }
+}
+
+/**
  * Enforcement de un límite de recurso (403 al exceder). Punto único de verdad
  * de los límites duros que consumen los controladores.
  */
 export async function enforceLimit(tx: TenantTx, resource: string, currentCount: number): Promise<void> {
+  await assertOrgActive(tx); // suspensión → 403 antes de mirar el límite
   const limit = await getFeatureLimit(tx, resource);
   if (typeof limit !== "number" || limit <= 0) return;
   if (currentCount >= limit) {

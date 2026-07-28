@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
+import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
 
 /**
@@ -148,6 +149,43 @@ export class PlatformController {
     const org = await this.prisma.admin.organization.update({ where: { id }, data: { status: parsed.data.status } });
     await this.audit(req, `platform.org.${parsed.data.status.toLowerCase()}`, "organization", id, { status: parsed.data.status });
     return { ok: true, status: org.status };
+  }
+
+  /**
+   * Impersonación AUDITADA: emite un token de TENANT de corta duración (30 min)
+   * para entrar como el owner de la organización y dar soporte. El token lleva el
+   * claim `imp` (id del super admin) para trazabilidad y queda registrado en la
+   * auditoría. No expone contraseñas ni cambia credenciales del tenant.
+   */
+  @Post("organizations/:id/impersonate")
+  async impersonate(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const db = this.prisma.admin;
+    const org = await db.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException("Organización no encontrada");
+    const [memberships, roles] = await Promise.all([
+      db.organizationUser.findMany({
+        where: { organizationId: id, active: true },
+        include: { user: { select: { id: true, email: true, name: true } } },
+      }),
+      db.role.findMany({ where: { organizationId: id } }),
+    ]);
+    if (memberships.length === 0) throw new BadRequestException("La organización no tiene usuarios activos");
+    const roleById = new Map(roles.map((r) => [r.id, r]));
+    // Preferimos el owner; si no hay, el primer miembro activo.
+    const chosen = memberships.find((m) => roleById.get(m.roleId)?.code === "owner") ?? memberships[0];
+    const role = roleById.get(chosen.roleId);
+    const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
+    const token = signAppToken(
+      { sub: chosen.userId, orgId: id, role: role?.code ?? "viewer", perms },
+      { expiresIn: "30m", extra: { imp: req.platformAdmin!.sub } },
+    );
+    await this.audit(req, "platform.impersonate", "organization", id, { userId: chosen.userId, email: chosen.user.email });
+    return {
+      token,
+      user: { id: chosen.user.id, email: chosen.user.email, name: chosen.user.name },
+      org: { id: org.id, name: org.name },
+      expiresInMinutes: 30,
+    };
   }
 
   // ------------------------------- Planes -------------------------------
