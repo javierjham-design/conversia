@@ -6,7 +6,7 @@ import { api, setToken } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@digital-dent.local");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,9 +32,9 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <div>
-          <h1 className="text-xl font-semibold">TuBot</h1>
-          <p className="text-sm text-slate-500">Panel de atención conversacional</p>
+        <div className="text-center">
+          <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto" />
+          <p className="mt-2 text-sm text-slate-500">Panel de atención conversacional</p>
         </div>
         <label className="block text-sm">
           Email
@@ -60,13 +60,10 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-lg bg-cyan-700 px-4 py-2 font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
+          className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {loading ? "Entrando…" : "Entrar"}
         </button>
-        <p className="text-xs text-slate-400">
-          Seed dev: admin@digital-dent.local / SEED_ADMIN_PASSWORD (por defecto “conversia-dev”)
-        </p>
       </form>
     </main>
   );

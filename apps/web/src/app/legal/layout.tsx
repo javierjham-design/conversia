@@ -17,12 +17,12 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
     <div className="min-h-screen bg-slate-50 text-slate-800">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-lg font-semibold text-cyan-700">
-            TuBot
+          <Link href="/">
+            <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="h-7 w-auto" />
           </Link>
           <nav className="flex gap-4 text-sm text-slate-500">
             {links.map((l) => (
-              <Link key={l.href} href={l.href} className="hover:text-cyan-700">
+              <Link key={l.href} href={l.href} className="hover:text-brand-600">
                 {l.label}
               </Link>
             ))}
@@ -35,13 +35,13 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
             [&_h1]:mb-1 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:text-slate-900
             [&_h2]:mb-2 [&_h2]:mt-8 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-slate-900
             [&_p]:my-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:my-1
-            [&_a]:text-cyan-700 [&_a]:underline [&_strong]:text-slate-900"
+            [&_a]:text-brand-600 [&_a]:underline [&_strong]:text-slate-900"
         >
           {children}
         </article>
       </main>
       <footer className="mx-auto max-w-3xl px-6 pb-12 text-xs text-slate-400">
-        © {new Date().getFullYear()} TuBot · Atención conversacional multi-tenant
+        © {new Date().getFullYear()} Servicios DigitalDent SpA · TuBot.cl — Atención conversacional multi-tenant
       </footer>
     </div>
   );

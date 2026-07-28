@@ -2,9 +2,9 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "TuBot — Atención y ventas por WhatsApp con IA",
+  title: "TuBot.cl — Atención y ventas por WhatsApp con IA",
   description:
-    "Conecta tu WhatsApp, configura agentes de IA a tu medida y atiende, agenda y vende 24/7. Plataforma multi-tenant con bandeja para tu equipo, flujos automáticos y reportes.",
+    "Plataforma de IA conversacional y automatización para WhatsApp y otros canales. Conecta tu WhatsApp, configura agentes de IA y atiende, agenda y vende 24/7. Conversa. Automatiza. Crece.",
   robots: { index: true, follow: true },
 };
 
@@ -50,23 +50,23 @@ const plans = [
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-white text-slate-800">
+    <div className="min-h-screen bg-white text-slate-700">
       {/* Nav */}
       <header className="sticky top-0 z-10 border-b border-slate-100 bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <span className="text-xl font-bold tracking-tight text-cyan-700">TuBot</span>
+          <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="h-8 w-auto" />
           <nav className="hidden gap-8 text-sm text-slate-600 md:flex">
-            <a href="#caracteristicas" className="hover:text-cyan-700">Características</a>
-            <a href="#como-funciona" className="hover:text-cyan-700">Cómo funciona</a>
-            <a href="#precios" className="hover:text-cyan-700">Precios</a>
+            <a href="#caracteristicas" className="hover:text-brand-600">Características</a>
+            <a href="#como-funciona" className="hover:text-brand-600">Cómo funciona</a>
+            <a href="#precios" className="hover:text-brand-600">Precios</a>
           </nav>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm font-medium text-slate-700 hover:text-cyan-700">
+            <Link href="/login" className="text-sm font-medium text-navy-900 hover:text-brand-600">
               Entrar
             </Link>
             <a
               href="#contacto"
-              className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
             >
               Solicitar demo
             </a>
@@ -75,38 +75,42 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="mx-auto max-w-6xl px-6 py-20 text-center">
-        <span className="inline-block rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-700">
-          Atención por WhatsApp con IA
-        </span>
-        <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-slate-900 md:text-5xl">
-          Tu propio bot de WhatsApp que atiende, agenda y vende <span className="text-cyan-700">24/7</span>
-        </h1>
-        <p className="mx-auto mt-5 max-w-2xl text-lg text-slate-600">
-          Conecta WhatsApp, configura agentes de inteligencia artificial con la información real de tu negocio y deja
-          que tu equipo se enfoque en lo importante. Sin código.
-        </p>
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-          <a href="#contacto" className="rounded-lg bg-cyan-700 px-6 py-3 font-medium text-white hover:bg-cyan-800">
-            Solicitar una demo
-          </a>
-          <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-slate-700 hover:border-cyan-700 hover:text-cyan-700">
-            Entrar al panel
-          </Link>
+      <section className="relative overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50 to-white" />
+        <div className="relative mx-auto max-w-6xl px-6 py-20 text-center">
+          <span className="inline-block rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700">
+            Conversa. Automatiza. Crece.
+          </span>
+          <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-navy-900 md:text-5xl">
+            Tu propio bot de WhatsApp que atiende, agenda y vende{" "}
+            <span className="bg-gradient-to-r from-brand-600 to-accent-400 bg-clip-text text-transparent">24/7</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-slate-600">
+            Plataforma de IA conversacional para WhatsApp y otros canales. Configura agentes con la información real
+            de tu negocio y deja que tu equipo se enfoque en lo importante. Sin código.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+            <a href="#contacto" className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-brand-700">
+              Solicitar una demo
+            </a>
+            <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-navy-900 hover:border-brand-600 hover:text-brand-600">
+              Entrar al panel
+            </Link>
+          </div>
+          <p className="mt-4 text-xs text-slate-400">Sin permanencia · Empieza gratis</p>
         </div>
-        <p className="mt-4 text-xs text-slate-400">Sin permanencia · Empieza gratis</p>
       </section>
 
       {/* Features */}
       <section id="caracteristicas" className="border-t border-slate-100 bg-slate-50 py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">
             Todo lo que necesitas para atender por WhatsApp
           </h2>
           <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
               <div key={f.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-slate-900">{f.title}</h3>
+                <h3 className="text-lg font-semibold text-navy-900">{f.title}</h3>
                 <p className="mt-2 text-sm text-slate-600">{f.body}</p>
               </div>
             ))}
@@ -117,14 +121,14 @@ export default function LandingPage() {
       {/* Cómo funciona */}
       <section id="como-funciona" className="py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900">En 3 pasos</h2>
+          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">En 3 pasos</h2>
           <div className="mt-12 grid gap-8 md:grid-cols-3">
             {steps.map((s) => (
               <div key={s.n} className="text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-cyan-700 text-lg font-bold text-white">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-bold text-white">
                   {s.n}
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-slate-900">{s.title}</h3>
+                <h3 className="mt-4 text-lg font-semibold text-navy-900">{s.title}</h3>
                 <p className="mt-2 text-sm text-slate-600">{s.body}</p>
               </div>
             ))}
@@ -135,29 +139,29 @@ export default function LandingPage() {
       {/* Precios */}
       <section id="precios" className="border-t border-slate-100 bg-slate-50 py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-slate-900">Planes simples</h2>
+          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">Planes simples</h2>
           <p className="mt-3 text-center text-sm text-slate-500">Precios en CLP. Cambia o cancela cuando quieras.</p>
           <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {plans.map((p) => (
               <div
                 key={p.name}
-                className={`rounded-2xl border bg-white p-6 shadow-sm ${p.highlight ? "border-cyan-600 ring-1 ring-cyan-600" : "border-slate-200"}`}
+                className={`rounded-2xl border bg-white p-6 shadow-sm ${p.highlight ? "border-brand-600 ring-1 ring-brand-600" : "border-slate-200"}`}
               >
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{p.name}</h3>
                 <p className="mt-3">
-                  <span className="text-3xl font-bold text-slate-900">{p.price}</span>
+                  <span className="text-3xl font-bold text-navy-900">{p.price}</span>
                   <span className="text-sm text-slate-500"> {p.note}</span>
                 </p>
                 <ul className="mt-4 space-y-2 text-sm text-slate-600">
                   {p.features.map((feat) => (
                     <li key={feat} className="flex items-center gap-2">
-                      <span className="text-cyan-600">✓</span> {feat}
+                      <span className="text-accent-500">✓</span> {feat}
                     </li>
                   ))}
                 </ul>
                 <a
                   href="#contacto"
-                  className={`mt-6 block rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-cyan-700 text-white hover:bg-cyan-800" : "border border-slate-300 text-slate-700 hover:border-cyan-700 hover:text-cyan-700"}`}
+                  className={`mt-6 block rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-slate-300 text-navy-900 hover:border-brand-600 hover:text-brand-600"}`}
                 >
                   Empezar
                 </a>
@@ -170,18 +174,18 @@ export default function LandingPage() {
       {/* Contacto / CTA */}
       <section id="contacto" className="py-20">
         <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900">¿Listo para automatizar tu WhatsApp?</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-navy-900">¿Listo para automatizar tu WhatsApp?</h2>
           <p className="mt-4 text-slate-600">
             Escríbenos y te mostramos TuBot funcionando con un caso real de tu negocio.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <a
               href="mailto:hola@tubot.cl"
-              className="rounded-lg bg-cyan-700 px-6 py-3 font-medium text-white hover:bg-cyan-800"
+              className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white hover:bg-brand-700"
             >
               hola@tubot.cl
             </a>
-            <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-slate-700 hover:border-cyan-700 hover:text-cyan-700">
+            <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-navy-900 hover:border-brand-600 hover:text-brand-600">
               Ya tengo cuenta
             </Link>
           </div>
@@ -189,16 +193,16 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-slate-100 bg-white py-10">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-sm text-slate-500 md:flex-row">
-          <span className="font-semibold text-cyan-700">TuBot</span>
+      <footer className="border-t border-slate-100 bg-navy-900 py-10 text-slate-300">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-sm md:flex-row">
+          <img src="/brand/tubot-mono.png" alt="TuBot.cl" className="h-7 w-auto brightness-0 invert" />
           <nav className="flex flex-wrap gap-6">
-            <Link href="/legal/privacidad" className="hover:text-cyan-700">Privacidad</Link>
-            <Link href="/legal/terminos" className="hover:text-cyan-700">Términos</Link>
-            <Link href="/legal/eliminacion-datos" className="hover:text-cyan-700">Eliminación de datos</Link>
-            <a href="mailto:hola@tubot.cl" className="hover:text-cyan-700">Contacto</a>
+            <Link href="/legal/privacidad" className="hover:text-white">Privacidad</Link>
+            <Link href="/legal/terminos" className="hover:text-white">Términos</Link>
+            <Link href="/legal/eliminacion-datos" className="hover:text-white">Eliminación de datos</Link>
+            <a href="mailto:hola@tubot.cl" className="hover:text-white">Contacto</a>
           </nav>
-          <span className="text-xs text-slate-400">© {new Date().getFullYear()} TuBot</span>
+          <span className="text-xs text-slate-400">© {new Date().getFullYear()} Servicios DigitalDent SpA</span>
         </div>
       </footer>
     </div>
