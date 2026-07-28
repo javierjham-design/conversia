@@ -13,11 +13,6 @@ interface Channel {
   phoneNumberId: string | null;
   displayPhone: string | null;
 }
-interface WebhookInfo {
-  webhookUrl: string;
-  verifyToken: string;
-  graphVersion: string;
-}
 interface AgentOpt {
   id: string;
   name: string;
@@ -25,7 +20,6 @@ interface AgentOpt {
 
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [info, setInfo] = useState<WebhookInfo | null>(null);
   const [agents, setAgents] = useState<AgentOpt[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -46,13 +40,11 @@ export default function ChannelsPage() {
   });
 
   const load = useCallback(async () => {
-    const [ch, wi, ag] = await Promise.all([
+    const [ch, ag] = await Promise.all([
       api<Channel[]>("/channels"),
-      api<WebhookInfo>("/channels/meta/webhook-info"),
       api<{ id: string; name: string }[]>("/organizations/me/agents"),
     ]);
     setChannels(ch);
-    setInfo(wi);
     setAgents(ag.map((a: any) => ({ id: a.id, name: a.name })));
   }, []);
 
@@ -104,11 +96,6 @@ export default function ChannelsPage() {
     await load();
   }
 
-  async function copy(text: string) {
-    await navigator.clipboard.writeText(text);
-    setMsg("Copiado al portapapeles ✔");
-  }
-
   // -------- Embedded Signup (conexión self-service tipo Respond) --------
   useEffect(() => {
     api<{ appId: string; configId: string; graphVersion: string }>("/channels/meta/embedded-config")
@@ -116,15 +103,17 @@ export default function ChannelsPage() {
       .catch(() => undefined);
     function onMsg(event: MessageEvent) {
       if (typeof event.origin !== "string" || !event.origin.endsWith("facebook.com")) return;
-      try {
-        const d = JSON.parse(event.data);
-        if (d?.type === "WA_EMBEDDED_SIGNUP" && d.data) {
-          if (d.data.waba_id) sessionRef.current.wabaId = d.data.waba_id;
-          if (d.data.phone_number_id) sessionRef.current.phoneNumberId = d.data.phone_number_id;
+      let d: any = event.data;
+      if (typeof d === "string") {
+        try {
+          d = JSON.parse(d);
+        } catch {
+          return;
         }
-      } catch {
-        /* no-op */
       }
+      const data = d?.data ?? d;
+      if (data?.waba_id) sessionRef.current.wabaId = data.waba_id;
+      if (data?.phone_number_id) sessionRef.current.phoneNumberId = data.phone_number_id;
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
@@ -236,23 +225,6 @@ export default function ChannelsPage() {
       </div>
 
       {msg && <p className="mb-4 rounded-lg bg-slate-100 px-3 py-2 text-sm">{msg}</p>}
-
-      {info && (
-        <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="mb-2 font-medium">Configuración del webhook en Meta</h2>
-          <p className="mb-3 text-xs text-slate-500">
-            En Meta for Developers → tu App → WhatsApp → Configuration, registra este webhook y suscríbete al campo <b>messages</b>.
-          </p>
-          <div className="grid gap-2 text-sm md:grid-cols-2">
-            <button onClick={() => void copy(info.webhookUrl)} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left font-mono text-xs hover:bg-slate-100">
-              URL: {info.webhookUrl} 📋
-            </button>
-            <button onClick={() => void copy(info.verifyToken)} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left font-mono text-xs hover:bg-slate-100">
-              Verify token: {info.verifyToken} 📋
-            </button>
-          </div>
-        </div>
-      )}
 
       {showNew && (
         <form onSubmit={create} className="mb-6 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4">
