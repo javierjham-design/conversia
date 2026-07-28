@@ -39,7 +39,12 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false, // no revelar "X-Powered-By: Next.js"
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Super Admin: no indexar / no descubrir por buscadores (capa 1 de "no descubrible";
+      // el perímetro real (Cloudflare Access/IP allowlist) es pendiente — ver SUPER_ADMIN_SECURITY.md).
+      { source: "/admin/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" }] },
+    ];
   },
 };
 
