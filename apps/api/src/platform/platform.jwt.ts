@@ -16,19 +16,25 @@ export interface PlatformClaims {
   email: string;
 }
 
+/** Secreto propio del Super Admin (separado del de tenant); cae a JWT_SECRET si no se configuró. */
+function platformSecret(): string {
+  const env = getEnv();
+  return env.SUPER_ADMIN_SESSION_SECRET || env.JWT_SECRET;
+}
+
 export function signPlatformToken(claims: PlatformClaims): string {
   const env = getEnv();
-  return jwt.sign({ ...claims, platform: true, jti: randomUUID() }, env.JWT_SECRET, {
+  return jwt.sign({ ...claims, platform: true, jti: randomUUID() }, platformSecret(), {
     algorithm: ALGO,
     issuer: env.JWT_ISSUER,
     audience: PLATFORM_AUDIENCE,
-    expiresIn: "8h",
+    expiresIn: `${env.SUPER_ADMIN_SESSION_HOURS}h`,
   } as jwt.SignOptions);
 }
 
 export function verifyPlatformToken(token: string): PlatformClaims {
   const env = getEnv();
-  const decoded = jwt.verify(token, env.JWT_SECRET, {
+  const decoded = jwt.verify(token, platformSecret(), {
     algorithms: [ALGO],
     issuer: env.JWT_ISSUER,
     audience: PLATFORM_AUDIENCE,

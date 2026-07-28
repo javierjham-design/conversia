@@ -16,6 +16,7 @@ import { RateLimitService } from "./common/rate-limit";
 import { RateLimitMiddleware } from "./common/rate-limit.middleware";
 import { PlatformAuthController } from "./platform/platform-auth.controller";
 import { PlatformController } from "./platform/platform.controller";
+import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
@@ -36,6 +37,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ReportsController,
     BillingController,
     WhatsappController,
+    PublicController, // API pública de precios (sin auth)
     // Plataforma (super-admin) — autenticación y audiencia separadas
     PlatformAuthController,
     PlatformController,

@@ -41,14 +41,47 @@ const steps = [
   { n: "3", title: "Atiende y vende 24/7", body: "La IA responde y agenda; tu equipo entra cuando quiere. Todo medido." },
 ];
 
-const plans = [
+type PlanCard = { name: string; price: string; note: string; features: string[]; highlight?: boolean };
+
+const FALLBACK_PLANS: PlanCard[] = [
   { name: "Free", price: "$0", note: "Para probar", features: ["1 canal", "2 agentes IA", "3 flujos"] },
   { name: "Starter", price: "$29.990", note: "/mes", features: ["1 canal", "5 agentes IA", "10 flujos", "5 usuarios"], highlight: true },
   { name: "Pro", price: "$79.990", note: "/mes", features: ["3 canales", "20 agentes IA", "50 flujos", "20 usuarios"] },
   { name: "Enterprise", price: "A medida", note: "", features: ["Ilimitado", "White-label", "SSO", "Soporte dedicado"] },
 ];
 
-export default function LandingPage() {
+/** Precios EN VIVO desde la API pública (Fase E); cae a FALLBACK si no responde. */
+async function getPlans(): Promise<PlanCard[]> {
+  try {
+    const base = process.env.API_URL || "https://api-production-cf8e.up.railway.app";
+    const res = await fetch(`${base}/public/plans`, { next: { revalidate: 300 } });
+    if (!res.ok) return FALLBACK_PLANS;
+    const data: any[] = await res.json();
+    return Array.isArray(data) && data.length ? data.map(mapPlan) : FALLBACK_PLANS;
+  } catch {
+    return FALLBACK_PLANS;
+  }
+}
+
+function mapPlan(p: any): PlanCard {
+  const l = (p.limits ?? {}) as Record<string, number>;
+  const enterprise = p.code === "enterprise";
+  const feats: string[] = [];
+  if (l.channels) feats.push(`${l.channels} canal${l.channels > 1 ? "es" : ""}`);
+  if (l.agents) feats.push(`${l.agents} agentes IA`);
+  if (l.workflows) feats.push(`${l.workflows} flujos`);
+  if (l.users) feats.push(`${l.users} usuarios`);
+  return {
+    name: p.name,
+    price: enterprise ? "A medida" : p.priceClp === 0 ? "$0" : `$${Number(p.priceClp).toLocaleString("es-CL")}`,
+    note: enterprise ? "" : p.priceClp === 0 ? "Para probar" : "/mes",
+    features: enterprise ? ["Ilimitado", "White-label", "SSO", "Soporte dedicado"] : feats,
+    highlight: p.code === "starter",
+  };
+}
+
+export default async function LandingPage() {
+  const plans = await getPlans();
   return (
     <div className="min-h-screen bg-white text-slate-700">
       {/* Nav */}

@@ -51,6 +51,13 @@ const envSchema = z.object({
   FLOW_SECRET_KEY: z.string().optional().default(""),
   FLOW_BASE_URL: z.string().default("https://sandbox.flow.cl/api"),
 
+  // Seguridad del Super Admin (Fase A). Vacías = sin restricción extra (defaults seguros).
+  SUPER_ADMIN_SESSION_SECRET: z.string().optional().default(""), // separa del JWT_SECRET de tenant
+  SUPER_ADMIN_ALLOWED_IPS: z.string().optional().default(""), // CSV; vacío = sin allowlist
+  SUPER_ADMIN_MFA_ISSUER: z.string().default("TuBot.cl"),
+  SUPER_ADMIN_SESSION_HOURS: z.coerce.number().default(4),
+  PUBLIC_PRICING_CACHE_TTL: z.coerce.number().default(300),
+
   WHATSAPP_PROVIDER: z.enum(["meta", "mock"]).default("mock"),
   /** Token requerido para inyectar mensajes por canales mock (simulador). */
   MOCK_INBOUND_TOKEN: z.string().default("dev-mock-inbound-token"),
