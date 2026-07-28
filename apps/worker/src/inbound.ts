@@ -1,6 +1,7 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
 import { runAgentTurn } from "./agent-turn";
+import { transcribeWhatsappAudio } from "./audio";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
@@ -123,6 +124,21 @@ export async function processInbound(job: InboundJob): Promise<void> {
     }
     const { organizationId } = tenant;
 
+    // Notas de voz: descargar y transcribir el audio para usarlo como texto del
+    // agente (fuera de la transacción: es una llamada de red). Degrada a "[audio]".
+    let text = msg.text;
+    let transcribed = false;
+    if (!text && (msg.type === "audio" || msg.type === "voice")) {
+      const mediaId = (msg.payload as any)?.audio?.id ?? (msg.payload as any)?.voice?.id;
+      if (mediaId) {
+        const t = await transcribeWhatsappAudio(String(mediaId));
+        if (t) {
+          text = t;
+          transcribed = true;
+        }
+      }
+    }
+
     const result = await withTenant(organizationId, async (tx) => {
       // Idempotencia por wamid
       const dup = await tx.message.findUnique({
@@ -191,19 +207,25 @@ export async function processInbound(job: InboundJob): Promise<void> {
           conversationId: conversation.id,
           direction: "INBOUND",
           type: msg.type === "text" ? "TEXT" : "TEXT",
-          body: msg.text ?? `[${msg.type}]`,
-          payload: msg.payload as object,
+          body: text ?? `[${msg.type}]`,
+          payload: (transcribed ? { ...(msg.payload as object), transcribed: true } : msg.payload) as object,
           externalId: msg.externalId,
           status: "DELIVERED",
           authorType: "CONTACT",
           sentAt: new Date(),
         },
       });
+      if (transcribed) {
+        // Registro de uso: cada transcripción tiene un costo (nota de voz → texto).
+        await tx.usageEvent.create({
+          data: { organizationId, type: "audio_transcription", quantity: 1, meta: { conversationId: conversation.id } },
+        });
+      }
       await tx.conversation.update({
         where: { id: conversation.id },
         data: {
           lastMessageAt: new Date(),
-          lastMessagePreview: (msg.text ?? `[${msg.type}]`).slice(0, 120),
+          lastMessagePreview: (text ?? `[${msg.type}]`).slice(0, 120),
           unreadCount: { increment: 1 },
         },
       });
@@ -221,7 +243,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
       organizationId,
       conversationId: result.conversationId,
       contactId: result.contactId,
-      data: { text: msg.text ?? "" },
+      data: { text: text ?? "" },
       occurredAt: new Date().toISOString(),
     };
     if (result.started) {
@@ -234,7 +256,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
     await dispatchEvent({ ...base, type: "message_received" });
     await emitPlatformEvent(organizationId, "message.received", {
       conversationId: result.conversationId,
-      text: (msg.text ?? "").slice(0, 200),
+      text: (text ?? "").slice(0, 200),
     });
 
     // Respuesta del agente activo — salvo que un workflow ya lo haya

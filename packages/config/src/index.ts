@@ -41,6 +41,7 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   AI_DEFAULT_MODEL: z.string().default("gpt-4o-mini"),
   AI_CLASSIFIER_MODEL: z.string().default("gpt-4o-mini"),
+  AI_TRANSCRIBE_MODEL: z.string().default("whisper-1"), // notas de voz de WhatsApp (OpenAI)
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
