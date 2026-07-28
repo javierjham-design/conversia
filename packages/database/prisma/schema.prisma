@@ -183,12 +183,18 @@ enum AlertSeverity {
 // ------------------------ Nivel plataforma ------------------------
 
 model PlatformAdmin {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String   @map("password_hash")
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
   name         String
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  // RBAC de plataforma: owner (todo) | admin | support | billing | readonly
+  role         String    @default("owner")
+  // MFA TOTP (RFC 6238). El secreto es durable; las sesiones viven en Redis.
+  mfaSecret       String?   @map("mfa_secret")
+  mfaEnabledAt    DateTime? @map("mfa_enabled_at")
+  mfaRecoveryCodes Json     @default("[]") @map("mfa_recovery_codes")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@map("platform_admins")
 }
