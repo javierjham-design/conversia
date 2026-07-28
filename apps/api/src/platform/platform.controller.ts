@@ -123,27 +123,76 @@ export class PlatformController {
     const org = await db.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException("Organización no encontrada");
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const [sub, plans, invoices, usage, members, convInitiated, activeClientRows] = await Promise.all([
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const [sub, plans, invoices, usage, members, convInitiated, activeClientRows, tokensTodayAgg] = await Promise.all([
       db.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } }),
-      db.plan.findMany(),
+      db.plan.findMany({ orderBy: { order: "asc" } }),
       db.invoice.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
       db.usageEvent.groupBy({ by: ["type"], where: { organizationId: id, occurredAt: { gte: since } }, _sum: { quantity: true, costUsd: true } }),
       db.organizationUser.findMany({ where: { organizationId: id }, include: { user: { select: { email: true, name: true } } } }),
-      // Conversaciones iniciadas en el período (métrica facturable estilo CBP)
       db.conversation.count({ where: { organizationId: id, createdAt: { gte: since } } }),
-      // Clientes activos (MAU): contactos distintos con actividad en la ventana
       db.conversation.findMany({ where: { organizationId: id, lastMessageAt: { gte: since } }, select: { contactId: true }, distinct: ["contactId"] }),
+      db.usageEvent.aggregate({ where: { organizationId: id, type: "ai_tokens", occurredAt: { gte: startOfDay } }, _sum: { quantity: true } }),
     ]);
     const plan = sub ? plans.find((p) => p.id === sub.planId) : null;
+    const settings = (org.settings ?? {}) as Record<string, any>;
+    const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
+    const planLimits = (plan?.limits as Record<string, number>) ?? {};
     return {
       organization: { id: org.id, name: org.name, slug: org.slug, status: org.status, country: org.country, createdAt: org.createdAt, settings: org.settings },
       subscription: sub ? { status: sub.status, planCode: plan?.code, planName: plan?.name, periodEnd: sub.periodEnd } : null,
+      plan: plan ? { code: plan.code, name: plan.name, limits: planLimits, features: plan.features } : null,
+      // Límites efectivos = plan + override por-tenant (settings.limits). El override manda.
+      effectiveLimits: { ...planLimits, ...override } as Record<string, number>,
+      limitsOverride: override,
+      validUntil: typeof settings.validUntil === "string" ? settings.validUntil : null,
+      aiKillSwitch: settings.aiKillSwitch === true,
+      availablePlans: plans.map((p) => ({ code: p.code, name: p.name })),
       invoices,
       usage,
-      // Métricas de consumo del período (Fase C) — base de facturación por uso.
-      metrics: { periodDays: 30, conversationsInitiated: convInitiated, activeClients: activeClientRows.length },
+      metrics: {
+        periodDays: 30,
+        conversationsInitiated: convInitiated,
+        activeClients: activeClientRows.length,
+        aiTokensToday: Number(tokensTodayAgg._sum.quantity ?? 0),
+      },
       members: members.map((m) => ({ email: m.user.email, name: m.user.name, active: m.active })),
     };
+  }
+
+  /** Configuración completa por tenant: vigencia, override de límites (token limiter),
+   *  kill switch de IA, datos básicos. Punto único para operar cada cliente. */
+  @Post("organizations/:id/config")
+  async setConfig(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        name: z.string().min(2).max(120).optional(),
+        country: z.string().max(2).optional(),
+        validUntil: z.string().nullable().optional(), // ISO date o null (sin vencimiento)
+        aiKillSwitch: z.boolean().optional(),
+        limits: z.record(z.coerce.number().int().min(0)).optional(), // override por-tenant; 0 = ilimitado
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException("Organización no encontrada");
+    const settings = { ...((org.settings ?? {}) as Record<string, any>) };
+    if (parsed.data.validUntil !== undefined) {
+      settings.validUntil = parsed.data.validUntil || null;
+    }
+    if (parsed.data.aiKillSwitch !== undefined) settings.aiKillSwitch = parsed.data.aiKillSwitch;
+    if (parsed.data.limits !== undefined) settings.limits = parsed.data.limits;
+    const data: any = { settings };
+    if (parsed.data.name) data.name = parsed.data.name;
+    if (parsed.data.country) data.country = parsed.data.country;
+    await this.prisma.admin.organization.update({ where: { id }, data });
+    await this.audit(req, "platform.org.config", "organization", id, {
+      validUntil: settings.validUntil ?? null,
+      aiKillSwitch: settings.aiKillSwitch ?? false,
+      limits: settings.limits ?? {},
+    });
+    return { ok: true };
   }
 
   @Post("organizations/:id/status")

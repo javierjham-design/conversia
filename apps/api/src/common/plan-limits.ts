@@ -26,24 +26,41 @@ export interface Entitlements {
   hasSubscription: boolean;
   status: string | null;
   planCode: string | null;
-  limits: Record<string, number>;
+  limits: Record<string, number>; // efectivos: plan + override por-tenant
   features: Record<string, unknown>;
+  validUntil: string | null;
+  expired: boolean;
 }
 
-/** Resuelve el plan + suscripción activos del tenant (dentro de withTenant/RLS). */
+/**
+ * Resuelve los entitlements EFECTIVOS del tenant (dentro de withTenant/RLS):
+ * límites del plan combinados con el override por-tenant (`settings.limits`) —
+ * el override manda — más la vigencia (`settings.validUntil`).
+ */
 export async function getEntitlements(tx: TenantTx): Promise<Entitlements> {
-  const sub = await tx.subscription.findFirst({
-    where: { status: { in: ACTIVE_STATUSES as unknown as string[] } as never },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!sub) return { hasSubscription: false, status: null, planCode: null, limits: {}, features: {} };
-  const plan = await tx.plan.findUnique({ where: { id: sub.planId } });
+  const orgId = getContext()?.organizationId;
+  const [sub, org] = await Promise.all([
+    tx.subscription.findFirst({
+      where: { status: { in: ACTIVE_STATUSES as unknown as string[] } as never },
+      orderBy: { createdAt: "desc" },
+    }),
+    orgId ? tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } }) : Promise.resolve(null),
+  ]);
+  const settings = (org?.settings ?? {}) as Record<string, any>;
+  const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
+  const validUntil = typeof settings.validUntil === "string" ? settings.validUntil : null;
+  const expired = validUntil ? new Date(validUntil).getTime() < Date.now() : false;
+
+  const plan = sub ? await tx.plan.findUnique({ where: { id: sub.planId } }) : null;
+  const planLimits = (plan?.limits as Record<string, number>) ?? {};
   return {
-    hasSubscription: true,
-    status: sub.status,
+    hasSubscription: !!sub,
+    status: sub?.status ?? null,
     planCode: plan?.code ?? null,
-    limits: (plan?.limits as Record<string, number>) ?? {},
+    limits: { ...planLimits, ...override }, // el override por-tenant tiene prioridad
     features: (plan?.features as Record<string, unknown>) ?? {},
+    validUntil,
+    expired,
   };
 }
 
@@ -74,9 +91,14 @@ export async function getSubscriptionStatus(tx: TenantTx): Promise<string | null
 export async function assertOrgActive(tx: TenantTx): Promise<void> {
   const orgId = getContext()?.organizationId;
   if (!orgId) return;
-  const org = await tx.organization.findUnique({ where: { id: orgId }, select: { status: true } });
-  if (org && (org.status === "SUSPENDED" || org.status === "CANCELLED")) {
+  const org = await tx.organization.findUnique({ where: { id: orgId }, select: { status: true, settings: true } });
+  if (!org) return;
+  if (org.status === "SUSPENDED" || org.status === "CANCELLED") {
     throw new ForbiddenException("Tu cuenta está suspendida. Regulariza tu plan para volver a crear o modificar recursos.");
+  }
+  const validUntil = (org.settings as any)?.validUntil;
+  if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
+    throw new ForbiddenException("La vigencia de tu servicio venció. Renueva para seguir operando.");
   }
 }
 

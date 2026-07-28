@@ -118,9 +118,21 @@ export async function runAgentTurn(opts: {
     );
     return;
   }
-  // El tope efectivo sale del plan del tenant (limits.aiTokensDaily) si existe;
-  // si no, del default de la plataforma. 0 = ilimitado.
+  // Vigencia vencida: el servicio del tenant expiró → la IA deja de operar.
+  const validUntil = orgSettings.validUntil;
+  if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
+    await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: { organizationId, provider: "ai", type: "ai.expired", status: "warning", message: "IA detenida: vigencia del servicio vencida" },
+      }),
+    );
+    return;
+  }
+  // Tope diario efectivo: override por-tenant (settings.limits.aiTokensDaily) manda;
+  // si no, el del plan; si no, el default de la plataforma. 0 = ilimitado.
   const budget = await withTenant(organizationId, async (tx) => {
+    const override = (orgSettings.limits as Record<string, number> | undefined)?.aiTokensDaily;
+    if (typeof override === "number") return override;
     const sub = await tx.subscription.findFirst({
       where: { status: { in: ["ACTIVE", "TRIALING"] } },
       orderBy: { createdAt: "desc" },
