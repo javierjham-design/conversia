@@ -212,6 +212,31 @@ export class PlatformController {
     }));
   }
 
+  // ------------------------------ Alertas -------------------------------
+
+  /** Alertas críticas cross-tenant: eventos de integración con status warning/error. */
+  @Get("alerts")
+  async alerts(@Query("limit") limit?: string) {
+    const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
+    const rows = await this.prisma.admin.integrationEvent.findMany({
+      where: { status: { in: ["warning", "error"] } },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+    const orgIds = [...new Set(rows.map((r) => r.organizationId))];
+    const orgs = await this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } });
+    const nameById = new Map(orgs.map((o) => [o.id, o.name]));
+    return rows.map((r) => ({
+      id: r.id,
+      provider: r.provider,
+      type: r.type,
+      status: r.status,
+      message: r.message,
+      org: nameById.get(r.organizationId) ?? r.organizationId,
+      createdAt: r.createdAt,
+    }));
+  }
+
   // ------------------------------- Planes -------------------------------
 
   @Get("plans")
