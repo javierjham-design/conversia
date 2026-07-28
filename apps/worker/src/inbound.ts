@@ -2,6 +2,7 @@ import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
 import { runAgentTurn } from "./agent-turn";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
+import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
 import { cancelTimersOnReply, dispatchEvent } from "./workflow-runtime";
 
@@ -86,6 +87,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
       console.error(`✖ Error procesando leadgen ${change.leadgen_id}:`, (err as Error).message);
     }
   }
+
+  // Monitoreo de salud (calidad/estado de cuenta/plantillas) — early warning
+  await processMetaHealth(job.raw).catch((err) =>
+    console.error("✖ Error en monitoreo de salud WhatsApp:", (err as Error).message),
+  );
 
   const { messages, statuses } = parseWebhook(job.raw);
 
