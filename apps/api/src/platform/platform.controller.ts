@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -232,6 +233,65 @@ export class PlatformController {
     const plan = await this.prisma.admin.plan.update({ where: { id }, data: input });
     await this.audit(req, "platform.plan.update", "plan", id);
     return plan;
+  }
+
+  // ------------------------------- Cupones -------------------------------
+
+  @Get("coupons")
+  coupons() {
+    return this.prisma.admin.coupon.findMany({ orderBy: { createdAt: "desc" } });
+  }
+
+  @Post("coupons")
+  async createCoupon(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        code: z.string().min(3).max(40),
+        description: z.string().max(200).optional(),
+        discountType: z.enum(["PERCENT", "FIXED"]),
+        discountValue: z.coerce.number().positive(),
+        currency: z.enum(["CLP", "USD"]).optional(),
+        maxRedemptions: z.coerce.number().int().positive().optional(),
+        expiresAt: z.string().optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos de cupón inválidos");
+    const d = parsed.data;
+    if (d.discountType === "PERCENT" && d.discountValue > 100) throw new BadRequestException("El porcentaje no puede superar 100");
+    const coupon = await this.prisma.admin.coupon
+      .create({
+        data: {
+          code: d.code.trim().toUpperCase(),
+          description: d.description,
+          discountType: d.discountType,
+          discountValue: d.discountValue,
+          currency: d.discountType === "FIXED" ? d.currency ?? "CLP" : null,
+          maxRedemptions: d.maxRedemptions,
+          expiresAt: d.expiresAt ? new Date(d.expiresAt) : null,
+        },
+      })
+      .catch((e: any) => {
+        if (e?.code === "P2002") throw new BadRequestException("Ya existe un cupón con ese código");
+        throw e;
+      });
+    await this.audit(req, "platform.coupon.create", "coupon", coupon.id, { code: coupon.code });
+    return coupon;
+  }
+
+  @Patch("coupons/:id")
+  async updateCoupon(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ active: z.boolean().optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const coupon = await this.prisma.admin.coupon.update({ where: { id }, data: parsed.data });
+    await this.audit(req, "platform.coupon.update", "coupon", id, parsed.data);
+    return coupon;
+  }
+
+  @Delete("coupons/:id")
+  async deleteCoupon(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.prisma.admin.coupon.delete({ where: { id } });
+    await this.audit(req, "platform.coupon.delete", "coupon", id);
+    return { ok: true };
   }
 
   // ---------------------------- Suscripciones ----------------------------

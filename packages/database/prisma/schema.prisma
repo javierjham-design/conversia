@@ -219,6 +219,37 @@ model Plan {
   @@map("plans")
 }
 
+// Cupón de descuento (lo crea el super admin, se aplica en el checkout). Encaja
+// con la estrategia de landings por campaña. Platform-level (cliente admin).
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  description    String?
+  discountType   String    @map("discount_type") // PERCENT | FIXED
+  discountValue  Decimal   @map("discount_value") @db.Decimal(12, 2)
+  currency       String? // requerido si FIXED (CLP/USD); null si PERCENT
+  maxRedemptions Int?      @map("max_redemptions")
+  timesRedeemed  Int       @default(0) @map("times_redeemed")
+  expiresAt      DateTime? @map("expires_at")
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("coupons")
+}
+
+// Idempotencia de webhooks de pago: garantiza no procesar dos veces el mismo
+// evento (reintentos de Stripe/Flow → no duplicar activaciones/facturas).
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String // stripe | flow
+  eventId     String   @map("event_id")
+  type        String?
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@unique([provider, eventId])
+  @@map("webhook_events")
+}
+
 enum InvoiceStatus {
   DRAFT
   OPEN

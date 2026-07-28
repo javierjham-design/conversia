@@ -69,14 +69,16 @@ export class BillingController {
   @Post("checkout")
   async checkout(@Body() body: unknown) {
     const ctx = requirePermission("billing:write");
-    const parsed = z.object({ planCode: z.string() }).safeParse(body);
+    const parsed = z.object({ planCode: z.string(), couponCode: z.string().max(40).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
     if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
 
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
     const currency = org?.currency ?? "CLP";
-    const amount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    const listAmount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    const applied = await this.applyCoupon(parsed.data.couponCode, listAmount, currency);
+    const amount = applied.amount;
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
     const provider = createPaymentProvider(currency); // CLP→Flow, resto→Stripe
     const session = await provider.createCheckout({
@@ -89,12 +91,45 @@ export class BillingController {
       successUrl: `${getEnv().WEB_URL}/billing`,
       cancelUrl: `${getEnv().WEB_URL}/billing`,
     });
+    // Cuenta la redención sólo cuando el checkout se creó bien (no en validaciones fallidas).
+    if (applied.coupon) {
+      await this.prisma.admin.coupon.update({ where: { id: applied.coupon.id }, data: { timesRedeemed: { increment: 1 } } });
+    }
     await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.auditLog.create({
-        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.checkout", entityType: "plan", entityId: plan.id, after: { planCode: plan.code, provider: session.provider } },
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.checkout", entityType: "plan", entityId: plan.id, after: { planCode: plan.code, provider: session.provider, couponCode: applied.coupon?.code ?? null, amount } },
       }),
     );
-    return { ...session, mock: session.provider === "mock" };
+    return { ...session, mock: session.provider === "mock", listAmount, amount, couponCode: applied.coupon?.code ?? null };
+  }
+
+  /** Valida un cupón y calcula el monto con descuento. No incrementa la redención. */
+  private async applyCoupon(code: string | undefined, amount: number, currency: string) {
+    if (!code) return { amount, coupon: null as null | { id: string; code: string } };
+    const coupon = await this.prisma.admin.coupon.findUnique({ where: { code: code.trim().toUpperCase() } });
+    if (!coupon || !coupon.active) throw new BadRequestException("Cupón inválido");
+    if (coupon.expiresAt && coupon.expiresAt < new Date()) throw new BadRequestException("Cupón expirado");
+    if (coupon.maxRedemptions != null && coupon.timesRedeemed >= coupon.maxRedemptions) throw new BadRequestException("Cupón agotado");
+    if (coupon.discountType === "FIXED" && coupon.currency && coupon.currency !== currency) {
+      throw new BadRequestException("Cupón no válido para esta moneda");
+    }
+    const value = Number(coupon.discountValue);
+    const discounted = coupon.discountType === "PERCENT" ? amount * (1 - value / 100) : amount - value;
+    return { amount: Math.max(0, Math.round(discounted)), coupon: { id: coupon.id, code: coupon.code } };
+  }
+
+  /**
+   * Idempotencia de webhooks: registra (provider, eventId) de forma atómica.
+   * Devuelve true si el evento YA se procesó (no volver a activar/facturar).
+   */
+  private async alreadyProcessed(provider: string, eventId: string, type?: string): Promise<boolean> {
+    try {
+      await this.prisma.admin.webhookEvent.create({ data: { provider, eventId, type } });
+      return false;
+    } catch (e: any) {
+      if (e?.code === "P2002") return true; // violación de unique → ya procesado
+      throw e;
+    }
   }
 
   /**
@@ -124,6 +159,10 @@ export class BillingController {
       throw new UnauthorizedException("Firma de Stripe inválida");
     }
     const event: any = JSON.parse(raw.toString("utf8"));
+    // Idempotencia: Stripe reintenta; no procesar el mismo evento dos veces.
+    if (event?.id && (await this.alreadyProcessed("stripe", String(event.id), event.type))) {
+      return { received: true, deduped: true };
+    }
     const obj = event?.data?.object ?? {};
     if (event?.type === "checkout.session.completed") {
       const meta = obj.metadata ?? {};
@@ -156,6 +195,10 @@ export class BillingController {
         meta = {};
       }
       if (meta.organizationId && meta.planCode) {
+        // Dedup al confirmarse el pago (Flow reenvía callbacks del mismo token).
+        if (await this.alreadyProcessed("flow", token, "flow.payment")) {
+          return { received: true, deduped: true };
+        }
         await this.activate(meta.organizationId, meta.planCode, "flow", token);
       }
     }
