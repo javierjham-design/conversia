@@ -16,6 +16,7 @@ import { z } from "zod";
 import { MODEL_PRICING, createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
+import { AuthService } from "../auth/auth.service";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
 
@@ -27,7 +28,10 @@ import { PlatformGuard, type PlatformRequest } from "./platform.guard";
 @Controller("platform")
 @UseGuards(PlatformGuard)
 export class PlatformController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auth: AuthService,
+  ) {}
 
   private audit(req: PlatformRequest, action: string, entityType: string, entityId: string, after?: object) {
     return this.prisma.admin.auditLog.create({
@@ -286,6 +290,83 @@ export class PlatformController {
       org: nameById.get(r.organizationId) ?? r.organizationId,
       createdAt: r.createdAt,
     }));
+  }
+
+  // --------------------------- Demos / CRM ---------------------------
+
+  /** CRM de prospectos/demos, con días en la plataforma y estado de IA si ya se provisionó. */
+  @Get("demo-leads")
+  async demoLeads() {
+    const leads = await this.prisma.admin.demoLead.findMany({ orderBy: { createdAt: "desc" }, take: 300 });
+    const orgIds = leads.map((l) => l.organizationId).filter(Boolean) as string[];
+    const orgs = orgIds.length
+      ? await this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, createdAt: true, status: true, settings: true } })
+      : [];
+    const orgById = new Map(orgs.map((o) => [o.id, o]));
+    return leads.map((l) => {
+      const org = l.organizationId ? orgById.get(l.organizationId) : null;
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      return {
+        id: l.id,
+        name: l.name,
+        email: l.email,
+        company: l.company,
+        phone: l.phone,
+        planInterest: l.planInterest,
+        status: l.status,
+        notes: l.notes,
+        createdAt: l.createdAt,
+        organizationId: l.organizationId,
+        orgStatus: org?.status ?? null,
+        daysOnPlatform: org ? Math.floor((Date.now() - new Date(org.createdAt).getTime()) / 86_400_000) : null,
+        aiEnabled: org ? settings.aiKillSwitch !== true : null,
+        validUntil: typeof settings.validUntil === "string" ? settings.validUntil : null,
+      };
+    });
+  }
+
+  @Patch("demo-leads/:id")
+  async updateDemoLead(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        status: z.enum(["NEW", "CONTACTED", "PROVISIONED", "ACTIVE", "WON", "LOST"]).optional(),
+        notes: z.string().max(1000).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const lead = await this.prisma.admin.demoLead.update({ where: { id }, data: parsed.data });
+    await this.audit(req, "platform.demo.update", "demo_lead", id, parsed.data);
+    return lead;
+  }
+
+  /** Provisiona el demo: crea org + usuario owner con IA PAUSADA (no gasta tokens). */
+  @Post("demo-leads/:id/provision")
+  async provisionDemoLead(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const lead = await this.prisma.admin.demoLead.findUnique({ where: { id } });
+    if (!lead) throw new NotFoundException("Prospecto no encontrado");
+    if (lead.organizationId) throw new BadRequestException("Este prospecto ya tiene un demo provisionado");
+    const res = await this.auth.provisionDemo({ email: lead.email, name: lead.name, company: lead.company ?? lead.name });
+    await this.prisma.admin.demoLead.update({ where: { id }, data: { organizationId: res.organizationId, status: "PROVISIONED" } });
+    await this.audit(req, "platform.demo.provision", "demo_lead", id, { organizationId: res.organizationId });
+    return { ok: true, email: res.email, tempPassword: res.tempPassword, organizationId: res.organizationId, validUntil: res.validUntil };
+  }
+
+  /** Crea un prospecto manualmente (para demos agendados fuera de la web). */
+  @Post("demo-leads")
+  async createDemoLead(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        name: z.string().min(2).max(80),
+        email: z.string().email().max(200),
+        company: z.string().max(120).optional(),
+        phone: z.string().max(40).optional(),
+        planInterest: z.string().max(40).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const lead = await this.prisma.admin.demoLead.create({ data: { ...parsed.data, status: "NEW" } });
+    await this.audit(req, "platform.demo.create", "demo_lead", lead.id, { email: lead.email });
+    return lead;
   }
 
   // ------------------------------- Planes -------------------------------

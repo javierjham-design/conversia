@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { DemoCta } from "@/components/DemoCta";
 
 export const metadata: Metadata = {
   title: "TuBot.cl — Atención y ventas por WhatsApp con IA",
@@ -41,13 +42,13 @@ const steps = [
   { n: "3", title: "Atiende y vende 24/7", body: "La IA responde y agenda; tu equipo entra cuando quiere. Todo medido." },
 ];
 
-type PlanCard = { name: string; price: string; note: string; features: string[]; highlight?: boolean };
+type PlanCard = { code: string; name: string; price: string; note: string; features: string[]; highlight?: boolean };
 
 const FALLBACK_PLANS: PlanCard[] = [
-  { name: "Free", price: "$0", note: "Para probar", features: ["1 canal", "2 agentes IA", "3 flujos"] },
-  { name: "Starter", price: "$29.990", note: "/mes", features: ["1 canal", "5 agentes IA", "10 flujos", "5 usuarios"], highlight: true },
-  { name: "Pro", price: "$79.990", note: "/mes", features: ["3 canales", "20 agentes IA", "50 flujos", "20 usuarios"] },
-  { name: "Enterprise", price: "A medida", note: "", features: ["Ilimitado", "White-label", "SSO", "Soporte dedicado"] },
+  { code: "free", name: "Free", price: "$0", note: "Para probar", features: ["1 canal", "2 agentes IA", "3 flujos"] },
+  { code: "starter", name: "Starter", price: "$29.990", note: "/mes", features: ["1 canal", "5 agentes IA", "10 flujos", "5 usuarios"], highlight: true },
+  { code: "pro", name: "Pro", price: "$79.990", note: "/mes", features: ["3 canales", "20 agentes IA", "50 flujos", "20 usuarios"] },
+  { code: "enterprise", name: "Enterprise", price: "A medida", note: "", features: ["Ilimitado", "White-label", "SSO", "Soporte dedicado"] },
 ];
 
 /** Precios EN VIVO desde la API pública (Fase E); cae a FALLBACK si no responde. */
@@ -72,6 +73,7 @@ function mapPlan(p: any): PlanCard {
   if (l.workflows) feats.push(`${l.workflows} flujos`);
   if (l.users) feats.push(`${l.users} usuarios`);
   return {
+    code: p.code,
     name: p.name,
     price: enterprise ? "A medida" : p.priceClp === 0 ? "$0" : `$${Number(p.priceClp).toLocaleString("es-CL")}`,
     note: enterprise ? "" : p.priceClp === 0 ? "Para probar" : "/mes",
@@ -97,12 +99,7 @@ export default async function LandingPage() {
             <Link href="/login" className="text-sm font-medium text-navy-900 hover:text-brand-600">
               Entrar
             </Link>
-            <a
-              href="#contacto"
-              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-            >
-              Solicitar demo
-            </a>
+            <DemoCta label="Solicitar demo" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700" />
           </div>
         </div>
       </header>
@@ -123,9 +120,7 @@ export default async function LandingPage() {
             de tu negocio y deja que tu equipo se enfoque en lo importante. Sin código.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <a href="#contacto" className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-brand-700">
-              Solicitar una demo
-            </a>
+            <DemoCta label="Solicitar una demo" className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-brand-700" />
             <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-navy-900 hover:border-brand-600 hover:text-brand-600">
               Entrar al panel
             </Link>
@@ -192,12 +187,11 @@ export default async function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <a
-                  href="#contacto"
-                  className={`mt-6 block rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-slate-300 text-navy-900 hover:border-brand-600 hover:text-brand-600"}`}
-                >
-                  Empezar
-                </a>
+                <DemoCta
+                  label="Empezar"
+                  planCode={p.code}
+                  className={`mt-6 block w-full rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-slate-300 text-navy-900 hover:border-brand-600 hover:text-brand-600"}`}
+                />
               </div>
             ))}
           </div>

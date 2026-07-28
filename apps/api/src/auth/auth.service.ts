@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
@@ -94,6 +95,52 @@ export class AuthService {
     });
 
     return this.issueTokens(result.user.id, result.org.id, result.role.code, ["*"]);
+  }
+
+  /**
+   * Provisiona un DEMO: organización + usuario owner con IA PAUSADA
+   * (aiKillSwitch) para que NO gaste tokens hasta que el super admin la habilite,
+   * con vigencia limitada. Devuelve las credenciales (contraseña temporal una vez).
+   */
+  async provisionDemo(input: { email: string; name: string; company: string; demoDays?: number }) {
+    const db = this.prisma.admin;
+    let slug = slugify(input.company) || "demo";
+    if (await db.organization.findUnique({ where: { slug } })) {
+      slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
+    }
+    const validUntil = new Date(Date.now() + (input.demoDays ?? 14) * 24 * 3600 * 1000).toISOString();
+    const tempPassword = randomBytes(6).toString("base64url");
+    return db.$transaction(async (tx) => {
+      const org = await tx.organization.create({
+        data: {
+          name: input.company,
+          slug,
+          // Demo: IA pausada (no gasta tokens) + tope 0 + vigencia, hasta habilitar.
+          settings: { demo: true, aiKillSwitch: true, validUntil, limits: { aiTokensDaily: 0 } },
+        },
+      });
+      await tx.$queryRaw`SELECT set_config('app.org_id', ${org.id}, true)`;
+      const roles = await Promise.all(
+        DEFAULT_ROLES.map((r) =>
+          tx.role.create({ data: { organizationId: org.id, code: r.code, name: r.name, permissions: [...r.permissions], system: true } }),
+        ),
+      );
+      const ownerRole = roles.find((r) => r.code === "owner")!;
+      let user = await tx.user.findUnique({ where: { email: input.email } });
+      let revealPassword: string | null = tempPassword;
+      if (!user) {
+        user = await tx.user.create({
+          data: { email: input.email, passwordHash: bcrypt.hashSync(tempPassword, BCRYPT_COST), name: input.name },
+        });
+      } else {
+        revealPassword = null; // ya tenía cuenta: usa su contraseña existente
+      }
+      await tx.organizationUser.create({ data: { organizationId: org.id, userId: user.id, roleId: ownerRole.id } });
+      await tx.leadStatus.createMany({
+        data: DEFAULT_LEAD_STATUSES.map((s) => ({ organizationId: org.id, code: s.code, name: s.name, category: s.category as any, order: s.order, system: true })),
+      });
+      return { organizationId: org.id, email: input.email, tempPassword: revealPassword, validUntil };
+    });
   }
 
   async login(input: { email: string; password: string }) {

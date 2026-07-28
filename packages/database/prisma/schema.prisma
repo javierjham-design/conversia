@@ -199,6 +199,26 @@ model PlatformAdmin {
   @@map("platform_admins")
 }
 
+// CRM de prospectos/demos de la plataforma (TuBot). Distinto de los "leads" del
+// tenant. Se crea desde la web ("Empezar"/"Solicitar demo") y se gestiona en el
+// super admin. Al provisionar el demo se enlaza organizationId.
+model DemoLead {
+  id             String    @id @default(cuid())
+  name           String
+  email          String
+  company        String?
+  phone          String?
+  planInterest   String?   @map("plan_interest")
+  status         String    @default("NEW") // NEW | CONTACTED | PROVISIONED | ACTIVE | WON | LOST
+  organizationId String?   @map("organization_id")
+  notes          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@map("demo_leads")
+}
+
 model Plan {
   id        String   @id @default(cuid())
   code      String   @unique
