@@ -42,11 +42,17 @@ Contrato: `createCheckout({organizationId, planCode, amount, currency, successUr
 ## Variables de entorno
 
 ```
-STRIPE_SECRET_KEY=        # vacío → pasarela mock
-STRIPE_WEBHOOK_SECRET=    # firma de webhooks de Stripe
+# Selección por MONEDA del tenant: CLP → Flow · resto (USD) → Stripe · vacías → mock.
+STRIPE_SECRET_KEY=        # Stripe (USD/internacional)
+STRIPE_WEBHOOK_SECRET=    # firma del webhook Stripe → POST /billing/webhooks/stripe
+FLOW_API_KEY=            # Flow (Chile / CLP)
+FLOW_SECRET_KEY=         # clave secreta (firma HMAC) de Flow → webhook POST /billing/webhooks/flow
+FLOW_BASE_URL=          # https://www.flow.cl/api (prod) · default https://sandbox.flow.cl/api
 PLATFORM_ADMIN_EMAIL=     # super-admin (seed)
 PLATFORM_ADMIN_PASSWORD=  # super-admin (seed)
 ```
+
+**Adaptadores** (`apps/api/src/billing/payment-provider.ts`): `StripePaymentProvider` (Checkout mode=subscription, precio recurrente inline, sin SDK), `FlowPaymentProvider` (payment/create firmado). Webhooks en `billing.controller.ts`: Stripe (verifica `Stripe-Signature`, evento `checkout.session.completed`) y Flow (consulta `getStatus` firmado, status=2 pagado). Ambos llaman a `activate()` → activan/renuevan la suscripción + emiten factura pagada. Rutas `/billing/webhooks/*` públicas (las valida su firma, no el JWT).
 
 ## Decisión de pasarela (pendiente de confirmar)
 

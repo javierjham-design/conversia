@@ -1,9 +1,11 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { getEnv } from "@conversia/config";
+
 /**
- * Abstracción de pasarela de pago (patrón provider, como agenda/canales).
- * MockPaymentProvider permite desarrollar el ciclo de suscripción/factura sin
- * credenciales. El adaptador real recomendado es Stripe (Checkout + webhooks);
- * su contrato se documenta en docs/BILLING.md. NUNCA se guardan datos de
- * tarjeta: sólo el token/referencia del proveedor.
+ * Abstracción de pasarela de pago (patrón provider). Selección por moneda:
+ * CLP → Flow (Chile), resto → Stripe (USD internacional). Mock en dev si no hay
+ * credenciales. NUNCA se guardan datos de tarjeta: sólo el token/referencia.
+ * Contrato y decisiones en docs/BILLING.md.
  */
 export interface CheckoutSession {
   id: string;
@@ -11,37 +13,148 @@ export interface CheckoutSession {
   provider: string;
 }
 
+export interface CheckoutInput {
+  organizationId: string;
+  planCode: string;
+  amount: number;
+  currency: string;
+  successUrl: string;
+  cancelUrl: string;
+  email?: string;
+  interval?: string; // monthly | yearly
+}
+
 export interface PaymentProvider {
   readonly kind: string;
-  /** Crea una sesión de checkout para que el tenant pague/cambie de plan. */
-  createCheckout(input: {
-    organizationId: string;
-    planCode: string;
-    amount: number;
-    currency: string;
-    successUrl: string;
-    cancelUrl: string;
-  }): Promise<CheckoutSession>;
+  createCheckout(input: CheckoutInput): Promise<CheckoutSession>;
 }
 
 /** Mock: no cobra; devuelve una URL interna que marca la factura como pagada. */
 export class MockPaymentProvider implements PaymentProvider {
   readonly kind = "mock";
-  async createCheckout(input: {
-    organizationId: string;
-    planCode: string;
-    amount: number;
-    currency: string;
-    successUrl: string;
-    cancelUrl: string;
-  }): Promise<CheckoutSession> {
+  async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
     const id = `mock_cs_${Date.now()}`;
-    // La URL de éxito la resuelve el frontend/endpoint mock (no hay cobro real).
     return { id, url: `${input.successUrl}?mock_session=${id}`, provider: "mock" };
   }
 }
 
-export function createPaymentProvider(): PaymentProvider {
-  // Cuando exista STRIPE_SECRET_KEY se instancia StripePaymentProvider (doc).
+/** Monedas sin decimales (el monto va tal cual, no en centavos). */
+const ZERO_DECIMAL = new Set(["CLP", "JPY", "KRW", "VND", "XAF", "XOF", "CLF"]);
+
+/** Stripe Checkout (suscripción) vía HTTP directo — sin SDK. USD/internacional. */
+export class StripePaymentProvider implements PaymentProvider {
+  readonly kind = "stripe";
+  constructor(private secretKey: string) {}
+
+  async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
+    const cur = input.currency.toLowerCase();
+    const minor = ZERO_DECIMAL.has(input.currency.toUpperCase())
+      ? Math.round(input.amount)
+      : Math.round(input.amount * 100);
+    const interval = input.interval === "yearly" ? "year" : "month";
+    const p = new URLSearchParams();
+    p.set("mode", "subscription");
+    p.set("success_url", `${input.successUrl}?paid=1`);
+    p.set("cancel_url", input.cancelUrl);
+    p.set("client_reference_id", input.organizationId);
+    p.set("metadata[organizationId]", input.organizationId);
+    p.set("metadata[planCode]", input.planCode);
+    p.set("subscription_data[metadata][organizationId]", input.organizationId);
+    p.set("subscription_data[metadata][planCode]", input.planCode);
+    if (input.email) p.set("customer_email", input.email);
+    p.set("line_items[0][quantity]", "1");
+    p.set("line_items[0][price_data][currency]", cur);
+    p.set("line_items[0][price_data][unit_amount]", String(minor));
+    p.set("line_items[0][price_data][recurring][interval]", interval);
+    p.set("line_items[0][price_data][product_data][name]", `TuBot — Plan ${input.planCode}`);
+
+    const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.secretKey}`, "content-type": "application/x-www-form-urlencoded" },
+      body: p.toString(),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.url) throw new Error(`Stripe checkout: ${json?.error?.message ?? res.status}`);
+    return { id: json.id, url: json.url, provider: "stripe" };
+  }
+}
+
+/** Firma de Flow: HMAC-SHA256 de los params ordenados alfabéticamente (key+value). */
+export function flowSign(params: Record<string, string>, secret: string): string {
+  const toSign = Object.keys(params)
+    .sort()
+    .map((k) => k + params[k])
+    .join("");
+  return createHmac("sha256", secret).update(toSign).digest("hex");
+}
+
+/** Flow (Chile) vía HTTP directo. CLP. */
+export class FlowPaymentProvider implements PaymentProvider {
+  readonly kind = "flow";
+  constructor(
+    private apiKey: string,
+    private secretKey: string,
+    private baseUrl: string,
+  ) {}
+
+  async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
+    const env = getEnv();
+    const params: Record<string, string> = {
+      apiKey: this.apiKey,
+      commerceOrder: `tubot-${input.organizationId.slice(0, 8)}-${Date.now()}`,
+      subject: `TuBot — Plan ${input.planCode}`,
+      currency: input.currency,
+      amount: String(Math.round(input.amount)),
+      email: input.email || "facturacion@tubot.cl",
+      urlConfirmation: `${env.API_URL}/billing/webhooks/flow`,
+      urlReturn: `${input.successUrl}?paid=1`,
+      optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode }),
+    };
+    params.s = flowSign(params, this.secretKey);
+    const res = await fetch(`${this.baseUrl}/payment/create`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    if (!json?.url || !json?.token) throw new Error(`Flow create: ${json?.message ?? res.status}`);
+    return { id: json.token, url: `${json.url}?token=${json.token}`, provider: "flow" };
+  }
+}
+
+/** Verifica la firma del webhook de Stripe (Stripe-Signature: t=…,v1=…). */
+export function verifyStripeSignature(rawBody: Buffer, sigHeader: string | undefined, secret: string): boolean {
+  if (!sigHeader) return false;
+  const parts: Record<string, string> = {};
+  for (const kv of sigHeader.split(",")) {
+    const idx = kv.indexOf("=");
+    if (idx > 0) parts[kv.slice(0, idx).trim()] = kv.slice(idx + 1).trim();
+  }
+  const t = parts["t"];
+  const v1 = parts["v1"];
+  if (!t || !v1) return false;
+  const expected = createHmac("sha256", secret).update(`${t}.${rawBody.toString("utf8")}`).digest("hex");
+  try {
+    return v1.length === expected.length && timingSafeEqual(Buffer.from(v1), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Selección de pasarela por moneda: CLP → Flow, resto → Stripe. Cae a Mock si
+ * no hay credenciales de la pasarela correspondiente (dev sin romper).
+ */
+export function createPaymentProvider(currency = "CLP"): PaymentProvider {
+  const env = getEnv();
+  const isClp = currency.toUpperCase() === "CLP";
+  if (isClp && env.FLOW_API_KEY && env.FLOW_SECRET_KEY) {
+    return new FlowPaymentProvider(env.FLOW_API_KEY, env.FLOW_SECRET_KEY, env.FLOW_BASE_URL);
+  }
+  if (!isClp && env.STRIPE_SECRET_KEY) {
+    return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
+  }
+  // Respaldo: si hay Stripe úsalo aunque sea CLP; si no, mock.
+  if (env.STRIPE_SECRET_KEY) return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
   return new MockPaymentProvider();
 }

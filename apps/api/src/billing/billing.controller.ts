@@ -1,9 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException } from "@nestjs/common";
+import type { Request } from "express";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
-import { createPaymentProvider } from "./payment-provider";
+import { createPaymentProvider, flowSign, verifyStripeSignature } from "./payment-provider";
 
 /**
  * Facturación del TENANT (su propia suscripción). Vista del plan actual, uso
@@ -75,12 +76,15 @@ export class BillingController {
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
-    const provider = createPaymentProvider();
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
+    const provider = createPaymentProvider(currency); // CLP→Flow, resto→Stripe
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: plan.code,
       amount,
       currency,
+      email: user?.email,
+      interval: plan.interval,
       successUrl: `${getEnv().WEB_URL}/billing`,
       cancelUrl: `${getEnv().WEB_URL}/billing`,
     });
@@ -101,41 +105,100 @@ export class BillingController {
     const ctx = requireContext();
     const parsed = z.object({ planCode: z.string() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
-    if (getEnv().NODE_ENV === "production" && process.env.STRIPE_SECRET_KEY) {
+    if (getEnv().NODE_ENV === "production" && getEnv().STRIPE_SECRET_KEY) {
       throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
     }
-    const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
-    if (!plan) throw new BadRequestException("Plan desconocido");
+    await this.activate(ctx.organizationId, parsed.data.planCode, "mock");
+    return { ok: true, planCode: parsed.data.planCode, note: "Pago simulado (dev). En producción lo confirma el webhook de la pasarela." };
+  }
 
-    const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
-    const currency = org?.currency ?? "CLP";
+  /** Webhook de Stripe (firmado): activa/renueva la suscripción al confirmarse el pago. */
+  @Post("webhooks/stripe")
+  async stripeWebhook(@Req() req: Request & { rawBody?: Buffer }) {
+    const env = getEnv();
+    if (!env.STRIPE_WEBHOOK_SECRET) throw new BadRequestException("Webhook de Stripe no configurado");
+    const sig = req.headers["stripe-signature"] as string | undefined;
+    const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), "utf-8");
+    if (!verifyStripeSignature(raw, sig, env.STRIPE_WEBHOOK_SECRET)) {
+      throw new UnauthorizedException("Firma de Stripe inválida");
+    }
+    const event: any = JSON.parse(raw.toString("utf8"));
+    const obj = event?.data?.object ?? {};
+    if (event?.type === "checkout.session.completed") {
+      const meta = obj.metadata ?? {};
+      const organizationId = meta.organizationId ?? obj.client_reference_id;
+      if (organizationId && meta.planCode) {
+        await this.activate(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id);
+      }
+    }
+    return { received: true };
+  }
+
+  /** Webhook de Flow: consulta el estado firmado (getStatus) y activa si está pagado. */
+  @Post("webhooks/flow")
+  async flowWebhook(@Body() body: any) {
+    const env = getEnv();
+    const token = body?.token;
+    if (!token || !env.FLOW_API_KEY || !env.FLOW_SECRET_KEY) {
+      throw new BadRequestException("Webhook de Flow inválido o no configurado");
+    }
+    const params: Record<string, string> = { apiKey: env.FLOW_API_KEY, token };
+    params.s = flowSign(params, env.FLOW_SECRET_KEY);
+    const res = await fetch(`${env.FLOW_BASE_URL}/payment/getStatus?${new URLSearchParams(params).toString()}`);
+    const status: any = await res.json().catch(() => ({}));
+    // status.status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
+    if (status?.status === 2 && status?.optional) {
+      let meta: any = {};
+      try {
+        meta = typeof status.optional === "string" ? JSON.parse(status.optional) : status.optional;
+      } catch {
+        meta = {};
+      }
+      if (meta.organizationId && meta.planCode) {
+        await this.activate(meta.organizationId, meta.planCode, "flow", token);
+      }
+    }
+    return { received: true };
+  }
+
+  /**
+   * Activa/renueva la suscripción del tenant y emite la factura pagada. La usan
+   * el mock (dev) y los webhooks de Stripe/Flow (prod). Cliente admin: es una
+   * operación de plataforma sobre subscription/organization/invoice.
+   */
+  private async activate(organizationId: string, planCode: string, provider: string, providerRef?: string) {
+    const plan = await this.prisma.admin.plan.findUnique({ where: { code: planCode } });
+    if (!plan) return;
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId } });
+    if (!org) return;
+    const currency = org.currency ?? "CLP";
     const amount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + (plan.interval === "yearly" ? 12 : 1));
 
-    // Suscripción + factura pagada (cliente admin: subscription/plan/invoice)
-    const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" } });
     if (existing) {
       await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
     } else {
-      await this.prisma.admin.subscription.create({ data: { organizationId: ctx.organizationId, planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
+      await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
     }
-    await this.prisma.admin.organization.update({ where: { id: ctx.organizationId }, data: { status: "ACTIVE", planId: plan.id } });
+    await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id } });
+
     if (amount > 0) {
       const count = await this.prisma.admin.invoice.count();
       await this.prisma.admin.invoice.create({
         data: {
-          organizationId: ctx.organizationId,
+          organizationId,
           number: `CONV-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`,
           status: "PAID",
           currency,
           amountDue: amount,
           lines: [{ concept: `Plan ${plan.name} (${plan.interval})`, amount }],
           paidAt: new Date(),
-          provider: "mock",
+          provider,
+          providerRef: providerRef ?? null,
         },
       });
     }
-    return { ok: true, planCode: plan.code, note: "Pago simulado (dev). En producción lo confirma el webhook de la pasarela." };
   }
 }

@@ -46,6 +46,11 @@ const envSchema = z.object({
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
 
+  // Flow (Chile / CLP) — Stripe ya está definido más abajo. Vacías = mock en dev.
+  FLOW_API_KEY: z.string().optional().default(""),
+  FLOW_SECRET_KEY: z.string().optional().default(""),
+  FLOW_BASE_URL: z.string().default("https://sandbox.flow.cl/api"),
+
   WHATSAPP_PROVIDER: z.enum(["meta", "mock"]).default("mock"),
   /** Token requerido para inyectar mensajes por canales mock (simulador). */
   MOCK_INBOUND_TOKEN: z.string().default("dev-mock-inbound-token"),
