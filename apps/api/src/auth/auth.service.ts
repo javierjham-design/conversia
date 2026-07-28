@@ -111,6 +111,25 @@ export class AuthService {
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
   }
 
+  /**
+   * Login con Google: el email ya viene verificado (ID token validado con Google
+   * en el controlador). Solo permitimos cuentas que YA existen como miembros —
+   * no es auto-registro. Mensaje genérico para no filtrar qué correos existen.
+   */
+  async loginWithGoogle(email: string) {
+    const user = await this.prisma.admin.user.findUnique({
+      where: { email },
+      include: { memberships: { where: { active: true } } },
+    });
+    const membership = user?.memberships[0];
+    if (!user || !membership) {
+      throw new UnauthorizedException("Tu cuenta de Google no está autorizada en la plataforma");
+    }
+    const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
+    const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
+    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
+  }
+
   private issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
     const token = signAppToken({ sub: userId, orgId, role: roleCode, perms });
     return { token, organizationId: orgId, role: roleCode };

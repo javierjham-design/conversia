@@ -43,6 +43,8 @@ const envSchema = z.object({
   AI_CLASSIFIER_MODEL: z.string().default("claude-haiku-4-5"),
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
+  // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
+  GOOGLE_CLIENT_ID: z.string().optional().default(""),
 
   WHATSAPP_PROVIDER: z.enum(["meta", "mock"]).default("mock"),
   /** Token requerido para inyectar mensajes por canales mock (simulador). */

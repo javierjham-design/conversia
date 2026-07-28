@@ -7,9 +7,11 @@ import {
   HttpStatus,
   Post,
   Req,
+  UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
+import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
@@ -70,6 +72,29 @@ export class AuthController {
       );
     }
     return this.auth.login(input);
+  }
+
+  /** Config pública para el botón de Google en el login (client id no es secreto). */
+  @Get("google-config")
+  googleConfig() {
+    return { clientId: getEnv().GOOGLE_CLIENT_ID };
+  }
+
+  /** Login con Google: valida el ID token con Google y emite nuestro JWT. */
+  @Post("google")
+  async google(@Body() body: unknown) {
+    const { credential } = parse(z.object({ credential: z.string().min(10) }), body);
+    const env = getEnv();
+    if (!env.GOOGLE_CLIENT_ID) throw new BadRequestException("El inicio con Google no está configurado.");
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+    );
+    const info: any = await res.json().catch(() => ({}));
+    const emailVerified = info?.email_verified === true || info?.email_verified === "true";
+    if (!res.ok || info?.aud !== env.GOOGLE_CLIENT_ID || !info?.email || !emailVerified) {
+      throw new UnauthorizedException("No se pudo validar tu cuenta de Google.");
+    }
+    return this.auth.loginWithGoogle(String(info.email).toLowerCase());
   }
 
   @Get("me")

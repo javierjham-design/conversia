@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setToken } from "@/lib/api";
 
@@ -10,6 +10,56 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
+
+  // Botón de Google (opcional): solo aparece si GOOGLE_CLIENT_ID está configurado.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await api<{ clientId: string }>("/auth/google-config");
+        if (!cfg.clientId || cancelled) return;
+        await new Promise<void>((resolve, reject) => {
+          if ((window as any).google?.accounts?.id) return resolve();
+          const s = document.createElement("script");
+          s.src = "https://accounts.google.com/gsi/client";
+          s.async = true;
+          s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("gsi"));
+          document.head.appendChild(s);
+        });
+        if (cancelled) return;
+        const g = (window as any).google;
+        g.accounts.id.initialize({
+          client_id: cfg.clientId,
+          callback: async (resp: any) => {
+            setError(null);
+            try {
+              const r = await api<{ token: string }>("/auth/google", {
+                method: "POST",
+                body: JSON.stringify({ credential: resp.credential }),
+              });
+              setToken(r.token);
+              router.push("/inbox");
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          },
+        });
+        const el = document.getElementById("google-btn");
+        if (el) {
+          g.accounts.id.renderButton(el, { theme: "outline", size: "large", width: 320, text: "continue_with" });
+          setGoogleReady(true);
+        }
+      } catch {
+        /* Google no configurado o no cargó: se muestra solo email/contraseña */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +86,12 @@ export default function LoginPage() {
           <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto" />
           <p className="mt-2 text-sm text-slate-500">Panel de atención conversacional</p>
         </div>
+        <div id="google-btn" className="flex justify-center" />
+        {googleReady && (
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />o<span className="h-px flex-1 bg-slate-200" />
+          </div>
+        )}
         <label className="block text-sm">
           Email
           <input
