@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
+import { MODEL_PRICING } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -242,6 +243,12 @@ export class PlatformController {
   @Get("plans")
   plans() {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
+  }
+
+  /** Precios por token (USD/millón) por modelo — insumo del estimador de costos de planes. */
+  @Get("cost-model")
+  costModel() {
+    return { models: MODEL_PRICING };
   }
 
   @Post("plans")
