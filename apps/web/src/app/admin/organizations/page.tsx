@@ -122,6 +122,37 @@ export default function OrganizationsPage() {
               <button onClick={() => setDetail(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
             <p className="text-sm text-slate-500">{detail.organization.slug} · {detail.organization.status} · {detail.subscription?.planName ?? "sin plan"} ({detail.subscription?.status ?? "—"})</p>
+
+            <h3 className="mt-4 mb-1 text-sm font-semibold">Consumo (últimos 30 días)</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: "Clientes activos", value: detail.metrics?.activeClients ?? 0 },
+                { label: "Conversaciones", value: detail.metrics?.conversationsInitiated ?? 0 },
+                {
+                  label: "Costo IA (USD)",
+                  value: `$${Number(detail.usage?.find((u: any) => u.type === "ai_tokens")?._sum?.costUsd ?? 0).toFixed(2)}`,
+                },
+              ].map((s) => (
+                <div key={s.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-lg font-semibold text-navy-900">{s.value}</div>
+                  <div className="text-[11px] text-slate-500">{s.label}</div>
+                </div>
+              ))}
+            </div>
+            {detail.usage?.length > 0 && (
+              <table className="mt-2 w-full text-xs">
+                <tbody>
+                  {detail.usage.map((u: any) => (
+                    <tr key={u.type} className="border-t border-slate-100">
+                      <td className="py-1 text-slate-500">{u.type}</td>
+                      <td className="py-1 text-right">{Number(u._sum?.quantity ?? 0).toLocaleString("es-CL")}</td>
+                      <td className="py-1 text-right text-slate-400">US${Number(u._sum?.costUsd ?? 0).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
             <h3 className="mt-4 mb-1 text-sm font-semibold">Miembros ({detail.members.length})</h3>
             <ul className="text-xs text-slate-600">
               {detail.members.map((m: any) => (<li key={m.email}>{m.name} · {m.email} {m.active ? "" : "(inactivo)"}</li>))}
