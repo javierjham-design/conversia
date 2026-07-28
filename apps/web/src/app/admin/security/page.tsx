@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { padmin } from "@/lib/platform-api";
 import { Button, PageHeader, Skeleton, StatusBadge, useToast } from "@/components/ui";
 
@@ -112,22 +113,25 @@ export default function SecurityPage() {
           </div>
         ) : enroll ? (
           <div className="space-y-4">
-            <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-600">
-              <li>Abre Google Authenticator, Authy o 1Password.</li>
-              <li>Elige “agregar cuenta” → “ingresar clave manualmente” y pega esta clave:</li>
-            </ol>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="break-all font-mono text-sm tracking-wider text-navy-900">{enroll.secret}</p>
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(enroll.secret);
-                  toast.push("Clave copiada", "ok");
-                }}
-                className="mt-1 text-xs text-brand-600 hover:underline"
-              >
-                Copiar clave
-              </button>
+            <p className="text-sm text-slate-600">Escanea este código con Google Authenticator, Authy o 1Password:</p>
+            <div className="flex justify-center rounded-lg border border-slate-200 bg-white p-4">
+              <QRCodeSVG value={enroll.otpauthUri} size={188} level="M" />
             </div>
+            <details className="text-sm">
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">¿No puedes escanear? Ingresa la clave manualmente</summary>
+              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="break-all font-mono text-sm tracking-wider text-navy-900">{enroll.secret}</p>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(enroll.secret);
+                    toast.push("Clave copiada", "ok");
+                  }}
+                  className="mt-1 text-xs text-brand-600 hover:underline"
+                >
+                  Copiar clave
+                </button>
+              </div>
+            </details>
             <label className="block text-sm">
               Ingresa el código de 6 dígitos que muestra la app
               <input
