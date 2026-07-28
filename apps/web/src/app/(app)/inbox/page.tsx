@@ -53,6 +53,7 @@ interface Conversation {
   status: string;
   aiEnabled: boolean;
   assignedUserId: string | null;
+  activeAgentId: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   contact: Contact;
@@ -70,6 +71,11 @@ interface Assignable {
   userId: string;
   name: string;
 }
+interface AgentOption {
+  id: string;
+  name: string;
+  slug: string;
+}
 
 export default function InboxPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -77,6 +83,7 @@ export default function InboxPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [users, setUsers] = useState<Assignable[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [fStatus, setFStatus] = useState("open");
   const [fAi, setFAi] = useState("all");
   const [fAssigned, setFAssigned] = useState("all");
@@ -104,6 +111,7 @@ export default function InboxPage() {
 
   useEffect(() => {
     void api<Assignable[]>("/users/assignable").then(setUsers).catch(() => setUsers([]));
+    void api<AgentOption[]>("/agents/assignable").then(setAgents).catch(() => setAgents([]));
   }, []);
 
   useEffect(() => {
@@ -149,6 +157,16 @@ export default function InboxPage() {
     await api(`/conversations/${selected.id}/assign`, {
       method: "POST",
       body: JSON.stringify({ userId: userId || null }),
+    });
+    await loadMessages(selected.id);
+  }
+
+  async function assignAgent(agentId: string) {
+    if (!selected) return;
+    // Al asignar un agente, la IA retoma el control (aiEnabled=true en el backend).
+    await api(`/conversations/${selected.id}/agent`, {
+      method: "POST",
+      body: JSON.stringify({ agentId: agentId || null }),
     });
     await loadMessages(selected.id);
   }
@@ -236,6 +254,17 @@ export default function InboxPage() {
                   <option value="">👤 Sin asignar</option>
                   {users.map((u) => (
                     <option key={u.userId} value={u.userId}>👤 {u.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={selected.activeAgentId ?? ""}
+                  onChange={(e) => void assignAgent(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                  title="Agente de IA a cargo"
+                >
+                  <option value="">🤖 Sin agente</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>🤖 {a.name}</option>
                   ))}
                 </select>
                 <button

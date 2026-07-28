@@ -263,6 +263,46 @@ export class ConversationsController {
   }
 
   /**
+   * Asigna (o cambia) el agente de IA a cargo de la conversación. Al asignar uno,
+   * la IA retoma el control (aiEnabled=true) y responde según su configuración;
+   * agentId=null desactiva la IA. Cierra cualquier handoff humano activo.
+   */
+  @Post(":id/agent")
+  setAgent(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ agentId: z.string().min(1).nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("agentId inválido");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const agentId = parsed.data.agentId;
+      if (agentId) {
+        const agent = await tx.agent.findFirst({ where: { id: agentId, deletedAt: null } });
+        if (!agent) throw new BadRequestException("Agente no encontrado");
+      }
+      await tx.conversation.update({ where: { id }, data: { activeAgentId: agentId, aiEnabled: !!agentId } });
+      if (agentId) {
+        await tx.humanHandoff.updateMany({
+          where: { conversationId: id, status: "ACTIVE" },
+          data: { status: "RETURNED_TO_AI", resolvedAt: new Date() },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "conversation.set_agent",
+          entityType: "conversation",
+          entityId: id,
+          after: { agentId },
+        },
+      });
+      return { ok: true, activeAgentId: agentId, aiEnabled: !!agentId };
+    });
+  }
+
+  /**
    * Tiempo real v0: SSE con sondeo cada 3s de conversaciones actualizadas.
    * (Upgrade documentado: pub/sub Redis → websockets.)
    */

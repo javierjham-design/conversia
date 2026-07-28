@@ -150,6 +150,19 @@ export class AgentsController {
     });
   }
 
+  /** Lista liviana de agentes activos para asignar en la bandeja (cualquier miembro). */
+  @Get("assignable")
+  assignable() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.agent.findMany({
+        where: { deletedAt: null, active: true },
+        select: { id: true, name: true, slug: true },
+        orderBy: { name: "asc" },
+      }),
+    );
+  }
+
   @Get(":id")
   detail(@Param("id") id: string) {
     const ctx = requirePermission("agents:read");
