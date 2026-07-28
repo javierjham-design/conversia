@@ -117,12 +117,17 @@ export class PlatformController {
     const db = this.prisma.admin;
     const org = await db.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException("Organización no encontrada");
-    const [sub, plans, invoices, usage, members] = await Promise.all([
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const [sub, plans, invoices, usage, members, convInitiated, activeClientRows] = await Promise.all([
       db.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } }),
       db.plan.findMany(),
       db.invoice.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
-      db.usageEvent.groupBy({ by: ["type"], where: { organizationId: id, occurredAt: { gte: new Date(Date.now() - 30 * 24 * 3600 * 1000) } }, _sum: { quantity: true, costUsd: true } }),
+      db.usageEvent.groupBy({ by: ["type"], where: { organizationId: id, occurredAt: { gte: since } }, _sum: { quantity: true, costUsd: true } }),
       db.organizationUser.findMany({ where: { organizationId: id }, include: { user: { select: { email: true, name: true } } } }),
+      // Conversaciones iniciadas en el período (métrica facturable estilo CBP)
+      db.conversation.count({ where: { organizationId: id, createdAt: { gte: since } } }),
+      // Clientes activos (MAU): contactos distintos con actividad en la ventana
+      db.conversation.findMany({ where: { organizationId: id, lastMessageAt: { gte: since } }, select: { contactId: true }, distinct: ["contactId"] }),
     ]);
     const plan = sub ? plans.find((p) => p.id === sub.planId) : null;
     return {
@@ -130,6 +135,8 @@ export class PlatformController {
       subscription: sub ? { status: sub.status, planCode: plan?.code, planName: plan?.name, periodEnd: sub.periodEnd } : null,
       invoices,
       usage,
+      // Métricas de consumo del período (Fase C) — base de facturación por uso.
+      metrics: { periodDays: 30, conversationsInitiated: convInitiated, activeClients: activeClientRows.length },
       members: members.map((m) => ({ email: m.user.email, name: m.user.name, active: m.active })),
     };
   }
