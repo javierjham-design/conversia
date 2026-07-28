@@ -2,16 +2,15 @@ import { ForbiddenException } from "@nestjs/common";
 import type { TenantTx } from "@conversia/database";
 
 /**
- * Enforcement de límites del plan del tenant. Se llama DENTRO de una
- * transacción withTenant (RLS activo) antes de crear un recurso.
- * Reglas:
- * - Sin suscripción activa → no se aplica límite (no romper tenants sin plan).
- * - limit ausente o 0 → ilimitado (convención del catálogo de planes).
- * - currentCount >= limit → 403 con mensaje de upgrade.
+ * MOTOR DE ENTITLEMENTS (Fase B) — punto ÚNICO de verdad de los límites y
+ * funciones de cada tenant, resuelto server-side dentro de `withTenant` (RLS).
+ * Reglas: sin suscripción activa o límite 0 → ilimitado (no romper tenants sin
+ * plan). Nunca confiar en el frontend. Los controladores llaman a `enforceLimit`
+ * antes de crear un recurso; las rutas de features llaman a `canUseFeature`.
  */
 export type LimitedResource = "agents" | "channels" | "workflows" | "users" | "clinics";
 
-const LABELS: Record<LimitedResource, string> = {
+const LABELS: Record<string, string> = {
   agents: "agentes",
   channels: "canales",
   workflows: "flujos",
@@ -19,18 +18,66 @@ const LABELS: Record<LimitedResource, string> = {
   clinics: "sedes",
 };
 
-export async function enforcePlanLimit(tx: TenantTx, resource: LimitedResource, currentCount: number): Promise<void> {
+// Estados de suscripción que otorgan entitlements. `as const` + cast al enum de Prisma.
+const ACTIVE_STATUSES = ["ACTIVE", "TRIALING"] as const;
+
+export interface Entitlements {
+  hasSubscription: boolean;
+  status: string | null;
+  planCode: string | null;
+  limits: Record<string, number>;
+  features: Record<string, unknown>;
+}
+
+/** Resuelve el plan + suscripción activos del tenant (dentro de withTenant/RLS). */
+export async function getEntitlements(tx: TenantTx): Promise<Entitlements> {
   const sub = await tx.subscription.findFirst({
-    where: { status: { in: ["ACTIVE", "TRIALING"] } },
+    where: { status: { in: ACTIVE_STATUSES as unknown as string[] } as never },
     orderBy: { createdAt: "desc" },
   });
-  if (!sub) return;
+  if (!sub) return { hasSubscription: false, status: null, planCode: null, limits: {}, features: {} };
   const plan = await tx.plan.findUnique({ where: { id: sub.planId } });
-  const limit = (plan?.limits as Record<string, number> | undefined)?.[resource];
+  return {
+    hasSubscription: true,
+    status: sub.status,
+    planCode: plan?.code ?? null,
+    limits: (plan?.limits as Record<string, number>) ?? {},
+    features: (plan?.features as Record<string, unknown>) ?? {},
+  };
+}
+
+/** Límite numérico de un recurso (null = sin plan; 0 = ilimitado por convención). */
+export async function getFeatureLimit(tx: TenantTx, resource: string): Promise<number | null> {
+  const ent = await getEntitlements(tx);
+  const v = ent.limits[resource];
+  return typeof v === "number" ? v : null;
+}
+
+/** ¿La feature está habilitada por el plan? Sin plan → no se restringen features. */
+export async function canUseFeature(tx: TenantTx, feature: string): Promise<boolean> {
+  const ent = await getEntitlements(tx);
+  if (!ent.hasSubscription) return true;
+  return ent.features[feature] === true;
+}
+
+export async function getSubscriptionStatus(tx: TenantTx): Promise<string | null> {
+  return (await getEntitlements(tx)).status;
+}
+
+/**
+ * Enforcement de un límite de recurso (403 al exceder). Punto único de verdad
+ * de los límites duros que consumen los controladores.
+ */
+export async function enforceLimit(tx: TenantTx, resource: string, currentCount: number): Promise<void> {
+  const limit = await getFeatureLimit(tx, resource);
   if (typeof limit !== "number" || limit <= 0) return;
   if (currentCount >= limit) {
+    const label = LABELS[resource] ?? resource;
     throw new ForbiddenException(
-      `Alcanzaste el límite de tu plan (${limit} ${LABELS[resource]}). Sube de plan en Configuración → Plan y facturación.`,
+      `Alcanzaste el límite de tu plan (${limit} ${label}). Sube de plan en Configuración → Plan y facturación.`,
     );
   }
 }
+
+/** Alias de compatibilidad — los controladores ya importan `enforcePlanLimit`. */
+export const enforcePlanLimit = enforceLimit;
