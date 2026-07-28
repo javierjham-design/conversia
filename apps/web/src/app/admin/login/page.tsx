@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
-import { padmin, setPlatformToken } from "@/lib/platform-api";
+import { API_URL, setPlatformToken } from "@/lib/platform-api";
 
 export default function PlatformLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("superadmin@conversia.local");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,14 +19,26 @@ export default function PlatformLoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await padmin<{ token: string }>("/platform/auth/login", {
+      // Fetch directo (no `padmin`) para poder leer el flag `mfaRequired` del 401.
+      const res = await fetch(`${API_URL}/platform/auth/login`, {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password, code: code || undefined }),
       });
-      setPlatformToken(res.token);
-      router.push("/admin");
-    } catch (err) {
-      setError((err as Error).message);
+      const body = await res.json().catch(() => ({} as any));
+      if (res.ok) {
+        setPlatformToken(body.token);
+        router.push("/admin");
+        return;
+      }
+      if (body.mfaRequired) {
+        setNeedCode(true);
+        setError(code ? "Código de verificación inválido." : null);
+      } else {
+        setError(body.message ?? "No se pudo iniciar sesión");
+      }
+    } catch {
+      setError("Error de conexión");
     } finally {
       setLoading(false);
     }
@@ -44,15 +58,29 @@ export default function PlatformLoginPage() {
         </div>
         <label className="block text-sm">
           Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-1 w-full rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-white" />
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" className="mt-1 w-full rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-white" />
         </label>
         <label className="block text-sm">
           Contraseña
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-1 w-full rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-white" />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" className="mt-1 w-full rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 text-white" />
         </label>
+        {needCode && (
+          <label className="block text-sm">
+            Código de verificación
+            <input
+              inputMode="numeric"
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="6 dígitos de tu app"
+              className="mt-1 w-full rounded-lg border border-navy-700 bg-navy-800 px-3 py-2 tracking-widest text-white"
+            />
+            <span className="mt-1 block text-[11px] text-navy-400">O usa un código de recuperación.</span>
+          </label>
+        )}
         {error && <p className="text-sm text-red-400">{error}</p>}
         <button type="submit" disabled={loading} className="w-full rounded-lg bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50">
-          {loading ? "Entrando…" : "Entrar"}
+          {loading ? "Entrando…" : needCode ? "Verificar" : "Entrar"}
         </button>
         <p className="text-[11px] text-navy-300">Acceso exclusivo para administradores de la plataforma TuBot.</p>
       </form>

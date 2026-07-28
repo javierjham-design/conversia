@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Building2, CreditCard, LayoutDashboard, LogOut, Package, ShieldCheck } from "lucide-react";
-import { clearPlatformToken, getPlatformToken } from "@/lib/platform-api";
+import { Building2, CreditCard, KeyRound, LayoutDashboard, LogOut, Package, ShieldCheck } from "lucide-react";
+import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 import { ToastProvider, cn } from "@/components/ui";
 
 const NAV = [
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/admin/organizations", label: "Organizaciones", icon: Building2 },
   { href: "/admin/plans", label: "Planes", icon: Package },
   { href: "/admin/billing", label: "Facturación", icon: CreditCard },
+  { href: "/admin/security", label: "Seguridad", icon: KeyRound },
 ];
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
@@ -69,7 +70,9 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             })}
           </div>
           <button
-            onClick={() => {
+            onClick={async () => {
+              // Revoca la sesión en el servidor (Redis) antes de limpiar el token local.
+              await padmin("/platform/auth/logout", { method: "POST" }).catch(() => {});
               clearPlatformToken();
               window.location.href = "/admin/login";
             }}

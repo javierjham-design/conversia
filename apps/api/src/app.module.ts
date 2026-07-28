@@ -16,6 +16,8 @@ import { RateLimitService } from "./common/rate-limit";
 import { RateLimitMiddleware } from "./common/rate-limit.middleware";
 import { PlatformAuthController } from "./platform/platform-auth.controller";
 import { PlatformController } from "./platform/platform.controller";
+import { PlatformGuard } from "./platform/platform.guard";
+import { PlatformSessionService } from "./platform/platform-session.service";
 import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
@@ -42,7 +44,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     PlatformAuthController,
     PlatformController,
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

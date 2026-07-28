@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import type { Request } from "express";
 import { getEnv } from "@conversia/config";
 import { verifyPlatformToken, type PlatformClaims } from "./platform.jwt";
+import { PlatformSessionService } from "./platform-session.service";
 
 export interface PlatformRequest extends Request {
   platformAdmin?: PlatformClaims;
@@ -14,7 +15,9 @@ function clientIp(req: Request): string {
 /** Protege las rutas /platform/* con el token de administrador de plataforma. */
 @Injectable()
 export class PlatformGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private sessions: PlatformSessionService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<PlatformRequest>();
 
     // 2ª capa (opcional): allowlist de IP. Vacío = sin restricción (default seguro).
@@ -28,11 +31,17 @@ export class PlatformGuard implements CanActivate {
 
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer ")) throw new UnauthorizedException("Falta token de plataforma");
+    let claims: PlatformClaims;
     try {
-      req.platformAdmin = verifyPlatformToken(header.slice(7));
-      return true;
+      claims = verifyPlatformToken(header.slice(7));
     } catch {
       throw new UnauthorizedException("Token de plataforma inválido o expirado");
     }
+    // La sesión debe seguir viva en Redis (permite revocación / logout remoto).
+    if (!(await this.sessions.isValid(claims.jti))) {
+      throw new UnauthorizedException("Sesión cerrada o revocada. Inicia sesión de nuevo.");
+    }
+    req.platformAdmin = claims;
+    return true;
   }
 }
