@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
+import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
@@ -137,6 +138,32 @@ export class ConversationsController {
       });
       return { conversation, messages };
     });
+  }
+
+  /** Transmite el audio original de una nota de voz (lo descarga de Meta on-demand
+   *  con el token de la plataforma). Permite al operador escucharlo por si acaso. */
+  @Get(":id/messages/:messageId/audio")
+  async messageAudio(@Param("id") id: string, @Param("messageId") messageId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    const message = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.message.findFirst({ where: { id: messageId, conversationId: id } }),
+    );
+    if (!message) throw new NotFoundException("Mensaje no encontrado");
+    const payload = (message.payload ?? {}) as any;
+    const mediaId = payload?.audio?.id ?? payload?.voice?.id;
+    if (!mediaId) throw new NotFoundException("Este mensaje no tiene audio");
+    const env = getEnv();
+    const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(String(mediaId))}`, {
+      headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` },
+    });
+    const meta: any = await metaRes.json().catch(() => ({}));
+    if (!meta?.url) throw new NotFoundException("Audio no disponible (puede haber expirado en Meta)");
+    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` } });
+    if (!audioRes.ok) throw new NotFoundException("No se pudo obtener el audio");
+    const buf = Buffer.from(await audioRes.arrayBuffer());
+    res.setHeader("content-type", meta.mime_type ?? "audio/ogg");
+    res.setHeader("cache-control", "private, max-age=3600");
+    res.send(buf);
   }
 
   /** Envío manual desde el panel (autor humano). */

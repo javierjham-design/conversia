@@ -206,7 +206,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
           organizationId,
           conversationId: conversation.id,
           direction: "INBOUND",
-          type: msg.type === "text" ? "TEXT" : "TEXT",
+          type: msg.type === "audio" || msg.type === "voice" ? "AUDIO" : "TEXT",
           body: text ?? `[${msg.type}]`,
           payload: (transcribed ? { ...(msg.payload as object), transcribed: true } : msg.payload) as object,
           externalId: msg.externalId,

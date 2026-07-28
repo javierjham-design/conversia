@@ -1,7 +1,46 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
+
+/** Reproductor de nota de voz: descarga el audio (con auth) on-demand y lo reproduce. */
+function AudioBubble({ conversationId, messageId, transcript, outbound }: { conversationId: string; messageId: string; transcript: string | null; outbound: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(false);
+  async function load() {
+    if (url || loading) return;
+    setLoading(true);
+    setErr(false);
+    try {
+      const res = await fetch(`/backend/conversations/${conversationId}/messages/${messageId}/audio`, {
+        headers: { authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) throw new Error();
+      setUrl(URL.createObjectURL(await res.blob()));
+    } catch {
+      setErr(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <div>
+      {url ? (
+        <audio controls src={url} className="mb-1 h-9 w-56" />
+      ) : (
+        <button
+          onClick={() => void load()}
+          disabled={loading}
+          className={`mb-1 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs ${outbound ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-700"}`}
+        >
+          🎤 {loading ? "Cargando…" : err ? "No disponible" : "Escuchar audio"}
+        </button>
+      )}
+      {transcript && <p className="whitespace-pre-wrap">{transcript}</p>}
+    </div>
+  );
+}
 
 interface Contact {
   id: string;
@@ -21,6 +60,7 @@ interface Conversation {
 interface Message {
   id: string;
   direction: "INBOUND" | "OUTBOUND";
+  type?: string;
   body: string | null;
   authorType: string;
   status: string;
@@ -224,7 +264,11 @@ export default function InboxPage() {
                       m.direction === "OUTBOUND" ? "bg-cyan-700 text-white" : "border border-slate-200 bg-white"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{m.body}</p>
+                    {m.type === "AUDIO" ? (
+                      <AudioBubble conversationId={selected?.id ?? ""} messageId={m.id} transcript={m.body} outbound={m.direction === "OUTBOUND"} />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{m.body}</p>
+                    )}
                     <p className={`mt-1 text-[10px] ${m.direction === "OUTBOUND" ? "text-cyan-200" : "text-slate-400"}`}>
                       {m.authorType.toLowerCase()} · {new Date(m.createdAt).toLocaleTimeString("es-CL")} · {m.status.toLowerCase()}
                     </p>
