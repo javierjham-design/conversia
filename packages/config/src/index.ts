@@ -42,6 +42,9 @@ const envSchema = z.object({
   AI_DEFAULT_MODEL: z.string().default("gpt-4o-mini"),
   AI_CLASSIFIER_MODEL: z.string().default("gpt-4o-mini"),
   AI_TRANSCRIBE_MODEL: z.string().default("whisper-1"), // notas de voz de WhatsApp (OpenAI)
+  // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
+  RESEND_API_KEY: z.string().optional().default(""),
+  RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)

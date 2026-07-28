@@ -17,6 +17,7 @@ import { MODEL_PRICING, createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { AuthService } from "../auth/auth.service";
+import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
 
@@ -143,8 +144,13 @@ export class PlatformController {
     const settings = (org.settings ?? {}) as Record<string, any>;
     const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
     const planLimits = (plan?.limits as Record<string, number>) ?? {};
+    // Correo del admin (owner) del tenant, para la sección de cuenta.
+    const orgRoles = await db.role.findMany({ where: { organizationId: id }, select: { id: true, code: true } });
+    const ownerRoleIds = new Set(orgRoles.filter((r) => r.code === "owner").map((r) => r.id));
+    const adminMember = members.find((m) => ownerRoleIds.has(m.roleId) && m.active) ?? members.find((m) => m.active) ?? members[0];
     return {
       organization: { id: org.id, name: org.name, slug: org.slug, status: org.status, country: org.country, createdAt: org.createdAt, settings: org.settings },
+      adminEmail: adminMember?.user.email ?? null,
       subscription: sub ? { status: sub.status, planCode: plan?.code, planName: plan?.name, periodEnd: sub.periodEnd } : null,
       plan: plan ? { code: plan.code, name: plan.name, limits: planLimits, features: plan.features } : null,
       // Límites efectivos = plan + override por-tenant (settings.limits). El override manda.
@@ -197,6 +203,42 @@ export class PlatformController {
       limits: settings.limits ?? {},
     });
     return { ok: true };
+  }
+
+  // ------------------- Cuenta del administrador del tenant -------------------
+
+  /** Restablece la contraseña del admin y devuelve la temporal (mostrada una vez). */
+  @Post("organizations/:id/admin/reset-password")
+  async resetAdminPassword(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const res = await this.auth.resetOrgAdminPassword(id);
+    if (!res) throw new BadRequestException("La organización no tiene usuarios activos");
+    await this.audit(req, "platform.admin.reset_password", "user", res.userId, { email: res.email });
+    return { ok: true, email: res.email, tempPassword: res.tempPassword };
+  }
+
+  /** Restablece la contraseña y la ENVÍA por correo (Resend). Si no hay email
+   *  configurado, cae a devolver la temporal para entrega manual. */
+  @Post("organizations/:id/admin/send-reset")
+  async sendAdminReset(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const res = await this.auth.resetOrgAdminPassword(id);
+    if (!res) throw new BadRequestException("La organización no tiene usuarios activos");
+    const html = `<p>Hola,</p>
+<p>Se restableció el acceso a tu cuenta de TuBot.</p>
+<p><b>Usuario:</b> ${res.email}<br/><b>Contraseña temporal:</b> ${res.tempPassword}</p>
+<p>Ingresa en <a href="https://tubot.cl/login">tubot.cl/login</a> y cámbiala.</p>`;
+    const sent = await sendEmail({ to: res.email, subject: "Restablecimiento de acceso · TuBot", html });
+    await this.audit(req, "platform.admin.send_reset", "user", res.userId, { email: res.email, sent });
+    return { ok: true, email: res.email, sent, tempPassword: sent ? null : res.tempPassword };
+  }
+
+  /** Cambia el correo del admin del tenant. */
+  @Post("organizations/:id/admin/email")
+  async updateAdminEmail(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ email: z.string().email().max(200) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Correo inválido");
+    const res = await this.auth.setOrgAdminEmail(id, parsed.data.email);
+    await this.audit(req, "platform.admin.change_email", "user", res.userId, { email: res.email });
+    return { ok: true, email: res.email };
   }
 
   @Post("organizations/:id/status")

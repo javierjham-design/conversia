@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
@@ -141,6 +141,38 @@ export class AuthService {
       });
       return { organizationId: org.id, email: input.email, tempPassword: revealPassword, validUntil };
     });
+  }
+
+  /** Usuario administrador (owner, o primer miembro activo) de una organización. */
+  private async orgAdminUser(orgId: string) {
+    const memberships = await this.prisma.admin.organizationUser.findMany({
+      where: { organizationId: orgId, active: true },
+      include: { user: true },
+    });
+    if (!memberships.length) return null;
+    const roles = await this.prisma.admin.role.findMany({ where: { organizationId: orgId } });
+    const roleById = new Map(roles.map((r) => [r.id, r]));
+    const chosen = memberships.find((m) => roleById.get(m.roleId)?.code === "owner") ?? memberships[0];
+    return chosen.user;
+  }
+
+  /** Restablece la contraseña del admin del tenant: genera una temporal y actualiza el hash. */
+  async resetOrgAdminPassword(orgId: string): Promise<{ userId: string; email: string; tempPassword: string } | null> {
+    const user = await this.orgAdminUser(orgId);
+    if (!user) return null;
+    const tempPassword = randomBytes(6).toString("base64url");
+    await this.prisma.admin.user.update({ where: { id: user.id }, data: { passwordHash: bcrypt.hashSync(tempPassword, BCRYPT_COST) } });
+    return { userId: user.id, email: user.email, tempPassword };
+  }
+
+  /** Cambia el correo del admin del tenant (valida unicidad global). */
+  async setOrgAdminEmail(orgId: string, email: string): Promise<{ userId: string; email: string }> {
+    const user = await this.orgAdminUser(orgId);
+    if (!user) throw new BadRequestException("La organización no tiene usuarios activos");
+    const existing = await this.prisma.admin.user.findUnique({ where: { email } });
+    if (existing && existing.id !== user.id) throw new ConflictException("Ese correo ya está en uso");
+    await this.prisma.admin.user.update({ where: { id: user.id }, data: { email } });
+    return { userId: user.id, email };
   }
 
   async login(input: { email: string; password: string }) {

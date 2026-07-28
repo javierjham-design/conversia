@@ -25,6 +25,8 @@ export default function OrgDetailPage() {
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [model, setModel] = useState("gpt-4o-mini");
   const [saving, setSaving] = useState(false);
+  const [adminEmail, setAdminEmail] = useState("");
+  const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
 
   const load = useCallback(async () => {
     const [detail, cm] = await Promise.all([padmin<any>(`/platform/organizations/${id}`), padmin<any>("/platform/cost-model")]);
@@ -32,6 +34,7 @@ export default function OrgDetailPage() {
     setCost(cm);
     setValidUntil(detail.validUntil ? String(detail.validUntil).slice(0, 10) : "");
     setLimits({ ...detail.effectiveLimits });
+    setAdminEmail(detail.adminEmail ?? "");
   }, [id]);
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
@@ -67,6 +70,38 @@ export default function OrgDetailPage() {
       const res = await padmin<{ token: string; user: { email: string } }>(`/platform/organizations/${id}/impersonate`, { method: "POST" });
       window.localStorage.setItem("conversia_token", res.token);
       window.open("/", "_blank");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
+  }
+
+  async function saveEmail() {
+    setSaving(true);
+    try {
+      await padmin(`/platform/organizations/${id}/admin/email`, { method: "POST", body: JSON.stringify({ email: adminEmail }) });
+      toast.push("Correo actualizado ✔", "ok");
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function resetPassword() {
+    if (!window.confirm("¿Restablecer la contraseña del administrador? Se generará una nueva y la actual dejará de servir.")) return;
+    try {
+      const res = await padmin<{ email: string; tempPassword: string }>(`/platform/organizations/${id}/admin/reset-password`, { method: "POST" });
+      setResetInfo({ email: res.email, tempPassword: res.tempPassword });
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
+  }
+  async function sendReset() {
+    if (!window.confirm("¿Enviar un restablecimiento de contraseña al correo del administrador?")) return;
+    try {
+      const res = await padmin<{ email: string; sent: boolean; tempPassword: string | null }>(`/platform/organizations/${id}/admin/send-reset`, { method: "POST" });
+      setResetInfo({ email: res.email, sent: res.sent, tempPassword: res.tempPassword });
+      if (res.sent) toast.push(`Correo enviado a ${res.email}`, "ok");
     } catch (e) {
       toast.push((e as Error).message, "error");
     }
@@ -238,6 +273,37 @@ export default function OrgDetailPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </section>
+
+        {/* Cuenta del administrador */}
+        <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
+          <h2 className="mb-1 font-semibold text-navy-900">Cuenta del administrador</h2>
+          <p className="mb-3 text-xs text-slate-500">Correo y contraseña del usuario dueño de este tenant.</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="text-sm">
+              Correo del administrador
+              <input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} className="mt-1 block w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </label>
+            <Button variant="secondary" disabled={saving || !adminEmail} onClick={() => void saveEmail()}>Guardar correo</Button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button onClick={() => void resetPassword()}>Restablecer contraseña</Button>
+            <Button variant="secondary" onClick={() => void sendReset()}>Enviar restablecimiento al correo</Button>
+          </div>
+          {resetInfo && (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+              {resetInfo.tempPassword ? (
+                <>
+                  <p className="text-amber-900">Contraseña temporal para <b>{resetInfo.email}</b> (se muestra una vez):</p>
+                  <p className="mt-1 font-mono text-base text-navy-900">{resetInfo.tempPassword}</p>
+                  {resetInfo.sent === false && <p className="mt-1 text-[11px] text-amber-700">No se pudo enviar por correo (falta configurar Resend): compártela manualmente.</p>}
+                </>
+              ) : (
+                <p className="text-emerald-800">✓ Restablecimiento enviado a {resetInfo.email}.</p>
+              )}
+              <button onClick={() => setResetInfo(null)} className="mt-2 text-xs text-slate-400 hover:text-slate-600">Cerrar</button>
+            </div>
           )}
         </section>
 
