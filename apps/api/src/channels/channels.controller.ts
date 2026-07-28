@@ -234,10 +234,44 @@ export class ChannelsController {
 
     // 5. Persistir el canal con el token por-WABA cifrado
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
       const existing = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId } });
-      if (existing) throw new BadRequestException("Ese número ya está conectado.");
 
+      // Re-onboarding idempotente: si ESTE tenant ya tiene el número (bajo RLS solo
+      // ve los suyos), refrescamos el token y reactivamos el canal en vez de fallar.
+      if (existing) {
+        const credential = await tx.integrationCredential.create({
+          data: {
+            organizationId: ctx.organizationId,
+            provider: "whatsapp",
+            label: `Token Embedded Signup ${name} (reconexión)`,
+            ciphertext: encryptSecret(accessToken),
+          },
+        });
+        await tx.whatsappAccount.updateMany({
+          where: { organizationId: ctx.organizationId, wabaId: input.wabaId },
+          data: { credentialId: credential.id },
+        });
+        if (existing.channelConnectionId) {
+          await tx.channelConnection.update({
+            where: { id: existing.channelConnectionId },
+            data: { status: "active", ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}) },
+          });
+        }
+        await tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "channel.embedded_signup_reconnect",
+            entityType: "channel_connection",
+            entityId: existing.channelConnectionId ?? existing.id,
+            after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
+          },
+        });
+        return { ok: true, id: existing.channelConnectionId, name, displayPhone, reconnected: true };
+      }
+
+      await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
       const channel = await tx.channelConnection.create({
         data: {
           organizationId: ctx.organizationId,

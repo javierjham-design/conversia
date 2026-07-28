@@ -153,6 +153,12 @@ export default function ChannelsPage() {
   }, [esConfig]);
 
   async function finishEmbedded(code: string) {
+    if (!sessionRef.current.wabaId || !sessionRef.current.phoneNumberId) {
+      setMsg(
+        'Meta no devolvió la cuenta/número. Reintenta "Conectar con Meta" y elige "Editar configuración" para seleccionar tu WhatsApp Business (no "Reconectar").',
+      );
+      return;
+    }
     setConnecting(true);
     try {
       const r = await api<{ displayPhone: string }>("/channels/embedded-signup", {
