@@ -32,6 +32,7 @@ export default function ChannelsPage() {
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [fbReady, setFbReady] = useState(false);
   const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string }>({});
 
   const [form, setForm] = useState({
@@ -129,22 +130,27 @@ export default function ChannelsPage() {
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
-  function loadFb(appId: string, version: string): Promise<void> {
-    return new Promise((resolve) => {
-      const w = window as any;
-      if (w.FB) return resolve();
-      w.fbAsyncInit = () => {
-        w.FB.init({ appId, autoLogAppEvents: true, xfbml: true, version });
-        resolve();
-      };
-      const s = document.createElement("script");
-      s.async = true;
-      s.defer = true;
-      s.crossOrigin = "anonymous";
-      s.src = "https://connect.facebook.net/en_US/sdk.js";
-      document.body.appendChild(s);
-    });
-  }
+  // Carga + inicializa el SDK de Facebook APENAS tengamos la config, para que
+  // FB.login se llame SÍNCRONO en el click (si va tras un await, el navegador
+  // bloquea el popup y "no hace nada").
+  useEffect(() => {
+    if (!esConfig?.configId || !esConfig.appId) return;
+    const w = window as any;
+    if (w.FB) {
+      setFbReady(true);
+      return;
+    }
+    w.fbAsyncInit = () => {
+      w.FB.init({ appId: esConfig.appId, autoLogAppEvents: true, xfbml: true, version: esConfig.graphVersion });
+      setFbReady(true);
+    };
+    const s = document.createElement("script");
+    s.async = true;
+    s.defer = true;
+    s.crossOrigin = "anonymous";
+    s.src = "https://connect.facebook.net/en_US/sdk.js";
+    document.body.appendChild(s);
+  }, [esConfig]);
 
   async function finishEmbedded(code: string) {
     setConnecting(true);
@@ -167,15 +173,19 @@ export default function ChannelsPage() {
     }
   }
 
-  async function connectWithMeta() {
+  function connectWithMeta() {
     if (!esConfig?.configId) {
       setMsg("El Embedded Signup aún no está configurado (falta META_CONFIG_ID en el servidor).");
       return;
     }
+    const w = window as any;
+    if (!fbReady || !w.FB) {
+      setMsg("No se pudo cargar el SDK de Facebook (¿un bloqueador de anuncios/tracking?) o el dominio aún no está autorizado en Meta.");
+      return;
+    }
     setMsg(null);
     sessionRef.current = {};
-    await loadFb(esConfig.appId, esConfig.graphVersion);
-    (window as any).FB.login(
+    w.FB.login(
       (response: any) => {
         const code = response?.authResponse?.code;
         if (!code) {
