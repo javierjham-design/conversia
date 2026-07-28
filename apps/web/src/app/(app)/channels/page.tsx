@@ -204,7 +204,9 @@ export default function ChannelsPage() {
         config_id: esConfig.configId,
         response_type: "code",
         override_default_response_type: true,
-        extras: { setup: {} },
+        // sessionInfoVersion:'3' hace que Meta emita el evento WA_EMBEDDED_SIGNUP
+        // con waba_id + phone_number_id durante el flujo de WhatsApp.
+        extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
       },
     );
   }
