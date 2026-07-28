@@ -85,3 +85,17 @@ Meta es el **de la plataforma**, no el del tenant. (Modelo Tech Provider, como R
 
 > Nota honesta: los requisitos y pantallas exactas de Meta cambian con el tiempo; seguir también las indicaciones
 > que muestre el propio dashboard. Este documento cubre la sustancia y los textos.
+
+## Etapa 2 — Marketing (CAPI + Lead Ads) — PENDIENTE
+Decisión 2026-07-27: se **faseó**. La Etapa 1 (solo permisos de WhatsApp) va primero para no frenar la aprobación
+del core; la Etapa 2 se envía en una **segunda revisión** con el core ya vivo. Permisos/productos a agregar:
+- `ads_management` (Avanzado) — gestionar datasets/conjuntos de datos y enviar **CAPI** de forma programática por tenant.
+- `leads_retrieval` (Avanzado) — leer leads de **Lead Ads** ("cliente potencial") de otros negocios.
+- `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata` — acceso a la Página + suscribir el webhook `leadgen`.
+- `business_management` — gestión de activos del negocio en el onboarding.
+- Producto **Marketing API**.
+
+El código de CAPI + Lead Ads **ya existe** (worker: `meta-leads.ts`, `capi.ts`; UI en *Integraciones → Meta*): lo que
+gatea la producción son estos permisos. **Atajo para el piloto** (CAPI sin permisos nuevos): el tenant genera el
+**token de su dataset** en Events Manager y lo carga; con eso se envían conversiones de una. Falta un ajuste de
+código menor: leer el `referral`/`ctwa_clid` del anuncio Click-to-WhatsApp que ya llega en el webhook de `messages`.

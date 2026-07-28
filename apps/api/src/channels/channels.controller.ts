@@ -163,6 +163,128 @@ export class ChannelsController {
     });
   }
 
+  /** Config pública para el frontend del Embedded Signup (sin secretos). */
+  @Get("meta/embedded-config")
+  embeddedConfig() {
+    requireContext();
+    const env = getEnv();
+    return { appId: env.META_APP_ID, configId: env.META_CONFIG_ID, graphVersion: env.META_GRAPH_VERSION };
+  }
+
+  /**
+   * Completa el Embedded Signup: intercambia el code por el token del negocio,
+   * suscribe nuestra app a su WABA, registra el número y crea el canal.
+   */
+  @Post("embedded-signup")
+  async embeddedSignup(@Body() body: unknown) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    const input = parse(
+      z.object({
+        code: z.string().min(5),
+        wabaId: z.string().min(3),
+        phoneNumberId: z.string().min(3),
+        name: z.string().min(2).max(60).optional(),
+        defaultAgentId: z.string().nullable().optional(),
+      }),
+      body,
+    );
+    if (!env.META_APP_ID || !env.META_APP_SECRET) {
+      throw new BadRequestException("Embedded Signup no está configurado en el servidor (META_APP_ID / META_APP_SECRET).");
+    }
+    const v = env.META_GRAPH_VERSION;
+
+    // 1. code -> token del negocio (long-lived en Embedded Signup)
+    const tokenRes = await fetch(
+      `https://graph.facebook.com/${v}/oauth/access_token?client_id=${encodeURIComponent(env.META_APP_ID)}&client_secret=${encodeURIComponent(env.META_APP_SECRET)}&code=${encodeURIComponent(input.code)}`,
+    );
+    const tokenJson: any = await tokenRes.json().catch(() => ({}));
+    const accessToken: string | undefined = tokenJson?.access_token;
+    if (!tokenRes.ok || !accessToken) {
+      throw new BadRequestException(`No se pudo obtener el token de Meta: ${tokenJson?.error?.message ?? tokenRes.status}`);
+    }
+
+    // 2. Suscribir nuestra app al WABA del cliente (webhooks) — best-effort
+    await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+    }).catch(() => undefined);
+
+    // 3. Registrar el número para Cloud API — best-effort (puede estar ya registrado)
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}/register`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", pin }),
+    }).catch(() => undefined);
+
+    // 4. Nombre visible del número — best-effort
+    let displayPhone = input.phoneNumberId;
+    try {
+      const numRes = await fetch(
+        `https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}?fields=display_phone_number,verified_name`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      const numJson: any = await numRes.json();
+      if (numRes.ok && numJson?.display_phone_number) displayPhone = numJson.display_phone_number;
+    } catch {
+      /* ignore */
+    }
+    const name = input.name ?? `WhatsApp ${displayPhone}`;
+
+    // 5. Persistir el canal con el token por-WABA cifrado
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
+      const existing = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId } });
+      if (existing) throw new BadRequestException("Ese número ya está conectado.");
+
+      const channel = await tx.channelConnection.create({
+        data: {
+          organizationId: ctx.organizationId,
+          type: "WHATSAPP_CLOUD",
+          name,
+          defaultAgentId: input.defaultAgentId ?? null,
+          status: "active",
+        },
+      });
+      const credential = await tx.integrationCredential.create({
+        data: {
+          organizationId: ctx.organizationId,
+          provider: "whatsapp",
+          label: `Token Embedded Signup ${name}`,
+          ciphertext: encryptSecret(accessToken),
+        },
+      });
+      const account = await tx.whatsappAccount.upsert({
+        where: { organizationId_wabaId: { organizationId: ctx.organizationId, wabaId: input.wabaId } },
+        update: { credentialId: credential.id },
+        create: { organizationId: ctx.organizationId, wabaId: input.wabaId, name, credentialId: credential.id },
+      });
+      await tx.whatsappPhoneNumber.create({
+        data: {
+          organizationId: ctx.organizationId,
+          accountId: account.id,
+          channelConnectionId: channel.id,
+          phoneNumberId: input.phoneNumberId,
+          displayPhone,
+          status: "active",
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "channel.embedded_signup",
+          entityType: "channel_connection",
+          entityId: channel.id,
+          after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
+        },
+      });
+      return { ok: true, id: channel.id, name, displayPhone };
+    });
+  }
+
   @Patch(":id")
   update(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("channels:write");

@@ -51,6 +51,9 @@ const envSchema = z.object({
   META_VERIFY_TOKEN: z.string().default("conversia-verify-token-dev"),
   META_ACCESS_TOKEN: z.string().optional().default(""),
   META_GRAPH_VERSION: z.string().default("v21.0"),
+  // Embedded Signup (onboarding self-service tipo Respond): app id + id de configuración
+  META_APP_ID: z.string().optional().default(""),
+  META_CONFIG_ID: z.string().optional().default(""),
 
   SCHEDULING_PROVIDER: z.enum(["mock", "clariva"]).default("mock"),
   CLARIVA_BASE_URL: z.string().default("http://localhost:4010"),

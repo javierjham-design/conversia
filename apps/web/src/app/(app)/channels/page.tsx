@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
 interface Channel {
@@ -30,6 +30,9 @@ export default function ChannelsPage() {
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string } | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string }>({});
 
   const [form, setForm] = useState({
     type: "WHATSAPP_CLOUD" as "WHATSAPP_CLOUD" | "MOCK",
@@ -105,6 +108,91 @@ export default function ChannelsPage() {
     setMsg("Copiado al portapapeles ✔");
   }
 
+  // -------- Embedded Signup (conexión self-service tipo Respond) --------
+  useEffect(() => {
+    api<{ appId: string; configId: string; graphVersion: string }>("/channels/meta/embedded-config")
+      .then(setEsConfig)
+      .catch(() => undefined);
+    function onMsg(event: MessageEvent) {
+      if (typeof event.origin !== "string" || !event.origin.endsWith("facebook.com")) return;
+      try {
+        const d = JSON.parse(event.data);
+        if (d?.type === "WA_EMBEDDED_SIGNUP" && d.data) {
+          if (d.data.waba_id) sessionRef.current.wabaId = d.data.waba_id;
+          if (d.data.phone_number_id) sessionRef.current.phoneNumberId = d.data.phone_number_id;
+        }
+      } catch {
+        /* no-op */
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  function loadFb(appId: string, version: string): Promise<void> {
+    return new Promise((resolve) => {
+      const w = window as any;
+      if (w.FB) return resolve();
+      w.fbAsyncInit = () => {
+        w.FB.init({ appId, autoLogAppEvents: true, xfbml: true, version });
+        resolve();
+      };
+      const s = document.createElement("script");
+      s.async = true;
+      s.defer = true;
+      s.crossOrigin = "anonymous";
+      s.src = "https://connect.facebook.net/en_US/sdk.js";
+      document.body.appendChild(s);
+    });
+  }
+
+  async function finishEmbedded(code: string) {
+    setConnecting(true);
+    try {
+      const r = await api<{ displayPhone: string }>("/channels/embedded-signup", {
+        method: "POST",
+        body: JSON.stringify({
+          code,
+          wabaId: sessionRef.current.wabaId,
+          phoneNumberId: sessionRef.current.phoneNumberId,
+          defaultAgentId: form.defaultAgentId || null,
+        }),
+      });
+      await load();
+      setMsg(`WhatsApp conectado con Meta: ${r.displayPhone} ✔`);
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function connectWithMeta() {
+    if (!esConfig?.configId) {
+      setMsg("El Embedded Signup aún no está configurado (falta META_CONFIG_ID en el servidor).");
+      return;
+    }
+    setMsg(null);
+    sessionRef.current = {};
+    await loadFb(esConfig.appId, esConfig.graphVersion);
+    (window as any).FB.login(
+      (response: any) => {
+        const code = response?.authResponse?.code;
+        if (!code) {
+          setMsg("Conexión cancelada.");
+          return;
+        }
+        void finishEmbedded(code);
+      },
+      {
+        config_id: esConfig.configId,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: { setup: {} },
+      },
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -112,9 +200,21 @@ export default function ChannelsPage() {
           <h1 className="text-xl font-semibold">Canales</h1>
           <p className="text-sm text-slate-500">Números de WhatsApp (Meta Cloud API) y canales de prueba.</p>
         </div>
-        <button onClick={() => setShowNew(!showNew)} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800">
-          + Conectar canal
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void connectWithMeta()}
+            disabled={connecting}
+            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {connecting ? "Conectando…" : "Conectar con Meta"}
+          </button>
+          <button
+            onClick={() => setShowNew(!showNew)}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Manual
+          </button>
+        </div>
       </div>
 
       {msg && <p className="mb-4 rounded-lg bg-slate-100 px-3 py-2 text-sm">{msg}</p>}
