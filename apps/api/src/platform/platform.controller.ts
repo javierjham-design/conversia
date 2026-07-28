@@ -13,7 +13,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
-import { MODEL_PRICING } from "@conversia/agents";
+import { MODEL_PRICING, createAIRouter } from "@conversia/agents";
+import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -249,6 +250,32 @@ export class PlatformController {
   @Get("cost-model")
   costModel() {
     return { models: MODEL_PRICING };
+  }
+
+  /** Prueba rápida de IA: manda un prompt al modelo y devuelve la respuesta + uso.
+   *  Verifica que la llave (OpenAI/Anthropic) funciona sin depender de WhatsApp. */
+  @Post("test-ai")
+  async testAi(@Body() body: unknown) {
+    const parsed = z
+      .object({
+        model: z.string().default("gpt-4o-mini"),
+        prompt: z.string().max(500).default("Responde en una sola frase: ¿estás funcionando correctamente?"),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const env = getEnv();
+    const router = createAIRouter({ anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
+    try {
+      const res = await router.chat({
+        model: parsed.data.model,
+        system: "Eres un asistente de prueba. Responde breve y en español.",
+        messages: [{ role: "user", content: parsed.data.prompt }],
+      });
+      return { ok: true, text: res.text, model: parsed.data.model, usage: res.usage, latencyMs: res.latencyMs, stopReason: res.stopReason };
+    } catch (e: any) {
+      // Devolvemos el error de forma legible (p.ej. sin saldo, llave inválida).
+      return { ok: false, model: parsed.data.model, error: String(e?.message ?? e).slice(0, 300) };
+    }
   }
 
   @Post("plans")

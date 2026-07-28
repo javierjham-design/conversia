@@ -43,6 +43,21 @@ export default function PlansPage() {
   // Supuestos del estimador de costos de IA.
   const [model, setModel] = useState("gpt-4o-mini");
   const [inputPct, setInputPct] = useState(75);
+  // Prueba de IA en vivo.
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<any | null>(null);
+
+  async function runTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(await padmin("/platform/test-ai", { method: "POST", body: JSON.stringify({ model }) }));
+    } catch (e) {
+      setTestResult({ ok: false, error: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const [p, c] = await Promise.all([padmin<Plan[]>("/platform/plans"), padmin<CostModel>("/platform/cost-model")]);
@@ -117,6 +132,28 @@ export default function PlansPage() {
             {model}: ${cost.models[model].inputPerMTok}/M entrada · ${cost.models[model].outputPerMTok}/M salida
           </p>
         )}
+      </div>
+
+      {/* Probar IA en vivo (verifica la llave del proveedor) */}
+      <div className="mb-5 rounded-card border border-slate-200 bg-white p-4 shadow-card">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button onClick={() => void runTest()} disabled={testing}>
+            {testing ? "Probando…" : `Probar IA (${model})`}
+          </Button>
+          <span className="text-xs text-slate-400">Manda un prompt de prueba al modelo seleccionado y verifica que la llave funciona.</span>
+        </div>
+        {testResult &&
+          (testResult.ok ? (
+            <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+              <p className="text-emerald-800">✓ {testResult.text}</p>
+              <p className="mt-1 text-xs text-emerald-600">
+                {testResult.model} · {testResult.usage?.inputTokens}+{testResult.usage?.outputTokens} tokens · US$
+                {Number(testResult.usage?.costUsd ?? 0).toFixed(5)} · {testResult.latencyMs}ms
+              </p>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">✗ {testResult.error ?? "Error"}</div>
+          ))}
       </div>
 
       {!plans ? (
