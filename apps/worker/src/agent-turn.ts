@@ -101,6 +101,22 @@ export async function runAgentTurn(opts: {
     );
     return;
   }
+  // Suspensión real: si la organización está SUSPENDED/CANCELLED, la IA deja de
+  // operar (deja de gastar). El Super Admin la fija con /platform/organizations/:id/status.
+  if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
+    await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: {
+          organizationId,
+          provider: "ai",
+          type: "ai.org_suspended",
+          status: "warning",
+          message: `IA detenida: organización ${org.status}`,
+        },
+      }),
+    );
+    return;
+  }
   // El tope efectivo sale del plan del tenant (limits.aiTokensDaily) si existe;
   // si no, del default de la plataforma. 0 = ilimitado.
   const budget = await withTenant(organizationId, async (tx) => {
