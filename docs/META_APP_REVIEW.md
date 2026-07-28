@@ -8,7 +8,7 @@ a los permisos de WhatsApp, que se obtiene por **App Review**.
 `2024917441656687` · Business: Digital-Dent Temuco (verificado ✅). *(Opcional pero recomendado: renombrar la app
 de Meta a "TuBot" en Configuración → Básica, para consistencia en el popup de Embedded Signup.)*
 
-> ⚠️ Las URLs `https://tubot.cl/...` requieren que el dominio esté **apuntado a Railway** (dominio personalizado
+> ⚠️ Las URLs `https://www.tubot.cl/...` requieren que el dominio esté **apuntado a Railway** (dominio personalizado
 > en el servicio `web` + CNAME en el DNS). Hasta entonces, las páginas siguen accesibles en la URL de Railway.
 
 ## Decisión de negocio (2026-07-27)
@@ -26,9 +26,9 @@ Meta es el **de la plataforma**, no el del tenant. (Modelo Tech Provider, como R
 - [x] Verificación del negocio (Meta) — **hecha**.
 - [x] Producto WhatsApp agregado a la app — **hecho**.
 - [ ] **Páginas legales publicadas** (ya creadas en el panel; requieren deploy):
-  - Privacidad: `https://tubot.cl/legal/privacidad`
-  - Términos: `https://tubot.cl/legal/terminos`
-  - Eliminación de datos: `https://tubot.cl/legal/eliminacion-datos`
+  - Privacidad: `https://www.tubot.cl/legal/privacidad`
+  - Términos: `https://www.tubot.cl/legal/terminos`
+  - Eliminación de datos: `https://www.tubot.cl/legal/eliminacion-datos`
 - [ ] En **Configuración de la app → Básica**: pegar esas 3 URLs (privacidad, condiciones, eliminación de datos),
       elegir **Categoría** y subir **ícono** de la app.
 - [ ] Completar razón social / dirección reales en las páginas legales (hoy con placeholders).
@@ -55,7 +55,7 @@ Meta es el **de la plataforma**, no el del tenant. (Modelo Tech Provider, como R
 > de webhook del número, consultar el estado/calidad del número y gestionar plantillas de mensaje.
 
 **Instrucciones para el revisor (test steps):**
-> 1. Ingresar al panel de demostración: `https://tubot.cl` con las credenciales de
+> 1. Ingresar al panel de demostración: `https://www.tubot.cl` con las credenciales de
 >    prueba provistas en el campo de credenciales.
 > 2. Ir a **Canales → Conectar canal → WhatsApp Cloud → Conectar con Meta** para ver el flujo de Embedded Signup.
 > 3. Ir a **Bandeja**: se muestra una conversación real de WhatsApp con respuesta automática del agente de IA.

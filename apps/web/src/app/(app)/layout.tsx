@@ -139,9 +139,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             {/* Marca */}
             <div className={cn("flex items-center gap-2.5 px-4 pb-4 pt-5", collapsed && "justify-center px-0")}>
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 font-bold text-white shadow-pop">
-                C
-              </div>
+              <img src="/brand/tubot-icon.png" alt="TuBot" className="h-9 w-9 shrink-0 object-contain" />
               {!collapsed && (
                 <div className="leading-tight">
                   <p className="font-semibold tracking-tight text-white">TuBot</p>
