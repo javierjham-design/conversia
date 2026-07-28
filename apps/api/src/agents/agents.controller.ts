@@ -29,7 +29,7 @@ const draftSchema = z.object({
   systemPrompt: z.string().min(20, "El prompt debe tener al menos 20 caracteres"),
   config: z
     .object({
-      model: z.string().default("claude-opus-4-8"),
+      model: z.string().default("gpt-4o-mini"),
       maxTokens: z.coerce.number().int().min(50).max(4000).default(400),
       maxToolRounds: z.coerce.number().int().min(0).max(10).default(5),
       language: z.string().default("es"),
@@ -130,7 +130,7 @@ export class AgentsController {
           version: 1,
           status: "DRAFT",
           systemPrompt: DEFAULT_PROMPT,
-          config: { model: "claude-opus-4-8", maxTokens: 400, maxToolRounds: 5, language: "es" },
+          config: { model: "gpt-4o-mini", maxTokens: 400, maxToolRounds: 5, language: "es" },
           tools: ["getServices", "getServicePrice", "searchKnowledgeBase", "transferToHuman"],
           changelog: "Borrador inicial",
           createdById: ctx.userId,

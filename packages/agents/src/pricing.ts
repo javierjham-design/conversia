@@ -15,6 +15,9 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-opus-4-6": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
+  // OpenAI (USD/millón de tokens — fuente: openai.com/pricing, cache 2026-07)
+  "gpt-4o-mini": { inputPerMTok: 0.15, outputPerMTok: 0.6 },
+  "gpt-4o": { inputPerMTok: 2.5, outputPerMTok: 10 },
 };
 
 export function computeCostUsd(model: string, inputTokens: number, outputTokens: number): number {

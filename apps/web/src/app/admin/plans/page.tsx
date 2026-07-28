@@ -41,7 +41,7 @@ export default function PlansPage() {
   const [cost, setCost] = useState<CostModel | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   // Supuestos del estimador de costos de IA.
-  const [model, setModel] = useState("claude-opus-4-8");
+  const [model, setModel] = useState("gpt-4o-mini");
   const [inputPct, setInputPct] = useState(75);
 
   const load = useCallback(async () => {

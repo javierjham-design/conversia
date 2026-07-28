@@ -1,7 +1,7 @@
 import {
   ToolRegistry,
   buildCoreTools,
-  createAIProvider,
+  createAIRouter,
   orchestrate,
   type AgentRuntime,
 } from "@conversia/agents";
@@ -15,9 +15,10 @@ import { buildToolServices } from "./tool-services";
 const registry = new ToolRegistry();
 for (const tool of buildCoreTools()) registry.register(tool);
 
-const ai = createAIProvider({
-  provider: getEnv().AI_PROVIDER,
+// Router por modelo: gpt-* → OpenAI, claude-* → Anthropic (según las llaves).
+const ai = createAIRouter({
   anthropicApiKey: getEnv().ANTHROPIC_API_KEY,
+  openaiApiKey: getEnv().OPENAI_API_KEY,
 });
 
 /**

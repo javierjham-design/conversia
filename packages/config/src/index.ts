@@ -37,10 +37,10 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   AI_DAILY_TOKEN_BUDGET_PER_ORG: z.coerce.number().default(3_000_000), // 0 = ilimitado
 
-  AI_PROVIDER: z.enum(["anthropic", "mock"]).default("mock"),
+  AI_PROVIDER: z.enum(["anthropic", "openai", "mock"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
-  AI_DEFAULT_MODEL: z.string().default("claude-opus-4-8"),
-  AI_CLASSIFIER_MODEL: z.string().default("claude-haiku-4-5"),
+  AI_DEFAULT_MODEL: z.string().default("gpt-4o-mini"),
+  AI_CLASSIFIER_MODEL: z.string().default("gpt-4o-mini"),
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
