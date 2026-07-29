@@ -17,6 +17,12 @@ function queues() {
   return { webhookQueue: webhookQueue!, capiQueue: capiQueue! };
 }
 
+/** Encola un evento CAPI DIRECTO (nodo de workflow) con reintentos/backoff. */
+export async function enqueueCapiEvent(job: CapiJob): Promise<void> {
+  const { capiQueue } = queues();
+  await capiQueue.add("send", job, { attempts: 5, backoff: { type: "exponential", delay: 5000 } });
+}
+
 /** Elimina claves con pinta de secreto/token del payload publicado. */
 function sanitize(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

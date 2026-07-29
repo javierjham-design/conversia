@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -18,6 +18,11 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     assignTeam: async (_c, teamId) => void calls.push(`team:${teamId}`),
     switchAgent: async (_c, slug) => void calls.push(`switch:${slug}`),
     startWorkflow: async (_c, name) => void calls.push(`start:${name}`),
+    openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
+    addNote: async (_c, text) => void calls.push(`note:${text}`),
+    sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
+    runAgentWithObjective: async (_c, _slug, obj) => { calls.push(`objective:${obj}`); return true; },
+    callApi: async (c, config) => { (c as any).variables.__http_ok = "true"; calls.push(`http:${(config as any).url ?? ""}`); },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,
@@ -73,6 +78,18 @@ describe("motor de workflows v0", () => {
     expect(matchesTrigger(closed, { organizationId: "o", type: "message_received", occurredAt: "" })).toBe(false);
   });
 
+  it("condiciones de click_to_chat (anuncio) y lead_status_changed (origen→destino)", () => {
+    const ad: WorkflowDefinition = { trigger: { type: "click_to_chat", config: { adId: "AD123" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(ad, { organizationId: "o", type: "click_to_chat", data: { ad_id: "AD123" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(ad, { organizationId: "o", type: "click_to_chat", data: { ad_id: "OTRO" }, occurredAt: "" })).toBe(false);
+    const anyAd: WorkflowDefinition = { ...ad, trigger: { type: "click_to_chat", config: {} } };
+    expect(matchesTrigger(anyAd, { organizationId: "o", type: "click_to_chat", data: { ad_id: "X" }, occurredAt: "" })).toBe(true);
+
+    const life: WorkflowDefinition = { trigger: { type: "lead_status_changed", config: { toStatus: "agendado" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "agendado", fromCode: "nuevo" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "perdido" }, occurredAt: "" })).toBe(false);
+  });
+
   it("ejecuta hasta la espera y programa el timer", async () => {
     const { deps, calls } = makeDeps();
     const result = await executeFrom(deps, ctx, def, findStartNode(def)!.id);
@@ -118,5 +135,104 @@ describe("motor de workflows v0", () => {
     const result = await executeFrom(deps, ctx, flow, "a");
     expect(result).toEqual({ status: "completed" });
     expect(calls).toEqual(["untag:frio", "contact:firstName", "team:t1", "switch:ventas", "start:Bienvenida"]);
+  });
+});
+
+describe("Categoría 2 — Conversación + Control de flujo", () => {
+  it("abre conversación (setea ctx.conversationId) y deja comentario", async () => {
+    const { deps, calls } = makeDeps();
+    const c2: RunCtx = { ...ctx, conversationId: undefined };
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "open_conversation", config: {} },
+        { id: "b", type: "add_note", config: { text: "Contacto desde flujo" } },
+        { id: "c", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
+    };
+    const r = await executeFrom(deps, c2, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["open", "note:Contacto desde flujo"]);
+    expect(c2.conversationId).toBe("conv-new");
+  });
+
+  it("Saltar a otro paso: salta al destino y omite los intermedios", async () => {
+    const { deps, calls } = makeDeps();
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "add_tag", config: { tag: "ini" } },
+        { id: "b", type: "goto", config: { targetNodeId: "d" } },
+        { id: "c", type: "add_tag", config: { tag: "omitido" } },
+        { id: "d", type: "add_tag", config: { tag: "destino" } },
+        { id: "e", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }, { from: "d", to: "e" }],
+    };
+    const r = await executeFrom(deps, ctx, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["tag:ini", "tag:destino"]);
+  });
+
+  it("Saltar a otro paso: corta bucles al superar el máximo de saltos", async () => {
+    const { deps } = makeDeps();
+    const loop: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [{ id: "x", type: "goto", config: { targetNodeId: "x" } }],
+      edges: [],
+    };
+    const r = await executeFrom(deps, ctx, loop, "x");
+    expect(r.status).toBe("failed");
+    expect((r as any).error).toContain("saltos");
+  });
+
+  it("Fecha y hora: dentro, fuera y feriado (zona horaria UTC para el test)", () => {
+    const cfg = { timezone: "UTC", hours: { mon: [{ from: "09:00", to: "18:00" }] }, holidays: ["2026-07-27"] };
+    // 2026-07-27 es lunes.
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-27T11:00:00Z"))).toBe(true); // dentro
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-27T20:00:00Z"))).toBe(false); // fuera de hora
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-28T11:00:00Z"))).toBe(false); // martes sin horario
+    expect(evalBusinessHours(cfg, new Date("2026-07-27T11:00:00Z"))).toBe(false); // feriado
+  });
+
+  it("send_capi encola el evento y el flujo continúa (no bloquea)", async () => {
+    const { deps, calls } = makeDeps();
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "send_capi", config: { eventName: "Schedule", value: 50000, currency: "CLP" } },
+        { id: "b", type: "add_tag", config: { tag: "capi-ok" } },
+        { id: "c", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
+    };
+    const r = await executeFrom(deps, ctx, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["capi:Schedule", "tag:capi-ok"]);
+  });
+
+  it("ai_objective ramifica según el resultado (cumplido / no cumplido)", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "ai_objective", config: { agentSlug: "agendamiento", objective: "confirmar" } },
+        { id: "ok", type: "add_tag", config: { tag: "confirmado" } },
+        { id: "no", type: "transfer_human", config: {} },
+      ],
+      edges: [{ from: "a", to: "ok", when: "met" }, { from: "a", to: "no", when: "unmet" }],
+    };
+    const met = makeDeps();
+    expect(await executeFrom(met.deps, ctx, flow, "a")).toEqual({ status: "completed" });
+    expect(met.calls).toEqual(["objective:confirmar", "tag:confirmado"]);
+
+    const unmet = makeDeps({ runAgentWithObjective: async () => false });
+    await executeFrom(unmet.deps, ctx, flow, "a");
+    expect(unmet.calls).toContain("human");
   });
 });

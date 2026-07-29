@@ -32,6 +32,8 @@ export async function runAgentTurn(opts: {
   conversationId: string;
   agentSlug?: string;
   depth?: number;
+  /** Objetivo puntual inyectado al prompt (nodo de workflow "Agente IA"). */
+  objective?: string;
 }): Promise<void> {
   const { organizationId, conversationId } = opts;
   const depth = opts.depth ?? 0;
@@ -187,8 +189,10 @@ export async function runAgentTurn(opts: {
     agentVersionId: version.id,
     slug: agent.slug,
     name: agent.name,
-    // Prompt base + instrucciones en lenguaje natural de cada acción habilitada.
-    systemPrompt: assembleSystemPrompt(version.systemPrompt, cfg.actions),
+    // Prompt base + instrucciones NL de cada acción + objetivo puntual del flujo.
+    systemPrompt:
+      assembleSystemPrompt(version.systemPrompt, cfg.actions) +
+      (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     model: aiCfg.model ?? getEnv().AI_DEFAULT_MODEL,
     maxTokens: aiCfg.maxTokens ?? 400,
     maxToolRounds: aiCfg.maxToolRounds ?? 5,

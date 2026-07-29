@@ -261,6 +261,10 @@ export const TRIGGER_TYPES = [
   "manual",
   "human_handoff",
   "conversation_closed",
+  "click_to_chat",
+  "appointment_rescheduled",
+  "missed_call",
+  "tiktok_ad",
 ] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
@@ -289,6 +293,7 @@ export const NODE_TYPES = [
   "resume_ai",
   "transfer_human",
   "add_note",
+  "open_conversation",
   // Agenda
   "check_availability",
   "create_appointment",
@@ -301,10 +306,17 @@ export const NODE_TYPES = [
   "stop",
   "start_workflow",
   "cancel_workflows",
+  "goto",
+  "business_hours",
   // Integraciones
   "call_api",
   "send_webhook",
   "notify_team",
+  // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
+  "send_capi",
+  "send_tiktok_event",
+  "google_sheets_append",
+  "ai_objective",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -439,6 +451,13 @@ export interface CapiJob {
   leadId?: string | null;
   test?: boolean;
   occurredAt: string;
+  /** Evento DIRECTO (nodo de workflow "Enviar evento CAPI"): si viene, se envía
+   *  este event_name sin depender de las reglas source→dest del tenant. */
+  eventName?: string;
+  value?: number | null;
+  currency?: string | null;
+  /** click id del anuncio Click-to-WhatsApp (atribución del conversion). */
+  ctwaClid?: string | null;
 }
 
 export interface InboundJob {

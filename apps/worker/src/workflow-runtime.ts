@@ -8,9 +8,12 @@ import {
   type RunCtx,
 } from "@conversia/workflows";
 import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
+import { createAIRouter } from "@conversia/agents";
+import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
+import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
-import { emitPlatformEvent } from "./platform-events";
+import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
 /** Implementación de efectos del motor sobre la plataforma real. */
 function makeDeps(): EngineDeps {
@@ -62,22 +65,24 @@ function makeDeps(): EngineDeps {
 
     async updateLeadStatus(ctx, statusCode) {
       if (!ctx.contactId) return;
-      await withTenant(ctx.organizationId, async (tx) => {
+      const fromCode = await withTenant(ctx.organizationId, async (tx) => {
         const status = await tx.leadStatus.findUnique({
           where: { organizationId_code: { organizationId: ctx.organizationId, code: statusCode } },
         });
-        if (!status) return;
-        const lead = await tx.lead.findFirst({ where: { contactId: ctx.contactId! }, orderBy: { createdAt: "desc" } });
+        if (!status) return null;
+        const lead = await tx.lead.findFirst({ where: { contactId: ctx.contactId! }, orderBy: { createdAt: "desc" }, include: { status: true } });
+        const prev = lead?.status?.code ?? null;
         if (lead) {
           await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
           await tx.leadEvent.create({
-            data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { to: statusCode }, actorType: "workflow", actorId: ctx.workflowId },
+            data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { from: prev, to: statusCode }, actorType: "workflow", actorId: ctx.workflowId },
           });
         } else {
           await tx.lead.create({
             data: { organizationId: ctx.organizationId, contactId: ctx.contactId!, statusId: status.id },
           });
         }
+        return prev;
       });
       const contact = await withTenant(ctx.organizationId, (tx) =>
         tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true } }),
@@ -88,6 +93,15 @@ function makeDeps(): EngineDeps {
         { statusCode, contactId: ctx.contactId, conversationId: ctx.conversationId },
         { contactPhone: contact?.phone ?? null },
       );
+      // Dispara workflows con trigger "Etapa del ciclo de vida" (origen→destino).
+      await dispatchEvent({
+        organizationId: ctx.organizationId,
+        type: "lead_status_changed",
+        conversationId: ctx.conversationId,
+        contactId: ctx.contactId,
+        data: { statusCode, fromCode },
+        occurredAt: new Date().toISOString(),
+      });
     },
 
     async addTag(ctx, tagName) {
@@ -221,6 +235,113 @@ function makeDeps(): EngineDeps {
         { conversationId: ctx.conversationId, contactId: ctx.contactId },
         { excludeWorkflowId: ctx.workflowId },
       );
+    },
+
+    async openConversation(ctx) {
+      if (ctx.conversationId || !ctx.contactId) return; // ya hay una / sin contacto
+      const convId = await withTenant(ctx.organizationId, async (tx) => {
+        const existing = await tx.conversation.findFirst({
+          where: { contactId: ctx.contactId!, status: { not: "CLOSED" } },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (existing) return existing.id;
+        const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
+        const created = await tx.conversation.create({
+          data: {
+            organizationId: ctx.organizationId,
+            contactId: ctx.contactId!,
+            channelConnectionId: channel?.id ?? null,
+            activeAgentId: channel?.defaultAgentId ?? null,
+            status: "OPEN",
+          },
+        });
+        return created.id;
+      });
+      ctx.conversationId = convId; // los pasos siguientes escriben en esta conversación
+    },
+
+    async addNote(ctx, text) {
+      if (!ctx.conversationId || !text.trim()) return;
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.message.create({
+          data: {
+            organizationId: ctx.organizationId,
+            conversationId: ctx.conversationId!,
+            direction: "OUTBOUND",
+            type: "NOTE",
+            visibility: "INTERNAL",
+            body: text,
+            authorType: "SYSTEM",
+            status: "DELIVERED",
+          },
+        }),
+      );
+    },
+
+    async sendCapiEvent(ctx, config) {
+      // Lee el ctwa_clid + teléfono del contacto y encola el evento (reintentos
+      // vía BullMQ; si Meta falla, se reintenta sin bloquear el flujo).
+      const contact = ctx.contactId
+        ? await withTenant(ctx.organizationId, (tx) =>
+            tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true, ctwaClid: true } }),
+          )
+        : null;
+      // El ctwa_clid vive en su columna estructurada (lo captura el inbound al
+      // crear/actualizar el contacto desde el referral CTWA).
+      const ctwaClid = contact?.ctwaClid ?? undefined;
+      await enqueueCapiEvent({
+        organizationId: ctx.organizationId,
+        source: "workflow",
+        occurredAt: new Date().toISOString(),
+        contactPhone: contact?.phone ?? null,
+        eventName: config.eventName,
+        value: config.value ?? null,
+        currency: config.currency ?? null,
+        ctwaClid: ctwaClid ?? null,
+      });
+    },
+
+    async runAgentWithObjective(ctx, agentSlug, objective) {
+      if (!ctx.conversationId) return false;
+      // 1) El agente responde con el objetivo inyectado en su prompt.
+      await runAgentTurn({
+        organizationId: ctx.organizationId,
+        conversationId: ctx.conversationId,
+        agentSlug: agentSlug || undefined,
+        objective,
+      });
+      if (!objective.trim()) return false;
+      // 2) Evalúa (mejor esfuerzo, modelo económico) si el objetivo ya se cumplió.
+      try {
+        const msgs = await withTenant(ctx.organizationId, (tx) =>
+          tx.message.findMany({
+            where: { conversationId: ctx.conversationId!, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
+            orderBy: { createdAt: "desc" },
+            take: 12,
+          }),
+        );
+        const transcript = msgs
+          .reverse()
+          .map((m) => `${m.direction === "INBOUND" ? "Cliente" : "Agente"}: ${m.body ?? ""}`)
+          .join("\n");
+        const router = createAIRouter({ anthropicApiKey: getEnv().ANTHROPIC_API_KEY, openaiApiKey: getEnv().OPENAI_API_KEY });
+        const res = await router.chat({
+          model: getEnv().AI_DEFAULT_MODEL,
+          system: "Eres un evaluador estricto. Responde ÚNICAMENTE 'SI' o 'NO'.",
+          messages: [{ role: "user", content: `Objetivo: "${objective}".\n\nConversación:\n${transcript}\n\n¿El objetivo YA se cumplió de forma clara? Responde solo SI o NO.` }],
+          maxTokens: 3,
+        });
+        return /\bs[íi]\b/i.test(res.text ?? "");
+      } catch {
+        return false; // ante error → "no cumplido" (rama de escalamiento)
+      }
+    },
+
+    async callApi(ctx, config) {
+      // Guard SSRF + timeout dentro de callHttp; el resultado (incluye
+      // __http_ok/__http_status y el mapeo JSON) queda disponible para los pasos.
+      const result = await callHttp(config as HttpNodeConfig, ctx.variables);
+      Object.assign(ctx.variables, result);
     },
 
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {
@@ -441,6 +562,43 @@ async function runWorkflowVersion(
   const result = await executeFrom(deps, ctx, def, start.id);
   await finishRun(organizationId, run.id, result);
   return { ok: true };
+}
+
+/**
+ * Programa recordatorios de cita: por cada workflow activo con trigger
+ * "Recordatorio de cita" (appointment_upcoming), crea un scheduled_job a
+ * (inicio − hoursBefore) que ejecutará ese flujo. Idempotente por (wf, cita).
+ */
+export async function scheduleAppointmentReminders(
+  organizationId: string,
+  appt: { id: string; start: string },
+  target: { conversationId?: string; contactId?: string },
+): Promise<void> {
+  const startsAt = new Date(appt.start);
+  await withTenant(organizationId, async (tx) => {
+    const wfs = await tx.workflow.findMany({
+      where: { active: true, deletedAt: null },
+      include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
+    });
+    for (const wf of wfs) {
+      const def = wf.versions[0]?.definition as any;
+      if (def?.trigger?.type !== "appointment_upcoming") continue;
+      const hoursBefore = Number(def.trigger.config?.hoursBefore ?? 24);
+      const dueAt = new Date(startsAt.getTime() - hoursBefore * 3600 * 1000);
+      if (dueAt.getTime() <= Date.now()) continue; // el recordatorio ya pasó
+      await tx.scheduledJob.upsert({
+        where: { organizationId_uniqueKey: { organizationId, uniqueKey: `apptreminder:${wf.id}:${appt.id}` } },
+        update: { dueAt, status: "PENDING" },
+        create: {
+          organizationId,
+          kind: "appointment_reminder",
+          dueAt,
+          uniqueKey: `apptreminder:${wf.id}:${appt.id}`,
+          payload: { workflowId: wf.id, contactId: target.contactId ?? null, conversationId: target.conversationId ?? null, appointmentExternalId: appt.id },
+        },
+      });
+    }
+  });
 }
 
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */

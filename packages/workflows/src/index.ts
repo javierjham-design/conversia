@@ -32,6 +32,16 @@ export interface EngineDeps {
   assignTeam(ctx: RunCtx, teamId: string): Promise<void>;
   switchAgent(ctx: RunCtx, agentSlug: string): Promise<void>;
   startWorkflow(ctx: RunCtx, workflowName: string): Promise<void>;
+  /** Abre (o reutiliza) una conversación para el contacto; setea ctx.conversationId. */
+  openConversation(ctx: RunCtx): Promise<void>;
+  /** Deja un comentario interno (solo el equipo lo ve) en la conversación. */
+  addNote(ctx: RunCtx, text: string): Promise<void>;
+  /** Encola un evento de Conversions API (Meta) con el ctwa_clid del contacto. */
+  sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
+  /** Entrega la conversación a un agente con un objetivo y devuelve si se cumplió. */
+  runAgentWithObjective(ctx: RunCtx, agentSlug: string, objective: string): Promise<boolean>;
+  /** Petición HTTP externa (con guard SSRF); mapea la respuesta a ctx.variables. */
+  callApi(ctx: RunCtx, config: Record<string, unknown>): Promise<void>;
   /** Persiste el timer (scheduled_jobs). cancelOn: evento que lo cancela. */
   scheduleTimer(ctx: RunCtx, nodeId: string, dueAt: Date, cancelOn?: string): Promise<void>;
   /** Evalúa condiciones (p.ej. no_reply: ¿el contacto respondió desde runStartedAt?). */
@@ -46,9 +56,44 @@ export type EngineResult =
   | { status: "failed"; nodeId: string; error: string };
 
 const MAX_NODES_PER_RUN = 50;
+// Tope de saltos ("Saltar a otro paso") por ejecución — protección anti-bucle.
+const MAX_JUMPS_PER_RUN = 25;
 
 export function renderVars(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k: string) => vars[k] ?? "");
+}
+
+const WEEKDAY_KEY: Record<string, string> = { Mon: "mon", Tue: "tue", Wed: "wed", Thu: "thu", Fri: "fri", Sat: "sat", Sun: "sun" };
+
+/**
+ * ¿`now` cae dentro del horario de atención definido en el nodo "Fecha y hora"?
+ * Puro y determinista: usa Intl para resolver día/hora en la zona horaria del
+ * tenant. config = { timezone, hours:{ mon:[{from,to}],… }, holidays:[YYYY-MM-DD] }.
+ */
+export function evalBusinessHours(config: Record<string, any>, now: Date): boolean {
+  const tz = String(config.timezone || "America/Santiago");
+  let parts: Record<string, string>;
+  try {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit",
+      hour12: false, year: "numeric", month: "2-digit", day: "2-digit",
+    });
+    parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
+  } catch {
+    return true; // zona horaria inválida → no bloquear el flujo
+  }
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  const holidays: string[] = Array.isArray(config.holidays) ? config.holidays : [];
+  if (holidays.includes(dateStr)) return false;
+  const wd = WEEKDAY_KEY[parts.weekday] ?? "";
+  const intervals: { from?: string; to?: string }[] = (config.hours ?? {})[wd] ?? [];
+  const nowMin = Number(parts.hour) * 60 + Number(parts.minute);
+  for (const iv of intervals) {
+    const [fh, fm] = String(iv.from ?? "00:00").split(":").map(Number);
+    const [th, tm] = String(iv.to ?? "23:59").split(":").map(Number);
+    if (nowMin >= fh * 60 + fm && nowMin < th * 60 + tm) return true;
+  }
+  return false;
 }
 
 /** ¿El evento dispara este workflow? (matching de triggers, sección 16) */
@@ -74,6 +119,15 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
     }
     if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
     if (typeof cfg.channel === "string" && cfg.channel && data.channel && data.channel !== cfg.channel) return false;
+  }
+  // Anuncios Click-to-Chat: cualquier anuncio, o uno específico por ad_id.
+  if (t === "click_to_chat") {
+    if (typeof cfg.adId === "string" && cfg.adId.trim() && String(data.ad_id ?? "") !== cfg.adId.trim()) return false;
+  }
+  // Etapa del ciclo de vida: condiciones opcionales origen → destino.
+  if (t === "lead_status_changed") {
+    if (typeof cfg.toStatus === "string" && cfg.toStatus && String(data.statusCode ?? "") !== cfg.toStatus) return false;
+    if (typeof cfg.fromStatus === "string" && cfg.fromStatus && String(data.fromCode ?? "") !== cfg.fromStatus) return false;
   }
   return true;
 }
@@ -104,7 +158,7 @@ async function executeNode(
   deps: EngineDeps,
   ctx: RunCtx,
   node: WorkflowNode,
-): Promise<{ branch?: string; wait?: Date; stop?: boolean }> {
+): Promise<{ branch?: string; wait?: Date; stop?: boolean; goto?: string }> {
   const cfg = node.config as Record<string, any>;
   switch (node.type) {
     case "send_text":
@@ -149,6 +203,36 @@ async function executeNode(
     case "start_workflow":
       await deps.startWorkflow(ctx, String(cfg.workflowName ?? ""));
       return {};
+    case "open_conversation":
+      await deps.openConversation(ctx);
+      return {};
+    case "add_note":
+      await deps.addNote(ctx, renderVars(String(cfg.text ?? ""), ctx.variables));
+      return {};
+    case "business_hours":
+      // Evaluación pura (determinista dado now()): "in" dentro de horario, "out" fuera.
+      return { branch: evalBusinessHours(cfg, deps.now()) ? "in" : "out" };
+    case "goto":
+      return { goto: String(cfg.targetNodeId ?? "") };
+    case "send_capi":
+      await deps.sendCapiEvent(ctx, {
+        eventName: String(cfg.eventName ?? "Lead"),
+        value: cfg.value != null && cfg.value !== "" ? Number(cfg.value) : undefined,
+        currency: cfg.currency ? String(cfg.currency) : undefined,
+      });
+      return {};
+    case "ai_objective": {
+      const met = await deps.runAgentWithObjective(ctx, String(cfg.agentSlug ?? ""), String(cfg.objective ?? ""));
+      return { branch: met ? "met" : "unmet" };
+    }
+    case "call_api":
+      await deps.callApi(ctx, cfg);
+      return {};
+    case "send_tiktok_event":
+    case "google_sheets_append":
+    case "send_template":
+      // "Próximamente": sin integración aún. No-op registrado (no se finge).
+      return {};
     case "wait":
       return { wait: computeWaitDue(cfg, deps.now()) };
     case "condition": {
@@ -175,6 +259,7 @@ export async function executeFrom(
 ): Promise<EngineResult> {
   let currentId: string | undefined = startNodeId;
   let executed = 0;
+  let jumps = 0;
 
   while (currentId) {
     const node = def.nodes.find((n) => n.id === currentId);
@@ -190,8 +275,17 @@ export async function executeFrom(
         await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: { waitUntil: outcome.wait.toISOString() } });
         return { status: "waiting", nodeId: node.id };
       }
-      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: outcome.branch !== undefined ? { branch: outcome.branch } : undefined });
+      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: outcome.branch !== undefined ? { branch: outcome.branch } : outcome.goto ? { goto: outcome.goto } : undefined });
       if (outcome.stop) return { status: "completed" };
+      // "Saltar a otro paso": salta al nodo destino, acotado por MAX_JUMPS_PER_RUN.
+      if (outcome.goto !== undefined) {
+        if (!outcome.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
+        if (++jumps > MAX_JUMPS_PER_RUN) {
+          return { status: "failed", nodeId: node.id, error: `Límite de saltos excedido (${MAX_JUMPS_PER_RUN}) — posible bucle` };
+        }
+        currentId = outcome.goto;
+        continue;
+      }
       currentId = nextNodeId(def, node.id, outcome.branch);
     } catch (err) {
       const message = (err as Error).message;

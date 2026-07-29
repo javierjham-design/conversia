@@ -257,6 +257,20 @@ export async function processInbound(job: InboundJob): Promise<void> {
       text: (text ?? "").slice(0, 200),
     });
 
+    // Anuncios Click-to-WhatsApp: la atribución (ctwa_clid/ad_id/referral crudo)
+    // ya la guardó buildContactCreate/Update en columnas estructuradas + meta;
+    // aquí solo disparamos el flujo click_to_chat con los datos del anuncio.
+    if (msg.referral && result.started) {
+      const ref = msg.referral;
+      const referral = {
+        ad_id: ref.source_id ?? ref.source_url ?? null,
+        ctwa_clid: ref.ctwa_clid ?? null,
+        headline: ref.headline ?? null,
+        source_type: ref.source_type ?? null,
+      };
+      await dispatchEvent({ ...base, type: "click_to_chat", data: { ...base.data, ...referral } });
+    }
+
     // Respuesta del agente activo — salvo que un workflow ya lo haya
     // ejecutado para esta conversación en este ciclo (evita doble respuesta).
     const agentAlreadyRan = await withTenant(organizationId, (tx) =>

@@ -39,7 +39,13 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
       }),
     );
 
-  if (!config?.rule) {
+  // Modo DIRECTO: el nodo de workflow define el evento; no requiere regla.
+  const eventName: string | undefined = job.eventName ?? config?.rule?.dest;
+  if (!config) {
+    await log("error", "Meta no está configurado (dataset/token)");
+    return;
+  }
+  if (!eventName) {
     await log("error", `Sin regla activa para "${source}"`);
     return;
   }
@@ -48,9 +54,9 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     return;
   }
   if (config.mode === "MOCK") {
-    await log("ok", `[SIMULADO] ${source} → ${config.rule.dest} (conexión de desarrollo, no se envió a Meta)`, {
+    await log("ok", `[SIMULADO] ${source} → ${eventName} (conexión de desarrollo, no se envió a Meta)`, {
       simulated: true,
-      dest: config.rule.dest,
+      dest: eventName,
     });
     return;
   }
@@ -59,13 +65,18 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     return;
   }
 
+  const value = job.eventName ? job.value ?? null : config.rule?.value ?? null;
+  const currency = (job.eventName ? job.currency : config.rule?.currency) ?? "CLP";
   const eventPayload: Record<string, unknown> = {
-    event_name: config.rule.dest,
+    event_name: eventName,
     event_time: Math.floor(new Date(job.occurredAt).getTime() / 1000),
     action_source: "chat",
     event_id: `${organizationId}:${source}:${job.leadId ?? job.contactPhone ?? "anon"}:${job.occurredAt}`,
-    user_data: job.contactPhone ? { ph: [hashPhone(job.contactPhone)] } : {},
-    ...(config.rule.value ? { custom_data: { value: config.rule.value, currency: config.rule.currency ?? "CLP" } } : {}),
+    user_data: {
+      ...(job.contactPhone ? { ph: [hashPhone(job.contactPhone)] } : {}),
+      ...(job.ctwaClid ? { ctwa_clid: job.ctwaClid } : {}),
+    },
+    ...(value ? { custom_data: { value, currency } } : {}),
   };
   const body: Record<string, unknown> = { data: [eventPayload] };
   if (job.test && config.mapping.testEventCode) body.test_event_code = config.mapping.testEventCode;

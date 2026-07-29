@@ -13,7 +13,8 @@ import {
 import { z } from "zod";
 import { workflowDefinitionSchema } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
-import { enforcePlanLimit } from "../common/plan-limits";
+import { QueueService } from "../queues";
+import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { simulateWorkflow, type SimNames } from "./workflow-sandbox";
@@ -41,6 +42,16 @@ const TRIGGER_CATALOG = [
   { type: "message_received", label: "Mensaje recibido", description: "Cada mensaje entrante; admite condiciones", conditions: ["keyword", "firstMessage"] },
   { type: "conversation_closed", label: "Conversación cerrada", description: "Cuando se cierra la conversación (p. ej. encuesta post-atención)" },
   { type: "keyword", label: "Palabra clave (simple)", description: "El mensaje contiene una palabra o frase", config: ["keyword"] },
+  { type: "click_to_chat", label: "Anuncios Click-to-Chat (Meta)", description: "El primer mensaje viene de un anuncio Click-to-WhatsApp", conditions: ["adId"] },
+  { type: "lead_status_changed", label: "Etapa del ciclo de vida actualizada", description: "Cuando el lead cambia de etapa (origen → destino)", conditions: ["fromStatus", "toStatus"] },
+  { type: "appointment_created", label: "Cita creada", description: "Al agendar una cita para el contacto" },
+  { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita agendada", conditions: ["hoursBefore"] },
+  { type: "manual", label: "Disparo manual", description: "Se ejecuta a mano desde la bandeja o la lista de contactos" },
+  // Próximamente (estructura lista; falta la fuente del evento):
+  { type: "appointment_cancelled", label: "Cita cancelada", description: "Al cancelarse una cita (requiere webhook de agenda)", soon: true },
+  { type: "appointment_rescheduled", label: "Cita reprogramada", description: "Al reprogramarse una cita (requiere webhook de agenda)", soon: true },
+  { type: "missed_call", label: "Llamada perdida", description: "Llamada de WhatsApp no contestada (requiere eventos de llamada)", soon: true },
+  { type: "tiktok_ad", label: "Anuncios de mensajería TikTok", description: "Mensaje desde un anuncio de TikTok (requiere canal TikTok)", soon: true },
 ];
 
 const NODE_CATALOG = [
@@ -63,7 +74,38 @@ const NODE_CATALOG = [
 
 @Controller("workflows")
 export class WorkflowsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private queues: QueueService) {}
+
+  /** Disparo manual masivo: ejecuta un flujo publicado sobre varios contactos. */
+  @Post(":id/run-bulk")
+  async runBulk(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("workflows:write");
+    const input = parse(z.object({ contactIds: z.array(z.string()).min(1).max(500) }), body);
+    const info = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({
+        where: { id, deletedAt: null, active: true },
+        include: { versions: { where: { status: "PUBLISHED" }, take: 1 } },
+      });
+      if (!wf || wf.versions.length === 0) {
+        throw new BadRequestException("El flujo no existe, no está activo o no tiene versión publicada");
+      }
+      const contacts = await tx.contact.findMany({ where: { id: { in: input.contactIds } }, select: { id: true } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "workflow.run_bulk", entityType: "workflow", entityId: id, after: { count: contacts.length } },
+      });
+      return contacts.map((c) => c.id);
+    });
+    for (const contactId of info) {
+      await this.queues.events.add("emit", {
+        organizationId: ctx.organizationId,
+        type: "__manual_run__",
+        contactId,
+        data: { workflowId: id },
+        occurredAt: new Date().toISOString(),
+      });
+    }
+    return { ok: true, queued: info.length };
+  }
 
   @Get("meta/catalog")
   catalog() {
@@ -393,6 +435,11 @@ export class WorkflowsController {
         orderBy: { version: "desc" },
       });
       if (!draft) throw new BadRequestException("No hay borrador para publicar");
+      // Gating por plan: la "Petición HTTP" (call_api) es un paso premium.
+      const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string }[];
+      if (nodes.some((n) => n.type === "call_api") && !(await canUseFeature(tx, "http_step"))) {
+        throw new BadRequestException("El paso «Petición HTTP» requiere un plan superior. Actualiza tu plan para publicar este flujo.");
+      }
       const published = await tx.workflowVersion.update({
         where: { id: draft.id },
         data: { status: "PUBLISHED", publishedAt: new Date() },
