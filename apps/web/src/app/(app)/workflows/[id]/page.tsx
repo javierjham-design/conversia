@@ -21,7 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
+  ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
   Pencil, Plus, Redo2, Search, Share2, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -85,6 +85,13 @@ const NODE_DEFS: NodeDef[] = [
   // IA
   { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
   { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
+  {
+    type: "ai_objective", label: "Agente IA con objetivo", description: "Entrega la conversación a un agente con un objetivo y ramifica según el resultado",
+    category: "IA", icon: <Crosshair size={15} />, defaultConfig: { agentSlug: "", objective: "" },
+    branches: [{ handle: "met", label: "Objetivo cumplido" }, { handle: "unmet", label: "No cumplido / escalado" }],
+  },
+  // Agenda
+  { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM (fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {}, soon: true },
 ];
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 
@@ -232,6 +239,8 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "business_hours": return "Ramifica: dentro / fuera de horario";
     case "send_capi": return `CAPI: ${config.eventName ?? "Lead"}${config.value ? ` ($${config.value} ${config.currency ?? "CLP"})` : ""}`;
     case "send_tiktok_event": return "(Próximamente)";
+    case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
+    case "send_template": return "(Próximamente)";
     default: return "";
   }
 }
@@ -436,6 +445,7 @@ function Editor() {
       else if (t === "update_contact" && !Object.values((c.fields ?? {}) as Record<string, string>).some((v) => String(v).trim())) errors[n.id] = "Indica al menos un dato";
       else if (t === "add_note" && !String(c.text ?? "").trim()) errors[n.id] = "Escribe el comentario";
       else if (t === "goto" && !c.targetNodeId) errors[n.id] = "Elige el paso destino";
+      else if (t === "ai_objective" && !String(c.objective ?? "").trim()) errors[n.id] = "Define el objetivo del agente";
     }
     setNodes((ns) => ns.map((n) => (n.id in errors ? { ...n, data: { ...n.data, invalid: errors[n.id] } } : { ...n, data: { ...n.data, invalid: undefined } })));
     if (Object.keys(errors).length) {
@@ -906,6 +916,27 @@ function NodePanel({
 
       {type === "send_tiktok_event" && (
         <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere integrar TikTok Events API. Puedes dejar el paso, pero aún no envía.</p>
+      )}
+
+      {type === "ai_objective" && (
+        <div className="space-y-2">
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Agente</span>
+            <select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+              <option value="">Agente activo de la conversación</option>
+              {catalog.agents.map((a) => (<option key={a.slug} value={a.slug}>🤖 {a.name}</option>))}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Objetivo</span>
+            <textarea value={config.objective ?? ""} onChange={(e) => onChange({ objective: e.target.value })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <p className="text-[10px] text-slate-400">El agente conversa con el objetivo inyectado; luego el flujo ramifica en «Objetivo cumplido» / «No cumplido». (v1: evalúa el estado actual de la conversación.)</p>
+        </div>
+      )}
+
+      {type === "send_template" && (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere gestión de plantillas HSM aprobadas en el canal de WhatsApp.</p>
       )}
 
       {type === "update_lead_status" && (

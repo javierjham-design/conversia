@@ -133,8 +133,14 @@ export function simulateWorkflow(
         label = "Enviar evento CAPI (Meta)";
         detail = `Enviaría el evento “${cfg.eventName ?? "Lead"}”${cfg.value ? ` por $${cfg.value} ${cfg.currency ?? "CLP"}` : ""} (simulado)`;
         break;
+      case "ai_objective":
+        label = "Agente IA con objetivo";
+        branch = "met"; // en la prueba asumimos objetivo cumplido
+        detail = `El agente buscaría: “${cfg.objective ?? ""}” → asumimos «Objetivo cumplido» (simulado)`;
+        break;
       case "send_tiktok_event":
       case "google_sheets_append":
+      case "send_template":
         label = "Integración";
         detail = "(Próximamente — este paso aún no envía nada)";
         break;

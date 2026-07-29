@@ -21,6 +21,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
     addNote: async (_c, text) => void calls.push(`note:${text}`),
     sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
+    runAgentWithObjective: async (_c, _slug, obj) => { calls.push(`objective:${obj}`); return true; },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,
@@ -212,5 +213,25 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
     const r = await executeFrom(deps, ctx, flow, "a");
     expect(r).toEqual({ status: "completed" });
     expect(calls).toEqual(["capi:Schedule", "tag:capi-ok"]);
+  });
+
+  it("ai_objective ramifica según el resultado (cumplido / no cumplido)", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "ai_objective", config: { agentSlug: "agendamiento", objective: "confirmar" } },
+        { id: "ok", type: "add_tag", config: { tag: "confirmado" } },
+        { id: "no", type: "transfer_human", config: {} },
+      ],
+      edges: [{ from: "a", to: "ok", when: "met" }, { from: "a", to: "no", when: "unmet" }],
+    };
+    const met = makeDeps();
+    expect(await executeFrom(met.deps, ctx, flow, "a")).toEqual({ status: "completed" });
+    expect(met.calls).toEqual(["objective:confirmar", "tag:confirmado"]);
+
+    const unmet = makeDeps({ runAgentWithObjective: async () => false });
+    await executeFrom(unmet.deps, ctx, flow, "a");
+    expect(unmet.calls).toContain("human");
   });
 });

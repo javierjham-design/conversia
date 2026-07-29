@@ -8,6 +8,8 @@ import {
   type RunCtx,
 } from "@conversia/workflows";
 import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
+import { createAIRouter } from "@conversia/agents";
+import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
@@ -294,6 +296,42 @@ function makeDeps(): EngineDeps {
         currency: config.currency ?? null,
         ctwaClid: ctwaClid ?? null,
       });
+    },
+
+    async runAgentWithObjective(ctx, agentSlug, objective) {
+      if (!ctx.conversationId) return false;
+      // 1) El agente responde con el objetivo inyectado en su prompt.
+      await runAgentTurn({
+        organizationId: ctx.organizationId,
+        conversationId: ctx.conversationId,
+        agentSlug: agentSlug || undefined,
+        objective,
+      });
+      if (!objective.trim()) return false;
+      // 2) Evalúa (mejor esfuerzo, modelo económico) si el objetivo ya se cumplió.
+      try {
+        const msgs = await withTenant(ctx.organizationId, (tx) =>
+          tx.message.findMany({
+            where: { conversationId: ctx.conversationId!, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
+            orderBy: { createdAt: "desc" },
+            take: 12,
+          }),
+        );
+        const transcript = msgs
+          .reverse()
+          .map((m) => `${m.direction === "INBOUND" ? "Cliente" : "Agente"}: ${m.body ?? ""}`)
+          .join("\n");
+        const router = createAIRouter({ anthropicApiKey: getEnv().ANTHROPIC_API_KEY, openaiApiKey: getEnv().OPENAI_API_KEY });
+        const res = await router.chat({
+          model: getEnv().AI_DEFAULT_MODEL,
+          system: "Eres un evaluador estricto. Responde ÚNICAMENTE 'SI' o 'NO'.",
+          messages: [{ role: "user", content: `Objetivo: "${objective}".\n\nConversación:\n${transcript}\n\n¿El objetivo YA se cumplió de forma clara? Responde solo SI o NO.` }],
+          maxTokens: 3,
+        });
+        return /\bs[íi]\b/i.test(res.text ?? "");
+      } catch {
+        return false; // ante error → "no cumplido" (rama de escalamiento)
+      }
     },
 
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {

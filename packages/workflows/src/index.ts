@@ -38,6 +38,8 @@ export interface EngineDeps {
   addNote(ctx: RunCtx, text: string): Promise<void>;
   /** Encola un evento de Conversions API (Meta) con el ctwa_clid del contacto. */
   sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
+  /** Entrega la conversación a un agente con un objetivo y devuelve si se cumplió. */
+  runAgentWithObjective(ctx: RunCtx, agentSlug: string, objective: string): Promise<boolean>;
   /** Persiste el timer (scheduled_jobs). cancelOn: evento que lo cancela. */
   scheduleTimer(ctx: RunCtx, nodeId: string, dueAt: Date, cancelOn?: string): Promise<void>;
   /** Evalúa condiciones (p.ej. no_reply: ¿el contacto respondió desde runStartedAt?). */
@@ -217,8 +219,13 @@ async function executeNode(
         currency: cfg.currency ? String(cfg.currency) : undefined,
       });
       return {};
+    case "ai_objective": {
+      const met = await deps.runAgentWithObjective(ctx, String(cfg.agentSlug ?? ""), String(cfg.objective ?? ""));
+      return { branch: met ? "met" : "unmet" };
+    }
     case "send_tiktok_event":
     case "google_sheets_append":
+    case "send_template":
       // "Próximamente": sin integración aún. No-op registrado (no se finge).
       return {};
     case "wait":
