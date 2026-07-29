@@ -6,6 +6,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
 } from "@nestjs/common";
@@ -72,29 +73,41 @@ export class WorkflowsController {
   list() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const workflows = await tx.workflow.findMany({
-        where: { deletedAt: null },
-        include: { versions: { orderBy: { version: "desc" }, take: 5 } },
-        orderBy: { createdAt: "asc" },
-      });
-      const runCounts = await tx.workflowRun.groupBy({
-        by: ["workflowId", "status"],
-        _count: { _all: true },
-      });
+      const [workflows, runCounts, members] = await Promise.all([
+        tx.workflow.findMany({
+          where: { deletedAt: null },
+          include: { versions: { orderBy: { version: "desc" } } },
+          orderBy: { updatedAt: "desc" },
+        }),
+        tx.workflowRun.groupBy({ by: ["workflowId", "status"], _count: { _all: true } }),
+        tx.organizationUser.findMany({ where: { active: true }, include: { user: true } }),
+      ]);
+      const nameOf = (userId?: string | null) =>
+        userId ? members.find((m) => m.userId === userId)?.user.name ?? null : null;
       return workflows.map((w) => {
         const published = w.versions.find((v) => v.status === "PUBLISHED");
         const draft = w.versions.find((v) => v.status === "DRAFT" && (!published || v.version > published.version));
+        const first = w.versions[w.versions.length - 1];
         const runs = runCounts.filter((r) => r.workflowId === w.id);
+        // Estado de negocio: sin versión publicada = borrador; publicada + activa =
+        // publicado; publicada pero inactiva = detenido (no procesa disparos).
+        const status = !published ? "draft" : w.active ? "published" : "stopped";
         return {
           id: w.id,
           name: w.name,
           description: w.description,
           active: w.active,
+          status,
           publishedVersion: published?.version ?? null,
           hasDraft: Boolean(draft),
           trigger: ((published ?? draft)?.definition as any)?.trigger?.type ?? null,
           runsTotal: runs.reduce((a, r) => a + r._count._all, 0),
           runsWaiting: runs.find((r) => r.status === "WAITING")?._count._all ?? 0,
+          createdAt: w.createdAt,
+          createdBy: nameOf(first?.createdById),
+          updatedAt: w.updatedAt,
+          publishedAt: published?.publishedAt ?? null,
+          publishedBy: nameOf(published?.createdById),
         };
       });
     });
@@ -125,7 +138,83 @@ export class WorkflowsController {
           createdById: ctx.userId,
         },
       });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "workflow.create",
+          entityType: "workflow",
+          entityId: workflow.id,
+        },
+      });
       return workflow;
+    });
+  }
+
+  /** Renombrar / editar descripción sin tocar la definición. */
+  @Patch(":id")
+  rename(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("workflows:write");
+    const input = parse(
+      z.object({ name: z.string().min(2).max(80).optional(), description: z.string().max(300).nullable().optional() }),
+      body,
+    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({ where: { id, deletedAt: null } });
+      if (!wf) throw new NotFoundException("Flujo no encontrado");
+      await tx.workflow.update({
+        where: { id },
+        data: {
+          ...(input.name ? { name: input.name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+        },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "workflow.rename", entityType: "workflow", entityId: id },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Duplica el flujo (última versión) como un borrador nuevo, inactivo. */
+  @Post(":id/duplicate")
+  duplicate(@Param("id") id: string) {
+    const ctx = requirePermission("workflows:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const source = await tx.workflow.findFirst({ where: { id, deletedAt: null } });
+      if (!source) throw new NotFoundException("Flujo no encontrado");
+      await enforcePlanLimit(tx, "workflows", await tx.workflow.count({ where: { deletedAt: null } }));
+      const latest = await tx.workflowVersion.findFirst({ where: { workflowId: id }, orderBy: { version: "desc" } });
+      const copy = await tx.workflow.create({
+        data: {
+          organizationId: ctx.organizationId,
+          name: `${source.name} (copia)`,
+          description: source.description,
+          active: false,
+          templateKey: source.templateKey,
+        },
+      });
+      await tx.workflowVersion.create({
+        data: {
+          organizationId: ctx.organizationId,
+          workflowId: copy.id,
+          version: 1,
+          status: "DRAFT",
+          definition: (latest?.definition ?? {
+            trigger: { type: "conversation_started", config: {} },
+            variables: {},
+            nodes: [{ id: "n1", type: "send_text", config: { text: "Hola 👋" } }],
+            edges: [],
+          }) as object,
+          changelog: "Duplicado",
+          createdById: ctx.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "workflow.duplicate", entityType: "workflow", entityId: copy.id, after: { from: id } },
+      });
+      return { id: copy.id };
     });
   }
 
@@ -260,7 +349,10 @@ export class WorkflowsController {
     const input = parse(z.object({ active: z.boolean() }), body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.workflow.update({ where: { id }, data: { active: input.active } });
-      return { ok: true };
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: input.active ? "workflow.resume" : "workflow.stop", entityType: "workflow", entityId: id },
+      });
+      return { ok: true, active: input.active };
     });
   }
 
@@ -269,6 +361,9 @@ export class WorkflowsController {
     const ctx = requirePermission("workflows:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.workflow.update({ where: { id }, data: { deletedAt: new Date(), active: false } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "workflow.delete", entityType: "workflow", entityId: id },
+      });
       return { ok: true };
     });
   }
