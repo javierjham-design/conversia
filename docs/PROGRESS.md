@@ -1,5 +1,26 @@
 # Registro de progreso
 
+## 2026-07-29 (3) — Catálogo de Workflows ampliado (rama feature/workflow-catalog)
+
+Ampliación del constructor de workflows (triggers + pasos) estilo Respond.io, adaptado al rubro. Sin migraciones (todo en JSON/modelos existentes). Menú "Añadir paso" **categorizado (8 categorías) + buscador**, con soporte "Próximamente" (deshabilitado) y "Premium" (gating por plan). Trabajado por categorías con commit por cada una.
+
+**Triggers nuevos** (motor + catálogo + formularios de condiciones):
+- `click_to_chat` (Anuncios Click-to-WhatsApp): el inbound parsea el `referral`, guarda `ctwa_clid/ad_id/headline` en el contacto y dispara (condición por ad).
+- `lead_status_changed` (Etapa del ciclo de vida, origen→destino) — dispatch desde el nodo y la tool del agente.
+- `appointment_created` + `appointment_upcoming` (Recordatorio X h antes): recordatorios programados por-workflow (scheduled_job → scheduler → startWorkflowById).
+- `manual` masivo: `POST /workflows/:id/run-bulk` sobre varios contactos.
+- **Próximamente** (estructura lista): cita cancelada/reprogramada, llamada perdida, anuncios TikTok.
+
+**Pasos nuevos** (nodo + ejecutor en el motor + formulario + test):
+- Conversación: `open_conversation`, `add_note`.
+- Control de flujo: `goto` (Saltar a otro paso, edge punteado, anti-bucle máx 25 saltos + aviso de bucles al publicar), `business_hours` (Fecha y hora → ramas dentro/fuera, zona horaria via Intl + feriados).
+- Marketing: `send_capi` (evento CAPI directo con `ctwa_clid`, reintentos BullMQ, reutiliza dataset/token del Centro Meta). `send_tiktok_event` → Próximamente.
+- IA: `ai_objective` (agente con objetivo inyectado → ramas cumplido/no; evaluación v1 por clasificador económico).
+- Integraciones: `call_api` (Petición HTTP con **guard SSRF** — bloquea localhost/IPs privadas/metadata, allowlist, redirect:error, timeout —, mapeo JSON→variables, **gating por plan**). `google_sheets_append` → Próximamente (OAuth por diseñar).
+- Agenda: `send_template` (plantilla HSM) → Próximamente.
+
+**Calidad:** tests del motor (13) + guard SSRF (4, vitest nuevo en el worker); typecheck de todo en verde. El modo Prueba (sandbox) describe los nodos nuevos.
+
 ## 2026-07-29 (2) — Módulo de Workflows (canvas) + modelo de IA por-tenant
 
 **Workflows estilo Respond.io** sobre el motor JSON existente (sin migración; el motor queda intacto → los flujos publicados siguen corriendo igual):

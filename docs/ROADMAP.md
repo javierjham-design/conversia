@@ -34,8 +34,12 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ **Disparadores**: conversación nueva/cerrada, mensaje con condiciones (palabra clave, primer mensaje); puente API→worker para eventos del panel
 - ✅ **Modo prueba** (sandbox): recorre el flujo paso a paso sin efectos reales
 - ✅ **Plantillas** genéricas (bienvenida, seguimiento sin respuesta, palabra clave, encuesta post-cierre)
-- ✅ Atajo manual desde la bandeja ("Ejecutar flujo" sobre una conversación)
-- 🔶 Disparador etiqueta agregada (`tag_added`) · ⬜ Nodos call_api (SSRF), plantillas WhatsApp, pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
+- ✅ Atajo manual desde la bandeja ("Ejecutar flujo") + **disparo manual masivo** (run-bulk sobre contactos)
+- ✅ **Catálogo ampliado** (rama feature/workflow-catalog): menú categorizado + buscador
+  - Triggers: click_to_chat (CTWA + referral guardado), lead_status_changed (origen→destino), appointment_created, appointment_upcoming (recordatorio programado)
+  - Pasos: open_conversation, add_note, goto (anti-bucle), business_hours, send_capi (CAPI directo con ctwa_clid + reintentos), ai_objective (agente con objetivo + ramas), call_api (Petición HTTP con guard SSRF + gating por plan)
+- 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok · pasos send_tiktok_event, google_sheets_append (OAuth por diseñar), send_template (HSM)
+- ⬜ Disparador etiqueta agregada (`tag_added`) · ⬜ pregunta→variable, condición multi-campo · ⬜ ai_objective multi-turno (hoy v1 de un turno) · ⬜ Métricas por nodo
 
 ## Fase 5 — Agendamiento e integraciones
 - ✅ Contrato SchedulingProvider completo + MockSchedulingProvider (doble reserva) + ClarivaSchedulingProvider + mock server del contrato
