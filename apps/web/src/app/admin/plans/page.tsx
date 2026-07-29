@@ -17,7 +17,7 @@ interface Plan {
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean> };
+type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -70,6 +70,7 @@ export default function PlansPage() {
         priceUsd: Number(plan.priceUsd),
         limits: Object.fromEntries(LIMIT_FIELDS.map((f) => [f.key, Number(plan.limits?.[f.key] ?? 0)])),
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
+        lsVariantId: String((plan.features as any)?.lsVariantId ?? ""),
       };
     }
     setDrafts(d);
@@ -89,7 +90,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -214,6 +215,16 @@ export default function PlansPage() {
                     </label>
                   ))}
                 </div>
+
+                <label className="mt-2 block text-xs text-slate-500">
+                  Lemon Squeezy · Variant ID (cobro USD)
+                  <input
+                    value={d.lsVariantId}
+                    onChange={(e) => patchDraft(p.id, (x) => ({ ...x, lsVariantId: e.target.value }))}
+                    placeholder="p. ej. 123456"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 font-mono text-sm"
+                  />
+                </label>
 
                 {/* Estimación de costo/margen */}
                 <div className="mt-3 rounded-lg border border-slate-100 bg-white p-2 text-xs">

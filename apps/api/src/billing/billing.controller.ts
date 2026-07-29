@@ -5,7 +5,7 @@ import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
-import { createPaymentProvider, flowSign, verifyStripeSignature } from "./payment-provider";
+import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStripeSignature } from "./payment-provider";
 
 /**
  * Facturación del TENANT (su propia suscripción). Vista del plan actual, uso
@@ -88,6 +88,7 @@ export class BillingController {
       currency,
       email: user?.email,
       interval: plan.interval,
+      variantId: (plan.features as any)?.lsVariantId ? String((plan.features as any).lsVariantId) : undefined,
       successUrl: `${getEnv().WEB_URL}/billing`,
       cancelUrl: `${getEnv().WEB_URL}/billing`,
     });
@@ -205,9 +206,43 @@ export class BillingController {
     return { received: true };
   }
 
+  /** Webhook de Lemon Squeezy (MoR). Firma X-Signature (HMAC del raw body). */
+  @Post("webhooks/lemonsqueezy")
+  async lemonSqueezyWebhook(@Req() req: Request & { rawBody?: Buffer }) {
+    const env = getEnv();
+    if (!env.LEMONSQUEEZY_WEBHOOK_SECRET) throw new BadRequestException("Webhook de Lemon Squeezy no configurado");
+    const sig = req.headers["x-signature"] as string | undefined;
+    const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), "utf-8");
+    if (!verifyLemonSqueezySignature(raw, sig, env.LEMONSQUEEZY_WEBHOOK_SECRET)) {
+      throw new UnauthorizedException("Firma de Lemon Squeezy inválida");
+    }
+    const event: any = JSON.parse(raw.toString("utf8"));
+    const eventName: string | undefined = event?.meta?.event_name;
+    const custom = event?.meta?.custom_data ?? {};
+    const organizationId = custom.organization_id;
+    const planCode = custom.plan_code;
+    const subId = event?.data?.id;
+    const updatedAt = event?.data?.attributes?.updated_at ?? "";
+    // Idempotencia (LS reintenta): dedup por evento+suscripción+fecha.
+    if (subId && (await this.alreadyProcessed("lemonsqueezy", `${eventName}:${subId}:${updatedAt}`, eventName))) {
+      return { received: true, deduped: true };
+    }
+    if (
+      organizationId &&
+      planCode &&
+      (eventName === "subscription_created" || eventName === "subscription_updated" || eventName === "subscription_payment_success")
+    ) {
+      const status = event?.data?.attributes?.status; // active | on_trial | past_due | cancelled | expired | unpaid
+      if (status === "active" || status === "on_trial" || eventName === "subscription_payment_success") {
+        await this.activate(organizationId, planCode, "lemonsqueezy", subId);
+      }
+    }
+    return { received: true };
+  }
+
   /**
    * Activa/renueva la suscripción del tenant y emite la factura pagada. La usan
-   * el mock (dev) y los webhooks de Stripe/Flow (prod). Cliente admin: es una
+   * el mock (dev) y los webhooks de Stripe/Flow/Lemon Squeezy (prod). Cliente admin: es una
    * operación de plataforma sobre subscription/organization/invoice.
    */
   private async activate(organizationId: string, planCode: string, provider: string, providerRef?: string) {

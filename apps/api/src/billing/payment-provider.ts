@@ -22,6 +22,7 @@ export interface CheckoutInput {
   cancelUrl: string;
   email?: string;
   interval?: string; // monthly | yearly
+  variantId?: string; // Lemon Squeezy: id de variante del plan
 }
 
 export interface PaymentProvider {
@@ -76,6 +77,64 @@ export class StripePaymentProvider implements PaymentProvider {
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok || !json?.url) throw new Error(`Stripe checkout: ${json?.error?.message ?? res.status}`);
     return { id: json.id, url: json.url, provider: "stripe" };
+  }
+}
+
+/**
+ * Lemon Squeezy (Merchant of Record). Crea un checkout hospedado por API para la
+ * variante del plan. LS cobra, factura, paga impuestos y te paga vía su Stripe
+ * Express. El organizationId/planCode viajan en checkout_data.custom y vuelven en
+ * el webhook (meta.custom_data). Secretos SOLO por entorno.
+ */
+export class LemonSqueezyPaymentProvider implements PaymentProvider {
+  readonly kind = "lemonsqueezy";
+  constructor(
+    private apiKey: string,
+    private storeId: string,
+  ) {}
+
+  async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
+    if (!input.variantId) throw new Error("Este plan no tiene Variant ID de Lemon Squeezy configurado (edítalo en Planes).");
+    const body = {
+      data: {
+        type: "checkouts",
+        attributes: {
+          checkout_data: {
+            email: input.email,
+            custom: { organization_id: input.organizationId, plan_code: input.planCode },
+          },
+          product_options: { redirect_url: `${input.successUrl}?paid=1` },
+        },
+        relationships: {
+          store: { data: { type: "stores", id: String(this.storeId) } },
+          variant: { data: { type: "variants", id: String(input.variantId) } },
+        },
+      },
+    };
+    const res = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.apiKey}`,
+        "content-type": "application/vnd.api+json",
+        accept: "application/vnd.api+json",
+      },
+      body: JSON.stringify(body),
+    });
+    const json: any = await res.json().catch(() => ({}));
+    const url = json?.data?.attributes?.url;
+    if (!res.ok || !url) throw new Error(`Lemon Squeezy checkout: ${json?.errors?.[0]?.detail ?? res.status}`);
+    return { id: json.data.id, url, provider: "lemonsqueezy" };
+  }
+}
+
+/** Verifica el webhook de Lemon Squeezy: HMAC-SHA256(rawBody) hex == X-Signature. */
+export function verifyLemonSqueezySignature(rawBody: Buffer, sigHeader: string | undefined, secret: string): boolean {
+  if (!sigHeader) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  try {
+    return sigHeader.length === expected.length && timingSafeEqual(Buffer.from(sigHeader), Buffer.from(expected));
+  } catch {
+    return false;
   }
 }
 
@@ -148,13 +207,15 @@ export function verifyStripeSignature(rawBody: Buffer, sigHeader: string | undef
 export function createPaymentProvider(currency = "CLP"): PaymentProvider {
   const env = getEnv();
   const isClp = currency.toUpperCase() === "CLP";
+  const hasLs = !!(env.LEMONSQUEEZY_API_KEY && env.LEMONSQUEEZY_STORE_ID);
   if (isClp && env.FLOW_API_KEY && env.FLOW_SECRET_KEY) {
     return new FlowPaymentProvider(env.FLOW_API_KEY, env.FLOW_SECRET_KEY, env.FLOW_BASE_URL);
   }
-  if (!isClp && env.STRIPE_SECRET_KEY) {
-    return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
-  }
-  // Respaldo: si hay Stripe úsalo aunque sea CLP; si no, mock.
+  // USD/internacional → Lemon Squeezy (MoR) si está; si no, Stripe.
+  if (!isClp && hasLs) return new LemonSqueezyPaymentProvider(env.LEMONSQUEEZY_API_KEY, env.LEMONSQUEEZY_STORE_ID);
+  if (!isClp && env.STRIPE_SECRET_KEY) return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
+  // Respaldo: lo que haya configurado; si nada, mock.
+  if (hasLs) return new LemonSqueezyPaymentProvider(env.LEMONSQUEEZY_API_KEY, env.LEMONSQUEEZY_STORE_ID);
   if (env.STRIPE_SECRET_KEY) return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
   return new MockPaymentProvider();
 }

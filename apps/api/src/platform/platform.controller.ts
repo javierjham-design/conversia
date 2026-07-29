@@ -309,6 +309,43 @@ export class PlatformController {
     }));
   }
 
+  // --------------------------- Pagos (config) ---------------------------
+
+  /** Estado de conexión de los proveedores de pago/correo. NO devuelve secretos:
+   *  solo si está configurado + datos públicos (store id, webhook URL, env vars). */
+  @Get("billing/providers")
+  billingProviders() {
+    const env = getEnv();
+    return {
+      lemonSqueezy: {
+        label: "Lemon Squeezy (USD / internacional)",
+        configured: !!(env.LEMONSQUEEZY_API_KEY && env.LEMONSQUEEZY_STORE_ID),
+        hasWebhookSecret: !!env.LEMONSQUEEZY_WEBHOOK_SECRET,
+        storeId: env.LEMONSQUEEZY_STORE_ID || null,
+        webhookUrl: `${env.API_URL}/billing/webhooks/lemonsqueezy`,
+        envVars: ["LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_STORE_ID", "LEMONSQUEEZY_WEBHOOK_SECRET"],
+      },
+      flow: {
+        label: "Flow (CLP / Chile)",
+        configured: !!(env.FLOW_API_KEY && env.FLOW_SECRET_KEY),
+        baseUrl: env.FLOW_BASE_URL,
+        webhookUrl: `${env.API_URL}/billing/webhooks/flow`,
+        envVars: ["FLOW_API_KEY", "FLOW_SECRET_KEY", "FLOW_BASE_URL"],
+      },
+      stripe: {
+        label: "Stripe (directo, opcional)",
+        configured: !!env.STRIPE_SECRET_KEY,
+        webhookUrl: `${env.API_URL}/billing/webhooks/stripe`,
+        envVars: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+      },
+      resend: {
+        label: "Resend (correos)",
+        configured: !!env.RESEND_API_KEY,
+        envVars: ["RESEND_API_KEY", "RESEND_FROM"],
+      },
+    };
+  }
+
   // ------------------------------ Alertas -------------------------------
 
   /** Alertas críticas cross-tenant: eventos de integración con status warning/error. */

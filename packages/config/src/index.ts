@@ -55,6 +55,12 @@ const envSchema = z.object({
   FLOW_SECRET_KEY: z.string().optional().default(""),
   FLOW_BASE_URL: z.string().default("https://sandbox.flow.cl/api"),
 
+  // Lemon Squeezy (Merchant of Record, USD/internacional). El variant por plan se
+  // guarda en el plan (features.lsVariantId). Secretos SOLO por entorno.
+  LEMONSQUEEZY_API_KEY: z.string().optional().default(""),
+  LEMONSQUEEZY_STORE_ID: z.string().optional().default(""),
+  LEMONSQUEEZY_WEBHOOK_SECRET: z.string().optional().default(""),
+
   // Seguridad del Super Admin (Fase A). Vacías = sin restricción extra (defaults seguros).
   SUPER_ADMIN_SESSION_SECRET: z.string().optional().default(""), // separa del JWT_SECRET de tenant
   SUPER_ADMIN_ALLOWED_IPS: z.string().optional().default(""), // CSV; vacío = sin allowlist
