@@ -29,3 +29,18 @@
 ## Pendiente
 
 Media entrante (descarga por media_id) y saliente · plantillas + ventana 24h · reacciones/replies · varios números por tenant en panel · webhook de calidad/baneo del número → system_alerts.
+
+## Embedded Signup: elegir negocio + crear WhatsApp nueva
+
+El botón "Conectar con Meta" (página **Canales**) usa el Embedded Signup vía JS SDK:
+`FB.login({ config_id, response_type:"code", override_default_response_type:true, extras:{ setup:{}, featureType, sessionInfoVersion:"3" } })`.
+
+- `setup:{}` (vacío) → Meta deja **elegir el negocio (portfolio)** cuando el usuario administra varios, y **crear una WABA nueva** o usar una existente.
+- `featureType` = `META_ES_FEATURE_TYPE` (default `""` = flujo completo con creación; `only_waba_sharing` = solo compartir una WABA existente).
+- Del evento `WA_EMBEDDED_SIGNUP` capturamos `waba_id`, `phone_number_id` y `business_id`; el negocio se guarda en `whatsapp_accounts.business_id` y se muestra al terminar.
+
+**Si NO aparece "crear cuenta nueva" o el selector de negocio**, es configuración de Meta, no del código:
+1. `META_CONFIG_ID` debe ser una configuración de **Embedded Signup de WhatsApp** (App Dashboard → WhatsApp → Embedded Signup / Facebook Login for Business con el producto WhatsApp), **no** un login genérico de `business_management`.
+2. La config **no** debe estar fijada a un negocio concreto (deja que el usuario elija).
+3. La app necesita **acceso avanzado** a `whatsapp_business_management`, `whatsapp_business_messaging` y `business_management` (App Review), y estar en modo Live.
+4. El dominio del panel debe estar en los **dominios permitidos** del Facebook Login.

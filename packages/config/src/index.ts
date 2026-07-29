@@ -78,6 +78,10 @@ const envSchema = z.object({
   // Embedded Signup (onboarding self-service tipo Respond): app id + id de configuración
   META_APP_ID: z.string().optional().default(""),
   META_CONFIG_ID: z.string().optional().default(""),
+  // featureType del Embedded Signup: "" = flujo completo (permite CREAR una WABA
+  // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
+  // compartir una WABA existente), "whatsapp_business_app_onboarding".
+  META_ES_FEATURE_TYPE: z.string().optional().default(""),
 
   SCHEDULING_PROVIDER: z.enum(["mock", "clariva"]).default("mock"),
   CLARIVA_BASE_URL: z.string().default("http://localhost:4010"),

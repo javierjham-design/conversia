@@ -168,7 +168,12 @@ export class ChannelsController {
   embeddedConfig() {
     requireContext();
     const env = getEnv();
-    return { appId: env.META_APP_ID, configId: env.META_CONFIG_ID, graphVersion: env.META_GRAPH_VERSION };
+    return {
+      appId: env.META_APP_ID,
+      configId: env.META_CONFIG_ID,
+      graphVersion: env.META_GRAPH_VERSION,
+      featureType: env.META_ES_FEATURE_TYPE,
+    };
   }
 
   /**
@@ -184,6 +189,7 @@ export class ChannelsController {
         code: z.string().min(5),
         wabaId: z.string().min(3),
         phoneNumberId: z.string().min(3),
+        businessId: z.string().optional(), // negocio (portfolio) elegido en el ES
         name: z.string().min(2).max(60).optional(),
         defaultAgentId: z.string().nullable().optional(),
       }),
@@ -230,6 +236,22 @@ export class ChannelsController {
     } catch {
       /* ignore */
     }
+
+    // 4b. Nombre del negocio (portfolio) que el usuario eligió en el Embedded
+    // Signup — best-effort, solo para mostrarlo/registrarlo (multi-negocio).
+    let businessName: string | null = null;
+    if (input.businessId) {
+      try {
+        const bRes = await fetch(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(input.businessId)}?fields=name`,
+          { headers: { authorization: `Bearer ${accessToken}` } },
+        );
+        const bJson: any = await bRes.json();
+        if (bRes.ok && bJson?.name) businessName = bJson.name;
+      } catch {
+        /* ignore */
+      }
+    }
     const name = input.name ?? `WhatsApp ${displayPhone}`;
 
     // 5. Persistir el canal con el token por-WABA cifrado
@@ -249,12 +271,15 @@ export class ChannelsController {
         });
         await tx.whatsappAccount.updateMany({
           where: { organizationId: ctx.organizationId, wabaId: input.wabaId },
-          data: { credentialId: credential.id },
+          data: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
         });
         if (existing.channelConnectionId) {
           await tx.channelConnection.update({
             where: { id: existing.channelConnectionId },
-            data: { status: "active", ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}) },
+            data: {
+              status: "active",
+              ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}),
+            },
           });
         }
         await tx.auditLog.create({
@@ -268,7 +293,7 @@ export class ChannelsController {
             after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
           },
         });
-        return { ok: true, id: existing.channelConnectionId, name, displayPhone, reconnected: true };
+        return { ok: true, id: existing.channelConnectionId, name, displayPhone, businessName, reconnected: true };
       }
 
       await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
@@ -291,8 +316,8 @@ export class ChannelsController {
       });
       const account = await tx.whatsappAccount.upsert({
         where: { organizationId_wabaId: { organizationId: ctx.organizationId, wabaId: input.wabaId } },
-        update: { credentialId: credential.id },
-        create: { organizationId: ctx.organizationId, wabaId: input.wabaId, name, credentialId: credential.id },
+        update: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
+        create: { organizationId: ctx.organizationId, wabaId: input.wabaId, businessId: input.businessId ?? null, name, credentialId: credential.id },
       });
       await tx.whatsappPhoneNumber.create({
         data: {
@@ -315,7 +340,7 @@ export class ChannelsController {
           after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
         },
       });
-      return { ok: true, id: channel.id, name, displayPhone };
+      return { ok: true, id: channel.id, name, displayPhone, businessName };
     });
   }
 

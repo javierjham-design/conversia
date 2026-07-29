@@ -24,10 +24,10 @@ export default function ChannelsPage() {
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
-  const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string } | null>(null);
+  const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string; featureType?: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [fbReady, setFbReady] = useState(false);
-  const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string }>({});
+  const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string; businessId?: string }>({});
 
   const [form, setForm] = useState({
     type: "WHATSAPP_CLOUD" as "WHATSAPP_CLOUD" | "MOCK",
@@ -111,9 +111,12 @@ export default function ChannelsPage() {
           return;
         }
       }
+      // Solo nos interesa el evento del flujo de WhatsApp Embedded Signup.
+      if (d?.type && d.type !== "WA_EMBEDDED_SIGNUP") return;
       const data = d?.data ?? d;
       if (data?.waba_id) sessionRef.current.wabaId = data.waba_id;
       if (data?.phone_number_id) sessionRef.current.phoneNumberId = data.phone_number_id;
+      if (data?.business_id) sessionRef.current.businessId = data.business_id;
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
@@ -150,17 +153,18 @@ export default function ChannelsPage() {
     }
     setConnecting(true);
     try {
-      const r = await api<{ displayPhone: string }>("/channels/embedded-signup", {
+      const r = await api<{ displayPhone: string; businessName?: string | null }>("/channels/embedded-signup", {
         method: "POST",
         body: JSON.stringify({
           code,
           wabaId: sessionRef.current.wabaId,
           phoneNumberId: sessionRef.current.phoneNumberId,
+          businessId: sessionRef.current.businessId,
           defaultAgentId: form.defaultAgentId || null,
         }),
       });
       await load();
-      setMsg(`WhatsApp conectado con Meta: ${r.displayPhone} ✔`);
+      setMsg(`WhatsApp conectado con Meta: ${r.displayPhone}${r.businessName ? ` · negocio: ${r.businessName}` : ""} ✔`);
     } catch (err) {
       setMsg((err as Error).message);
     } finally {
@@ -193,9 +197,11 @@ export default function ChannelsPage() {
         config_id: esConfig.configId,
         response_type: "code",
         override_default_response_type: true,
-        // sessionInfoVersion:'3' hace que Meta emita el evento WA_EMBEDDED_SIGNUP
-        // con waba_id + phone_number_id durante el flujo de WhatsApp.
-        extras: { setup: {}, featureType: "", sessionInfoVersion: "3" },
+        // setup vacío = Meta deja ELEGIR el negocio (portfolio) y CREAR una WABA
+        // nueva o usar una existente. featureType configurable por env (por
+        // defecto "" = flujo completo con creación). sessionInfoVersion:'3' hace
+        // que Meta emita WA_EMBEDDED_SIGNUP con waba_id + phone_number_id + business_id.
+        extras: { setup: {}, featureType: esConfig.featureType ?? "", sessionInfoVersion: "3" },
       },
     );
   }
@@ -225,6 +231,10 @@ export default function ChannelsPage() {
       </div>
 
       {msg && <p className="mb-4 rounded-lg bg-slate-100 px-3 py-2 text-sm">{msg}</p>}
+
+      <p className="mb-4 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+        Al pulsar <b>Conectar con Meta</b> podrás <b>elegir el negocio</b> (si administras varios) y <b>crear una cuenta de WhatsApp nueva</b> o usar una existente, con su número. Si no ves esas opciones, revisa que tu <span className="font-mono">META_CONFIG_ID</span> sea una configuración de <b>Embedded Signup de WhatsApp</b> (no un login genérico) y que la app tenga acceso avanzado a <span className="font-mono">whatsapp_business_management</span>.
+      </p>
 
       {showNew && (
         <form onSubmit={create} className="mb-6 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4">
