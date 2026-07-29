@@ -10,6 +10,8 @@ on:
 # Mínimo privilegio para el token de Actions
 permissions:
   contents: read
+  # gitleaks-action lista los commits del PR vía API en eventos pull_request
+  pull-requests: read
 
 jobs:
   # --- Escaneo de secretos (BLOQUEANTE) ---
@@ -29,9 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -46,6 +47,8 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      # requerido por codeql-action para leer metadatos del run en repos privados
+      actions: read
     strategy:
       matrix:
         language: ["javascript-typescript"]
@@ -55,16 +58,26 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
+      # Repo PRIVADO sin Advanced Security: la pestaña Code Scanning no está
+      # disponible y el upload falla el job. Se analiza igual y el SARIF queda
+      # como artefacto. Si algún día se habilita GHAS: quitar `upload: never`
+      # y el paso de artefacto.
       - uses: github/codeql-action/analyze@v3
+        with:
+          upload: never
+          output: codeql-results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: codeql-results
 
   # --- SBOM (CycloneDX) publicado como artefacto ---
   sbom:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -101,9 +114,8 @@ jobs:
       SEED_ADMIN_PASSWORD: ci-verificacion-1234
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20

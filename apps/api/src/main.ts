@@ -11,8 +11,9 @@ async function bootstrap() {
   // rawBody: necesario para verificar la firma HMAC de los webhooks de Meta
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 
-  // Límites de tamaño de cuerpo (anti-DoS por payloads gigantes) sin doble parseo
-  app.useBodyParser("json", { limit: "512kb" });
+  // Límites de tamaño de cuerpo (anti-DoS por payloads gigantes) sin doble
+  // parseo. 2mb: el import CSV de contactos admite hasta 10 000 filas por POST.
+  app.useBodyParser("json", { limit: "2mb" });
   app.useBodyParser("urlencoded", { limit: "512kb", extended: false });
 
   // Detrás del proxy de Railway/Next: honra X-Forwarded-* (IP, proto)
