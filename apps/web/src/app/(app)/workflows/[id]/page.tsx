@@ -20,8 +20,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  ArrowLeft, Bot, Clock, Flag, GitBranch, MessageSquare, Plus, Redo2, Square,
-  Tag, Trash2, Undo2, UserRound, XCircle, Zap,
+  ArrowLeft, Bot, Clock, GitBranch, MessageSquare, Pencil, Plus, Redo2, Share2, Square,
+  Tag, Tags, Trash2, Undo2, Users, UserRound, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -51,8 +51,14 @@ const NODE_DEFS: NodeDef[] = [
   },
   { type: "update_lead_status", label: "Cambiar estado del lead", icon: <Tag size={15} />, defaultConfig: { statusCode: "" } },
   { type: "add_tag", label: "Agregar etiqueta", icon: <Tag size={15} />, defaultConfig: { tag: "" } },
+  { type: "remove_tag", label: "Quitar etiqueta", icon: <Tags size={15} />, defaultConfig: { tag: "" } },
+  { type: "update_contact", label: "Actualizar datos del contacto", icon: <Pencil size={15} />, defaultConfig: { fields: {} } },
+  { type: "assign_user", label: "Asignar a usuario", icon: <UserRound size={15} />, defaultConfig: { userId: "" } },
+  { type: "assign_team", label: "Asignar a equipo", icon: <Users size={15} />, defaultConfig: { teamId: "" } },
+  { type: "switch_agent", label: "Cambiar agente IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
   { type: "transfer_human", label: "Escalar a humano", icon: <UserRound size={15} />, defaultConfig: { reason: "" } },
   { type: "close_conversation", label: "Cerrar conversación", icon: <XCircle size={15} />, defaultConfig: {} },
+  { type: "start_workflow", label: "Disparar otro flujo", icon: <Share2 size={15} />, defaultConfig: { workflowName: "" } },
   { type: "stop", label: "Terminar flujo", icon: <Square size={15} />, defaultConfig: {}, terminal: true },
 ];
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
@@ -64,6 +70,9 @@ interface Catalog {
   nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string }[];
   agents: { slug: string; name: string }[];
+  users: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
+  workflows: { name: string }[];
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -183,6 +192,16 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "condition": return "Continúa si el contacto no ha respondido";
     case "update_lead_status": return config.statusCode ? `→ ${config.statusCode}` : "(elige un estado)";
     case "add_tag": return config.tag ? `#${config.tag}` : "(elige una etiqueta)";
+    case "remove_tag": return config.tag ? `quitar #${config.tag}` : "(elige una etiqueta)";
+    case "update_contact": {
+      const keys = Object.keys(config.fields ?? {}).filter((k) => config.fields[k]);
+      const es: Record<string, string> = { firstName: "nombre", lastName: "apellido", email: "email" };
+      return keys.length ? `Actualiza: ${keys.map((k) => es[k] ?? k).join(", ")}` : "(elige qué guardar)";
+    }
+    case "assign_user": return config.userId ? "Asignar a una persona" : "(elige usuario)";
+    case "assign_team": return config.teamId ? "Asignar a un equipo" : "(elige equipo)";
+    case "switch_agent": return config.agentSlug ? `Agente: ${config.agentSlug}` : "(elige agente)";
+    case "start_workflow": return config.workflowName ? `→ ${config.workflowName}` : "(elige flujo)";
     case "transfer_human": return config.reason || "Escalar al equipo humano";
     default: return "";
   }
@@ -414,8 +433,13 @@ function Editor() {
       if (!reachable.has(n.id)) errors[n.id] = "Nodo sin conexión desde el disparador";
       else if (t === "send_text" && !String(c.text ?? "").trim()) errors[n.id] = "Escribe el mensaje";
       else if (t === "update_lead_status" && !c.statusCode) errors[n.id] = "Elige un estado de lead";
-      else if (t === "add_tag" && !String(c.tag ?? "").trim()) errors[n.id] = "Indica la etiqueta";
+      else if ((t === "add_tag" || t === "remove_tag") && !String(c.tag ?? "").trim()) errors[n.id] = "Indica la etiqueta";
       else if (t === "wait" && !(c.minutes || c.hours || c.days)) errors[n.id] = "Indica cuánto esperar";
+      else if (t === "assign_user" && !c.userId) errors[n.id] = "Elige una persona";
+      else if (t === "assign_team" && !c.teamId) errors[n.id] = "Elige un equipo";
+      else if (t === "switch_agent" && !c.agentSlug) errors[n.id] = "Elige un agente";
+      else if (t === "start_workflow" && !String(c.workflowName ?? "").trim()) errors[n.id] = "Elige un flujo";
+      else if (t === "update_contact" && !Object.values((c.fields ?? {}) as Record<string, string>).some((v) => String(v).trim())) errors[n.id] = "Indica al menos un dato";
     }
     setNodes((ns) => ns.map((n) => (n.id in errors ? { ...n, data: { ...n.data, invalid: errors[n.id] } } : { ...n, data: { ...n.data, invalid: undefined } })));
     if (Object.keys(errors).length) {
@@ -664,10 +688,70 @@ function NodePanel({
         </label>
       )}
 
-      {type === "add_tag" && (
+      {(type === "add_tag" || type === "remove_tag") && (
         <label className="block text-sm">
           <span className="text-xs text-slate-500">Etiqueta</span>
           <input value={config.tag ?? ""} onChange={(e) => onChange({ tag: e.target.value })} placeholder="p. ej. interesado" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+      )}
+
+      {type === "update_contact" && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-500">Guarda estos datos del contacto (deja vacío lo que no cambie):</p>
+          {(["firstName", "lastName", "email"] as const).map((k) => (
+            <label key={k} className="block text-sm">
+              <span className="text-xs text-slate-500">{k === "firstName" ? "Nombre" : k === "lastName" ? "Apellido" : "Email"}</span>
+              <input
+                value={(config.fields ?? {})[k] ?? ""}
+                onChange={(e) => onChange({ fields: { ...(config.fields ?? {}), [k]: e.target.value } })}
+                placeholder="admite {{variables}}"
+                className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+
+      {type === "assign_user" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Usuario</span>
+          <select value={config.userId ?? ""} onChange={(e) => onChange({ userId: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+            <option value="">— elegir persona —</option>
+            {catalog.users.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
+          </select>
+          <span className="mt-1 block text-[10px] text-slate-400">Al asignar, la IA se pausa en esa conversación.</span>
+        </label>
+      )}
+
+      {type === "assign_team" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Equipo</span>
+          <select value={config.teamId ?? ""} onChange={(e) => onChange({ teamId: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+            <option value="">— elegir equipo —</option>
+            {catalog.teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+          </select>
+          <span className="mt-1 block text-[10px] text-slate-400">Al asignar, la IA se pausa en esa conversación.</span>
+        </label>
+      )}
+
+      {type === "switch_agent" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Agente IA que toma el control</span>
+          <select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+            <option value="">— elegir agente —</option>
+            {catalog.agents.map((a) => (<option key={a.slug} value={a.slug}>🤖 {a.name}</option>))}
+          </select>
+        </label>
+      )}
+
+      {type === "start_workflow" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Flujo a disparar</span>
+          <select value={config.workflowName ?? ""} onChange={(e) => onChange({ workflowName: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+            <option value="">— elegir flujo —</option>
+            {catalog.workflows.map((w) => (<option key={w.name} value={w.name}>{w.name}</option>))}
+          </select>
+          <span className="mt-1 block text-[10px] text-slate-400">Debe estar publicado y activo. Un flujo no puede dispararse a sí mismo.</span>
         </label>
       )}
 

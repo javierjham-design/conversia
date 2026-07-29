@@ -150,6 +150,79 @@ function makeDeps(): EngineDeps {
       await emitPlatformEvent(ctx.organizationId, "conversation.closed", { conversationId: ctx.conversationId });
     },
 
+    async removeTag(ctx, tagName) {
+      if (!ctx.conversationId || !tagName) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        const tag = await tx.tag.findUnique({
+          where: { organizationId_name: { organizationId: ctx.organizationId, name: tagName } },
+        });
+        if (!tag) return;
+        await tx.tagAssignment.deleteMany({
+          where: { tagId: tag.id, entityType: "conversation", entityId: ctx.conversationId! },
+        });
+      });
+    },
+
+    async updateContact(ctx, fields) {
+      if (!ctx.contactId) return;
+      const data: Record<string, string> = {};
+      for (const key of ["firstName", "lastName", "email"] as const) {
+        const v = fields[key];
+        if (typeof v === "string" && v.trim()) data[key] = v.trim();
+      }
+      if (Object.keys(data).length === 0) return;
+      await withTenant(ctx.organizationId, (tx) => tx.contact.update({ where: { id: ctx.contactId! }, data }));
+    },
+
+    async assignUser(ctx, userId) {
+      if (!ctx.conversationId || !userId) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        const member = await tx.organizationUser.findFirst({ where: { userId, active: true } });
+        if (!member) return;
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { assignedUserId: userId, aiEnabled: false },
+        });
+      });
+    },
+
+    async assignTeam(ctx, teamId) {
+      if (!ctx.conversationId || !teamId) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        const team = await tx.team.findUnique({ where: { id: teamId } });
+        if (!team) return;
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { assignedTeamId: teamId, aiEnabled: false },
+        });
+      });
+    },
+
+    async switchAgent(ctx, agentSlug) {
+      if (!ctx.conversationId || !agentSlug) return;
+      await withTenant(ctx.organizationId, async (tx) => {
+        const agent = await tx.agent.findUnique({
+          where: { organizationId_slug: { organizationId: ctx.organizationId, slug: agentSlug } },
+        });
+        if (!agent || !agent.active) return;
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { activeAgentId: agent.id, aiEnabled: true },
+        });
+      });
+    },
+
+    async startWorkflow(ctx, workflowName) {
+      if (!workflowName) return;
+      // Evita el auto-disparo del mismo flujo (loop directo).
+      await startWorkflowByName(
+        ctx.organizationId,
+        workflowName,
+        { conversationId: ctx.conversationId, contactId: ctx.contactId },
+        { excludeWorkflowId: ctx.workflowId },
+      );
+    },
+
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {
       await withTenant(ctx.organizationId, async (tx) => {
         await tx.scheduledJob.upsert({
@@ -288,6 +361,7 @@ export async function startWorkflowByName(
   organizationId: string,
   workflowName: string,
   target: { conversationId?: string; contactId?: string },
+  opts: { excludeWorkflowId?: string } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const wf = await withTenant(organizationId, (tx) =>
     tx.workflow.findFirst({
@@ -296,6 +370,9 @@ export async function startWorkflowByName(
     }),
   );
   if (!wf) return { ok: false, error: `No encontré un flujo activo llamado "${workflowName}"` };
+  if (opts.excludeWorkflowId && wf.id === opts.excludeWorkflowId) {
+    return { ok: false, error: "Un flujo no puede dispararse a sí mismo" };
+  }
   const versionRow = wf.versions[0];
   if (!versionRow) return { ok: false, error: `El flujo "${workflowName}" no tiene versión publicada` };
   const parsed = workflowDefinitionSchema.safeParse(versionRow.definition);

@@ -48,8 +48,14 @@ const NODE_CATALOG = [
   { type: "condition_no_reply", label: "¿Sigue sin responder?", description: "Si NO ha respondido continúa; si respondió, termina el flujo" },
   { type: "update_lead_status", label: "Cambiar estado del lead", description: "Actualiza el estado del lead del contacto" },
   { type: "add_tag", label: "Agregar etiqueta", description: "Etiqueta la conversación" },
+  { type: "remove_tag", label: "Quitar etiqueta", description: "Quita una etiqueta de la conversación" },
+  { type: "update_contact", label: "Actualizar datos del contacto", description: "Guarda nombre, apellido o email del contacto" },
+  { type: "assign_user", label: "Asignar a usuario", description: "Asigna la conversación a una persona (pausa la IA)" },
+  { type: "assign_team", label: "Asignar a equipo", description: "Asigna la conversación a un equipo (pausa la IA)" },
+  { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control de la conversación" },
   { type: "transfer_human", label: "Escalar a humano", description: "Pausa la IA y notifica al equipo" },
   { type: "close_conversation", label: "Cerrar conversación", description: "Marca la conversación como cerrada" },
+  { type: "start_workflow", label: "Disparar otro flujo", description: "Inicia otro workflow por su nombre" },
   { type: "stop", label: "Terminar flujo", description: "Finaliza la ejecución" },
 ];
 
@@ -61,11 +67,22 @@ export class WorkflowsController {
   catalog() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [statuses, agents] = await Promise.all([
+      const [statuses, agents, members, teams, workflows] = await Promise.all([
         tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true } }),
         tx.agent.findMany({ where: { deletedAt: null, active: true }, select: { slug: true, name: true } }),
+        tx.organizationUser.findMany({ where: { active: true }, include: { user: { select: { id: true, name: true } } } }),
+        tx.team.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+        tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
       ]);
-      return { triggers: TRIGGER_CATALOG, nodes: NODE_CATALOG, leadStatuses: statuses, agents };
+      return {
+        triggers: TRIGGER_CATALOG,
+        nodes: NODE_CATALOG,
+        leadStatuses: statuses,
+        agents,
+        users: members.map((m) => ({ id: m.userId, name: m.user.name })),
+        teams,
+        workflows: workflows.map((w) => ({ name: w.name })),
+      };
     });
   }
 

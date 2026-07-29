@@ -26,6 +26,12 @@ export interface EngineDeps {
   transferHuman(ctx: RunCtx, reason?: string): Promise<void>;
   setAiEnabled(ctx: RunCtx, enabled: boolean): Promise<void>;
   closeConversation(ctx: RunCtx): Promise<void>;
+  removeTag(ctx: RunCtx, tag: string): Promise<void>;
+  updateContact(ctx: RunCtx, fields: Record<string, unknown>): Promise<void>;
+  assignUser(ctx: RunCtx, userId: string): Promise<void>;
+  assignTeam(ctx: RunCtx, teamId: string): Promise<void>;
+  switchAgent(ctx: RunCtx, agentSlug: string): Promise<void>;
+  startWorkflow(ctx: RunCtx, workflowName: string): Promise<void>;
   /** Persiste el timer (scheduled_jobs). cancelOn: evento que lo cancela. */
   scheduleTimer(ctx: RunCtx, nodeId: string, dueAt: Date, cancelOn?: string): Promise<void>;
   /** Evalúa condiciones (p.ej. no_reply: ¿el contacto respondió desde runStartedAt?). */
@@ -108,6 +114,24 @@ async function executeNode(
       return {};
     case "close_conversation":
       await deps.closeConversation(ctx);
+      return {};
+    case "remove_tag":
+      await deps.removeTag(ctx, String(cfg.tag ?? ""));
+      return {};
+    case "update_contact":
+      await deps.updateContact(ctx, (cfg.fields as Record<string, unknown>) ?? {});
+      return {};
+    case "assign_user":
+      await deps.assignUser(ctx, String(cfg.userId ?? ""));
+      return {};
+    case "assign_team":
+      await deps.assignTeam(ctx, String(cfg.teamId ?? ""));
+      return {};
+    case "switch_agent":
+      await deps.switchAgent(ctx, String(cfg.agentSlug ?? ""));
+      return {};
+    case "start_workflow":
+      await deps.startWorkflow(ctx, String(cfg.workflowName ?? ""));
       return {};
     case "wait":
       return { wait: computeWaitDue(cfg, deps.now()) };

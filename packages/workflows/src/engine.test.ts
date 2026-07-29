@@ -12,6 +12,12 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     transferHuman: async () => void calls.push("human"),
     setAiEnabled: async (_c, on) => void calls.push(`ai:${on}`),
     closeConversation: async () => void calls.push("close"),
+    removeTag: async (_c, tag) => void calls.push(`untag:${tag}`),
+    updateContact: async (_c, fields) => void calls.push(`contact:${Object.keys(fields).join(",")}`),
+    assignUser: async (_c, userId) => void calls.push(`user:${userId}`),
+    assignTeam: async (_c, teamId) => void calls.push(`team:${teamId}`),
+    switchAgent: async (_c, slug) => void calls.push(`switch:${slug}`),
+    startWorkflow: async (_c, name) => void calls.push(`start:${name}`),
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,
@@ -72,5 +78,31 @@ describe("motor de workflows v0", () => {
     const result = await resumeAfterWait(deps, ctx, def, "n3");
     expect(result).toEqual({ status: "completed" });
     expect(calls).toEqual([]);
+  });
+
+  it("ejecuta los nodos nuevos (etiqueta, contacto, asignación, agente, subflujo)", async () => {
+    const { deps, calls } = makeDeps();
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "remove_tag", config: { tag: "frio" } },
+        { id: "b", type: "update_contact", config: { fields: { firstName: "Ana" } } },
+        { id: "c", type: "assign_team", config: { teamId: "t1" } },
+        { id: "d", type: "switch_agent", config: { agentSlug: "ventas" } },
+        { id: "e", type: "start_workflow", config: { workflowName: "Bienvenida" } },
+        { id: "f", type: "stop", config: {} },
+      ],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "c" },
+        { from: "c", to: "d" },
+        { from: "d", to: "e" },
+        { from: "e", to: "f" },
+      ],
+    };
+    const result = await executeFrom(deps, ctx, flow, "a");
+    expect(result).toEqual({ status: "completed" });
+    expect(calls).toEqual(["untag:frio", "contact:firstName", "team:t1", "switch:ventas", "start:Bienvenida"]);
   });
 });
