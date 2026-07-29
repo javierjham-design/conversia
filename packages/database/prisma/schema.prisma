@@ -512,6 +512,20 @@ model Contact {
   blocked        Boolean   @default(false)
   source         String?
   campaignId     String?   @map("campaign_id")
+  // Nombre de perfil de WhatsApp (contacts[].profile.name) — SEPARADO del
+  // nombre real (firstName/lastName): nunca lo pisa; se refresca si Meta cambia.
+  profileName       String?   @map("profile_name")
+  // País ISO inferido del prefijo telefónico (CL, PE…) para tabla/filtros.
+  country           String?
+  // Fuente de creación del contacto: webhook | manual | import | api.
+  createdVia        String    @default("webhook") @map("created_via")
+  // Cómo llegó: "organic" | "ad" (para segmentar orgánicos vs anuncios).
+  acquisitionSource String?   @map("acquisition_source")
+  // Atribución Click-to-WhatsApp: ad id + click id (para CAPI y reportes).
+  adId              String?   @map("ad_id")
+  ctwaClid          String?   @map("ctwa_clid")
+  // Payload crudo del referral/contacto de Meta — no perder nada a futuro.
+  meta           Json      @default("{}")
   // atributos flexibles + resumen IA + preferencias + objeciones
   attributes     Json      @default("{}")
   firstContactAt DateTime? @map("first_contact_at")
@@ -527,7 +541,25 @@ model Contact {
 
   @@index([organizationId, phone])
   @@index([organizationId, lastContactAt])
+  @@index([organizationId, createdAt])
   @@map("contacts")
+}
+
+// Segmentos = filtros guardados por tenant (aparecen en el sidebar de Contactos).
+// definition = JSON de condiciones evaluado en BD (mismo lenguaje que los filtros).
+model ContactSegment {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  definition     Json     @default("{}")
+  isDefault      Boolean  @default(false) @map("is_default")
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("contact_segments")
 }
 
 // Identidad por canal (wa_id, ig_id, etc.). Resuelve contacto entrante.
