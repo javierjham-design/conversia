@@ -348,16 +348,18 @@ export class AgentsController {
       services: services as unknown as Record<string, unknown>,
     };
 
-    const cfg = input.config as Record<string, any>;
+    // El modelo/límites los fija el Super Admin por tenant (org.settings.ai);
+    // el probador usa esos mismos valores, no los del cuerpo.
+    const aiCfg = (orgSettings.ai ?? {}) as Record<string, any>;
     const runtime: AgentRuntime = {
       agentId: agent.id,
       agentVersionId: "sandbox",
       slug: agent.slug,
       name: agent.name,
       systemPrompt: assembleSystemPrompt(input.systemPrompt, input.actions),
-      model: cfg.model ?? env.AI_DEFAULT_MODEL,
-      maxTokens: cfg.maxTokens ?? 400,
-      maxToolRounds: cfg.maxToolRounds ?? 5,
+      model: aiCfg.model ?? env.AI_DEFAULT_MODEL,
+      maxTokens: aiCfg.maxTokens ?? 400,
+      maxToolRounds: aiCfg.maxToolRounds ?? 5,
       tools: input.tools ?? [],
     };
 

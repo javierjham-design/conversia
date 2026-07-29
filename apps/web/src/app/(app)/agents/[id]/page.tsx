@@ -43,13 +43,6 @@ interface Channel {
   defaultAgentId: string | null;
 }
 
-const MODELS = [
-  { id: "gpt-4o-mini", label: "GPT-4o mini — rápido y económico (recomendado)" },
-  { id: "gpt-4o", label: "GPT-4o — más capaz" },
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 — económico" },
-  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 — equilibrado" },
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8 — máxima calidad" },
-];
 const KINDS: [string, string][] = [
   ["orchestrator", "Recepcionista / Orquestador"],
   ["receptionist", "Recepcionista"],
@@ -491,21 +484,8 @@ export default function AgentEditorPage() {
               </button>
               {showAdvanced && (
                 <div className="space-y-4 border-t border-slate-100 p-4">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <label className="text-sm">
-                      <span className="text-xs text-slate-500">Modelo de IA</span>
-                      <select value={model} onChange={(e) => setModel(e.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
-                        {MODELS.map((m) => (<option key={m.id} value={m.id}>{m.label}</option>))}
-                      </select>
-                    </label>
-                    <label className="text-sm">
-                      <span className="text-xs text-slate-500">Máx. tokens/respuesta</span>
-                      <input type="number" min={50} max={4000} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
-                    </label>
-                    <label className="text-sm">
-                      <span className="text-xs text-slate-500">Máx. rondas de tools</span>
-                      <input type="number" min={0} max={10} value={maxToolRounds} onChange={(e) => setMaxToolRounds(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
-                    </label>
+                  <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                    El modelo de IA y sus límites (tokens por respuesta y rondas de herramientas) los administra tu proveedor para toda tu plataforma. No se configuran por agente.
                   </div>
                   <div>
                     <p className="mb-1 text-xs font-medium text-slate-600">Canales que atiende por defecto</p>

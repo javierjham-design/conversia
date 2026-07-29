@@ -179,6 +179,9 @@ export async function runAgentTurn(opts: {
   if (!history.length) return;
 
   const cfg = (version.config ?? {}) as Record<string, any>;
+  // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
+  // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
+  const aiCfg = (orgSettings.ai ?? {}) as Record<string, any>;
   const runtime: AgentRuntime = {
     agentId: agent.id,
     agentVersionId: version.id,
@@ -186,9 +189,9 @@ export async function runAgentTurn(opts: {
     name: agent.name,
     // Prompt base + instrucciones en lenguaje natural de cada acción habilitada.
     systemPrompt: assembleSystemPrompt(version.systemPrompt, cfg.actions),
-    model: cfg.model ?? getEnv().AI_DEFAULT_MODEL,
-    maxTokens: cfg.maxTokens ?? 400,
-    maxToolRounds: cfg.maxToolRounds ?? 5,
+    model: aiCfg.model ?? getEnv().AI_DEFAULT_MODEL,
+    maxTokens: aiCfg.maxTokens ?? 400,
+    maxToolRounds: aiCfg.maxToolRounds ?? 5,
     tools: Array.isArray(version.tools) ? (version.tools as string[]) : [],
   };
 

@@ -24,6 +24,10 @@ export default function OrgDetailPage() {
   const [validUntil, setValidUntil] = useState("");
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [model, setModel] = useState("gpt-4o-mini");
+  // Modelo de IA REAL de todo el tenant (lo fija el Super Admin).
+  const [aiModel, setAiModel] = useState("gpt-4o-mini");
+  const [aiMaxTokens, setAiMaxTokens] = useState(400);
+  const [aiMaxToolRounds, setAiMaxToolRounds] = useState(5);
   const [saving, setSaving] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
@@ -35,6 +39,9 @@ export default function OrgDetailPage() {
     setValidUntil(detail.validUntil ? String(detail.validUntil).slice(0, 10) : "");
     setLimits({ ...detail.effectiveLimits });
     setAdminEmail(detail.adminEmail ?? "");
+    setAiModel(detail.ai?.model ?? "gpt-4o-mini");
+    setAiMaxTokens(detail.ai?.maxTokens ?? 400);
+    setAiMaxToolRounds(detail.ai?.maxToolRounds ?? 5);
   }, [id]);
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
@@ -218,6 +225,32 @@ export default function OrgDetailPage() {
           <div className="mt-3 flex items-center gap-3">
             <Button disabled={saving} onClick={() => void saveConfig({ limits })}>Guardar límites</Button>
             <span className="text-xs text-slate-400">Los cambios aplican de inmediato (API y worker).</span>
+          </div>
+        </section>
+
+        {/* Modelo de IA del cliente — aplica a TODA su plataforma */}
+        <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
+          <h2 className="mb-1 font-semibold text-navy-900">Modelo de IA del cliente</h2>
+          <p className="mb-3 text-xs text-slate-500">Aplica a toda la plataforma del cliente (todos sus agentes y el probador). El cliente no puede cambiarlo.</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="text-xs text-slate-600">
+              Modelo
+              <select value={aiModel} onChange={(e) => setAiModel(e.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                {(cost ? Object.keys(cost.models) : [aiModel]).map((m) => (<option key={m} value={m}>{m}</option>))}
+              </select>
+            </label>
+            <label className="text-xs text-slate-600">
+              Máx. tokens/respuesta
+              <input type="number" min={50} max={4000} value={aiMaxTokens} onChange={(e) => setAiMaxTokens(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-600">
+              Máx. rondas de tools
+              <input type="number" min={0} max={10} value={aiMaxToolRounds} onChange={(e) => setAiMaxToolRounds(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <Button disabled={saving} onClick={() => void saveConfig({ ai: { model: aiModel, maxTokens: aiMaxTokens, maxToolRounds: aiMaxToolRounds } })}>Guardar modelo</Button>
+            <span className="text-xs text-slate-400">Aplica de inmediato a los agentes del cliente.</span>
           </div>
         </section>
 

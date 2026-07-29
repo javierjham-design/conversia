@@ -161,6 +161,12 @@ export class PlatformController {
       validUntil: typeof settings.validUntil === "string" ? settings.validUntil : null,
       aiKillSwitch: settings.aiKillSwitch === true,
       paymentProvider: settings.paymentProvider ?? null,
+      // Modelo de IA de TODA la plataforma del tenant (lo fija el Super Admin).
+      ai: {
+        model: (settings.ai as any)?.model ?? null,
+        maxTokens: (settings.ai as any)?.maxTokens ?? null,
+        maxToolRounds: (settings.ai as any)?.maxToolRounds ?? null,
+      },
       availablePlans: plans.map((p) => ({ code: p.code, name: p.name })),
       invoices,
       usage,
@@ -186,6 +192,15 @@ export class PlatformController {
         aiKillSwitch: z.boolean().optional(),
         limits: z.record(z.coerce.number().int().min(0)).optional(), // override por-tenant; 0 = ilimitado
         paymentProvider: z.enum(["flow", "lemonsqueezy"]).nullable().optional(), // proveedor de pago del tenant
+        // Modelo de IA para TODA la plataforma del tenant (exclusivo del Super Admin).
+        ai: z
+          .object({
+            model: z.string().min(1).max(60),
+            maxTokens: z.coerce.number().int().min(50).max(4000),
+            maxToolRounds: z.coerce.number().int().min(0).max(10),
+          })
+          .partial()
+          .optional(),
       })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
@@ -198,6 +213,7 @@ export class PlatformController {
     if (parsed.data.aiKillSwitch !== undefined) settings.aiKillSwitch = parsed.data.aiKillSwitch;
     if (parsed.data.limits !== undefined) settings.limits = parsed.data.limits;
     if (parsed.data.paymentProvider !== undefined) settings.paymentProvider = parsed.data.paymentProvider || null;
+    if (parsed.data.ai !== undefined) settings.ai = { ...(settings.ai ?? {}), ...parsed.data.ai };
     const data: any = { settings };
     if (parsed.data.name) data.name = parsed.data.name;
     if (parsed.data.country) data.country = parsed.data.country;
