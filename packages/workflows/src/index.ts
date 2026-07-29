@@ -36,6 +36,8 @@ export interface EngineDeps {
   openConversation(ctx: RunCtx): Promise<void>;
   /** Deja un comentario interno (solo el equipo lo ve) en la conversación. */
   addNote(ctx: RunCtx, text: string): Promise<void>;
+  /** Encola un evento de Conversions API (Meta) con el ctwa_clid del contacto. */
+  sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
   /** Persiste el timer (scheduled_jobs). cancelOn: evento que lo cancela. */
   scheduleTimer(ctx: RunCtx, nodeId: string, dueAt: Date, cancelOn?: string): Promise<void>;
   /** Evalúa condiciones (p.ej. no_reply: ¿el contacto respondió desde runStartedAt?). */
@@ -208,6 +210,17 @@ async function executeNode(
       return { branch: evalBusinessHours(cfg, deps.now()) ? "in" : "out" };
     case "goto":
       return { goto: String(cfg.targetNodeId ?? "") };
+    case "send_capi":
+      await deps.sendCapiEvent(ctx, {
+        eventName: String(cfg.eventName ?? "Lead"),
+        value: cfg.value != null && cfg.value !== "" ? Number(cfg.value) : undefined,
+        currency: cfg.currency ? String(cfg.currency) : undefined,
+      });
+      return {};
+    case "send_tiktok_event":
+    case "google_sheets_append":
+      // "Próximamente": sin integración aún. No-op registrado (no se finge).
+      return {};
     case "wait":
       return { wait: computeWaitDue(cfg, deps.now()) };
     case "condition": {

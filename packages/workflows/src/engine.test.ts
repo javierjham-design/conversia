@@ -20,6 +20,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     startWorkflow: async (_c, name) => void calls.push(`start:${name}`),
     openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
     addNote: async (_c, text) => void calls.push(`note:${text}`),
+    sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,
@@ -194,5 +195,22 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
     expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-27T20:00:00Z"))).toBe(false); // fuera de hora
     expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-28T11:00:00Z"))).toBe(false); // martes sin horario
     expect(evalBusinessHours(cfg, new Date("2026-07-27T11:00:00Z"))).toBe(false); // feriado
+  });
+
+  it("send_capi encola el evento y el flujo continúa (no bloquea)", async () => {
+    const { deps, calls } = makeDeps();
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "send_capi", config: { eventName: "Schedule", value: 50000, currency: "CLP" } },
+        { id: "b", type: "add_tag", config: { tag: "capi-ok" } },
+        { id: "c", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
+    };
+    const r = await executeFrom(deps, ctx, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["capi:Schedule", "tag:capi-ok"]);
   });
 });

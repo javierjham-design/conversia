@@ -112,6 +112,32 @@ export function simulateWorkflow(
         label = "Terminar flujo";
         detail = "Fin de la ejecución";
         break;
+      case "open_conversation":
+        label = "Abrir conversación";
+        detail = "Abriría/reutilizaría una conversación del contacto";
+        break;
+      case "add_note":
+        label = "Añadir comentario";
+        detail = renderVars(String(cfg.text ?? ""), vars) || "(sin comentario)";
+        break;
+      case "goto":
+        label = "Saltar a otro paso";
+        detail = cfg.targetNodeId ? `Continuaría en el paso ${cfg.targetNodeId}` : "(sin destino)";
+        break;
+      case "business_hours":
+        label = "Fecha y hora";
+        branch = "in"; // en la prueba asumimos dentro de horario
+        detail = "Ramificaría según el horario → asumimos «Dentro de horario» (simulado)";
+        break;
+      case "send_capi":
+        label = "Enviar evento CAPI (Meta)";
+        detail = `Enviaría el evento “${cfg.eventName ?? "Lead"}”${cfg.value ? ` por $${cfg.value} ${cfg.currency ?? "CLP"}` : ""} (simulado)`;
+        break;
+      case "send_tiktok_event":
+      case "google_sheets_append":
+        label = "Integración";
+        detail = "(Próximamente — este paso aún no envía nada)";
+        break;
       default:
         detail = "(este paso no tiene efecto en el motor)";
     }
@@ -124,7 +150,8 @@ export function simulateWorkflow(
       break;
     }
     seen.add(node.id);
-    current = nextNodeId(def, node.id, branch);
+    // "Saltar a otro paso": el recorrido sigue el destino configurado.
+    current = node.type === "goto" && cfg.targetNodeId ? String(cfg.targetNodeId) : nextNodeId(def, node.id, branch);
   }
 
   return trace;

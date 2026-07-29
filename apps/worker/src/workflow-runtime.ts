@@ -10,7 +10,7 @@ import {
 import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
 import { runAgentTurn } from "./agent-turn";
 import { getChannelProvider } from "./channel-providers";
-import { emitPlatformEvent } from "./platform-events";
+import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
 /** Implementación de efectos del motor sobre la plataforma real. */
 function makeDeps(): EngineDeps {
@@ -273,6 +273,27 @@ function makeDeps(): EngineDeps {
           },
         }),
       );
+    },
+
+    async sendCapiEvent(ctx, config) {
+      // Lee el ctwa_clid + teléfono del contacto y encola el evento (reintentos
+      // vía BullMQ; si Meta falla, se reintenta sin bloquear el flujo).
+      const contact = ctx.contactId
+        ? await withTenant(ctx.organizationId, (tx) =>
+            tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true, attributes: true } }),
+          )
+        : null;
+      const ctwaClid = ((contact?.attributes as Record<string, unknown>) ?? {}).ctwa_clid as string | undefined;
+      await enqueueCapiEvent({
+        organizationId: ctx.organizationId,
+        source: "workflow",
+        occurredAt: new Date().toISOString(),
+        contactPhone: contact?.phone ?? null,
+        eventName: config.eventName,
+        value: config.value ?? null,
+        currency: config.currency ?? null,
+        ctwaClid: ctwaClid ?? null,
+      });
     },
 
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {

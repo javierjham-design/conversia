@@ -21,8 +21,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, GitBranch, MessageSquare, MessageSquarePlus,
-  Pencil, Plus, Redo2, Search, Share2, Square, StickyNote, Tag, Tags, Trash2, Undo2, Users, UserRound, XCircle, Zap,
+  ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
+  Pencil, Plus, Redo2, Search, Share2, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -79,6 +79,9 @@ const NODE_DEFS: NodeDef[] = [
   { type: "goto", label: "Saltar a otro paso", description: "Continúa en cualquier otro paso del flujo", category: "Control de flujo", icon: <CornerUpRight size={15} />, defaultConfig: { targetNodeId: "" } },
   { type: "start_workflow", label: "Disparar otro flujo", description: "Inicia otro workflow por su nombre", category: "Control de flujo", icon: <Share2 size={15} />, defaultConfig: { workflowName: "" } },
   { type: "stop", label: "Terminar flujo", description: "Finaliza la ejecución", category: "Control de flujo", icon: <Square size={15} />, defaultConfig: {}, terminal: true },
+  // Marketing
+  { type: "send_capi", label: "Enviar evento CAPI (Meta)", description: "Envía un evento de conversión a Meta (Lead, Schedule, Purchase…)", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "Lead", value: "", currency: "CLP" } },
+  { type: "send_tiktok_event", label: "Enviar evento TikTok", description: "Evento a TikTok Events API", category: "Marketing", icon: <Megaphone size={15} />, defaultConfig: {}, soon: true },
   // IA
   { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
   { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
@@ -227,6 +230,8 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "add_note": return config.text ? `📝 ${String(config.text).slice(0, 40)}` : "(sin comentario)";
     case "goto": return config.targetNodeId ? "Salta a otro paso del flujo" : "(elige el paso destino)";
     case "business_hours": return "Ramifica: dentro / fuera de horario";
+    case "send_capi": return `CAPI: ${config.eventName ?? "Lead"}${config.value ? ` ($${config.value} ${config.currency ?? "CLP"})` : ""}`;
+    case "send_tiktok_event": return "(Próximamente)";
     default: return "";
   }
 }
@@ -897,6 +902,12 @@ function NodePanel({
 
       {type === "business_hours" && <BusinessHoursForm config={config} onChange={onChange} />}
 
+      {type === "send_capi" && <CapiForm config={config} onChange={onChange} />}
+
+      {type === "send_tiktok_event" && (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere integrar TikTok Events API. Puedes dejar el paso, pero aún no envía.</p>
+      )}
+
       {type === "update_lead_status" && (
         <label className="block text-sm">
           <span className="text-xs text-slate-500">Nuevo estado del lead</span>
@@ -984,6 +995,32 @@ function NodePanel({
       {(type === "close_conversation" || type === "stop") && (
         <p className="text-xs text-slate-400">Este paso no necesita configuración.</p>
       )}
+    </div>
+  );
+}
+
+const CAPI_EVENTS = ["Lead", "Schedule", "Purchase", "CompleteRegistration", "Contact", "SubmitApplication", "StartTrial"];
+
+function CapiForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <label className="block">
+        <span className="text-xs text-slate-500">Evento estándar de Meta</span>
+        <select value={config.eventName ?? "Lead"} onChange={(e) => onChange({ eventName: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+          {CAPI_EVENTS.map((ev) => (<option key={ev} value={ev}>{ev}</option>))}
+        </select>
+      </label>
+      <div className="flex gap-2">
+        <label className="flex-1">
+          <span className="text-xs text-slate-500">Valor (opcional)</span>
+          <input type="number" min={0} value={config.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+        <label className="w-24">
+          <span className="text-xs text-slate-500">Moneda</span>
+          <input value={config.currency ?? "CLP"} onChange={(e) => onChange({ currency: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <p className="text-[10px] text-slate-400">Usa el <span className="font-mono">ctwa_clid</span> del contacto (del disparador Click-to-Chat) + el dataset/token del <b>Centro Meta</b>. Se envía con reintentos automáticos.</p>
     </div>
   );
 }

@@ -312,6 +312,11 @@ export const NODE_TYPES = [
   "call_api",
   "send_webhook",
   "notify_team",
+  // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
+  "send_capi",
+  "send_tiktok_event",
+  "google_sheets_append",
+  "ai_objective",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 
@@ -446,6 +451,13 @@ export interface CapiJob {
   leadId?: string | null;
   test?: boolean;
   occurredAt: string;
+  /** Evento DIRECTO (nodo de workflow "Enviar evento CAPI"): si viene, se envía
+   *  este event_name sin depender de las reglas source→dest del tenant. */
+  eventName?: string;
+  value?: number | null;
+  currency?: string | null;
+  /** click id del anuncio Click-to-WhatsApp (atribución del conversion). */
+  ctwaClid?: string | null;
 }
 
 export interface InboundJob {
