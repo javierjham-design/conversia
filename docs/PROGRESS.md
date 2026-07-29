@@ -1,5 +1,18 @@
 # Registro de progreso
 
+## 2026-07-29 (3) — Módulo de Contactos (estilo Respond.io)
+
+Rama `feature/contacts` (PR aparte). Objetivo: capturar el **máximo** de datos de Meta/WhatsApp y gestionar la base de contactos con aislamiento total por tenant. 6 checkpoints, un commit cada uno; todo `withTenant` + zod + `audit_logs`, UI en español, nada hardcodeado por cliente.
+
+- **Aislamiento verificado**: RLS por `organization_id` en cada tabla; `resolveTenant()` enruta por número receptor; el mismo teléfono a dos tenants = dos contactos aislados. Uniques org-scoped.
+- **Esquema** (migración `20260729140000_contacts_capture`, aún **sin aplicar a prod**): +7 columnas en `contacts` (`profile_name`, `country`, `created_via`, `acquisition_source`, `ad_id`, `ctwa_clid`, `meta`) + índice `(org, created_at)` + tabla `contact_segments`. Custom fields ya existían.
+- **Captura (worker)**: perfil de WhatsApp guardado **aparte** del nombre real (nunca lo pisa); teléfono E.164; país/zona horaria inferidos por prefijo; referral CTWA estructurado (`ad_id`/`ctwa_clid`/`acquisition_source`) + payload crudo en `meta`. Tests vitest (6).
+- **Lista** (`/contacts`): sidebar con conteos en vivo (todos, bloqueados, ciclo de vida, agentes IA, segmentos); tabla con perfil WhatsApp, canal, etapa, etiquetas, país, estado de conversación, asignado; búsqueda con debounce, filtros combinables, selector de columnas, orden y paginación server-side (25/50/100). Alta manual con dedupe por teléfono.
+- **Ficha** (drawer): pestañas Datos / Origen / Conversaciones / Actividad. Edición inline + campos personalizados por tipo, bloque de atribución (readonly), bloquear/eliminar, notas internas (`attributes.notes`, sin tabla nueva), timeline de `audit_logs`.
+- **Acciones masivas**: etiquetar, cambiar etapa (upsert de lead), asignar (agente/usuario), bloquear/desbloquear, borrado lógico. **Segmentos**: guardar filtros actuales, presets sugeridos genéricos, borrar; segmento dinámico `createdWithinDays`.
+- **Import/Export/Fusión**: export CSV respetando filtros (hasta 10 000); import CSV con mapeo de columnas + dedupe por teléfono (crea/actualiza), por lotes; detector de duplicados por teléfono + fusión (reasigna conversaciones/leads/citas/identidades/etiquetas/campos, rellena huecos, baja lógica). Parser CSV con tests (5).
+- **Pendiente**: aplicar la migración a prod (Railway) antes de desplegar; unique DB `(org, phone)` queda como migración futura (propuesta, no aplicada) tras deduplicar; import muy grande → job BullMQ en 2º plano (hoy es síncrono por lotes).
+
 ## 2026-07-29 (2) — Módulo de Workflows (canvas) + modelo de IA por-tenant
 
 **Workflows estilo Respond.io** sobre el motor JSON existente (sin migración; el motor queda intacto → los flujos publicados siguen corriendo igual):

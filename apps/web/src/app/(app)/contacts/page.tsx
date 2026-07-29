@@ -10,6 +10,8 @@ import {
   Filter,
   Plus,
   Search,
+  Download,
+  GitMerge,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -20,9 +22,10 @@ import {
   Users2,
   X,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
 import { Button, ConfirmDialog, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
 import { ContactDrawer } from "./contact-drawer";
+import { DuplicatesModal, ImportModal } from "./contact-import-merge";
 
 // ------------------------------- Tipos -------------------------------
 
@@ -166,6 +169,9 @@ export default function ContactsPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [confirmBulkDel, setConfirmBulkDel] = useState(false);
   const [saveSegOpen, setSaveSegOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const agentName = useMemo(() => new Map(meta?.agents.map((a) => [a.id, a.name]) ?? []), [meta]);
   const userName = useMemo(() => new Map(meta?.users.map((u) => [u.id, u.name]) ?? []), [meta]);
@@ -249,6 +255,24 @@ export default function ContactsPage() {
   function refresh() {
     setRefreshKey((k) => k + 1);
     loadMeta();
+  }
+  async function downloadExport() {
+    setExporting(true);
+    try {
+      const res = await fetch(`/backend/contacts/export?${query}`, { headers: getToken() ? { authorization: `Bearer ${getToken()}` } : {} });
+      if (!res.ok) throw new Error("No se pudo exportar");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `contactos_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al exportar", "error");
+    } finally {
+      setExporting(false);
+    }
   }
   async function runBulk(action: string, params: Record<string, unknown> = {}) {
     try {
@@ -393,7 +417,13 @@ export default function ContactsPage() {
               </>
             )}
           </div>
-          <Button variant="secondary" onClick={() => toast.push("La importación de CSV llega en el checkpoint 6", "info")}>
+          <Button variant="secondary" onClick={() => setDupOpen(true)} title="Buscar y fusionar duplicados">
+            <GitMerge size={15} /> Duplicados
+          </Button>
+          <Button variant="secondary" onClick={downloadExport} disabled={exporting}>
+            <Download size={15} /> {exporting ? "Exportando…" : "Exportar"}
+          </Button>
+          <Button variant="secondary" onClick={() => setImportOpen(true)}>
             <Upload size={15} /> Importar
           </Button>
           <Button onClick={() => setAddOpen(true)}>
@@ -635,6 +665,9 @@ export default function ContactsPage() {
       />
 
       <SaveSegmentModal open={saveSegOpen} onClose={() => setSaveSegOpen(false)} definition={currentDefinition} onSaved={() => { setSaveSegOpen(false); loadMeta(); }} />
+
+      <ImportModal open={importOpen} onClose={() => setImportOpen(false)} onDone={refresh} />
+      <DuplicatesModal open={dupOpen} onClose={() => setDupOpen(false)} onDone={refresh} />
     </div>
   );
 }

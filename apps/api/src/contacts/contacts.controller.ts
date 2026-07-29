@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
@@ -95,6 +96,19 @@ const segmentDefinition = z
   .strip();
 const segmentBody = z.object({ name: z.string().trim().min(1).max(80), definition: segmentDefinition });
 
+const importRow = z.object({
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
+  country: z.string().optional(),
+  locale: z.string().optional(),
+  tags: z.string().optional(), // separadas por coma
+});
+const importBody = z.object({ rows: z.array(importRow).min(1).max(5000), updateExisting: z.boolean().default(false) });
+
+const mergeBody = z.object({ primaryId: z.string(), mergeIds: z.array(z.string()).min(1).max(20) });
+
 /** Traduce la definición de un segmento (o los query params) al `where` de Prisma. */
 function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
   const where: any = { deletedAt: null };
@@ -132,6 +146,32 @@ function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
   return where;
 }
 
+/** Segmento (base) + filtros explícitos del query encima → `where` de Prisma.
+ *  Compartido por la lista y la exportación. `emptyTag` corta si la etiqueta no
+ *  tiene contactos (evita un `IN ()` innecesario). */
+async function resolveWhere(tx: any, q: Record<string, any>): Promise<{ where: any; emptyTag: boolean }> {
+  let filters: Record<string, any> = {};
+  if (q.segmentId) {
+    const seg = await tx.contactSegment.findUnique({ where: { id: q.segmentId } });
+    if (seg) filters = { ...(seg.definition as Record<string, any>) };
+  }
+  for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "blocked", "dateFrom", "dateTo"]) {
+    if (q[k] !== undefined) filters[k] = q[k];
+  }
+  let tagContactIds: string[] | undefined;
+  if (filters.tag) {
+    const assigns = await tx.tagAssignment.findMany({ where: { tagId: filters.tag, entityType: "contact" }, select: { entityId: true } });
+    tagContactIds = assigns.map((a: { entityId: string }) => a.entityId);
+    if (tagContactIds!.length === 0) return { where: buildWhere(filters, tagContactIds), emptyTag: true };
+  }
+  return { where: buildWhere(filters, tagContactIds), emptyTag: false };
+}
+
+const csvEscape = (v: unknown): string => {
+  const s = v == null ? "" : String(v);
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
 @Controller("contacts")
 export class ContactsController {
   constructor(private prisma: PrismaService) {}
@@ -142,24 +182,8 @@ export class ContactsController {
     const ctx = requirePermission("contacts:read");
     const q = parse(listQuery, query);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      // Filtro por segmento como base + los filtros explícitos del query encima
-      // (solo los definidos, para no pisar la definición con undefined).
-      let filters: Record<string, any> = {};
-      if (q.segmentId) {
-        const seg = await tx.contactSegment.findUnique({ where: { id: q.segmentId } });
-        if (seg) filters = { ...(seg.definition as Record<string, any>) };
-      }
-      for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "blocked", "dateFrom", "dateTo"] as const) {
-        if (q[k] !== undefined) filters[k] = q[k];
-      }
-      // Filtro por etiqueta → resolver contactIds con esa etiqueta primero.
-      let tagContactIds: string[] | undefined;
-      if (filters.tag) {
-        const assigns = await tx.tagAssignment.findMany({ where: { tagId: filters.tag, entityType: "contact" }, select: { entityId: true } });
-        tagContactIds = assigns.map((a) => a.entityId);
-        if (tagContactIds.length === 0) return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
-      }
-      const where = buildWhere(filters, tagContactIds);
+      const { where, emptyTag } = await resolveWhere(tx, q);
+      if (emptyTag) return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
 
       const [total, contacts] = await Promise.all([
         tx.contact.count({ where }),
@@ -352,6 +376,73 @@ export class ContactsController {
     });
   }
 
+  // --------------------------- Exportación / duplicados (GET, antes de :id) ---------------------------
+
+  /** Exporta a CSV respetando los filtros actuales (hasta 10 000 filas). */
+  @Get("export")
+  async export(@Res() res: Response, @Query() query: unknown) {
+    const ctx = requirePermission("contacts:read");
+    const q = parse(listQuery, query);
+    const rows = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const { where, emptyTag } = await resolveWhere(tx, q);
+      if (emptyTag) return [];
+      const contacts = await tx.contact.findMany({
+        where,
+        orderBy: { [q.sortBy]: q.sortDir },
+        take: 10_000,
+        include: { leads: { orderBy: { createdAt: "desc" }, take: 1, include: { status: true } } },
+      });
+      const ids = contacts.map((c) => c.id);
+      const assigns = ids.length ? await tx.tagAssignment.findMany({ where: { entityType: "contact", entityId: { in: ids } }, select: { entityId: true, tagId: true } }) : [];
+      const tags = assigns.length ? await tx.tag.findMany({ where: { id: { in: [...new Set(assigns.map((a) => a.tagId))] } }, select: { id: true, name: true } }) : [];
+      const tagName = new Map(tags.map((t) => [t.id, t.name]));
+      const tagsByContact = new Map<string, string[]>();
+      for (const a of assigns) {
+        const n = tagName.get(a.tagId);
+        if (!n) continue;
+        tagsByContact.set(a.entityId, [...(tagsByContact.get(a.entityId) ?? []), n]);
+      }
+      return contacts.map((c) => ({ c, tags: tagsByContact.get(c.id) ?? [] }));
+    });
+
+    const header = "nombre;apellido;telefono;email;pais;idioma;etapa;etiquetas;origen;perfil_whatsapp;bloqueado;creado;ultimo_contacto";
+    const lines = rows.map(({ c, tags }) =>
+      [c.firstName, c.lastName, c.phone, c.email, c.country, c.locale, c.leads[0]?.status.name ?? "", tags.join(", "), c.acquisitionSource, c.profileName, c.blocked ? "si" : "no", c.createdAt.toISOString(), c.lastContactAt?.toISOString() ?? ""]
+        .map(csvEscape)
+        .join(";"),
+    );
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="contactos.csv"');
+    res.send("﻿" + [header, ...lines].join("\n"));
+  }
+
+  /** Grupos de contactos que comparten el mismo teléfono (candidatos a fusión). */
+  @Get("duplicates")
+  duplicates() {
+    const ctx = requirePermission("contacts:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const groups = await tx.contact.groupBy({
+        by: ["phone"],
+        where: { deletedAt: null, phone: { not: null } },
+        _count: { _all: true },
+        having: { phone: { _count: { gt: 1 } } },
+      });
+      const phones = groups.map((g) => g.phone).filter((p): p is string => !!p);
+      if (phones.length === 0) return { groups: [] };
+      const contacts = await tx.contact.findMany({
+        where: { deletedAt: null, phone: { in: phones } },
+        select: { id: true, firstName: true, lastName: true, phone: true, email: true, profileName: true, createdAt: true, lastContactAt: true },
+        orderBy: { createdAt: "asc" },
+      });
+      const byPhone = new Map<string, typeof contacts>();
+      for (const c of contacts) {
+        if (!c.phone) continue;
+        byPhone.set(c.phone, [...(byPhone.get(c.phone) ?? []), c]);
+      }
+      return { groups: [...byPhone.entries()].map(([phone, items]) => ({ phone, items })) };
+    });
+  }
+
   // --------------------------------- Acciones masivas ---------------------------------
 
   /** Acción sobre múltiples contactos (etiquetar, etapa, asignar, bloquear, borrar). */
@@ -431,6 +522,152 @@ export class ContactsController {
         data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: `contact.bulk.${b.action}`, entityType: "contact", after: { count: affected, ids: valid.length } },
       });
       return { affected };
+    });
+  }
+
+  // --------------------------------- Importación CSV ---------------------------------
+
+  /** Importa filas mapeadas (normaliza teléfono, dedupe por teléfono; crea o
+   *  actualiza según updateExisting). Procesa en lotes para no exceder el
+   *  timeout de la transacción. Para volúmenes muy grandes convendría un job
+   *  BullMQ en segundo plano (pendiente). */
+  @Post("import")
+  async import(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(importBody, body);
+    const orgId = ctx.organizationId;
+    let created = 0,
+      updated = 0,
+      skipped = 0;
+    const errors: { row: number; reason: string }[] = [];
+    const CHUNK = 200;
+
+    for (let i = 0; i < b.rows.length; i += CHUNK) {
+      const chunk = b.rows.slice(i, i + CHUNK);
+      await this.prisma.withTenant(orgId, async (tx) => {
+        for (let j = 0; j < chunk.length; j++) {
+          const idx = i + j + 1; // fila 1-based (sin cabecera)
+          const row = chunk[j];
+          const phone = normalizePhone(row.phone);
+          if (!phone && !row.email && !row.firstName && !row.lastName) {
+            errors.push({ row: idx, reason: "fila sin datos" });
+            continue;
+          }
+          let contactId: string;
+          const existing = phone ? await tx.contact.findFirst({ where: { phone, deletedAt: null } }) : null;
+          if (existing) {
+            contactId = existing.id;
+            if (b.updateExisting) {
+              const data: Record<string, unknown> = {};
+              if (row.firstName && !existing.firstName) data.firstName = row.firstName;
+              if (row.lastName && !existing.lastName) data.lastName = row.lastName;
+              if (row.email && !existing.email) data.email = row.email;
+              if (row.country && !existing.country) data.country = row.country.toUpperCase().slice(0, 2);
+              if (Object.keys(data).length) await tx.contact.update({ where: { id: existing.id }, data });
+              updated++;
+            } else {
+              skipped++;
+            }
+          } else {
+            const c = await tx.contact.create({
+              data: {
+                organizationId: orgId,
+                firstName: row.firstName || null,
+                lastName: row.lastName || null,
+                phone,
+                email: row.email || null,
+                country: row.country ? row.country.toUpperCase().slice(0, 2) : null,
+                locale: row.locale || "es",
+                source: "import",
+                createdVia: "import",
+                acquisitionSource: "organic",
+              },
+              select: { id: true },
+            });
+            contactId = c.id;
+            created++;
+          }
+          // Etiquetas (separadas por coma) → upsert Tag + asignación
+          if (row.tags) {
+            for (const raw of row.tags.split(",").map((t) => t.trim()).filter(Boolean)) {
+              const tag = await tx.tag.upsert({
+                where: { organizationId_name: { organizationId: orgId, name: raw } },
+                create: { organizationId: orgId, name: raw },
+                update: {},
+                select: { id: true },
+              });
+              await tx.tagAssignment.createMany({
+                data: [{ organizationId: orgId, tagId: tag.id, entityType: "contact", entityId: contactId }],
+                skipDuplicates: true,
+              });
+            }
+          }
+        }
+      });
+    }
+
+    await this.prisma.withTenant(orgId, (tx) =>
+      tx.auditLog.create({ data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: "contact.import", entityType: "contact", after: { created, updated, skipped } } }),
+    );
+    return { created, updated, skipped, errors: errors.slice(0, 100) };
+  }
+
+  // --------------------------------- Fusión de duplicados ---------------------------------
+
+  /** Fusiona contactos en uno primario: reasigna conversaciones/leads/citas/
+   *  identidades/etiquetas/campos, rellena huecos del primario y da de baja el resto. */
+  @Post("merge")
+  merge(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(mergeBody, body);
+    const orgId = ctx.organizationId;
+    return this.prisma.withTenant(orgId, async (tx) => {
+      const primary = await tx.contact.findFirst({ where: { id: b.primaryId, deletedAt: null } });
+      if (!primary) throw new NotFoundException("Contacto primario no encontrado");
+      const mergeIds = b.mergeIds.filter((id) => id !== b.primaryId);
+      const merges = await tx.contact.findMany({ where: { id: { in: mergeIds }, deletedAt: null } });
+      if (merges.length === 0) throw new BadRequestException("Sin contactos válidos para fusionar");
+
+      for (const m of merges) {
+        await tx.conversation.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
+        await tx.lead.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
+        await tx.appointment.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
+
+        // Identidades: mover solo si no colisionan con una del primario
+        const idents = await tx.contactIdentity.findMany({ where: { contactId: m.id } });
+        for (const id of idents) {
+          const clash = await tx.contactIdentity.findUnique({
+            where: { organizationId_channelType_externalId: { organizationId: orgId, channelType: id.channelType, externalId: id.externalId } },
+          });
+          if (!clash) await tx.contactIdentity.update({ where: { id: id.id }, data: { contactId: primary.id } });
+          else await tx.contactIdentity.delete({ where: { id: id.id } });
+        }
+        // Etiquetas (evitar duplicados) y campos personalizados (solo si faltan en el primario)
+        const tagAssigns = await tx.tagAssignment.findMany({ where: { entityType: "contact", entityId: m.id } });
+        for (const ta of tagAssigns) {
+          await tx.tagAssignment.createMany({ data: [{ organizationId: orgId, tagId: ta.tagId, entityType: "contact", entityId: primary.id }], skipDuplicates: true });
+        }
+        await tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: m.id } });
+        const cfvs = await tx.customFieldValue.findMany({ where: { entityId: m.id } });
+        for (const v of cfvs) {
+          const has = await tx.customFieldValue.findUnique({ where: { organizationId_definitionId_entityId: { organizationId: orgId, definitionId: v.definitionId, entityId: primary.id } } });
+          if (!has) await tx.customFieldValue.create({ data: { organizationId: orgId, definitionId: v.definitionId, entityId: primary.id, value: v.value as object } });
+        }
+      }
+
+      // Rellenar huecos del primario desde los fusionados
+      const fill: Record<string, unknown> = {};
+      const keys = ["firstName", "lastName", "email", "documentId", "country", "birthDate", "profileName", "adId", "ctwaClid"] as const;
+      for (const k of keys) {
+        if (!(primary as any)[k]) {
+          const src = merges.find((m) => (m as any)[k]);
+          if (src) fill[k] = (src as any)[k];
+        }
+      }
+      if (Object.keys(fill).length) await tx.contact.update({ where: { id: primary.id }, data: fill });
+      await tx.contact.updateMany({ where: { id: { in: merges.map((m) => m.id) } }, data: { deletedAt: new Date() } });
+      await tx.auditLog.create({ data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: "contact.merge", entityType: "contact", entityId: primary.id, after: { merged: merges.map((m) => m.id) } } });
+      return { ok: true, primaryId: primary.id, merged: merges.length };
     });
   }
 
