@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -21,7 +21,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
     addNote: async (_c, text) => void calls.push(`note:${text}`),
     sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
-    runAgentWithObjective: async (_c, _slug, obj) => { calls.push(`objective:${obj}`); return true; },
+    runAgentWithObjective: async (_c, _nodeId, cfg) => { calls.push(`objective:${(cfg as any).objective}`); return "met"; },
     callApi: async (c, config) => { (c as any).variables.__http_ok = "true"; calls.push(`http:${(config as any).url ?? ""}`); },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
@@ -88,6 +88,15 @@ describe("motor de workflows v0", () => {
     const life: WorkflowDefinition = { trigger: { type: "lead_status_changed", config: { toStatus: "agendado" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
     expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "agendado", fromCode: "nuevo" }, occurredAt: "" })).toBe(true);
     expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "perdido" }, occurredAt: "" })).toBe(false);
+  });
+
+  it("condiciones de tag_added (etiqueta específica, insensible a mayúsculas)", () => {
+    const specific: WorkflowDefinition = { trigger: { type: "tag_added", config: { tag: "VIP" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(specific, { organizationId: "o", type: "tag_added", data: { tag: "vip" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(specific, { organizationId: "o", type: "tag_added", data: { tag: "urgente" }, occurredAt: "" })).toBe(false);
+    const anyTag: WorkflowDefinition = { ...specific, trigger: { type: "tag_added", config: {} } };
+    expect(matchesTrigger(anyTag, { organizationId: "o", type: "tag_added", data: { tag: "x" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(anyTag, { organizationId: "o", type: "message_received", data: {}, occurredAt: "" })).toBe(false);
   });
 
   it("ejecuta hasta la espera y programa el timer", async () => {
@@ -231,8 +240,33 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
     expect(await executeFrom(met.deps, ctx, flow, "a")).toEqual({ status: "completed" });
     expect(met.calls).toEqual(["objective:confirmar", "tag:confirmado"]);
 
-    const unmet = makeDeps({ runAgentWithObjective: async () => false });
+    const unmet = makeDeps({ runAgentWithObjective: async () => "unmet" });
     await executeFrom(unmet.deps, ctx, flow, "a");
     expect(unmet.calls).toContain("human");
+  });
+
+  it("ai_objective multi-turno: pending deja el run esperando con timeout; el resume con rama continúa", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "ai_objective", config: { agentSlug: "agendamiento", objective: "confirmar", maxTurns: 3, timeoutHours: 12 } },
+        { id: "ok", type: "add_tag", config: { tag: "confirmado" } },
+        { id: "no", type: "transfer_human", config: {} },
+      ],
+      edges: [{ from: "a", to: "ok", when: "met" }, { from: "a", to: "no", when: "unmet" }],
+    };
+    const pending = makeDeps({ runAgentWithObjective: async () => "pending" });
+    expect(await executeFrom(pending.deps, ctx, flow, "a")).toEqual({ status: "waiting", nodeId: "a" });
+    // timeoutHours=12 desde now() (2026-01-01T12:00Z) → timer a medianoche
+    expect(pending.calls).toContain("timer:a");
+
+    // Reanudación con rama explícita (respuesta del contacto la resolvió)
+    const resumed = makeDeps();
+    expect(await resumeWithBranch(resumed.deps, ctx, flow, "a", "met")).toEqual({ status: "completed" });
+    expect(resumed.calls).toEqual(["tag:confirmado"]);
+    const timedOut = makeDeps();
+    await resumeWithBranch(timedOut.deps, ctx, flow, "a", "unmet");
+    expect(timedOut.calls).toContain("human");
   });
 });

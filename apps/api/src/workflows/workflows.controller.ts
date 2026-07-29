@@ -44,6 +44,7 @@ const TRIGGER_CATALOG = [
   { type: "keyword", label: "Palabra clave (simple)", description: "El mensaje contiene una palabra o frase", config: ["keyword"] },
   { type: "click_to_chat", label: "Anuncios Click-to-Chat (Meta)", description: "El primer mensaje viene de un anuncio Click-to-WhatsApp", conditions: ["adId"] },
   { type: "lead_status_changed", label: "Etapa del ciclo de vida actualizada", description: "Cuando el lead cambia de etapa (origen → destino)", conditions: ["fromStatus", "toStatus"] },
+  { type: "tag_added", label: "Etiqueta añadida", description: "Al etiquetar un contacto o conversación (panel, flujo, IA o Lead Ads)", conditions: ["tag"] },
   { type: "appointment_created", label: "Cita creada", description: "Al agendar una cita para el contacto" },
   { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita agendada", conditions: ["hoursBefore"] },
   { type: "manual", label: "Disparo manual", description: "Se ejecuta a mano desde la bandeja o la lista de contactos" },

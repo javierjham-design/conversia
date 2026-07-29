@@ -32,13 +32,13 @@ Requisitos transversales: idempotencia (aceptar header `Idempotency-Key` en POST
 
 ## Webhooks Cláriva → Conversia
 
-`POST {CONVERSIA_URL}/webhooks/clariva` (pendiente de implementar el receptor) con eventos:
+`POST {CONVERSIA_URL}/webhooks/clariva/{connectionId}` (receptor IMPLEMENTADO) con eventos:
 
 - `appointment.created | updated | confirmed | cancelled | rescheduled`
-- `appointment.attendance` (`completed`/`no_show`)
+- `appointment.attendance` (`{attended: boolean}` → completed/no_show)
 - `patient.updated`
 
-Payload: `{event, occurredAt, data: {...appointment}}`. Estos eventos disparan triggers de workflows (`appointment_confirmed`, `no_show`, etc.).
+Payload: `{event, occurredAt, data: {...appointment}}`. La URL incluye el id de la `scheduling_connection` (se entrega a Cláriva al conectar); la firma `X-Clariva-Signature` usa el secreto por-conexión `config.webhookSecret` (sin secreto configurado, el endpoint rechaza). El worker actualiza la proyección local (`appointments.external_id`, contacto por teléfono con fill-de-huecos) y dispara los triggers de workflows (`appointment_created/confirmed/cancelled/rescheduled`, `no_show`).
 
 ## Estrategia de sincronización
 

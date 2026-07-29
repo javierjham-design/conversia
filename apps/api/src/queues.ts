@@ -5,6 +5,7 @@ import { getEnv } from "@conversia/config";
 import {
   QUEUE_NAMES,
   type CapiJob,
+  type ContactImportJob,
   type EventJob,
   type InboundJob,
   type OutboundJob,
@@ -19,6 +20,7 @@ export class QueueService implements OnModuleDestroy {
   readonly events = new Queue<EventJob>(QUEUE_NAMES.events, { connection: this.connection });
   readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection });
   readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });
+  readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
 
   async onModuleDestroy() {
     await Promise.all([
@@ -27,6 +29,7 @@ export class QueueService implements OnModuleDestroy {
       this.events.close(),
       this.webhooks.close(),
       this.capi.close(),
+      this.imports.close(),
     ]);
     this.connection.disconnect();
   }

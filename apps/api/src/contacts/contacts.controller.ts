@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
 import { requirePermission } from "../tenancy/permissions";
 
 const listQuery = z.object({
@@ -105,7 +106,7 @@ const importRow = z.object({
   locale: z.string().optional(),
   tags: z.string().optional(), // separadas por coma
 });
-const importBody = z.object({ rows: z.array(importRow).min(1).max(5000), updateExisting: z.boolean().default(false) });
+const importBody = z.object({ rows: z.array(importRow).min(1).max(10000), updateExisting: z.boolean().default(false) });
 
 const mergeBody = z.object({ primaryId: z.string(), mergeIds: z.array(z.string()).min(1).max(20) });
 
@@ -174,7 +175,10 @@ const csvEscape = (v: unknown): string => {
 
 @Controller("contacts")
 export class ContactsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private queues: QueueService,
+  ) {}
 
   /** Lista paginada de contactos con búsqueda y filtros (todo server-side). */
   @Get()
@@ -447,11 +451,13 @@ export class ContactsController {
 
   /** Acción sobre múltiples contactos (etiquetar, etapa, asignar, bloquear, borrar). */
   @Post("bulk")
-  bulk(@Body() body: unknown) {
+  async bulk(@Body() body: unknown) {
     const ctx = requirePermission("contacts:write");
     const b = parse(bulkBody, body);
     const orgId = ctx.organizationId;
-    return this.prisma.withTenant(orgId, async (tx) => {
+    // Contactos recién etiquetados → evento tag.added (workflows con ese trigger).
+    let tagged: { name: string; contactIds: string[] } | null = null;
+    const result = await this.prisma.withTenant(orgId, async (tx) => {
       // Solo IDs que realmente pertenecen al tenant (RLS ya aísla, pero validamos).
       const valid = (await tx.contact.findMany({ where: { id: { in: b.ids }, deletedAt: null }, select: { id: true } })).map((c) => c.id);
       if (valid.length === 0) return { affected: 0 };
@@ -460,13 +466,22 @@ export class ContactsController {
       switch (b.action) {
         case "tag_add": {
           if (!b.tagId) throw new BadRequestException("Falta tagId");
-          const tag = await tx.tag.findFirst({ where: { id: b.tagId }, select: { id: true } });
+          const tag = await tx.tag.findFirst({ where: { id: b.tagId }, select: { id: true, name: true } });
           if (!tag) throw new BadRequestException("Etiqueta inválida");
-          const res = await tx.tagAssignment.createMany({
-            data: valid.map((entityId) => ({ organizationId: orgId, tagId: b.tagId!, entityType: "contact", entityId })),
-            skipDuplicates: true,
+          const existing = await tx.tagAssignment.findMany({
+            where: { tagId: b.tagId, entityType: "contact", entityId: { in: valid } },
+            select: { entityId: true },
           });
-          affected = res.count;
+          const already = new Set(existing.map((e) => e.entityId));
+          const fresh = valid.filter((id) => !already.has(id));
+          if (fresh.length) {
+            await tx.tagAssignment.createMany({
+              data: fresh.map((entityId) => ({ organizationId: orgId, tagId: b.tagId!, entityType: "contact", entityId })),
+              skipDuplicates: true,
+            });
+          }
+          tagged = { name: tag.name, contactIds: fresh };
+          affected = fresh.length;
           break;
         }
         case "tag_remove": {
@@ -523,93 +538,51 @@ export class ContactsController {
       });
       return { affected };
     });
+    if (tagged !== null) {
+      const { name, contactIds } = tagged as { name: string; contactIds: string[] };
+      const occurredAt = new Date().toISOString();
+      for (const contactId of contactIds) {
+        await this.queues.events.add("emit", {
+          organizationId: orgId,
+          type: "tag.added",
+          contactId,
+          data: { tag: name, contactId },
+          occurredAt,
+        });
+      }
+    }
+    return result;
   }
 
   // --------------------------------- Importación CSV ---------------------------------
 
-  /** Importa filas mapeadas (normaliza teléfono, dedupe por teléfono; crea o
-   *  actualiza según updateExisting). Procesa en lotes para no exceder el
-   *  timeout de la transacción. Para volúmenes muy grandes convendría un job
-   *  BullMQ en segundo plano (pendiente). */
+  /** Encola el import como job BullMQ (el worker procesa por lotes y deja el
+   *  audit log). La UI hace polling de GET import/:jobId hasta que termina. */
   @Post("import")
   async import(@Body() body: unknown) {
     const ctx = requirePermission("contacts:write");
     const b = parse(importBody, body);
-    const orgId = ctx.organizationId;
-    let created = 0,
-      updated = 0,
-      skipped = 0;
-    const errors: { row: number; reason: string }[] = [];
-    const CHUNK = 200;
-
-    for (let i = 0; i < b.rows.length; i += CHUNK) {
-      const chunk = b.rows.slice(i, i + CHUNK);
-      await this.prisma.withTenant(orgId, async (tx) => {
-        for (let j = 0; j < chunk.length; j++) {
-          const idx = i + j + 1; // fila 1-based (sin cabecera)
-          const row = chunk[j];
-          const phone = normalizePhone(row.phone);
-          if (!phone && !row.email && !row.firstName && !row.lastName) {
-            errors.push({ row: idx, reason: "fila sin datos" });
-            continue;
-          }
-          let contactId: string;
-          const existing = phone ? await tx.contact.findFirst({ where: { phone, deletedAt: null } }) : null;
-          if (existing) {
-            contactId = existing.id;
-            if (b.updateExisting) {
-              const data: Record<string, unknown> = {};
-              if (row.firstName && !existing.firstName) data.firstName = row.firstName;
-              if (row.lastName && !existing.lastName) data.lastName = row.lastName;
-              if (row.email && !existing.email) data.email = row.email;
-              if (row.country && !existing.country) data.country = row.country.toUpperCase().slice(0, 2);
-              if (Object.keys(data).length) await tx.contact.update({ where: { id: existing.id }, data });
-              updated++;
-            } else {
-              skipped++;
-            }
-          } else {
-            const c = await tx.contact.create({
-              data: {
-                organizationId: orgId,
-                firstName: row.firstName || null,
-                lastName: row.lastName || null,
-                phone,
-                email: row.email || null,
-                country: row.country ? row.country.toUpperCase().slice(0, 2) : null,
-                locale: row.locale || "es",
-                source: "import",
-                createdVia: "import",
-                acquisitionSource: "organic",
-              },
-              select: { id: true },
-            });
-            contactId = c.id;
-            created++;
-          }
-          // Etiquetas (separadas por coma) → upsert Tag + asignación
-          if (row.tags) {
-            for (const raw of row.tags.split(",").map((t) => t.trim()).filter(Boolean)) {
-              const tag = await tx.tag.upsert({
-                where: { organizationId_name: { organizationId: orgId, name: raw } },
-                create: { organizationId: orgId, name: raw },
-                update: {},
-                select: { id: true },
-              });
-              await tx.tagAssignment.createMany({
-                data: [{ organizationId: orgId, tagId: tag.id, entityType: "contact", entityId: contactId }],
-                skipDuplicates: true,
-              });
-            }
-          }
-        }
-      });
-    }
-
-    await this.prisma.withTenant(orgId, (tx) =>
-      tx.auditLog.create({ data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: "contact.import", entityType: "contact", after: { created, updated, skipped } } }),
+    const job = await this.queues.imports.add(
+      "import",
+      { organizationId: ctx.organizationId, userId: ctx.userId, rows: b.rows, updateExisting: b.updateExisting },
+      { removeOnComplete: { age: 3600 }, removeOnFail: { age: 3600 } },
     );
-    return { created, updated, skipped, errors: errors.slice(0, 100) };
+    return { queued: true, jobId: job.id, total: b.rows.length };
+  }
+
+  /** Estado del import encolado. Solo el tenant dueño del job puede verlo. */
+  @Get("import/:jobId")
+  async importStatus(@Param("jobId") jobId: string) {
+    const ctx = requirePermission("contacts:write");
+    const job = await this.queues.imports.getJob(jobId);
+    if (!job || job.data.organizationId !== ctx.organizationId) throw new NotFoundException("Import no encontrado");
+    const state = await job.getState();
+    return {
+      state, // waiting | active | completed | failed | …
+      progress: typeof job.progress === "object" ? job.progress : { processed: 0, total: job.data.rows.length },
+      result: state === "completed" ? job.returnvalue : null,
+      error: state === "failed" ? (job.failedReason ?? "Error desconocido") : null,
+    };
   }
 
   // --------------------------------- Fusión de duplicados ---------------------------------

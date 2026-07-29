@@ -38,8 +38,11 @@ export interface EngineDeps {
   addNote(ctx: RunCtx, text: string): Promise<void>;
   /** Encola un evento de Conversions API (Meta) con el ctwa_clid del contacto. */
   sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
-  /** Entrega la conversación a un agente con un objetivo y devuelve si se cumplió. */
-  runAgentWithObjective(ctx: RunCtx, agentSlug: string, objective: string): Promise<boolean>;
+  /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
+   *  ramifican de inmediato; "pending" (multi-turno) deja al agente
+   *  conversando y el run espera: respuestas del contacto lo reanudan con la
+   *  rama correcta y el timeout resuelve "unmet". */
+  runAgentWithObjective(ctx: RunCtx, nodeId: string, config: Record<string, unknown>): Promise<"met" | "unmet" | "pending">;
   /** Petición HTTP externa (con guard SSRF); mapea la respuesta a ctx.variables. */
   callApi(ctx: RunCtx, config: Record<string, unknown>): Promise<void>;
   /** Persiste el timer (scheduled_jobs). cancelOn: evento que lo cancela. */
@@ -128,6 +131,10 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
   if (t === "lead_status_changed") {
     if (typeof cfg.toStatus === "string" && cfg.toStatus && String(data.statusCode ?? "") !== cfg.toStatus) return false;
     if (typeof cfg.fromStatus === "string" && cfg.fromStatus && String(data.fromCode ?? "") !== cfg.fromStatus) return false;
+  }
+  // Etiqueta añadida: opcionalmente restringido a una etiqueta por nombre.
+  if (t === "tag_added") {
+    if (typeof cfg.tag === "string" && cfg.tag.trim() && String(data.tag ?? "").toLowerCase() !== cfg.tag.trim().toLowerCase()) return false;
   }
   return true;
 }
@@ -222,8 +229,14 @@ async function executeNode(
       });
       return {};
     case "ai_objective": {
-      const met = await deps.runAgentWithObjective(ctx, String(cfg.agentSlug ?? ""), String(cfg.objective ?? ""));
-      return { branch: met ? "met" : "unmet" };
+      const verdict = await deps.runAgentWithObjective(ctx, node.id, cfg);
+      if (verdict === "pending") {
+        // Multi-turno: el agente sigue a cargo; si nadie resuelve antes,
+        // el timeout reanuda el run por la rama "unmet".
+        const timeoutHours = Math.max(1, Number(cfg.timeoutHours ?? 24));
+        return { wait: new Date(deps.now().getTime() + timeoutHours * 3_600_000) };
+      }
+      return { branch: verdict };
     }
     case "call_api":
       await deps.callApi(ctx, cfg);
@@ -294,6 +307,20 @@ export async function executeFrom(
     }
   }
   return { status: "completed" };
+}
+
+/** Reanuda un run esperando en un nodo con ramas (p.ej. ai_objective
+ *  multi-turno resuelto por respuesta del contacto o por timeout). */
+export async function resumeWithBranch(
+  deps: EngineDeps,
+  ctx: RunCtx,
+  def: WorkflowDefinition,
+  nodeId: string,
+  branch: string,
+): Promise<EngineResult> {
+  const next = nextNodeId(def, nodeId, branch);
+  if (!next) return { status: "completed" };
+  return executeFrom(deps, ctx, def, next);
 }
 
 /** Reanuda tras un timer vencido: continúa desde el sucesor del nodo wait. */

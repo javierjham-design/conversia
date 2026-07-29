@@ -6,7 +6,7 @@ import { transcribeWhatsappAudio } from "./audio";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
-import { cancelTimersOnReply, dispatchEvent } from "./workflow-runtime";
+import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
 
 interface ParsedInbound {
   phoneNumberId: string;
@@ -271,18 +271,27 @@ export async function processInbound(job: InboundJob): Promise<void> {
       await dispatchEvent({ ...base, type: "click_to_chat", data: { ...base.data, ...referral } });
     }
 
-    // Respuesta del agente activo — salvo que un workflow ya lo haya
-    // ejecutado para esta conversación en este ciclo (evita doble respuesta).
-    const agentAlreadyRan = await withTenant(organizationId, (tx) =>
-      tx.workflowRunStep.findFirst({
-        where: {
-          nodeType: "run_agent",
-          status: "COMPLETED",
-          startedAt: { gte: new Date(Date.now() - 60_000) },
-          run: { conversationId: result.conversationId },
-        },
-      }),
-    );
+    // Objetivo multi-turno pendiente (nodo ai_objective): el agente a cargo
+    // responde con el objetivo, se re-evalúa y el run se reanuda al resolverse.
+    const objectiveHandled = await handlePendingObjective(organizationId, result.conversationId).catch((err) => {
+      console.error(`✖ Error en objetivo pendiente (${result.conversationId}):`, (err as Error).message);
+      return false;
+    });
+
+    // Respuesta del agente activo — salvo que el objetivo ya haya corrido el
+    // turno, o un workflow lo haya ejecutado en este ciclo (evita doble respuesta).
+    const agentAlreadyRan = objectiveHandled
+      ? true
+      : await withTenant(organizationId, (tx) =>
+          tx.workflowRunStep.findFirst({
+            where: {
+              nodeType: "run_agent",
+              status: "COMPLETED",
+              startedAt: { gte: new Date(Date.now() - 60_000) },
+              run: { conversationId: result.conversationId },
+            },
+          }),
+        );
     if (!agentAlreadyRan) {
       try {
         await runAgentTurn({ organizationId, conversationId: result.conversationId });

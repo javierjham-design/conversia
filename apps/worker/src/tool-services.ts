@@ -231,13 +231,13 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async addTag(name: string) {
-      await withTenant(orgId, async (tx) => {
+      const created = await withTenant(orgId, async (tx) => {
         const tag = await tx.tag.upsert({
           where: { organizationId_name: { organizationId: orgId, name } },
           update: {},
           create: { organizationId: orgId, name },
         });
-        await tx.tagAssignment.upsert({
+        const existing = await tx.tagAssignment.findUnique({
           where: {
             organizationId_tagId_entityType_entityId: {
               organizationId: orgId,
@@ -246,15 +246,30 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
               entityId: t.conversationId,
             },
           },
-          update: {},
-          create: {
+        });
+        if (existing) return false;
+        await tx.tagAssignment.create({
+          data: {
             organizationId: orgId,
             tagId: tag.id,
             entityType: "conversation",
             entityId: t.conversationId,
           },
         });
+        return true;
       });
+      // Solo la asignación nueva dispara tag_added (evita re-disparos al re-etiquetar).
+      if (created) {
+        await emitPlatformEvent(orgId, "tag.added", { tag: name, conversationId: t.conversationId, contactId: t.contactId });
+        await dispatchEvent({
+          organizationId: orgId,
+          type: "tag_added",
+          conversationId: t.conversationId,
+          contactId: t.contactId,
+          data: { tag: name },
+          occurredAt: new Date().toISOString(),
+        });
+      }
     },
 
     async searchKnowledge(query: string) {

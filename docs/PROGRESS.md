@@ -1,5 +1,13 @@
 # Registro de progreso
 
+## 2026-07-29 (5) — Pendientes de backlog: import en 2.º plano, webhooks Cláriva, ai_objective multi-turno
+
+Rama `feature/contact-import-job`. Además se verificó que el trigger `tag_added` ya estaba completo (panel bulk, tool IA, nodo de flujo, Lead Ads; el import CSV no dispara a propósito) → ROADMAP corregido.
+
+- **Import CSV → job BullMQ**: cola nueva `contact-imports`; la API valida (tope 10 000 filas, body 2 MB) y encola; el worker procesa por lotes de 200 con `updateProgress` + audit log; `GET /contacts/import/:jobId` (solo el tenant dueño) y UI con polling + barra de progreso.
+- **Receptor de webhooks Cláriva**: `POST /webhooks/clariva/:connectionId` (público, firma `X-Clariva-Signature` HMAC con `config.webhookSecret` por conexión). El worker actualiza la proyección `appointments` por `(provider, external_id)`, crea contacto por teléfono si falta (fill de huecos en `patient.updated`), registra `integration_events` y dispara `appointment_created/confirmed/cancelled/rescheduled` y `no_show`. Tests del mapeo (7).
+- **ai_objective multi-turno**: config `maxTurns` (default 1 = v1) + `timeoutHours`. `pending` deja el run en espera (timer sin cancelOn); el estado vive en `conversation.meta.aiObjective`; cada respuesta del contacto corre el turno del agente CON el objetivo, re-evalúa y reanuda por rama (`resumeWithBranch` nuevo en el motor); turnos agotados o timeout → «unmet» y limpieza. Test del motor pending/resume.
+
 ## 2026-07-29 (4) — Catálogo de Workflows ampliado + reconciliación CTWA (PR #1)
 
 Ampliación del constructor de workflows (triggers + pasos) estilo Respond.io, adaptado al rubro. Sin migraciones (todo en JSON/modelos existentes). Menú "Añadir paso" **categorizado (8 categorías) + buscador**, con soporte "Próximamente" (deshabilitado) y "Premium" (gating por plan). Trabajado por categorías con commit por cada una.
@@ -43,7 +51,7 @@ Rama `feature/contacts` (PR aparte). Objetivo: capturar el **máximo** de datos 
 - **Lista** (`/workflows`): estados Borrador/Publicado/Detenido, búsqueda, "Ver más", autor/fecha de creación y publicación, menú (renombrar, duplicar, detener/reanudar, eliminar). API: list enriquecido + `PATCH` rename + `duplicate` + audit_logs.
 - **Editor de canvas** (`/workflows/[id]`, `@xyflow/react`): lienzo con grilla, zoom/ajustar, **undo/redo**; nodo **Disparador** + nodos en tarjetas con panel de config; botón **+** por nodo; **ramas** etiquetadas en la condición; **validación al publicar** (disparador conectado, sin huérfanos, campos). Lee/escribe el mismo `WorkflowDefinition` (con posiciones); serialización extraída a `lib/workflow-serialize.ts` con **test de round-trip**.
 - **Nodos del motor ampliados** (aditivo): quitar etiqueta, actualizar datos de contacto, asignar a usuario/equipo, cambiar de agente IA (toma el control), disparar otro flujo (con guard anti auto-disparo). Deps en el worker.
-- **Disparadores**: `message_received` con condiciones (palabra clave, primer mensaje) y `conversation_closed`; puente API→worker (el `eventsWorker` mapea `conversation.closed`→`conversation_closed` y arranca los flujos). **Atajo manual desde la bandeja**: "Ejecutar flujo" sobre una conversación (`POST /conversations/:id/run-workflow` → `startWorkflowById`). Pendiente: `tag_added`.
+- **Disparadores**: `message_received` con condiciones (palabra clave, primer mensaje) y `conversation_closed`; puente API→worker (el `eventsWorker` mapea `conversation.closed`→`conversation_closed` y arranca los flujos). **Atajo manual desde la bandeja**: "Ejecutar flujo" sobre una conversación (`POST /conversations/:id/run-workflow` → `startWorkflowById`). **`tag_added`**: se dispara al etiquetar (acción masiva de Contactos, nodo "Agregar etiqueta", tool de IA, Lead Ads) con condición opcional por nombre; solo asignaciones NUEVAS emiten el evento (corta bucles entre flujos que se etiquetan mutuamente); evento público `tag.added` para webhooks.
 - **Modo Prueba** (`POST /workflows/:id/test`): recorre la definición actual contra un contacto ficticio y describe, paso a paso, qué haría cada nodo. No persiste ni envía nada.
 - **Plantillas** genéricas (4): bienvenida+captura, seguimiento sin respuesta (con ramas), respuesta a palabra clave, encuesta al cerrar. Galería en el modal de creación.
 - **Auditoría de brechas** documentada: el motor ejecuta un subconjunto del enum `NODE_TYPES`; los nodos/disparadores fuera de ese subconjunto se listan como brecha (no se fingen).

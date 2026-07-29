@@ -4,6 +4,7 @@ import {
   findStartNode,
   matchesTrigger,
   resumeAfterWait,
+  resumeWithBranch,
   type EngineDeps,
   type RunCtx,
 } from "@conversia/workflows";
@@ -105,32 +106,47 @@ function makeDeps(): EngineDeps {
     },
 
     async addTag(ctx, tagName) {
-      await withTenant(ctx.organizationId, async (tx) => {
+      const created = await withTenant(ctx.organizationId, async (tx) => {
         const tag = await tx.tag.upsert({
           where: { organizationId_name: { organizationId: ctx.organizationId, name: tagName } },
           update: {},
           create: { organizationId: ctx.organizationId, name: tagName },
         });
-        if (ctx.conversationId) {
-          await tx.tagAssignment.upsert({
-            where: {
-              organizationId_tagId_entityType_entityId: {
-                organizationId: ctx.organizationId,
-                tagId: tag.id,
-                entityType: "conversation",
-                entityId: ctx.conversationId,
-              },
-            },
-            update: {},
-            create: {
+        if (!ctx.conversationId) return false;
+        const existing = await tx.tagAssignment.findUnique({
+          where: {
+            organizationId_tagId_entityType_entityId: {
               organizationId: ctx.organizationId,
               tagId: tag.id,
               entityType: "conversation",
               entityId: ctx.conversationId,
             },
-          });
-        }
+          },
+        });
+        if (existing) return false;
+        await tx.tagAssignment.create({
+          data: {
+            organizationId: ctx.organizationId,
+            tagId: tag.id,
+            entityType: "conversation",
+            entityId: ctx.conversationId,
+          },
+        });
+        return true;
       });
+      // Solo una asignación NUEVA dispara tag_added: re-etiquetar es no-op y
+      // corta bucles entre flujos que se etiquetan mutuamente.
+      if (created) {
+        await emitPlatformEvent(ctx.organizationId, "tag.added", { tag: tagName, conversationId: ctx.conversationId, contactId: ctx.contactId });
+        await dispatchEvent({
+          organizationId: ctx.organizationId,
+          type: "tag_added",
+          conversationId: ctx.conversationId,
+          contactId: ctx.contactId,
+          data: { tag: tagName },
+          occurredAt: new Date().toISOString(),
+        });
+      }
     },
 
     async transferHuman(ctx, reason) {
@@ -301,8 +317,10 @@ function makeDeps(): EngineDeps {
       });
     },
 
-    async runAgentWithObjective(ctx, agentSlug, objective) {
-      if (!ctx.conversationId) return false;
+    async runAgentWithObjective(ctx, nodeId, cfg) {
+      const agentSlug = String(cfg.agentSlug ?? "");
+      const objective = String(cfg.objective ?? "");
+      if (!ctx.conversationId) return "unmet";
       // 1) El agente responde con el objetivo inyectado en su prompt.
       await runAgentTurn({
         organizationId: ctx.organizationId,
@@ -310,31 +328,23 @@ function makeDeps(): EngineDeps {
         agentSlug: agentSlug || undefined,
         objective,
       });
-      if (!objective.trim()) return false;
-      // 2) Evalúa (mejor esfuerzo, modelo económico) si el objetivo ya se cumplió.
-      try {
-        const msgs = await withTenant(ctx.organizationId, (tx) =>
-          tx.message.findMany({
-            where: { conversationId: ctx.conversationId!, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
-            orderBy: { createdAt: "desc" },
-            take: 12,
-          }),
-        );
-        const transcript = msgs
-          .reverse()
-          .map((m) => `${m.direction === "INBOUND" ? "Cliente" : "Agente"}: ${m.body ?? ""}`)
-          .join("\n");
-        const router = createAIRouter({ anthropicApiKey: getEnv().ANTHROPIC_API_KEY, openaiApiKey: getEnv().OPENAI_API_KEY });
-        const res = await router.chat({
-          model: getEnv().AI_DEFAULT_MODEL,
-          system: "Eres un evaluador estricto. Responde ÚNICAMENTE 'SI' o 'NO'.",
-          messages: [{ role: "user", content: `Objetivo: "${objective}".\n\nConversación:\n${transcript}\n\n¿El objetivo YA se cumplió de forma clara? Responde solo SI o NO.` }],
-          maxTokens: 3,
+      if (!objective.trim()) return "unmet";
+      // 2) Evalúa si el objetivo ya se cumplió en este primer turno.
+      if (await evaluateObjective(ctx.organizationId, ctx.conversationId, objective)) return "met";
+      // 3) Multi-turno: deja el objetivo pendiente en la conversación; cada
+      //    respuesta del contacto re-corre agente + evaluación (inbound) y el
+      //    run espera con timeout (rama "unmet" si nadie lo resuelve).
+      const maxTurns = Math.max(1, Number(cfg.maxTurns ?? 1));
+      if (maxTurns <= 1) return "unmet"; // v1: un solo turno
+      await withTenant(ctx.organizationId, async (tx) => {
+        const conv = await tx.conversation.findUnique({ where: { id: ctx.conversationId! }, select: { meta: true } });
+        const meta = (conv?.meta as Record<string, unknown>) ?? {};
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { meta: { ...meta, aiObjective: { runId: ctx.runId, nodeId, objective, agentSlug, turnsLeft: maxTurns - 1 } } as object },
         });
-        return /\bs[íi]\b/i.test(res.text ?? "");
-      } catch {
-        return false; // ante error → "no cumplido" (rama de escalamiento)
-      }
+      });
+      return "pending";
     },
 
     async callApi(ctx, config) {
@@ -602,7 +612,47 @@ export async function scheduleAppointmentReminders(
 }
 
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */
-export async function resumeRun(organizationId: string, runId: string, nodeId: string): Promise<void> {
+/** Evalúa (mejor esfuerzo, modelo económico) si el objetivo ya se cumplió. */
+export async function evaluateObjective(organizationId: string, conversationId: string, objective: string): Promise<boolean> {
+  if (!objective.trim()) return false;
+  try {
+    const msgs = await withTenant(organizationId, (tx) =>
+      tx.message.findMany({
+        where: { conversationId, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+      }),
+    );
+    const transcript = msgs
+      .reverse()
+      .map((m) => `${m.direction === "INBOUND" ? "Cliente" : "Agente"}: ${m.body ?? ""}`)
+      .join("\n");
+    const router = createAIRouter({ anthropicApiKey: getEnv().ANTHROPIC_API_KEY, openaiApiKey: getEnv().OPENAI_API_KEY });
+    const res = await router.chat({
+      model: getEnv().AI_DEFAULT_MODEL,
+      system: "Eres un evaluador estricto. Responde ÚNICAMENTE 'SI' o 'NO'.",
+      messages: [{ role: "user", content: `Objetivo: "${objective}".\n\nConversación:\n${transcript}\n\n¿El objetivo YA se cumplió de forma clara? Responde solo SI o NO.` }],
+      maxTokens: 3,
+    });
+    return /\bs[íi]\b/i.test(res.text ?? "");
+  } catch {
+    return false; // ante error → "no cumplido" (rama de escalamiento)
+  }
+}
+
+/** Quita el objetivo pendiente de la conversación (meta.aiObjective). */
+async function clearPendingObjective(organizationId: string, conversationId: string): Promise<void> {
+  await withTenant(organizationId, async (tx) => {
+    const conv = await tx.conversation.findUnique({ where: { id: conversationId }, select: { meta: true } });
+    const meta = { ...((conv?.meta as Record<string, unknown>) ?? {}) };
+    if (!("aiObjective" in meta)) return;
+    delete meta.aiObjective;
+    await tx.conversation.update({ where: { id: conversationId }, data: { meta: meta as object } });
+  });
+}
+
+/** Carga run+definición (WAITING→RUNNING) para reanudarlo. */
+async function loadWaitingRun(organizationId: string, runId: string): Promise<{ ctx: RunCtx; def: WorkflowDefinition } | null> {
   const data = await withTenant(organizationId, async (tx) => {
     const run = await tx.workflowRun.findUnique({ where: { id: runId } });
     if (!run || run.status !== "WAITING") return null;
@@ -611,22 +661,94 @@ export async function resumeRun(organizationId: string, runId: string, nodeId: s
     await tx.workflowRun.update({ where: { id: runId }, data: { status: "RUNNING" } });
     return { run, versionRow };
   });
-  if (!data) return;
-
+  if (!data) return null;
   const parsed = workflowDefinitionSchema.safeParse(data.versionRow.definition);
-  if (!parsed.success) return;
-
-  const ctx: RunCtx = {
-    organizationId,
-    runId,
-    workflowId: data.run.workflowId,
-    versionId: data.run.versionId,
-    conversationId: data.run.conversationId ?? undefined,
-    contactId: data.run.contactId ?? undefined,
-    variables: (data.run.variables as Record<string, string>) ?? {},
+  if (!parsed.success) return null;
+  return {
+    def: parsed.data,
+    ctx: {
+      organizationId,
+      runId,
+      workflowId: data.run.workflowId,
+      versionId: data.run.versionId,
+      conversationId: data.run.conversationId ?? undefined,
+      contactId: data.run.contactId ?? undefined,
+      variables: (data.run.variables as Record<string, string>) ?? {},
+    },
   };
-  const result = await resumeAfterWait(deps, ctx, parsed.data, nodeId);
+}
+
+export async function resumeRun(organizationId: string, runId: string, nodeId: string): Promise<void> {
+  const loaded = await loadWaitingRun(organizationId, runId);
+  if (!loaded) return;
+  const node = loaded.def.nodes.find((n) => n.id === nodeId);
+  // Timeout de un objetivo multi-turno: nadie lo resolvió → rama "unmet".
+  if (node?.type === "ai_objective") {
+    if (loaded.ctx.conversationId) await clearPendingObjective(organizationId, loaded.ctx.conversationId);
+    const result = await resumeWithBranch(deps, loaded.ctx, loaded.def, nodeId, "unmet");
+    await finishRun(organizationId, runId, result);
+    return;
+  }
+  const result = await resumeAfterWait(deps, loaded.ctx, loaded.def, nodeId);
   await finishRun(organizationId, runId, result);
+}
+
+/** Reanuda un run que esperaba en un nodo con ramas (ai_objective resuelto). */
+export async function resumeRunWithBranch(organizationId: string, runId: string, nodeId: string, branch: string): Promise<void> {
+  const loaded = await loadWaitingRun(organizationId, runId);
+  if (!loaded) return;
+  const result = await resumeWithBranch(deps, loaded.ctx, loaded.def, nodeId, branch);
+  await finishRun(organizationId, runId, result);
+}
+
+/**
+ * Multi-turno ai_objective: si la conversación tiene un objetivo pendiente,
+ * corre el turno del agente CON el objetivo, re-evalúa y reanuda el run
+ * cuando se resuelve (met) o se agotan los turnos (unmet).
+ * Devuelve true si manejó el turno del agente (el inbound no debe duplicarlo).
+ */
+export async function handlePendingObjective(organizationId: string, conversationId: string): Promise<boolean> {
+  const conv = await withTenant(organizationId, (tx) =>
+    tx.conversation.findUnique({ where: { id: conversationId }, select: { meta: true } }),
+  );
+  const pending = (conv?.meta as Record<string, any> | null)?.aiObjective;
+  if (!pending?.runId || !pending?.nodeId) return false;
+
+  try {
+    await runAgentTurn({
+      organizationId,
+      conversationId,
+      agentSlug: pending.agentSlug ? String(pending.agentSlug) : undefined,
+      objective: String(pending.objective ?? ""),
+    });
+  } catch (err) {
+    console.error(`✖ Error en turno de agente con objetivo (${conversationId}):`, (err as Error).message);
+  }
+
+  const met = await evaluateObjective(organizationId, conversationId, String(pending.objective ?? ""));
+  const turnsLeft = Number(pending.turnsLeft ?? 0) - 1;
+  if (!met && turnsLeft > 0) {
+    await withTenant(organizationId, async (tx) => {
+      const c = await tx.conversation.findUnique({ where: { id: conversationId }, select: { meta: true } });
+      const meta = (c?.meta as Record<string, unknown>) ?? {};
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data: { meta: { ...meta, aiObjective: { ...pending, turnsLeft } } as object },
+      });
+    });
+    return true;
+  }
+
+  // Resuelto (met) o turnos agotados (unmet): limpiar, cancelar el timeout y reanudar.
+  await clearPendingObjective(organizationId, conversationId);
+  await withTenant(organizationId, (tx) =>
+    tx.scheduledJob.updateMany({
+      where: { status: "PENDING", kind: "workflow_timer", uniqueKey: `${pending.runId}:${pending.nodeId}` },
+      data: { status: "CANCELLED" },
+    }),
+  );
+  await resumeRunWithBranch(organizationId, String(pending.runId), String(pending.nodeId), met ? "met" : "unmet");
+  return true;
 }
 
 /** Cancela esperas (y sus runs) cuando el contacto responde. */
