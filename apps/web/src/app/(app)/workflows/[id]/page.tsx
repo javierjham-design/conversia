@@ -88,7 +88,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
   {
     type: "ai_objective", label: "Agente IA con objetivo", description: "Entrega la conversación a un agente con un objetivo y ramifica según el resultado",
-    category: "IA", icon: <Crosshair size={15} />, defaultConfig: { agentSlug: "", objective: "" },
+    category: "IA", icon: <Crosshair size={15} />, defaultConfig: { agentSlug: "", objective: "", maxTurns: 1, timeoutHours: 24 },
     branches: [{ handle: "met", label: "Objetivo cumplido" }, { handle: "unmet", label: "No cumplido / escalado" }],
   },
   // Integraciones
@@ -952,7 +952,17 @@ function NodePanel({
             <span className="text-xs text-slate-500">Objetivo</span>
             <textarea value={config.objective ?? ""} onChange={(e) => onChange({ objective: e.target.value })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </label>
-          <p className="text-[10px] text-slate-400">El agente conversa con el objetivo inyectado; luego el flujo ramifica en «Objetivo cumplido» / «No cumplido». (v1: evalúa el estado actual de la conversación.)</p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-sm">
+              <span className="text-xs text-slate-500">Turnos máx. del contacto</span>
+              <input type="number" min={1} max={20} value={config.maxTurns ?? 1} onChange={(e) => onChange({ maxTurns: Number(e.target.value) || 1 })} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-slate-500">Timeout (horas)</span>
+              <input type="number" min={1} max={168} value={config.timeoutHours ?? 24} onChange={(e) => onChange({ timeoutHours: Number(e.target.value) || 24 })} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </label>
+          </div>
+          <p className="text-[10px] text-slate-400">Con 1 turno, evalúa el estado actual y ramifica de inmediato. Con más turnos, el agente sigue conversando: cada respuesta del contacto re-evalúa el objetivo, y si nadie lo resuelve antes del timeout, sigue por «No cumplido».</p>
         </div>
       )}
 

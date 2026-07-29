@@ -136,7 +136,7 @@ export function simulateWorkflow(
       case "ai_objective":
         label = "Agente IA con objetivo";
         branch = "met"; // en la prueba asumimos objetivo cumplido
-        detail = `El agente buscaría: “${cfg.objective ?? ""}” → asumimos «Objetivo cumplido» (simulado)`;
+        detail = `El agente buscaría: “${cfg.objective ?? ""}”${Number(cfg.maxTurns ?? 1) > 1 ? ` durante hasta ${cfg.maxTurns} turnos del contacto (timeout ${cfg.timeoutHours ?? 24} h)` : ""} → asumimos «Objetivo cumplido» (simulado)`;
         break;
       case "call_api":
         label = "Petición HTTP";
