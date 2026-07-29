@@ -1,5 +1,13 @@
 # Registro de progreso
 
+## 2026-07-29 (5) — Pendientes de backlog: import en 2.º plano, webhooks Cláriva, ai_objective multi-turno
+
+Rama `feature/contact-import-job`. Además se verificó que el trigger `tag_added` ya estaba completo (panel bulk, tool IA, nodo de flujo, Lead Ads; el import CSV no dispara a propósito) → ROADMAP corregido.
+
+- **Import CSV → job BullMQ**: cola nueva `contact-imports`; la API valida (tope 10 000 filas, body 2 MB) y encola; el worker procesa por lotes de 200 con `updateProgress` + audit log; `GET /contacts/import/:jobId` (solo el tenant dueño) y UI con polling + barra de progreso.
+- **Receptor de webhooks Cláriva**: `POST /webhooks/clariva/:connectionId` (público, firma `X-Clariva-Signature` HMAC con `config.webhookSecret` por conexión). El worker actualiza la proyección `appointments` por `(provider, external_id)`, crea contacto por teléfono si falta (fill de huecos en `patient.updated`), registra `integration_events` y dispara `appointment_created/confirmed/cancelled/rescheduled` y `no_show`. Tests del mapeo (7).
+- **ai_objective multi-turno**: config `maxTurns` (default 1 = v1) + `timeoutHours`. `pending` deja el run en espera (timer sin cancelOn); el estado vive en `conversation.meta.aiObjective`; cada respuesta del contacto corre el turno del agente CON el objetivo, re-evalúa y reanuda por rama (`resumeWithBranch` nuevo en el motor); turnos agotados o timeout → «unmet» y limpieza. Test del motor pending/resume.
+
 ## 2026-07-29 (4) — Catálogo de Workflows ampliado + reconciliación CTWA (PR #1)
 
 Ampliación del constructor de workflows (triggers + pasos) estilo Respond.io, adaptado al rubro. Sin migraciones (todo en JSON/modelos existentes). Menú "Añadir paso" **categorizado (8 categorías) + buscador**, con soporte "Próximamente" (deshabilitado) y "Premium" (gating por plan). Trabajado por categorías con commit por cada una.

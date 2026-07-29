@@ -40,12 +40,14 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
   - Pasos: open_conversation, add_note, goto (anti-bucle), business_hours, send_capi (CAPI directo con ctwa_clid + reintentos), ai_objective (agente con objetivo + ramas), call_api (Petición HTTP con guard SSRF + gating por plan)
 - 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok · pasos send_tiktok_event, google_sheets_append (OAuth por diseñar), send_template (HSM)
 - ✅ Disparador etiqueta agregada (`tag_added`): panel (bulk), tool IA, nodo de flujo y Lead Ads (el import CSV NO dispara, a propósito)
-- ⬜ pregunta→variable, condición multi-campo · ⬜ ai_objective multi-turno (hoy v1 de un turno) · ⬜ Métricas por nodo
+- ✅ ai_objective multi-turno (maxTurns + timeoutHours; respuestas del contacto re-evalúan y reanudan el run por rama; timeout → «unmet»)
+- ⬜ pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
 
 ## Fase 5 — Agendamiento e integraciones
 - ✅ Contrato SchedulingProvider completo + MockSchedulingProvider (doble reserva) + ClarivaSchedulingProvider + mock server del contrato
 - ✅ Selección de proveedor por tenant (scheduling_connections)
-- ⬜ Receptor de webhooks Cláriva · ⬜ Google Calendar / Dentalink · ⬜ Meta Lead Ads + Conversions API · ⬜ Recordatorios/confirmaciones programados (workflow plantilla existe; falta trigger appointment_upcoming automático)
+- ✅ Receptor de webhooks Cláriva (`POST /webhooks/clariva/:connectionId`, firma HMAC por conexión; proyección local de citas + triggers appointment_*/no_show)
+- ⬜ Google Calendar / Dentalink · ⬜ Meta Lead Ads + Conversions API · ⬜ Recordatorios/confirmaciones programados (workflow plantilla existe; falta trigger appointment_upcoming automático)
 
 ## Fase 6 — Piloto Digital Dent
 - ✅ Tenant por seed JSON (org, sede Temuco, equipos, 17 estados de lead, 7 servicios, 3 profesionales placeholder, 3 agentes, 2 workflows, canal mock)
