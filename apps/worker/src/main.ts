@@ -13,6 +13,7 @@ import {
   type WebhookDeliveryJob,
 } from "@conversia/types";
 import { processCapiJob } from "./capi";
+import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processOutbound } from "./outbound";
@@ -60,6 +61,12 @@ async function main() {
   const eventsWorker = new Worker<EventJob>(
     QUEUE_NAMES.events,
     async (job) => {
+      // Webhook de Cláriva (firma ya verificada por la API): actualiza la
+      // proyección local de la cita y dispara los triggers de agenda.
+      if (job.data.type === "__clariva_webhook__") {
+        await processClarivaWebhook(job.data.organizationId, job.data.data as unknown as ClarivaWebhookData, job.data.occurredAt);
+        return;
+      }
       // Atajo manual desde la bandeja: ejecutar un flujo específico por id.
       if (job.data.type === "__manual_run__") {
         const wfId = (job.data.data as any)?.workflowId as string | undefined;

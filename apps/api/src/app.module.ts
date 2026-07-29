@@ -22,6 +22,7 @@ import { PlatformGuard } from "./platform/platform.guard";
 import { PlatformSessionService } from "./platform/platform-session.service";
 import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
+import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
 import { WorkflowsController } from "./workflows/workflows.controller";
@@ -42,6 +43,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ReportsController,
     BillingController,
     WhatsappController,
+    ClarivaWebhookController,
     PublicController, // API pública de precios (sin auth)
     // Plataforma (super-admin) — autenticación y audiencia separadas
     PlatformAuthController,
