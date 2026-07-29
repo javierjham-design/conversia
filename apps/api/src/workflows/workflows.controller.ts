@@ -14,7 +14,7 @@ import { z } from "zod";
 import { workflowDefinitionSchema } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
-import { enforcePlanLimit } from "../common/plan-limits";
+import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { simulateWorkflow, type SimNames } from "./workflow-sandbox";
@@ -435,6 +435,11 @@ export class WorkflowsController {
         orderBy: { version: "desc" },
       });
       if (!draft) throw new BadRequestException("No hay borrador para publicar");
+      // Gating por plan: la "Petición HTTP" (call_api) es un paso premium.
+      const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string }[];
+      if (nodes.some((n) => n.type === "call_api") && !(await canUseFeature(tx, "http_step"))) {
+        throw new BadRequestException("El paso «Petición HTTP» requiere un plan superior. Actualiza tu plan para publicar este flujo.");
+      }
       const published = await tx.workflowVersion.update({
         where: { id: draft.id },
         data: { status: "PUBLISHED", publishedAt: new Date() },

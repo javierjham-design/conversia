@@ -22,7 +22,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
-  Pencil, Plus, Redo2, Search, Share2, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, XCircle, Zap,
+  Pencil, Plus, Redo2, Search, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -48,6 +48,7 @@ interface NodeDef {
   branches?: { handle: string; label: string }[];
   terminal?: boolean;
   soon?: boolean; // "Próximamente" — deshabilitado, no lo ejecuta el motor
+  premium?: boolean; // requiere plan superior (se valida al publicar)
 }
 
 const NODE_DEFS: NodeDef[] = [
@@ -90,6 +91,9 @@ const NODE_DEFS: NodeDef[] = [
     category: "IA", icon: <Crosshair size={15} />, defaultConfig: { agentSlug: "", objective: "" },
     branches: [{ handle: "met", label: "Objetivo cumplido" }, { handle: "unmet", label: "No cumplido / escalado" }],
   },
+  // Integraciones
+  { type: "call_api", label: "Petición HTTP", description: "Llama a un endpoint externo y mapea la respuesta a variables", category: "Integraciones", icon: <Webhook size={15} />, premium: true, defaultConfig: { method: "GET", url: "", headers: {}, body: "", responseMapping: {} } },
+  { type: "google_sheets_append", label: "Añadir fila a Google Sheets", description: "Agrega una fila a una hoja de cálculo", category: "Integraciones", icon: <Sheet size={15} />, defaultConfig: {}, soon: true },
   // Agenda
   { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM (fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {}, soon: true },
 ];
@@ -241,6 +245,8 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "send_tiktok_event": return "(Próximamente)";
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
     case "send_template": return "(Próximamente)";
+    case "call_api": return config.url ? `${config.method ?? "GET"} ${String(config.url).slice(0, 30)}` : "(configura la petición)";
+    case "google_sheets_append": return "(Próximamente)";
     default: return "";
   }
 }
@@ -446,6 +452,7 @@ function Editor() {
       else if (t === "add_note" && !String(c.text ?? "").trim()) errors[n.id] = "Escribe el comentario";
       else if (t === "goto" && !c.targetNodeId) errors[n.id] = "Elige el paso destino";
       else if (t === "ai_objective" && !String(c.objective ?? "").trim()) errors[n.id] = "Define el objetivo del agente";
+      else if (t === "call_api" && !String(c.url ?? "").trim()) errors[n.id] = "Indica la URL de la petición";
     }
     setNodes((ns) => ns.map((n) => (n.id in errors ? { ...n, data: { ...n.data, invalid: errors[n.id] } } : { ...n, data: { ...n.data, invalid: undefined } })));
     if (Object.keys(errors).length) {
@@ -818,6 +825,7 @@ function AddStepModal({ open, onClose, onPick }: { open: boolean; onClose: () =>
                       <span className="flex items-center gap-1.5 text-sm font-medium text-navy-900">
                         {n.label}
                         {n.soon && <span className="rounded bg-slate-100 px-1 text-[9px] text-slate-500">Próximamente</span>}
+                        {n.premium && !n.soon && <span className="rounded bg-brand-100 px-1 text-[9px] text-brand-700">Premium</span>}
                       </span>
                       <span className="block text-xs text-slate-500">{n.description}</span>
                     </span>
@@ -939,6 +947,12 @@ function NodePanel({
         <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere gestión de plantillas HSM aprobadas en el canal de WhatsApp.</p>
       )}
 
+      {type === "call_api" && <HttpForm config={config} onChange={onChange} />}
+
+      {type === "google_sheets_append" && (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere conectar Google (OAuth por tenant). Te propongo el diseño de la conexión aparte antes de implementarlo.</p>
+      )}
+
       {type === "update_lead_status" && (
         <label className="block text-sm">
           <span className="text-xs text-slate-500">Nuevo estado del lead</span>
@@ -1052,6 +1066,53 @@ function CapiForm({ config, onChange }: { config: Record<string, any>; onChange:
         </label>
       </div>
       <p className="text-[10px] text-slate-400">Usa el <span className="font-mono">ctwa_clid</span> del contacto (del disparador Click-to-Chat) + el dataset/token del <b>Centro Meta</b>. Se envía con reintentos automáticos.</p>
+    </div>
+  );
+}
+
+function HttpForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+  const [headersText, setHeadersText] = useState(JSON.stringify(config.headers ?? {}));
+  const [mapText, setMapText] = useState(JSON.stringify(config.responseMapping ?? {}));
+  const method = config.method ?? "GET";
+  function tryJson(text: string, key: string) {
+    try {
+      const obj = JSON.parse(text || "{}");
+      if (obj && typeof obj === "object") onChange({ [key]: obj });
+    } catch {
+      /* JSON incompleto mientras escribe — no actualiza hasta que sea válido */
+    }
+  }
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="rounded bg-brand-50 px-2 py-1 text-[10px] text-brand-700">
+        Paso <b>Premium</b>. Con guard SSRF (bloquea IPs internas). Luego tendrás <span className="font-mono">{"{{__http_ok}} {{__http_status}}"}</span> + lo que mapees.
+      </p>
+      <div className="flex gap-2">
+        <label className="w-28">
+          <span className="text-xs text-slate-500">Método</span>
+          <select value={method} onChange={(e) => onChange({ method: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+            {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (<option key={m} value={m}>{m}</option>))}
+          </select>
+        </label>
+        <label className="flex-1">
+          <span className="text-xs text-slate-500">URL</span>
+          <input value={config.url ?? ""} onChange={(e) => onChange({ url: e.target.value })} placeholder="https://api.tuservicio.com/…" className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-xs text-slate-500">Headers (JSON)</span>
+        <textarea value={headersText} onChange={(e) => { setHeadersText(e.target.value); tryJson(e.target.value, "headers"); }} rows={2} placeholder='{"Authorization":"Bearer …"}' className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
+      </label>
+      {method !== "GET" && (
+        <label className="block">
+          <span className="text-xs text-slate-500">Body (admite {"{{variables}}"})</span>
+          <textarea value={config.body ?? ""} onChange={(e) => onChange({ body: e.target.value })} rows={3} placeholder='{"nombre":"{{contact.firstName}}"}' className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
+        </label>
+      )}
+      <label className="block">
+        <span className="text-xs text-slate-500">Mapeo respuesta → variables (JSON)</span>
+        <textarea value={mapText} onChange={(e) => { setMapText(e.target.value); tryJson(e.target.value, "responseMapping"); }} rows={2} placeholder='{"saldo":"data.balance"}' className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
+      </label>
     </div>
   );
 }

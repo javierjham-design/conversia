@@ -22,6 +22,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     addNote: async (_c, text) => void calls.push(`note:${text}`),
     sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
     runAgentWithObjective: async (_c, _slug, obj) => { calls.push(`objective:${obj}`); return true; },
+    callApi: async (c, config) => { (c as any).variables.__http_ok = "true"; calls.push(`http:${(config as any).url ?? ""}`); },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,

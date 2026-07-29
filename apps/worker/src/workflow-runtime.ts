@@ -11,6 +11,7 @@ import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition }
 import { createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
+import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
@@ -332,6 +333,13 @@ function makeDeps(): EngineDeps {
       } catch {
         return false; // ante error → "no cumplido" (rama de escalamiento)
       }
+    },
+
+    async callApi(ctx, config) {
+      // Guard SSRF + timeout dentro de callHttp; el resultado (incluye
+      // __http_ok/__http_status y el mapeo JSON) queda disponible para los pasos.
+      const result = await callHttp(config as HttpNodeConfig, ctx.variables);
+      Object.assign(ctx.variables, result);
     },
 
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {

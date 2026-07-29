@@ -138,6 +138,10 @@ export function simulateWorkflow(
         branch = "met"; // en la prueba asumimos objetivo cumplido
         detail = `El agente buscaría: “${cfg.objective ?? ""}” → asumimos «Objetivo cumplido» (simulado)`;
         break;
+      case "call_api":
+        label = "Petición HTTP";
+        detail = `${cfg.method ?? "GET"} ${renderVars(String(cfg.url ?? ""), vars) || "(sin URL)"} (no se ejecuta en la prueba)`;
+        break;
       case "send_tiktok_event":
       case "google_sheets_append":
       case "send_template":
