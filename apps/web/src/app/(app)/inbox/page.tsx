@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, getToken } from "@/lib/api";
+import { useToast } from "@/components/ui";
 
 /** Reproductor de nota de voz: descarga el audio (con auth) on-demand y lo reproduce. */
 function AudioBubble({ conversationId, messageId, transcript, outbound }: { conversationId: string; messageId: string; transcript: string | null; outbound: boolean }) {
@@ -78,12 +79,14 @@ interface AgentOption {
 }
 
 export default function InboxPage() {
+  const toast = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [users, setUsers] = useState<Assignable[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
   const [fStatus, setFStatus] = useState("open");
   const [fAi, setFAi] = useState("all");
   const [fAssigned, setFAssigned] = useState("all");
@@ -112,6 +115,10 @@ export default function InboxPage() {
   useEffect(() => {
     void api<Assignable[]>("/users/assignable").then(setUsers).catch(() => setUsers([]));
     void api<AgentOption[]>("/agents/assignable").then(setAgents).catch(() => setAgents([]));
+    // Flujos publicados+activos, para el atajo "Ejecutar flujo".
+    void api<{ id: string; name: string; status: string }[]>("/workflows")
+      .then((r) => setWorkflows(r.filter((w) => w.status === "published").map((w) => ({ id: w.id, name: w.name }))))
+      .catch(() => setWorkflows([]));
   }, []);
 
   useEffect(() => {
@@ -169,6 +176,19 @@ export default function InboxPage() {
       body: JSON.stringify({ agentId: agentId || null }),
     });
     await loadMessages(selected.id);
+  }
+
+  async function runWorkflow(workflowId: string) {
+    if (!selected || !workflowId) return;
+    try {
+      await api(`/conversations/${selected.id}/run-workflow`, {
+        method: "POST",
+        body: JSON.stringify({ workflowId }),
+      });
+      toast.push("Flujo ejecutado sobre esta conversación", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
   }
 
   function displayName(c: Contact) {
@@ -270,6 +290,19 @@ export default function InboxPage() {
                     <option key={a.id} value={a.id}>🤖 {a.name}</option>
                   ))}
                 </select>
+                {workflows.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => void runWorkflow(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                    title="Ejecutar un flujo sobre esta conversación"
+                  >
+                    <option value="">⚡ Ejecutar flujo…</option>
+                    {workflows.map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                )}
                 <button
                   onClick={() => void toggleAi()}
                   className={`rounded-lg px-3 py-1.5 text-sm font-medium ${

@@ -34,7 +34,8 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ **Disparadores**: conversación nueva/cerrada, mensaje con condiciones (palabra clave, primer mensaje); puente API→worker para eventos del panel
 - ✅ **Modo prueba** (sandbox): recorre el flujo paso a paso sin efectos reales
 - ✅ **Plantillas** genéricas (bienvenida, seguimiento sin respuesta, palabra clave, encuesta post-cierre)
-- 🔶 Disparadores por más superficie: etiqueta agregada, atajo manual desde la bandeja · ⬜ Nodos call_api (SSRF), plantillas WhatsApp, pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
+- ✅ Atajo manual desde la bandeja ("Ejecutar flujo" sobre una conversación)
+- 🔶 Disparador etiqueta agregada (`tag_added`) · ⬜ Nodos call_api (SSRF), plantillas WhatsApp, pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
 
 ## Fase 5 — Agendamiento e integraciones
 - ✅ Contrato SchedulingProvider completo + MockSchedulingProvider (doble reserva) + ClarivaSchedulingProvider + mock server del contrato

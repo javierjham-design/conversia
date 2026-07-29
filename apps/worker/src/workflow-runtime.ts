@@ -375,19 +375,51 @@ export async function startWorkflowByName(
   }
   const versionRow = wf.versions[0];
   if (!versionRow) return { ok: false, error: `El flujo "${workflowName}" no tiene versión publicada` };
-  const parsed = workflowDefinitionSchema.safeParse(versionRow.definition);
+  return runWorkflowVersion(organizationId, wf.id, versionRow.id, versionRow.definition, target);
+}
+
+/**
+ * Dispara un workflow por su ID (atajo manual desde la bandeja). Ejecuta la
+ * versión publicada del flujo activo sobre la conversación/contacto indicados.
+ */
+export async function startWorkflowById(
+  organizationId: string,
+  workflowId: string,
+  target: { conversationId?: string; contactId?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  const wf = await withTenant(organizationId, (tx) =>
+    tx.workflow.findFirst({
+      where: { id: workflowId, active: true, deletedAt: null },
+      include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
+    }),
+  );
+  if (!wf) return { ok: false, error: "Flujo no encontrado o inactivo" };
+  const versionRow = wf.versions[0];
+  if (!versionRow) return { ok: false, error: "El flujo no tiene versión publicada" };
+  return runWorkflowVersion(organizationId, wf.id, versionRow.id, versionRow.definition, target);
+}
+
+/** Crea el run y ejecuta una versión ya resuelta de un workflow (uso manual). */
+async function runWorkflowVersion(
+  organizationId: string,
+  workflowId: string,
+  versionId: string,
+  definition: unknown,
+  target: { conversationId?: string; contactId?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  const parsed = workflowDefinitionSchema.safeParse(definition);
   if (!parsed.success) return { ok: false, error: "La definición del flujo es inválida" };
   const def = parsed.data;
   const start = findStartNode(def);
   if (!start) return { ok: false, error: "El flujo no tiene nodo inicial" };
 
-  const idempotencyKey = `manual:${wf.id}:${target.conversationId ?? target.contactId ?? "global"}:${Date.now()}`;
+  const idempotencyKey = `manual:${workflowId}:${target.conversationId ?? target.contactId ?? "global"}:${Date.now()}`;
   const run = await withTenant(organizationId, (tx) =>
     tx.workflowRun.create({
       data: {
         organizationId,
-        workflowId: wf.id,
-        versionId: versionRow.id,
+        workflowId,
+        versionId,
         status: "RUNNING",
         contactId: target.contactId,
         conversationId: target.conversationId,
@@ -400,8 +432,8 @@ export async function startWorkflowByName(
   const ctx: RunCtx = {
     organizationId,
     runId: run.id,
-    workflowId: wf.id,
-    versionId: versionRow.id,
+    workflowId,
+    versionId,
     conversationId: target.conversationId,
     contactId: target.contactId,
     variables: {},

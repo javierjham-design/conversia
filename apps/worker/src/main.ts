@@ -17,7 +17,7 @@ import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
 import { processWebhookDelivery } from "./webhook-sender";
-import { dispatchEvent } from "./workflow-runtime";
+import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
 
 async function main() {
   const env = getEnv();
@@ -52,6 +52,17 @@ async function main() {
   const eventsWorker = new Worker<EventJob>(
     QUEUE_NAMES.events,
     async (job) => {
+      // Atajo manual desde la bandeja: ejecutar un flujo específico por id.
+      if (job.data.type === "__manual_run__") {
+        const wfId = (job.data.data as any)?.workflowId as string | undefined;
+        if (wfId) {
+          await startWorkflowById(job.data.organizationId, wfId, {
+            conversationId: job.data.conversationId,
+            contactId: job.data.contactId,
+          });
+        }
+        return;
+      }
       await emitPlatformEvent(job.data.organizationId, job.data.type, job.data.data ?? {});
       const triggerType = job.data.type.replace(/\./g, "_");
       if ((TRIGGER_TYPES as readonly string[]).includes(triggerType)) {

@@ -126,6 +126,35 @@ export class ConversationsController {
     });
   }
 
+  /** Atajo manual: ejecutar un flujo publicado sobre esta conversación. */
+  @Post(":id/run-workflow")
+  async runWorkflow(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ workflowId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("workflowId requerido");
+    const info = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const wf = await tx.workflow.findFirst({
+        where: { id: parsed.data.workflowId, deletedAt: null, active: true },
+        include: { versions: { where: { status: "PUBLISHED" }, take: 1 } },
+      });
+      if (!wf || wf.versions.length === 0) {
+        throw new BadRequestException("El flujo no existe, no está activo o no tiene versión publicada");
+      }
+      return { contactId: conversation.contactId };
+    });
+    await this.queues.events.add("emit", {
+      organizationId: ctx.organizationId,
+      type: "__manual_run__",
+      conversationId: id,
+      contactId: info.contactId ?? undefined,
+      data: { workflowId: parsed.data.workflowId },
+      occurredAt: new Date().toISOString(),
+    });
+    return { ok: true };
+  }
+
   @Get(":id/messages")
   messages(@Param("id") id: string) {
     const ctx = requireContext();
