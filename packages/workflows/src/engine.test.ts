@@ -90,6 +90,15 @@ describe("motor de workflows v0", () => {
     expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "perdido" }, occurredAt: "" })).toBe(false);
   });
 
+  it("condiciones de tag_added (etiqueta específica, insensible a mayúsculas)", () => {
+    const specific: WorkflowDefinition = { trigger: { type: "tag_added", config: { tag: "VIP" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(specific, { organizationId: "o", type: "tag_added", data: { tag: "vip" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(specific, { organizationId: "o", type: "tag_added", data: { tag: "urgente" }, occurredAt: "" })).toBe(false);
+    const anyTag: WorkflowDefinition = { ...specific, trigger: { type: "tag_added", config: {} } };
+    expect(matchesTrigger(anyTag, { organizationId: "o", type: "tag_added", data: { tag: "x" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(anyTag, { organizationId: "o", type: "message_received", data: {}, occurredAt: "" })).toBe(false);
+  });
+
   it("ejecuta hasta la espera y programa el timer", async () => {
     const { deps, calls } = makeDeps();
     const result = await executeFrom(deps, ctx, def, findStartNode(def)!.id);

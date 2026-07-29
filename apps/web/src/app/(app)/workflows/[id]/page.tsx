@@ -772,6 +772,19 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
         </div>
       )}
 
+      {trigger.type === "tag_added" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Etiqueta específica (opcional)</span>
+          <input
+            value={String(trigger.config.tag ?? "")}
+            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, tag: e.target.value } })}
+            placeholder="nombre de la etiqueta — vacío = cualquiera"
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <span className="mt-1 block text-[10px] text-slate-400">Se dispara al etiquetar desde el panel, un flujo, la IA o Lead Ads (solo asignaciones nuevas).</span>
+        </label>
+      )}
+
       {trigger.type === "appointment_upcoming" && (
         <label className="block text-sm">
           <span className="text-xs text-slate-500">Horas antes de la cita</span>

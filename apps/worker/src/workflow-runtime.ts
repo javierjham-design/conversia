@@ -105,32 +105,47 @@ function makeDeps(): EngineDeps {
     },
 
     async addTag(ctx, tagName) {
-      await withTenant(ctx.organizationId, async (tx) => {
+      const created = await withTenant(ctx.organizationId, async (tx) => {
         const tag = await tx.tag.upsert({
           where: { organizationId_name: { organizationId: ctx.organizationId, name: tagName } },
           update: {},
           create: { organizationId: ctx.organizationId, name: tagName },
         });
-        if (ctx.conversationId) {
-          await tx.tagAssignment.upsert({
-            where: {
-              organizationId_tagId_entityType_entityId: {
-                organizationId: ctx.organizationId,
-                tagId: tag.id,
-                entityType: "conversation",
-                entityId: ctx.conversationId,
-              },
-            },
-            update: {},
-            create: {
+        if (!ctx.conversationId) return false;
+        const existing = await tx.tagAssignment.findUnique({
+          where: {
+            organizationId_tagId_entityType_entityId: {
               organizationId: ctx.organizationId,
               tagId: tag.id,
               entityType: "conversation",
               entityId: ctx.conversationId,
             },
-          });
-        }
+          },
+        });
+        if (existing) return false;
+        await tx.tagAssignment.create({
+          data: {
+            organizationId: ctx.organizationId,
+            tagId: tag.id,
+            entityType: "conversation",
+            entityId: ctx.conversationId,
+          },
+        });
+        return true;
       });
+      // Solo una asignación NUEVA dispara tag_added: re-etiquetar es no-op y
+      // corta bucles entre flujos que se etiquetan mutuamente.
+      if (created) {
+        await emitPlatformEvent(ctx.organizationId, "tag.added", { tag: tagName, conversationId: ctx.conversationId, contactId: ctx.contactId });
+        await dispatchEvent({
+          organizationId: ctx.organizationId,
+          type: "tag_added",
+          conversationId: ctx.conversationId,
+          contactId: ctx.contactId,
+          data: { tag: tagName },
+          occurredAt: new Date().toISOString(),
+        });
+      }
     },
 
     async transferHuman(ctx, reason) {

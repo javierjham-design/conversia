@@ -129,6 +129,10 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
     if (typeof cfg.toStatus === "string" && cfg.toStatus && String(data.statusCode ?? "") !== cfg.toStatus) return false;
     if (typeof cfg.fromStatus === "string" && cfg.fromStatus && String(data.fromCode ?? "") !== cfg.fromStatus) return false;
   }
+  // Etiqueta añadida: opcionalmente restringido a una etiqueta por nombre.
+  if (t === "tag_added") {
+    if (typeof cfg.tag === "string" && cfg.tag.trim() && String(data.tag ?? "").toLowerCase() !== cfg.tag.trim().toLowerCase()) return false;
+  }
   return true;
 }
 

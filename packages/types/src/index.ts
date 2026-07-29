@@ -382,6 +382,7 @@ export const PLATFORM_PUBLIC_EVENTS = [
   "message.sent",
   "lead.created",
   "lead.status_changed",
+  "tag.added",
   "appointment.created",
   "appointment.updated",
   "appointment.cancelled",

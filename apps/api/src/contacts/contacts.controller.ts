@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
 import { requirePermission } from "../tenancy/permissions";
 
 const listQuery = z.object({
@@ -174,7 +175,10 @@ const csvEscape = (v: unknown): string => {
 
 @Controller("contacts")
 export class ContactsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private queues: QueueService,
+  ) {}
 
   /** Lista paginada de contactos con búsqueda y filtros (todo server-side). */
   @Get()
@@ -447,11 +451,13 @@ export class ContactsController {
 
   /** Acción sobre múltiples contactos (etiquetar, etapa, asignar, bloquear, borrar). */
   @Post("bulk")
-  bulk(@Body() body: unknown) {
+  async bulk(@Body() body: unknown) {
     const ctx = requirePermission("contacts:write");
     const b = parse(bulkBody, body);
     const orgId = ctx.organizationId;
-    return this.prisma.withTenant(orgId, async (tx) => {
+    // Contactos recién etiquetados → evento tag.added (workflows con ese trigger).
+    let tagged: { name: string; contactIds: string[] } | null = null;
+    const result = await this.prisma.withTenant(orgId, async (tx) => {
       // Solo IDs que realmente pertenecen al tenant (RLS ya aísla, pero validamos).
       const valid = (await tx.contact.findMany({ where: { id: { in: b.ids }, deletedAt: null }, select: { id: true } })).map((c) => c.id);
       if (valid.length === 0) return { affected: 0 };
@@ -460,13 +466,22 @@ export class ContactsController {
       switch (b.action) {
         case "tag_add": {
           if (!b.tagId) throw new BadRequestException("Falta tagId");
-          const tag = await tx.tag.findFirst({ where: { id: b.tagId }, select: { id: true } });
+          const tag = await tx.tag.findFirst({ where: { id: b.tagId }, select: { id: true, name: true } });
           if (!tag) throw new BadRequestException("Etiqueta inválida");
-          const res = await tx.tagAssignment.createMany({
-            data: valid.map((entityId) => ({ organizationId: orgId, tagId: b.tagId!, entityType: "contact", entityId })),
-            skipDuplicates: true,
+          const existing = await tx.tagAssignment.findMany({
+            where: { tagId: b.tagId, entityType: "contact", entityId: { in: valid } },
+            select: { entityId: true },
           });
-          affected = res.count;
+          const already = new Set(existing.map((e) => e.entityId));
+          const fresh = valid.filter((id) => !already.has(id));
+          if (fresh.length) {
+            await tx.tagAssignment.createMany({
+              data: fresh.map((entityId) => ({ organizationId: orgId, tagId: b.tagId!, entityType: "contact", entityId })),
+              skipDuplicates: true,
+            });
+          }
+          tagged = { name: tag.name, contactIds: fresh };
+          affected = fresh.length;
           break;
         }
         case "tag_remove": {
@@ -523,6 +538,20 @@ export class ContactsController {
       });
       return { affected };
     });
+    if (tagged !== null) {
+      const { name, contactIds } = tagged as { name: string; contactIds: string[] };
+      const occurredAt = new Date().toISOString();
+      for (const contactId of contactIds) {
+        await this.queues.events.add("emit", {
+          organizationId: orgId,
+          type: "tag.added",
+          contactId,
+          data: { tag: name, contactId },
+          occurredAt,
+        });
+      }
+    }
+    return result;
   }
 
   // --------------------------------- Importación CSV ---------------------------------

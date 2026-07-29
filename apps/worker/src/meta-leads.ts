@@ -169,13 +169,14 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       leadId = lead.id;
     }
 
+    const newTags: string[] = [];
     for (const tagName of (config.tags as string[]) ?? []) {
       const tag = await tx.tag.upsert({
         where: { organizationId_name: { organizationId, name: tagName } },
         update: {},
         create: { organizationId, name: tagName },
       });
-      await tx.tagAssignment.upsert({
+      const existing = await tx.tagAssignment.findUnique({
         where: {
           organizationId_tagId_entityType_entityId: {
             organizationId,
@@ -184,9 +185,13 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
             entityId: contact.id,
           },
         },
-        update: {},
-        create: { organizationId, tagId: tag.id, entityType: "contact", entityId: contact.id },
       });
+      if (!existing) {
+        await tx.tagAssignment.create({
+          data: { organizationId, tagId: tag.id, entityType: "contact", entityId: contact.id },
+        });
+        newTags.push(tagName);
+      }
     }
 
     await tx.integrationEvent.create({
@@ -199,7 +204,7 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       },
     });
 
-    return { contactId: contact.id, leadId, phone };
+    return { contactId: contact.id, leadId, phone, newTags };
   });
 
   if (!result) return; // duplicado
@@ -211,6 +216,17 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
     data: { source: "meta_lead_ads", formId: change.form_id },
     occurredAt: new Date().toISOString(),
   });
+  // Etiquetas de la config del formulario recién asignadas → trigger tag_added.
+  for (const tagName of result.newTags) {
+    await emitPlatformEvent(organizationId, "tag.added", { tag: tagName, contactId: result.contactId });
+    await dispatchEvent({
+      organizationId,
+      type: "tag_added",
+      contactId: result.contactId,
+      data: { tag: tagName },
+      occurredAt: new Date().toISOString(),
+    });
+  }
   await emitPlatformEvent(
     organizationId,
     "lead.created",
