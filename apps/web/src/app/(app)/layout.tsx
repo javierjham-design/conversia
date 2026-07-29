@@ -57,7 +57,7 @@ const NAV_GROUPS: Array<{
     label: "Operación",
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
-      { label: "Contactos", icon: Contact2, soon: true },
+      { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read" },
       { label: "Agenda", icon: CalendarDays, soon: true },
     ],
   },
@@ -85,6 +85,7 @@ const NAV_GROUPS: Array<{
 
 const BREADCRUMBS: Record<string, string[]> = {
   "/inbox": ["Operación", "Bandeja"],
+  "/contacts": ["Operación", "Contactos"],
   "/agents": ["Automatización", "Agentes IA"],
   "/workflows": ["Automatización", "Flujos"],
   "/reports": ["Análisis", "Reportes"],
