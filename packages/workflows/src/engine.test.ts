@@ -59,6 +59,20 @@ describe("motor de workflows v0", () => {
     expect(matchesTrigger(def, { organizationId: "org1", type: "message_received", occurredAt: "" })).toBe(false);
   });
 
+  it("evalúa condiciones de message_received y conversation_closed", () => {
+    const kw: WorkflowDefinition = { trigger: { type: "message_received", config: { keyword: "hora" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(kw, { organizationId: "o", type: "message_received", data: { text: "quiero una HORA" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(kw, { organizationId: "o", type: "message_received", data: { text: "hola" }, occurredAt: "" })).toBe(false);
+
+    const first: WorkflowDefinition = { trigger: { type: "message_received", config: { firstMessage: true } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(first, { organizationId: "o", type: "message_received", data: { isFirstMessage: true }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(first, { organizationId: "o", type: "message_received", data: { isFirstMessage: false }, occurredAt: "" })).toBe(false);
+
+    const closed: WorkflowDefinition = { trigger: { type: "conversation_closed", config: {} }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(closed, { organizationId: "o", type: "conversation_closed", occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(closed, { organizationId: "o", type: "message_received", occurredAt: "" })).toBe(false);
+  });
+
   it("ejecuta hasta la espera y programa el timer", async () => {
     const { deps, calls } = makeDeps();
     const result = await executeFrom(deps, ctx, def, findStartNode(def)!.id);

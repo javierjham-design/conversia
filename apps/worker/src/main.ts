@@ -4,6 +4,7 @@ import { getEnv } from "@conversia/config";
 import { getPrisma } from "@conversia/database";
 import {
   QUEUE_NAMES,
+  TRIGGER_TYPES,
   type CapiJob,
   type EventJob,
   type InboundJob,
@@ -16,6 +17,7 @@ import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
 import { processWebhookDelivery } from "./webhook-sender";
+import { dispatchEvent } from "./workflow-runtime";
 
 async function main() {
   const env = getEnv();
@@ -44,10 +46,18 @@ async function main() {
     async (job) => processCapiJob(job.data),
     { connection, concurrency: 2 },
   );
-  // Eventos emitidos por la API (p.ej. conversation.closed desde el panel)
+  // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
+  // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
+  // workflow (conversation.closed → conversation_closed), inicia los flujos.
   const eventsWorker = new Worker<EventJob>(
     QUEUE_NAMES.events,
-    async (job) => emitPlatformEvent(job.data.organizationId, job.data.type, job.data.data ?? {}),
+    async (job) => {
+      await emitPlatformEvent(job.data.organizationId, job.data.type, job.data.data ?? {});
+      const triggerType = job.data.type.replace(/\./g, "_");
+      if ((TRIGGER_TYPES as readonly string[]).includes(triggerType)) {
+        await dispatchEvent({ ...job.data, type: triggerType });
+      }
+    },
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 

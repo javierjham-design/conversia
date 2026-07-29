@@ -37,8 +37,9 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 /** Catálogo del constructor: triggers y pasos IMPLEMENTADOS por el motor v0. */
 const TRIGGER_CATALOG = [
   { type: "conversation_started", label: "Conversación nueva", description: "Primer mensaje de un contacto (crea la conversación)" },
-  { type: "message_received", label: "Cada mensaje recibido", description: "Cualquier mensaje entrante del contacto" },
-  { type: "keyword", label: "Palabra clave", description: "El mensaje contiene una palabra/frase", config: ["keyword"] },
+  { type: "message_received", label: "Mensaje recibido", description: "Cada mensaje entrante; admite condiciones", conditions: ["keyword", "firstMessage"] },
+  { type: "conversation_closed", label: "Conversación cerrada", description: "Cuando se cierra la conversación (p. ej. encuesta post-atención)" },
+  { type: "keyword", label: "Palabra clave (simple)", description: "El mensaje contiene una palabra o frase", config: ["keyword"] },
 ];
 
 const NODE_CATALOG = [

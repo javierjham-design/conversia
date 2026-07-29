@@ -53,11 +53,27 @@ export function renderVars(template: string, vars: Record<string, string>): stri
 
 /** ¿El evento dispara este workflow? (matching de triggers, sección 16) */
 export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): boolean {
-  if (def.trigger.type !== event.type) return false;
+  const t = def.trigger.type;
   const cfg = def.trigger.config as Record<string, unknown>;
-  if (def.trigger.type === "keyword" && typeof cfg.keyword === "string") {
-    const text = String((event.data as any)?.text ?? "").toLowerCase();
-    return text.includes(String(cfg.keyword).toLowerCase());
+  const data = (event.data ?? {}) as Record<string, unknown>;
+
+  // "keyword" (legado) se comporta como un message_received con palabra clave.
+  if (t === "keyword") {
+    if (event.type !== "message_received") return false;
+    return typeof cfg.keyword === "string"
+      ? String(data.text ?? "").toLowerCase().includes(cfg.keyword.toLowerCase())
+      : true;
+  }
+
+  if (t !== event.type) return false;
+
+  // Condiciones opcionales del mensaje entrante.
+  if (t === "message_received") {
+    if (typeof cfg.keyword === "string" && cfg.keyword.trim() && !String(data.text ?? "").toLowerCase().includes(cfg.keyword.toLowerCase())) {
+      return false;
+    }
+    if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
+    if (typeof cfg.channel === "string" && cfg.channel && data.channel && data.channel !== cfg.channel) return false;
   }
   return true;
 }

@@ -81,12 +81,13 @@ export class ConversationsController {
           entityId: id,
         },
       });
-      return { ok: true };
+      return { ok: true, contactId: conversation.contactId };
     }).then(async (r) => {
       await this.queues.events.add("emit", {
         organizationId: ctx.organizationId,
         type: "conversation.closed",
         conversationId: id,
+        contactId: r.contactId ?? undefined,
         data: { conversationId: id },
         occurredAt: new Date().toISOString(),
       });

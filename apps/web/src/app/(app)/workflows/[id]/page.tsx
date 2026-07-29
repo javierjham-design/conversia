@@ -66,7 +66,7 @@ const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 const TRIGGER_NODE_ID = "__trigger__";
 
 interface Catalog {
-  triggers: { type: string; label: string; description: string; config?: string[] }[];
+  triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[] }[];
   nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string }[];
   agents: { slug: string; name: string }[];
@@ -254,10 +254,21 @@ function edgeStyle(when?: string) {
   return { label, animated: false, style: { stroke: "#94a3b8" }, labelStyle: { fontSize: 10, fill: "#64748b" } };
 }
 
+function triggerConfigFor(t: DefTrigger): Record<string, unknown> {
+  if (t.type === "keyword") return { keyword: t.config.keyword ?? "" };
+  if (t.type === "message_received") {
+    const c: Record<string, unknown> = {};
+    if (String(t.config.keyword ?? "").trim()) c.keyword = t.config.keyword;
+    if (t.config.firstMessage === true) c.firstMessage = true;
+    return c;
+  }
+  return {};
+}
+
 function flowToDef(nodes: Node[], edges: Edge[], trigger: DefTrigger): any {
   const stepNodes = nodes.filter((n) => n.id !== TRIGGER_NODE_ID);
   return {
-    trigger: { type: trigger.type, config: trigger.type === "keyword" ? { keyword: trigger.config.keyword ?? "" } : {} },
+    trigger: { type: trigger.type, config: triggerConfigFor(trigger) },
     variables: {},
     nodes: stepNodes.map((n) => ({
       id: n.id,
@@ -611,6 +622,7 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
         </select>
       </label>
       {desc && <p className="text-xs text-slate-400">{desc}</p>}
+
       {trigger.type === "keyword" && (
         <label className="block text-sm">
           <span className="text-xs text-slate-500">Palabra o frase</span>
@@ -621,6 +633,29 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         </label>
+      )}
+
+      {trigger.type === "message_received" && (
+        <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+          <p className="text-xs font-medium text-slate-500">Condiciones (opcionales)</p>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Contiene la palabra/frase</span>
+            <input
+              value={String(trigger.config.keyword ?? "")}
+              onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, keyword: e.target.value } })}
+              placeholder="dejar vacío = cualquier mensaje"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            <input
+              type="checkbox"
+              checked={trigger.config.firstMessage === true}
+              onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, firstMessage: e.target.checked } })}
+            />
+            Solo el primer mensaje de la conversación
+          </label>
+        </div>
       )}
     </div>
   );
