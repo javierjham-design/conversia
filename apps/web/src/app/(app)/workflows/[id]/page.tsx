@@ -86,7 +86,7 @@ const NODE_DEFS: NodeDef[] = [
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 
 interface Catalog {
-  triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[] }[];
+  triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean }[];
   nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string }[];
   agents: { slug: string; name: string }[];
@@ -710,6 +710,59 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
             Solo el primer mensaje de la conversación
           </label>
         </div>
+      )}
+
+      {catalog.triggers.find((t) => t.type === trigger.type)?.soon && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          «Próximamente»: puedes dejar el flujo armado, pero este disparador aún no se ejecuta (falta la fuente del evento).
+        </p>
+      )}
+
+      {trigger.type === "click_to_chat" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Anuncio específico (opcional)</span>
+          <input
+            value={String(trigger.config.adId ?? "")}
+            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, adId: e.target.value } })}
+            placeholder="ad_id — vacío = cualquier anuncio"
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <span className="mt-1 block text-[10px] text-slate-400">Guarda ctwa_clid / ad_id / headline en el contacto para el evento CAPI.</span>
+        </label>
+      )}
+
+      {trigger.type === "lead_status_changed" && (
+        <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+          <p className="text-xs font-medium text-slate-500">Condiciones (opcionales)</p>
+          {(["fromStatus", "toStatus"] as const).map((key) => (
+            <label key={key} className="block text-sm">
+              <span className="text-xs text-slate-500">{key === "fromStatus" ? "Desde la etapa" : "Hacia la etapa"}</span>
+              <select
+                value={String(trigger.config[key] ?? "")}
+                onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, [key]: e.target.value } })}
+                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value="">— cualquiera —</option>
+                {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.name}</option>))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {trigger.type === "appointment_upcoming" && (
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Horas antes de la cita</span>
+          <input
+            type="number"
+            min={1}
+            max={168}
+            value={Number(trigger.config.hoursBefore ?? 24)}
+            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, hoursBefore: Number(e.target.value) } })}
+            className="mt-1 block w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <span className="mt-1 block text-[10px] text-slate-400">Se programa el recordatorio al crear la cita.</span>
+        </label>
       )}
     </div>
   );

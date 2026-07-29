@@ -1,6 +1,6 @@
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
-import { resumeRun } from "./workflow-runtime";
+import { resumeRun, startWorkflowById } from "./workflow-runtime";
 
 /**
  * Sondea scheduled_jobs (timers persistentes en Postgres) y ejecuta los
@@ -28,6 +28,13 @@ export function startScheduler(): () => void {
         if (job.kind === "workflow_timer" && job.runId) {
           const payload = job.payload as Record<string, unknown>;
           await resumeRun(job.organizationId, job.runId, String(payload.nodeId));
+        } else if (job.kind === "appointment_reminder") {
+          // Recordatorio de cita: ejecuta el workflow appointment_upcoming.
+          const p = job.payload as Record<string, unknown>;
+          await startWorkflowById(job.organizationId, String(p.workflowId), {
+            conversationId: p.conversationId ? String(p.conversationId) : undefined,
+            contactId: p.contactId ? String(p.contactId) : undefined,
+          });
         }
         await prisma.scheduledJob.update({
           where: { id: job.id },

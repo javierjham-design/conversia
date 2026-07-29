@@ -114,6 +114,15 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
     if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
     if (typeof cfg.channel === "string" && cfg.channel && data.channel && data.channel !== cfg.channel) return false;
   }
+  // Anuncios Click-to-Chat: cualquier anuncio, o uno específico por ad_id.
+  if (t === "click_to_chat") {
+    if (typeof cfg.adId === "string" && cfg.adId.trim() && String(data.ad_id ?? "") !== cfg.adId.trim()) return false;
+  }
+  // Etapa del ciclo de vida: condiciones opcionales origen → destino.
+  if (t === "lead_status_changed") {
+    if (typeof cfg.toStatus === "string" && cfg.toStatus && String(data.statusCode ?? "") !== cfg.toStatus) return false;
+    if (typeof cfg.fromStatus === "string" && cfg.fromStatus && String(data.fromCode ?? "") !== cfg.fromStatus) return false;
+  }
   return true;
 }
 

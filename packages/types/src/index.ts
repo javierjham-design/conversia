@@ -261,6 +261,10 @@ export const TRIGGER_TYPES = [
   "manual",
   "human_handoff",
   "conversation_closed",
+  "click_to_chat",
+  "appointment_rescheduled",
+  "missed_call",
+  "tiktok_ad",
 ] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 

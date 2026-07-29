@@ -75,6 +75,18 @@ describe("motor de workflows v0", () => {
     expect(matchesTrigger(closed, { organizationId: "o", type: "message_received", occurredAt: "" })).toBe(false);
   });
 
+  it("condiciones de click_to_chat (anuncio) y lead_status_changed (origen→destino)", () => {
+    const ad: WorkflowDefinition = { trigger: { type: "click_to_chat", config: { adId: "AD123" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(ad, { organizationId: "o", type: "click_to_chat", data: { ad_id: "AD123" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(ad, { organizationId: "o", type: "click_to_chat", data: { ad_id: "OTRO" }, occurredAt: "" })).toBe(false);
+    const anyAd: WorkflowDefinition = { ...ad, trigger: { type: "click_to_chat", config: {} } };
+    expect(matchesTrigger(anyAd, { organizationId: "o", type: "click_to_chat", data: { ad_id: "X" }, occurredAt: "" })).toBe(true);
+
+    const life: WorkflowDefinition = { trigger: { type: "lead_status_changed", config: { toStatus: "agendado" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "agendado", fromCode: "nuevo" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "perdido" }, occurredAt: "" })).toBe(false);
+  });
+
   it("ejecuta hasta la espera y programa el timer", async () => {
     const { deps, calls } = makeDeps();
     const result = await executeFrom(deps, ctx, def, findStartNode(def)!.id);

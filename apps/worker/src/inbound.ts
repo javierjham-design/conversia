@@ -14,6 +14,7 @@ interface ParsedInbound {
   profileName?: string;
   type: string;
   text?: string;
+  referral?: any; // objeto referral de Meta (anuncios Click-to-WhatsApp)
   payload: unknown;
 }
 
@@ -41,6 +42,7 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
           profileName,
           type: m.type ?? "unknown",
           text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title,
+          referral: m.referral,
           payload: m,
         });
       }
@@ -258,6 +260,24 @@ export async function processInbound(job: InboundJob): Promise<void> {
       conversationId: result.conversationId,
       text: (text ?? "").slice(0, 200),
     });
+
+    // Anuncios Click-to-WhatsApp: si el primer mensaje trae referral, se guarda
+    // en el contacto (ctwa_clid para CAPI) y se dispara click_to_chat.
+    if (msg.referral && result.started) {
+      const ref = msg.referral;
+      const referral = {
+        ad_id: ref.source_id ?? ref.source_url ?? null,
+        ctwa_clid: ref.ctwa_clid ?? null,
+        headline: ref.headline ?? null,
+        source_type: ref.source_type ?? null,
+      };
+      await withTenant(organizationId, async (tx) => {
+        const c = await tx.contact.findUnique({ where: { id: result.contactId }, select: { attributes: true } });
+        const attrs = { ...((c?.attributes as Record<string, unknown>) ?? {}), ctwa_clid: referral.ctwa_clid, referral };
+        await tx.contact.update({ where: { id: result.contactId }, data: { attributes: attrs } });
+      });
+      await dispatchEvent({ ...base, type: "click_to_chat", data: { ...base.data, ...referral } });
+    }
 
     // Respuesta del agente activo — salvo que un workflow ya lo haya
     // ejecutado para esta conversación en este ciclo (evita doble respuesta).

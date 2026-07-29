@@ -62,22 +62,24 @@ function makeDeps(): EngineDeps {
 
     async updateLeadStatus(ctx, statusCode) {
       if (!ctx.contactId) return;
-      await withTenant(ctx.organizationId, async (tx) => {
+      const fromCode = await withTenant(ctx.organizationId, async (tx) => {
         const status = await tx.leadStatus.findUnique({
           where: { organizationId_code: { organizationId: ctx.organizationId, code: statusCode } },
         });
-        if (!status) return;
-        const lead = await tx.lead.findFirst({ where: { contactId: ctx.contactId! }, orderBy: { createdAt: "desc" } });
+        if (!status) return null;
+        const lead = await tx.lead.findFirst({ where: { contactId: ctx.contactId! }, orderBy: { createdAt: "desc" }, include: { status: true } });
+        const prev = lead?.status?.code ?? null;
         if (lead) {
           await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
           await tx.leadEvent.create({
-            data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { to: statusCode }, actorType: "workflow", actorId: ctx.workflowId },
+            data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { from: prev, to: statusCode }, actorType: "workflow", actorId: ctx.workflowId },
           });
         } else {
           await tx.lead.create({
             data: { organizationId: ctx.organizationId, contactId: ctx.contactId!, statusId: status.id },
           });
         }
+        return prev;
       });
       const contact = await withTenant(ctx.organizationId, (tx) =>
         tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true } }),
@@ -88,6 +90,15 @@ function makeDeps(): EngineDeps {
         { statusCode, contactId: ctx.contactId, conversationId: ctx.conversationId },
         { contactPhone: contact?.phone ?? null },
       );
+      // Dispara workflows con trigger "Etapa del ciclo de vida" (origen→destino).
+      await dispatchEvent({
+        organizationId: ctx.organizationId,
+        type: "lead_status_changed",
+        conversationId: ctx.conversationId,
+        contactId: ctx.contactId,
+        data: { statusCode, fromCode },
+        occurredAt: new Date().toISOString(),
+      });
     },
 
     async addTag(ctx, tagName) {
@@ -482,6 +493,43 @@ async function runWorkflowVersion(
   const result = await executeFrom(deps, ctx, def, start.id);
   await finishRun(organizationId, run.id, result);
   return { ok: true };
+}
+
+/**
+ * Programa recordatorios de cita: por cada workflow activo con trigger
+ * "Recordatorio de cita" (appointment_upcoming), crea un scheduled_job a
+ * (inicio − hoursBefore) que ejecutará ese flujo. Idempotente por (wf, cita).
+ */
+export async function scheduleAppointmentReminders(
+  organizationId: string,
+  appt: { id: string; start: string },
+  target: { conversationId?: string; contactId?: string },
+): Promise<void> {
+  const startsAt = new Date(appt.start);
+  await withTenant(organizationId, async (tx) => {
+    const wfs = await tx.workflow.findMany({
+      where: { active: true, deletedAt: null },
+      include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
+    });
+    for (const wf of wfs) {
+      const def = wf.versions[0]?.definition as any;
+      if (def?.trigger?.type !== "appointment_upcoming") continue;
+      const hoursBefore = Number(def.trigger.config?.hoursBefore ?? 24);
+      const dueAt = new Date(startsAt.getTime() - hoursBefore * 3600 * 1000);
+      if (dueAt.getTime() <= Date.now()) continue; // el recordatorio ya pasó
+      await tx.scheduledJob.upsert({
+        where: { organizationId_uniqueKey: { organizationId, uniqueKey: `apptreminder:${wf.id}:${appt.id}` } },
+        update: { dueAt, status: "PENDING" },
+        create: {
+          organizationId,
+          kind: "appointment_reminder",
+          dueAt,
+          uniqueKey: `apptreminder:${wf.id}:${appt.id}`,
+          payload: { workflowId: wf.id, contactId: target.contactId ?? null, conversationId: target.conversationId ?? null, appointmentExternalId: appt.id },
+        },
+      });
+    }
+  });
 }
 
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */

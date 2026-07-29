@@ -1,7 +1,7 @@
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { emitPlatformEvent } from "./platform-events";
-import { startWorkflowByName } from "./workflow-runtime";
+import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
 import { ClarivaSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
@@ -168,10 +168,20 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         start: appt.start,
         conversationId: t.conversationId,
       });
+      // Dispara workflows "Cita creada" y programa los recordatorios configurados.
+      await dispatchEvent({
+        organizationId: orgId,
+        type: "appointment_created",
+        conversationId: t.conversationId,
+        contactId: t.contactId,
+        data: { externalId: appt.id, startsAt: appt.start },
+        occurredAt: new Date().toISOString(),
+      });
+      await scheduleAppointmentReminders(orgId, { id: appt.id, start: appt.start }, { conversationId: t.conversationId, contactId: t.contactId });
     },
 
     async updateLeadStatus(code: string) {
-      await withTenant(orgId, async (tx) => {
+      const fromCode = await withTenant(orgId, async (tx) => {
         const status = await tx.leadStatus.findUnique({
           where: { organizationId_code: { organizationId: orgId, code } },
         });
@@ -179,10 +189,13 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         let lead = await tx.lead.findFirst({
           where: { contactId: t.contactId },
           orderBy: { createdAt: "desc" },
+          include: { status: true },
         });
+        const prev = lead?.status?.code ?? null;
         if (!lead) {
           lead = await tx.lead.create({
             data: { organizationId: orgId, contactId: t.contactId, statusId: status.id },
+            include: { status: true },
           });
         } else {
           await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
@@ -192,11 +205,11 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             organizationId: orgId,
             leadId: lead.id,
             type: "status_changed",
-            data: { to: code },
+            data: { from: prev, to: code },
             actorType: "agent",
           },
         });
-        return lead.id;
+        return prev;
       });
       const contact = await withTenant(orgId, (tx) =>
         tx.contact.findUnique({ where: { id: t.contactId }, select: { phone: true } }),
@@ -207,6 +220,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         { statusCode: code, contactId: t.contactId, conversationId: t.conversationId },
         { contactPhone: contact?.phone ?? null },
       );
+      await dispatchEvent({
+        organizationId: orgId,
+        type: "lead_status_changed",
+        conversationId: t.conversationId,
+        contactId: t.contactId,
+        data: { statusCode: code, fromCode },
+        occurredAt: new Date().toISOString(),
+      });
     },
 
     async addTag(name: string) {
