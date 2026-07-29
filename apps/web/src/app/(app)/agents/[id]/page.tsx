@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
+import { AGENT_ACTIONS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
+
+type ActionState = Record<string, { enabled: boolean; instructions: string }>;
+interface Mention { label: string; type: "equipo" | "usuario" | "agente" }
 
 interface ToolMeta {
   name: string;
@@ -79,13 +83,80 @@ function Section({ title, subtitle, helpKey, onHelp, children }: { title: string
   );
 }
 
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked} className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-brand-600" : "bg-slate-300")}>
+      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", checked ? "left-[18px]" : "left-0.5")} />
+    </button>
+  );
+}
+
+function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: AgentActionDef; state?: { enabled: boolean; instructions: string }; onToggle: (en: boolean) => void; onInstructions: (v: string) => void; mentions?: Mention[] }) {
+  const enabled = state?.enabled ?? false;
+  return (
+    <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40" : "border-slate-200")}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-navy-900">{def.label}</p>
+          <p className="text-xs text-slate-500">{def.description}</p>
+        </div>
+        <Toggle checked={enabled} onChange={onToggle} />
+      </div>
+      {enabled && (
+        <div className="mt-2">
+          <label className="text-xs text-slate-500">¿Cuándo y cómo debe ejecutarse esta acción?</label>
+          {mentions ? (
+            <MentionTextarea value={state?.instructions ?? ""} onChange={onInstructions} placeholder={def.placeholder} mentions={mentions} />
+          ) : (
+            <textarea value={state?.instructions ?? ""} onChange={(e) => onInstructions(e.target.value)} rows={2} placeholder={def.placeholder} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MentionTextarea({ value, onChange, placeholder, mentions }: { value: string; onChange: (v: string) => void; placeholder?: string; mentions: Mention[] }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [query, setQuery] = useState<string | null>(null);
+  function handle(v: string) {
+    onChange(v);
+    const pos = ref.current?.selectionStart ?? v.length;
+    const m = v.slice(0, pos).match(/@([\w\s]{0,20})$/);
+    setQuery(m ? m[1] : null);
+  }
+  const filtered = query != null ? mentions.filter((mm) => mm.label.toLowerCase().includes(query.toLowerCase())).slice(0, 6) : [];
+  function pick(label: string) {
+    const pos = ref.current?.selectionStart ?? value.length;
+    const before = value.slice(0, pos).replace(/@([\w\s]{0,20})$/, `@${label} `);
+    onChange(before + value.slice(pos));
+    setQuery(null);
+    ref.current?.focus();
+  }
+  return (
+    <div className="relative">
+      <textarea ref={ref} value={value} onChange={(e) => handle(e.target.value)} rows={2} placeholder={placeholder} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+      {query != null && filtered.length > 0 && (
+        <div className="absolute z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-pop">
+          {filtered.map((mm) => (
+            <button key={`${mm.type}-${mm.label}`} type="button" onClick={() => pick(mm.label)} className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-slate-50">
+              <span>{mm.label}</span>
+              <span className="text-[10px] text-slate-400">{mm.type}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="mt-1 text-[10px] text-slate-400">Escribe @ para mencionar equipos, usuarios u otros agentes.</p>
+    </div>
+  );
+}
+
 export default function AgentEditorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
 
   const [agent, setAgent] = useState<AgentDetail | null>(null);
-  const [toolCatalog, setToolCatalog] = useState<ToolMeta[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
 
   const [emoji, setEmoji] = useState("🤖");
@@ -97,7 +168,9 @@ export default function AgentEditorPage() {
   const [model, setModel] = useState("gpt-4o-mini");
   const [maxTokens, setMaxTokens] = useState(400);
   const [maxToolRounds, setMaxToolRounds] = useState(5);
-  const [tools, setTools] = useState<string[]>([]);
+  const [actions, setActions] = useState<ActionState>({});
+  const [extraTools, setExtraTools] = useState<string[]>([]);
+  const [mentions, setMentions] = useState<Mention[]>([]);
 
   const [snapshot, setSnapshot] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -105,33 +178,44 @@ export default function AgentEditorPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const load = useCallback(async () => {
-    const [detail, catalog, chans] = await Promise.all([
+    const [detail, chans, users, teams, agents] = await Promise.all([
       api<AgentDetail>(`/agents/${id}`),
-      api<ToolMeta[]>("/agents/meta/tools"),
       api<Channel[]>("/organizations/me/channels").catch(() => []),
+      api<{ userId: string; name: string }[]>("/users/assignable").catch(() => []),
+      api<{ id: string; name: string }[]>("/users/teams").catch(() => []),
+      api<{ id: string; name: string }[]>("/agents/assignable").catch(() => []),
     ]);
     setAgent(detail);
-    setToolCatalog(catalog);
     setChannels(chans);
+    setMentions([
+      ...teams.map((t) => ({ label: t.name, type: "equipo" as const })),
+      ...users.map((u) => ({ label: u.name, type: "usuario" as const })),
+      ...agents.filter((a) => a.id !== id).map((a) => ({ label: a.name, type: "agente" as const })),
+    ]);
     setName(detail.name);
     setKind(detail.kind);
     setDescription(detail.description ?? "");
     setShowDescription(!!detail.description);
     const e = detail.editing;
-    const nextEmoji = e?.config.emoji ?? "🤖";
+    const cfg = (e?.config ?? {}) as any;
+    const nextEmoji = cfg.emoji ?? "🤖";
     const nextPrompt = e?.systemPrompt ?? "";
-    const nextModel = e?.config.model ?? "gpt-4o-mini";
-    const nextMaxTokens = e?.config.maxTokens ?? 400;
-    const nextRounds = e?.config.maxToolRounds ?? 5;
+    const nextModel = cfg.model ?? "gpt-4o-mini";
+    const nextMaxTokens = cfg.maxTokens ?? 400;
+    const nextRounds = cfg.maxToolRounds ?? 5;
     const nextTools = (e?.tools as string[]) ?? [];
+    const nextActions: ActionState = cfg.actions && typeof cfg.actions === "object" ? cfg.actions : inferActions(nextTools);
+    const actionTools = new Set(AGENT_ACTIONS.flatMap((a) => a.tools));
+    const nextExtra = nextTools.filter((t) => !actionTools.has(t));
     setEmoji(nextEmoji);
     setSystemPrompt(nextPrompt);
     setModel(nextModel);
     setMaxTokens(nextMaxTokens);
     setMaxToolRounds(nextRounds);
-    setTools(nextTools);
+    setActions(nextActions);
+    setExtraTools(nextExtra);
     setSnapshot(
-      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, tools: nextTools }),
+      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions }),
     );
   }, [id]);
 
@@ -140,7 +224,7 @@ export default function AgentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, tools });
+  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions });
   const dirty = snapshot !== "" && current !== snapshot;
 
   // Validación de variables {{...}} contra las disponibles.
@@ -150,8 +234,11 @@ export default function AgentEditorPage() {
   }, [systemPrompt]);
   const approxTokens = Math.ceil(systemPrompt.length / 4);
 
-  function toggleTool(t: string) {
-    setTools((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  function setAction(key: string, patch: Partial<{ enabled: boolean; instructions: string }>) {
+    setActions((prev) => {
+      const cur = prev[key] ?? { enabled: false, instructions: "" };
+      return { ...prev, [key]: { ...cur, ...patch } };
+    });
   }
   function insertSnippet(text: string) {
     setSystemPrompt((p) => (p.trim() ? `${p.trim()}\n\n${text}` : text));
@@ -167,8 +254,8 @@ export default function AgentEditorPage() {
           kind,
           description: description || null,
           systemPrompt,
-          config: { model, maxTokens, maxToolRounds, language: "es", emoji },
-          tools,
+          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions },
+          tools: deriveTools(actions, extraTools),
         }),
       });
       toast.push("Borrador guardado", "ok");
@@ -307,17 +394,18 @@ export default function AgentEditorPage() {
               )}
             </Section>
 
-            {/* Acciones — se rediseña en Fase 3 (por ahora, herramientas) */}
-            <Section title="Acciones" subtitle="Qué puede hacer el agente. (Rediseño completo en curso.)" helpKey="acciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {toolCatalog.map((t) => (
-                  <label key={t.name} className={cn("flex cursor-pointer items-start gap-2 rounded-lg border p-2 text-sm", tools.includes(t.name) ? "border-brand-300 bg-brand-50/50" : "border-slate-200")}>
-                    <input type="checkbox" checked={tools.includes(t.name)} onChange={() => toggleTool(t.name)} className="mt-1" />
-                    <span>
-                      <span className="font-mono text-xs font-medium">{t.name}</span>
-                      <span className="block text-xs text-slate-500">{t.description}</span>
-                    </span>
-                  </label>
+            {/* Acciones */}
+            <Section title="Acciones" subtitle="Qué puede hacer el agente. Activa una acción y explica en tus palabras cuándo y cómo usarla." helpKey="acciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
+              <div className="space-y-2">
+                {AGENT_ACTIONS.map((a) => (
+                  <ActionCard
+                    key={a.key}
+                    def={a}
+                    state={actions[a.key]}
+                    onToggle={(en) => setAction(a.key, { enabled: en })}
+                    onInstructions={(v) => setAction(a.key, { instructions: v })}
+                    mentions={a.mentions ? mentions : undefined}
+                  />
                 ))}
               </div>
             </Section>

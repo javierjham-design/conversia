@@ -1,6 +1,7 @@
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { emitPlatformEvent } from "./platform-events";
+import { startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
 import { ClarivaSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
@@ -279,6 +280,72 @@ export async function buildToolServices(orgId: string, t: ToolTargets): Promise<
         conversationId: t.conversationId,
         reason,
       });
+    },
+
+    async closeConversation() {
+      await withTenant(orgId, async (tx) => {
+        await tx.conversation.update({ where: { id: t.conversationId }, data: { status: "CLOSED" } });
+        await tx.auditLog.create({
+          data: { organizationId: orgId, actorType: "agent", action: "conversation.closed", entityType: "conversation", entityId: t.conversationId },
+        });
+      });
+      await emitPlatformEvent(orgId, "conversation.closed", { conversationId: t.conversationId });
+    },
+
+    async assignConversation(target: string, reason?: string) {
+      return withTenant(orgId, async (tx) => {
+        const team = await tx.team.findFirst({ where: { name: { equals: target, mode: "insensitive" } } });
+        if (team) {
+          await tx.conversation.update({ where: { id: t.conversationId }, data: { assignedTeamId: team.id, aiEnabled: false } });
+          await tx.auditLog.create({
+            data: { organizationId: orgId, actorType: "agent", action: "conversation.assigned_team", entityType: "conversation", entityId: t.conversationId, after: { team: team.name, reason } },
+          });
+          return { assignedTo: `equipo ${team.name}` };
+        }
+        const members = await tx.organizationUser.findMany({ where: { active: true }, include: { user: true } });
+        const m = members.find((mm) => mm.user.name.toLowerCase() === target.toLowerCase());
+        if (m) {
+          await tx.conversation.update({ where: { id: t.conversationId }, data: { assignedUserId: m.userId, aiEnabled: false } });
+          await tx.auditLog.create({
+            data: { organizationId: orgId, actorType: "agent", action: "conversation.assigned_user", entityType: "conversation", entityId: t.conversationId, after: { user: m.user.name, reason } },
+          });
+          return { assignedTo: m.user.name };
+        }
+        return { error: `No encontré un equipo o persona llamada "${target}"` };
+      });
+    },
+
+    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {
+      const data: Record<string, string> = {};
+      if (fields.firstName) data.firstName = fields.firstName;
+      if (fields.lastName) data.lastName = fields.lastName;
+      if (fields.email) data.email = fields.email;
+      const updated = Object.keys(data);
+      if (updated.length) {
+        await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+      }
+      return { updated };
+    },
+
+    async triggerWorkflow(workflowName: string) {
+      return startWorkflowByName(orgId, workflowName, { conversationId: t.conversationId, contactId: t.contactId });
+    },
+
+    async addInternalNote(note: string) {
+      await withTenant(orgId, (tx) =>
+        tx.message.create({
+          data: {
+            organizationId: orgId,
+            conversationId: t.conversationId,
+            direction: "OUTBOUND",
+            type: "NOTE",
+            visibility: "INTERNAL",
+            body: note,
+            authorType: "AGENT",
+            status: "DELIVERED",
+          },
+        }),
+      );
     },
   };
 }

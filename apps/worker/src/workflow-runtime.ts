@@ -279,6 +279,61 @@ export async function dispatchEvent(event: PlatformEvent): Promise<void> {
   }
 }
 
+/**
+ * Dispara un workflow por su NOMBRE (usado por la tool triggerWorkflow del
+ * agente). Crea el run y lo ejecuta desde el nodo inicial, sin depender del
+ * matching de triggers por evento.
+ */
+export async function startWorkflowByName(
+  organizationId: string,
+  workflowName: string,
+  target: { conversationId?: string; contactId?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  const wf = await withTenant(organizationId, (tx) =>
+    tx.workflow.findFirst({
+      where: { active: true, deletedAt: null, name: workflowName },
+      include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
+    }),
+  );
+  if (!wf) return { ok: false, error: `No encontré un flujo activo llamado "${workflowName}"` };
+  const versionRow = wf.versions[0];
+  if (!versionRow) return { ok: false, error: `El flujo "${workflowName}" no tiene versión publicada` };
+  const parsed = workflowDefinitionSchema.safeParse(versionRow.definition);
+  if (!parsed.success) return { ok: false, error: "La definición del flujo es inválida" };
+  const def = parsed.data;
+  const start = findStartNode(def);
+  if (!start) return { ok: false, error: "El flujo no tiene nodo inicial" };
+
+  const idempotencyKey = `manual:${wf.id}:${target.conversationId ?? target.contactId ?? "global"}:${Date.now()}`;
+  const run = await withTenant(organizationId, (tx) =>
+    tx.workflowRun.create({
+      data: {
+        organizationId,
+        workflowId: wf.id,
+        versionId: versionRow.id,
+        status: "RUNNING",
+        contactId: target.contactId,
+        conversationId: target.conversationId,
+        triggerEvent: { manual: true },
+        idempotencyKey,
+        variables: {},
+      },
+    }),
+  );
+  const ctx: RunCtx = {
+    organizationId,
+    runId: run.id,
+    workflowId: wf.id,
+    versionId: versionRow.id,
+    conversationId: target.conversationId,
+    contactId: target.contactId,
+    variables: {},
+  };
+  const result = await executeFrom(deps, ctx, def, start.id);
+  await finishRun(organizationId, run.id, result);
+  return { ok: true };
+}
+
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */
 export async function resumeRun(organizationId: string, runId: string, nodeId: string): Promise<void> {
   const data = await withTenant(organizationId, async (tx) => {

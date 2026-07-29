@@ -1,5 +1,6 @@
 import {
   ToolRegistry,
+  assembleSystemPrompt,
   buildCoreTools,
   createAIRouter,
   orchestrate,
@@ -183,7 +184,8 @@ export async function runAgentTurn(opts: {
     agentVersionId: version.id,
     slug: agent.slug,
     name: agent.name,
-    systemPrompt: version.systemPrompt,
+    // Prompt base + instrucciones en lenguaje natural de cada acción habilitada.
+    systemPrompt: assembleSystemPrompt(version.systemPrompt, cfg.actions),
     model: cfg.model ?? getEnv().AI_DEFAULT_MODEL,
     maxTokens: cfg.maxTokens ?? 400,
     maxToolRounds: cfg.maxToolRounds ?? 5,

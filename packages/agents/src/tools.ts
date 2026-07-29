@@ -28,6 +28,12 @@ export interface ToolServices {
   addTag(name: string): Promise<void>;
   searchKnowledge(query: string): Promise<Array<{ title: string; content: string }>>;
   requestHumanHandoff(reason: string): Promise<void>;
+  // Acciones adicionales (Fase 3)
+  closeConversation(): Promise<void>;
+  assignConversation(target: string, reason?: string): Promise<{ assignedTo: string } | { error: string }>;
+  updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
+  triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
+  addInternalNote(note: string): Promise<void>;
 }
 
 function services(ctx: ToolContext): ToolServices {
@@ -216,6 +222,60 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { reason: string }) {
         await services(ctx).requestHumanHandoff(input.reason);
         return { ok: true, message: "Conversación escalada al equipo humano" };
+      },
+    },
+    {
+      name: "closeConversation",
+      description:
+        "Cierra la conversación actual cuando el asunto quedó resuelto y no requiere más atención. Úsala solo cuando estés seguro.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        await services(ctx).closeConversation();
+        return { ok: true, message: "Conversación cerrada" };
+      },
+    },
+    {
+      name: "assignConversation",
+      description:
+        "Asigna la conversación a un EQUIPO o una PERSONA del negocio (la IA deja de responder). Indica el nombre exacto del equipo o usuario.",
+      inputSchema: z.object({
+        target: z.string().describe("Nombre exacto del equipo o usuario al que asignar"),
+        reason: z.string().optional(),
+      }),
+      async execute(ctx, input: { target: string; reason?: string }) {
+        return services(ctx).assignConversation(input.target, input.reason);
+      },
+    },
+    {
+      name: "updateContactFields",
+      description:
+        "Actualiza datos del contacto (nombre, apellido, email) cuando el cliente los proporciona explícitamente. No inventes datos.",
+      inputSchema: z.object({
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        email: z.string().email().optional(),
+      }),
+      async execute(ctx, input: { firstName?: string; lastName?: string; email?: string }) {
+        return services(ctx).updateContactFields(input);
+      },
+    },
+    {
+      name: "triggerWorkflow",
+      description:
+        "Dispara un flujo de automatización del negocio por su nombre exacto (p. ej. una secuencia de seguimiento o recordatorio).",
+      inputSchema: z.object({ workflowName: z.string().describe("Nombre exacto del workflow a disparar") }),
+      async execute(ctx, input: { workflowName: string }) {
+        return services(ctx).triggerWorkflow(input.workflowName);
+      },
+    },
+    {
+      name: "addInternalNote",
+      description:
+        "Agrega una NOTA INTERNA para el equipo humano en la conversación. El cliente NO la ve. Útil para dejar contexto o alertas.",
+      inputSchema: z.object({ note: z.string() }),
+      async execute(ctx, input: { note: string }) {
+        await services(ctx).addInternalNote(input.note);
+        return { ok: true, message: "Nota interna agregada" };
       },
     },
   ];
