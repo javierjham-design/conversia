@@ -10,6 +10,8 @@ on:
 # Mínimo privilegio para el token de Actions
 permissions:
   contents: read
+  # gitleaks-action lista los commits del PR vía API en eventos pull_request
+  pull-requests: read
 
 jobs:
   # --- Escaneo de secretos (BLOQUEANTE) ---
@@ -29,9 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -46,6 +47,8 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      # requerido por codeql-action para leer metadatos del run en repos privados
+      actions: read
     strategy:
       matrix:
         language: ["javascript-typescript"]
@@ -62,9 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -101,9 +103,8 @@ jobs:
       SEED_ADMIN_PASSWORD: ci-verificacion-1234
     steps:
       - uses: actions/checkout@v4
+      # Sin `version`: la toma del campo packageManager de package.json.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
