@@ -35,6 +35,35 @@ const updateChannelSchema = z.object({
   accessToken: z.string().min(10).optional(),
 });
 
+// Plantillas de mensaje de WhatsApp (HSM) — gestión vía Graph API sobre la WABA
+// del canal. Reglas de Meta: nombre snake_case, cuerpo con variables {{1}},{{2}}…
+// consecutivas y con valores de ejemplo, pie ≤60, hasta 3 botones de respuesta rápida.
+const createTemplateSchema = z.object({
+  name: z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[a-z0-9_]+$/, "solo minúsculas, números y guion bajo (p. ej. recordatorio_cita)"),
+  category: z.enum(["UTILITY", "MARKETING", "AUTHENTICATION"]),
+  language: z.string().min(2).max(15).regex(/^[a-z]{2}(_[A-Z]{2})?$/, "código de idioma tipo es, es_MX, en_US"),
+  headerText: z.string().trim().max(60).optional(),
+  bodyText: z.string().trim().min(1).max(1024),
+  footerText: z.string().trim().max(60).optional(),
+  bodyExamples: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+  quickReplies: z.array(z.string().trim().min(1).max(25)).max(3).optional(),
+});
+
+/** Variables {{n}} del cuerpo; Meta exige que sean consecutivas desde {{1}}. */
+function bodyVariableCount(bodyText: string): number {
+  const nums = [...bodyText.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
+  if (nums.length === 0) return 0;
+  const max = Math.max(...nums);
+  for (let i = 1; i <= max; i++) {
+    if (!nums.includes(i)) throw new BadRequestException(`Las variables del cuerpo deben ser consecutivas: falta {{${i}}}`);
+  }
+  return max;
+}
+
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body);
   if (!r.success) {
@@ -420,6 +449,136 @@ export class ChannelsController {
     } catch (err) {
       return { ok: false, detail: `Error de red: ${(err as Error).message}` };
     }
+  }
+
+  // ------------------- Plantillas de mensaje (WABA) -------------------
+
+  /** WABA + token del canal (token por-canal cifrado; fallback al global). */
+  private async resolveWaba(organizationId: string, channelId: string): Promise<{ wabaId: string; token: string }> {
+    const env = getEnv();
+    const data = await this.prisma.withTenant(organizationId, async (tx) => {
+      const channel = await tx.channelConnection.findUnique({ where: { id: channelId } });
+      if (!channel) throw new NotFoundException("Canal no encontrado");
+      if (channel.type !== "WHATSAPP_CLOUD") {
+        throw new BadRequestException("Las plantillas solo aplican a canales de WhatsApp Cloud");
+      }
+      const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: channelId } });
+      const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
+      if (!account?.wabaId) throw new BadRequestException("El canal no tiene una WABA asociada");
+      const credential = account.credentialId
+        ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } })
+        : null;
+      return { wabaId: account.wabaId, token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN };
+    });
+    if (!data.token) throw new BadRequestException("Sin token de acceso: carga el access token del canal");
+    return { wabaId: data.wabaId, token: data.token };
+  }
+
+  /** Lista las plantillas de la WABA del canal (estado, categoría, idioma, contenido). */
+  @Get(":id/templates")
+  async listTemplates(@Param("id") id: string) {
+    const ctx = requireContext();
+    const env = getEnv();
+    const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
+    const res = await fetch(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=100`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
+    return {
+      wabaId,
+      templates: ((json?.data as any[]) ?? []).map((t) => ({
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        category: t.category,
+        language: t.language,
+        rejectedReason: t.rejected_reason ?? null,
+        components: t.components ?? [],
+      })),
+    };
+  }
+
+  /** Crea una plantilla en la WABA del canal (queda PENDING hasta que Meta la apruebe). */
+  @Post(":id/templates")
+  async createTemplate(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    const input = parse(createTemplateSchema, body);
+    const varCount = bodyVariableCount(input.bodyText);
+    if (varCount > 0 && (input.bodyExamples?.length ?? 0) < varCount) {
+      throw new BadRequestException(`El cuerpo usa ${varCount} variable(s): entrega un valor de ejemplo por cada una`);
+    }
+    const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
+
+    const components: Record<string, unknown>[] = [];
+    if (input.headerText) components.push({ type: "HEADER", format: "TEXT", text: input.headerText });
+    components.push({
+      type: "BODY",
+      text: input.bodyText,
+      ...(varCount > 0 ? { example: { body_text: [input.bodyExamples!.slice(0, varCount)] } } : {}),
+    });
+    if (input.footerText) components.push({ type: "FOOTER", text: input.footerText });
+    if (input.quickReplies?.length) {
+      components.push({ type: "BUTTONS", buttons: input.quickReplies.map((text) => ({ type: "QUICK_REPLY", text })) });
+    }
+
+    const res = await fetch(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ name: input.name, category: input.category, language: input.language, components }),
+      },
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new BadRequestException(json?.error?.error_user_msg ?? json?.error?.message ?? `Meta respondió ${res.status}`);
+    }
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "channel.template_create",
+          entityType: "channel_connection",
+          entityId: id,
+          after: { wabaId, name: input.name, category: input.category, language: input.language },
+        },
+      }),
+    );
+    return { ok: true, id: json?.id ?? null, status: json?.status ?? "PENDING", category: json?.category ?? input.category };
+  }
+
+  /** Elimina una plantilla por nombre (todas sus variantes de idioma). */
+  @Delete(":id/templates/:name")
+  async deleteTemplate(@Param("id") id: string, @Param("name") name: string) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    if (!/^[a-z0-9_]+$/.test(name)) throw new BadRequestException("Nombre de plantilla inválido");
+    const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
+    const res = await fetch(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?name=${encodeURIComponent(name)}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "channel.template_delete",
+          entityType: "channel_connection",
+          entityId: id,
+          after: { wabaId, name },
+        },
+      }),
+    );
+    return { ok: true };
   }
 
   @Delete(":id")

@@ -62,11 +62,35 @@ Meta es el **de la plataforma**, no el del tenant. (Modelo Tech Provider, como R
 > 4. Enviar un mensaje desde WhatsApp al número conectado y observar la respuesta en la bandeja.
 
 ## Guion del screencast (Meta exige video)
+
+Meta pide **dos videos separados** (uno por permiso, según el flujo de Tech Provider 2026):
+
+### Video 1 — `whatsapp_business_messaging` (enviar mensajes)
 1. Mostrar el panel y el botón **Conectar con Meta** en Canales.
 2. Ejecutar el **Embedded Signup**: seleccionar/crear WABA y número, autorizar.
 3. Mostrar el número ya conectado en Canales.
 4. Enviar un WhatsApp real al número → mostrar el mensaje entrante en la **Bandeja** y la **respuesta del agente**.
+   El video debe mostrar **ambos lados**: la app enviando y la interfaz de WhatsApp (web o móvil) recibiendo.
 5. Mostrar brevemente las páginas de **privacidad** y **eliminación de datos**.
+
+### Video 2 — `whatsapp_business_management` (crear una plantilla de mensaje)
+Requisito textual de Meta: "un único video por separado que muestre la **creación de una plantilla de mensaje
+de WhatsApp** para tu caso de uso". Se graba desde NUESTRO panel (implementado 2026-07-29, sección Canales →
+botón **Plantillas** del canal WhatsApp):
+1. Login en `www.tubot.cl` → **Canales** → canal WhatsApp → botón **Plantillas** (se ve la lista real de la WABA).
+2. **Nueva plantilla**: llenar nombre (p. ej. `recordatorio_cita`), categoría **Utilidad**, idioma Español,
+   cuerpo con variables — p. ej. `Hola {{1}}, te recordamos tu cita el {{2}} a las {{3}}. Responde CONFIRMAR.`
+   — y los **valores de ejemplo** de cada variable (Meta los exige). Opcional: pie y botones de respuesta rápida.
+3. **Crear plantilla** → mostrar el aviso de éxito y la plantilla en la lista con estado **En revisión (PENDING)**.
+4. Abrir el **WhatsApp Manager** de la WABA y mostrar la MISMA plantilla recién creada ahí (prueba de que la app
+   la creó de verdad vía API `POST /{waba_id}/message_templates`).
+5. Cierre: pulsar **Actualizar** en el panel; si Meta ya la aprobó, se ve el badge **Aprobada**.
+
+**Llamadas de prueba a la API** (requisito "API test calls"): las llamadas reales que hace la app al crear/listar
+plantillas ya cuentan como actividad de la app en Graph (tardan hasta 24 h en reflejarse en el formulario de
+revisión). Alternativa manual: la colección Postman publicada de WhatsApp Business Platform con el token del
+usuario de sistema (`GET /{waba_id}/message_templates` y `POST .../message_templates`). Hacer las llamadas 1 día
+ANTES de enviar la revisión.
 
 ## Qué construye Claude (🤖) para que la revisión pase limpio
 - **Botón "Conectar con Meta" (Embedded Signup)** en la página de Canales: SDK JS de Meta (`FB.login` con la

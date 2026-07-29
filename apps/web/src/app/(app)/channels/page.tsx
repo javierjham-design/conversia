@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { TemplatesPanel } from "./templates-panel";
 
 interface Channel {
   id: string;
@@ -24,6 +25,7 @@ export default function ChannelsPage() {
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [templatesOpen, setTemplatesOpen] = useState<Record<string, boolean>>({});
   const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string; featureType?: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [fbReady, setFbReady] = useState(false);
@@ -318,9 +320,18 @@ export default function ChannelsPage() {
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">
                   Probar conexión
                 </button>
+                {c.type === "WHATSAPP_CLOUD" && (
+                  <button
+                    onClick={() => setTemplatesOpen((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50"
+                  >
+                    {templatesOpen[c.id] ? "Ocultar plantillas" : "Plantillas"}
+                  </button>
+                )}
               </div>
             </div>
             {testResult[c.id] && <p className="mt-2 text-xs text-slate-600">{testResult[c.id]}</p>}
+            {c.type === "WHATSAPP_CLOUD" && templatesOpen[c.id] && <TemplatesPanel channelId={c.id} />}
           </div>
         ))}
         {channels.length === 0 && <p className="text-sm text-slate-400">Sin canales aún.</p>}
