@@ -283,10 +283,12 @@ function makeDeps(): EngineDeps {
       // vía BullMQ; si Meta falla, se reintenta sin bloquear el flujo).
       const contact = ctx.contactId
         ? await withTenant(ctx.organizationId, (tx) =>
-            tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true, attributes: true } }),
+            tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true, ctwaClid: true } }),
           )
         : null;
-      const ctwaClid = ((contact?.attributes as Record<string, unknown>) ?? {}).ctwa_clid as string | undefined;
+      // El ctwa_clid vive en su columna estructurada (lo captura el inbound al
+      // crear/actualizar el contacto desde el referral CTWA).
+      const ctwaClid = contact?.ctwaClid ?? undefined;
       await enqueueCapiEvent({
         organizationId: ctx.organizationId,
         source: "workflow",

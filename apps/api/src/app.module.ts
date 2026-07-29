@@ -4,6 +4,7 @@ import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
+import { ContactsController } from "./contacts/contacts.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { HealthController } from "./health.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
@@ -32,6 +33,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     OrganizationsController,
     AgentsController,
     ConversationsController,
+    ContactsController,
     ChannelsController,
     UsersController,
     IntegrationsController,

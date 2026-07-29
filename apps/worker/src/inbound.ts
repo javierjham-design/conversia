@@ -1,5 +1,6 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
+import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { runAgentTurn } from "./agent-turn";
 import { transcribeWhatsappAudio } from "./audio";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
@@ -161,23 +162,18 @@ export async function processInbound(job: InboundJob): Promise<void> {
         include: { contact: true },
       });
       let contact = identity?.contact ?? null;
+      // Captura MÁXIMA desde Meta: perfil (separado del nombre real), teléfono
+      // E.164, país inferido, atribución CTWA (referral) + payload crudo.
+      const parsedContact = { waId: msg.from, profileName: msg.profileName ?? null, referral: msg.referral };
       if (!contact) {
         contact = await tx.contact.create({
-          data: {
-            organizationId,
-            clinicId: tenant.clinicId,
-            firstName: msg.profileName ?? null,
-            phone: msg.from,
-            source: "whatsapp",
-            firstContactAt: new Date(),
-            lastContactAt: new Date(),
-          },
+          data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate(parsedContact, new Date()) },
         });
         await tx.contactIdentity.create({
           data: { organizationId, contactId: contact.id, channelType, externalId: msg.from },
         });
       } else {
-        await tx.contact.update({ where: { id: contact.id }, data: { lastContactAt: new Date() } });
+        await tx.contact.update({ where: { id: contact.id }, data: buildContactUpdate(contact, parsedContact, new Date()) });
       }
 
       // Conversación abierta o nueva
@@ -261,8 +257,9 @@ export async function processInbound(job: InboundJob): Promise<void> {
       text: (text ?? "").slice(0, 200),
     });
 
-    // Anuncios Click-to-WhatsApp: si el primer mensaje trae referral, se guarda
-    // en el contacto (ctwa_clid para CAPI) y se dispara click_to_chat.
+    // Anuncios Click-to-WhatsApp: la atribución (ctwa_clid/ad_id/referral crudo)
+    // ya la guardó buildContactCreate/Update en columnas estructuradas + meta;
+    // aquí solo disparamos el flujo click_to_chat con los datos del anuncio.
     if (msg.referral && result.started) {
       const ref = msg.referral;
       const referral = {
@@ -271,11 +268,6 @@ export async function processInbound(job: InboundJob): Promise<void> {
         headline: ref.headline ?? null,
         source_type: ref.source_type ?? null,
       };
-      await withTenant(organizationId, async (tx) => {
-        const c = await tx.contact.findUnique({ where: { id: result.contactId }, select: { attributes: true } });
-        const attrs = { ...((c?.attributes as Record<string, unknown>) ?? {}), ctwa_clid: referral.ctwa_clid, referral };
-        await tx.contact.update({ where: { id: result.contactId }, data: { attributes: attrs } });
-      });
       await dispatchEvent({ ...base, type: "click_to_chat", data: { ...base.data, ...referral } });
     }
 

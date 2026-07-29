@@ -47,6 +47,7 @@ interface Contact {
   id: string;
   firstName: string | null;
   lastName: string | null;
+  profileName: string | null;
   phone: string | null;
 }
 interface Conversation {
@@ -192,7 +193,8 @@ export default function InboxPage() {
   }
 
   function displayName(c: Contact) {
-    return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.phone || "Sin nombre";
+    // Nombre real → nombre de perfil de WhatsApp → teléfono.
+    return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.profileName || c.phone || "Sin nombre";
   }
 
   return (
