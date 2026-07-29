@@ -223,6 +223,47 @@ function makeDeps(): EngineDeps {
       );
     },
 
+    async openConversation(ctx) {
+      if (ctx.conversationId || !ctx.contactId) return; // ya hay una / sin contacto
+      const convId = await withTenant(ctx.organizationId, async (tx) => {
+        const existing = await tx.conversation.findFirst({
+          where: { contactId: ctx.contactId!, status: { not: "CLOSED" } },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (existing) return existing.id;
+        const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
+        const created = await tx.conversation.create({
+          data: {
+            organizationId: ctx.organizationId,
+            contactId: ctx.contactId!,
+            channelConnectionId: channel?.id ?? null,
+            activeAgentId: channel?.defaultAgentId ?? null,
+            status: "OPEN",
+          },
+        });
+        return created.id;
+      });
+      ctx.conversationId = convId; // los pasos siguientes escriben en esta conversación
+    },
+
+    async addNote(ctx, text) {
+      if (!ctx.conversationId || !text.trim()) return;
+      await withTenant(ctx.organizationId, (tx) =>
+        tx.message.create({
+          data: {
+            organizationId: ctx.organizationId,
+            conversationId: ctx.conversationId!,
+            direction: "OUTBOUND",
+            type: "NOTE",
+            visibility: "INTERNAL",
+            body: text,
+            authorType: "SYSTEM",
+            status: "DELIVERED",
+          },
+        }),
+      );
+    },
+
     async scheduleTimer(ctx, nodeId, dueAt, cancelOn) {
       await withTenant(ctx.organizationId, async (tx) => {
         await tx.scheduledJob.upsert({

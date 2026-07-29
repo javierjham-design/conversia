@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -18,6 +18,8 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     assignTeam: async (_c, teamId) => void calls.push(`team:${teamId}`),
     switchAgent: async (_c, slug) => void calls.push(`switch:${slug}`),
     startWorkflow: async (_c, name) => void calls.push(`start:${name}`),
+    openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
+    addNote: async (_c, text) => void calls.push(`note:${text}`),
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),
     evaluateCondition: async () => true,
     persistStep: async () => undefined,
@@ -118,5 +120,67 @@ describe("motor de workflows v0", () => {
     const result = await executeFrom(deps, ctx, flow, "a");
     expect(result).toEqual({ status: "completed" });
     expect(calls).toEqual(["untag:frio", "contact:firstName", "team:t1", "switch:ventas", "start:Bienvenida"]);
+  });
+});
+
+describe("Categoría 2 — Conversación + Control de flujo", () => {
+  it("abre conversación (setea ctx.conversationId) y deja comentario", async () => {
+    const { deps, calls } = makeDeps();
+    const c2: RunCtx = { ...ctx, conversationId: undefined };
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "open_conversation", config: {} },
+        { id: "b", type: "add_note", config: { text: "Contacto desde flujo" } },
+        { id: "c", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
+    };
+    const r = await executeFrom(deps, c2, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["open", "note:Contacto desde flujo"]);
+    expect(c2.conversationId).toBe("conv-new");
+  });
+
+  it("Saltar a otro paso: salta al destino y omite los intermedios", async () => {
+    const { deps, calls } = makeDeps();
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [
+        { id: "a", type: "add_tag", config: { tag: "ini" } },
+        { id: "b", type: "goto", config: { targetNodeId: "d" } },
+        { id: "c", type: "add_tag", config: { tag: "omitido" } },
+        { id: "d", type: "add_tag", config: { tag: "destino" } },
+        { id: "e", type: "stop", config: {} },
+      ],
+      edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }, { from: "d", to: "e" }],
+    };
+    const r = await executeFrom(deps, ctx, flow, "a");
+    expect(r).toEqual({ status: "completed" });
+    expect(calls).toEqual(["tag:ini", "tag:destino"]);
+  });
+
+  it("Saltar a otro paso: corta bucles al superar el máximo de saltos", async () => {
+    const { deps } = makeDeps();
+    const loop: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} },
+      variables: {},
+      nodes: [{ id: "x", type: "goto", config: { targetNodeId: "x" } }],
+      edges: [],
+    };
+    const r = await executeFrom(deps, ctx, loop, "x");
+    expect(r.status).toBe("failed");
+    expect((r as any).error).toContain("saltos");
+  });
+
+  it("Fecha y hora: dentro, fuera y feriado (zona horaria UTC para el test)", () => {
+    const cfg = { timezone: "UTC", hours: { mon: [{ from: "09:00", to: "18:00" }] }, holidays: ["2026-07-27"] };
+    // 2026-07-27 es lunes.
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-27T11:00:00Z"))).toBe(true); // dentro
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-27T20:00:00Z"))).toBe(false); // fuera de hora
+    expect(evalBusinessHours({ ...cfg, holidays: [] }, new Date("2026-07-28T11:00:00Z"))).toBe(false); // martes sin horario
+    expect(evalBusinessHours(cfg, new Date("2026-07-27T11:00:00Z"))).toBe(false); // feriado
   });
 });

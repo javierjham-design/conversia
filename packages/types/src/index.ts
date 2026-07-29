@@ -289,6 +289,7 @@ export const NODE_TYPES = [
   "resume_ai",
   "transfer_human",
   "add_note",
+  "open_conversation",
   // Agenda
   "check_availability",
   "create_appointment",
@@ -301,6 +302,8 @@ export const NODE_TYPES = [
   "stop",
   "start_workflow",
   "cancel_workflows",
+  "goto",
+  "business_hours",
   // Integraciones
   "call_api",
   "send_webhook",
