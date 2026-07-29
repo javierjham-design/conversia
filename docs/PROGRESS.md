@@ -1,5 +1,19 @@
 # Registro de progreso
 
+## 2026-07-29 (2) — Módulo de Workflows (canvas) + modelo de IA por-tenant
+
+**Workflows estilo Respond.io** sobre el motor JSON existente (sin migración; el motor queda intacto → los flujos publicados siguen corriendo igual):
+
+- **Lista** (`/workflows`): estados Borrador/Publicado/Detenido, búsqueda, "Ver más", autor/fecha de creación y publicación, menú (renombrar, duplicar, detener/reanudar, eliminar). API: list enriquecido + `PATCH` rename + `duplicate` + audit_logs.
+- **Editor de canvas** (`/workflows/[id]`, `@xyflow/react`): lienzo con grilla, zoom/ajustar, **undo/redo**; nodo **Disparador** + nodos en tarjetas con panel de config; botón **+** por nodo; **ramas** etiquetadas en la condición; **validación al publicar** (disparador conectado, sin huérfanos, campos). Lee/escribe el mismo `WorkflowDefinition` (con posiciones); serialización extraída a `lib/workflow-serialize.ts` con **test de round-trip**.
+- **Nodos del motor ampliados** (aditivo): quitar etiqueta, actualizar datos de contacto, asignar a usuario/equipo, cambiar de agente IA (toma el control), disparar otro flujo (con guard anti auto-disparo). Deps en el worker.
+- **Disparadores**: `message_received` con condiciones (palabra clave, primer mensaje) y `conversation_closed`; puente API→worker (el `eventsWorker` mapea `conversation.closed`→`conversation_closed` y arranca los flujos). Pendiente por UI: `tag_added` y atajo manual desde la bandeja.
+- **Modo Prueba** (`POST /workflows/:id/test`): recorre la definición actual contra un contacto ficticio y describe, paso a paso, qué haría cada nodo. No persiste ni envía nada.
+- **Plantillas** genéricas (4): bienvenida+captura, seguimiento sin respuesta (con ramas), respuesta a palabra clave, encuesta al cerrar. Galería en el modal de creación.
+- **Auditoría de brechas** documentada: el motor ejecuta un subconjunto del enum `NODE_TYPES`; los nodos/disparadores fuera de ese subconjunto se listan como brecha (no se fingen).
+
+**Modelo de IA por-tenant (exclusivo del Super Admin):** el modelo, el tope de tokens y las rondas de tools se sacan del editor de agente del tenant y se fijan por tenant desde el Super Admin (`org.settings.ai`), aplicando a toda la plataforma del cliente (todos sus agentes + el probador). El tenant ya no puede modificarlos. Lo consumen el worker (`agent-turn`) y el probador de agentes.
+
 ## 2026-07-29 — Editor de agentes estilo Respond.io + plataforma
 
 **Editor de agentes reconstruido** (`agents/[id]`) en 6 fases, sin migraciones (todo en `agent_versions.config` JSON con zod `.passthrough()`):

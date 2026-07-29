@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
+import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
 
 // ---------------------------------------------------------------------------
 // Catálogo de nodos SOPORTADOS por el motor v0 (mismos que expone
@@ -62,8 +63,6 @@ const NODE_DEFS: NodeDef[] = [
   { type: "stop", label: "Terminar flujo", icon: <Square size={15} />, defaultConfig: {}, terminal: true },
 ];
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
-
-const TRIGGER_NODE_ID = "__trigger__";
 
 interface Catalog {
   triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[] }[];
@@ -207,81 +206,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Serialización canvas <-> WorkflowDefinition
-// ---------------------------------------------------------------------------
-
-interface DefTrigger { type: string; config: Record<string, unknown> }
 interface SimStep { nodeId: string; nodeType: string; label: string; detail: string }
-
-function defToFlow(def: any): { nodes: Node[]; edges: Edge[]; trigger: DefTrigger } {
-  const trigger: DefTrigger = { type: def?.trigger?.type ?? "conversation_started", config: def?.trigger?.config ?? {} };
-  const defNodes: any[] = Array.isArray(def?.nodes) ? def.nodes : [];
-  const defEdges: any[] = Array.isArray(def?.edges) ? def.edges : [];
-  const withIncoming = new Set(defEdges.map((e) => e.to));
-  const startId = defNodes.find((n) => !withIncoming.has(n.id))?.id ?? defNodes[0]?.id;
-
-  const nodes: Node[] = defNodes.map((n, i) => ({
-    id: n.id,
-    type: "stepNode",
-    position: n.position ?? { x: 250, y: 140 + i * 130 },
-    data: { nodeType: n.type, config: n.config ?? {} },
-  }));
-
-  const startPos = nodes.find((n) => n.id === startId)?.position ?? { x: 250, y: 140 };
-  nodes.unshift({
-    id: TRIGGER_NODE_ID,
-    type: "triggerNode",
-    position: { x: startPos.x, y: Math.max(startPos.y - 120, 0) },
-    data: {},
-    draggable: false,
-  });
-
-  const edges: Edge[] = defEdges.map((e) => ({
-    id: `${e.from}->${e.to}:${e.when ?? ""}`,
-    source: e.from,
-    target: e.to,
-    sourceHandle: e.when ?? undefined,
-    ...edgeStyle(e.when),
-  }));
-  if (startId) {
-    edges.unshift({ id: `trigger->${startId}`, source: TRIGGER_NODE_ID, target: startId, ...edgeStyle() });
-  }
-  return { nodes, edges, trigger };
-}
-
-function edgeStyle(when?: string) {
-  const label = when === "true" ? "sin respuesta" : when === "false" ? "respondió" : undefined;
-  return { label, animated: false, style: { stroke: "#94a3b8" }, labelStyle: { fontSize: 10, fill: "#64748b" } };
-}
-
-function triggerConfigFor(t: DefTrigger): Record<string, unknown> {
-  if (t.type === "keyword") return { keyword: t.config.keyword ?? "" };
-  if (t.type === "message_received") {
-    const c: Record<string, unknown> = {};
-    if (String(t.config.keyword ?? "").trim()) c.keyword = t.config.keyword;
-    if (t.config.firstMessage === true) c.firstMessage = true;
-    return c;
-  }
-  return {};
-}
-
-function flowToDef(nodes: Node[], edges: Edge[], trigger: DefTrigger): any {
-  const stepNodes = nodes.filter((n) => n.id !== TRIGGER_NODE_ID);
-  return {
-    trigger: { type: trigger.type, config: triggerConfigFor(trigger) },
-    variables: {},
-    nodes: stepNodes.map((n) => ({
-      id: n.id,
-      type: (n.data as any).nodeType,
-      config: (n.data as any).config ?? {},
-      position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
-    })),
-    edges: edges
-      .filter((e) => e.source !== TRIGGER_NODE_ID)
-      .map((e) => ({ from: e.source, to: e.target, ...(e.sourceHandle ? { when: e.sourceHandle } : {}) })),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Editor

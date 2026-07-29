@@ -27,9 +27,14 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - 🔶 RAG (búsqueda textual; falta pgvector+embeddings) · ⬜ A/B y métricas por versión · ⬜ Detección de intención/sentimiento como paso separado (Haiku)
 
 ## Fase 4 — Workflows
-- ✅ Motor puro testeado: triggers, nodos v0 (send_text, run_agent, wait, condition, lead, tags, human, stop), ramas, timers persistentes, cancelación por respuesta, idempotencia de runs
-- ✅ Versionado (draft/published, el run fija su versión)
-- ⬜ Editor visual (React Flow) · ⬜ Más nodos (call_api con protección SSRF, plantillas WhatsApp, subflujos) · ⬜ Variables tipadas y expresiones seguras · ⬜ Métricas por nodo
+- ✅ Motor puro testeado: triggers, nodos v0, ramas, timers persistentes, cancelación por respuesta, idempotencia de runs
+- ✅ Versionado (draft/published, el run fija su versión; publicar no altera la versión activa)
+- ✅ **Editor visual de canvas** (React Flow): lista con estados/acciones, lienzo con disparador + nodos, panel por nodo, undo/redo, validación al publicar, serialización canvas↔JSON (con test de round-trip)
+- ✅ **Nodos** ejecutables ampliados: + quitar etiqueta, actualizar contacto, asignar usuario/equipo, cambiar agente IA, disparar subflujo (además de los v0)
+- ✅ **Disparadores**: conversación nueva/cerrada, mensaje con condiciones (palabra clave, primer mensaje); puente API→worker para eventos del panel
+- ✅ **Modo prueba** (sandbox): recorre el flujo paso a paso sin efectos reales
+- ✅ **Plantillas** genéricas (bienvenida, seguimiento sin respuesta, palabra clave, encuesta post-cierre)
+- 🔶 Disparadores por más superficie: etiqueta agregada, atajo manual desde la bandeja · ⬜ Nodos call_api (SSRF), plantillas WhatsApp, pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
 
 ## Fase 5 — Agendamiento e integraciones
 - ✅ Contrato SchedulingProvider completo + MockSchedulingProvider (doble reserva) + ClarivaSchedulingProvider + mock server del contrato
@@ -53,7 +58,7 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 6. ✅ CRUD/editor de agentes y prompts en panel (editar borrador → publicar versión) + probador en vivo.
 7. 🔶 Recepción de media: audio + transcripción (Whisper) hecho; falta imágenes/documentos.
 8. Plantillas de WhatsApp (sincronización + envío fuera de ventana 24h).
-9. Editor visual de workflows (React Flow) sobre el JSON existente.
+9. ✅ Editor visual de workflows (React Flow) sobre el JSON existente + modo prueba + plantillas.
 10. Panel de métricas (conversaciones, conversión a cita, costo IA por tenant).
 
 ## Criterios de aceptación del MVP (sección 45 del brief)

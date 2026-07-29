@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MoreVertical, Search, Workflow as WorkflowIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, ConfirmDialog, EmptyState, Modal, PageHeader, StatusBadge, useToast, cn } from "@/components/ui";
+import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "@/lib/workflow-templates";
 
 interface WorkflowRow {
   id: string;
@@ -72,6 +73,20 @@ export default function WorkflowsPage() {
     setBusy(true);
     try {
       const wf = await api<{ id: string }>("/workflows", { method: "POST", body: JSON.stringify({ name: newName.trim() }) });
+      router.push(`/workflows/${wf.id}`);
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createFromTemplate(t: WorkflowTemplate) {
+    setBusy(true);
+    try {
+      const name = newName.trim().length >= 2 ? newName.trim() : t.name;
+      const wf = await api<{ id: string }>("/workflows", { method: "POST", body: JSON.stringify({ name }) });
+      await api(`/workflows/${wf.id}/draft`, { method: "PUT", body: JSON.stringify({ name, definition: t.definition }) });
       router.push(`/workflows/${wf.id}`);
     } catch (e) {
       toast.push((e as Error).message, "error");
@@ -157,22 +172,41 @@ export default function WorkflowsPage() {
       )}
 
       {/* Crear */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear workflow">
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear workflow" wide>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nombre del flujo</span>
+          <span className="text-xs text-slate-500">Nombre del flujo (opcional si eliges una plantilla)</span>
           <input
             autoFocus
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void createBlank(); }}
             placeholder="p. ej. Seguimiento de leads fríos"
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         </label>
-        <p className="mt-2 text-xs text-slate-400">Partirás desde un lienzo en blanco. (Las plantillas llegan en la próxima entrega.)</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button>
-          <Button onClick={() => void createBlank()} disabled={busy || newName.trim().length < 2}>Crear y editar</Button>
+
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-medium text-slate-600">Empieza desde una plantilla</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {WORKFLOW_TEMPLATES.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => void createFromTemplate(t)}
+                disabled={busy}
+                className="flex flex-col rounded-lg border border-slate-200 p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
+              >
+                <span className="text-sm font-medium text-navy-900">{t.name}</span>
+                <span className="mt-0.5 text-xs text-slate-500">{t.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+          <span className="text-xs text-slate-400">…o parte desde un lienzo en blanco.</span>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+            <Button onClick={() => void createBlank()} disabled={busy || newName.trim().length < 2}>Crear en blanco</Button>
+          </div>
         </div>
       </Modal>
 
