@@ -1,5 +1,18 @@
 # Registro de progreso
 
+## 2026-07-29 — Editor de agentes estilo Respond.io + plataforma
+
+**Editor de agentes reconstruido** (`agents/[id]`) en 6 fases, sin migraciones (todo en `agent_versions.config` JSON con zod `.passthrough()`):
+
+1. **Auditoría**: se confirmó que `config` admite claves nuevas (actions, knowledgeSources, emoji) sin tocar el esquema.
+2. **Layout 2 columnas**: izquierda = formulario (Configuración, Instrucciones con variables `{{}}`, contador de tokens, plantillas de texto, ayuda por sección); derecha sticky = probador.
+3. **Acciones**: tarjetas con toggle + instrucción en lenguaje natural, mapeadas a tools reales. 5 tools nuevas (`closeConversation`, `assignConversation`, `updateContactFields`, `triggerWorkflow`, `addInternalNote`) + `assembleSystemPrompt` que inyecta la guía de cada acción habilitada al system prompt (misma verdad en worker y probador). Autocompletado `@equipo/@usuario/@agente` al derivar.
+4. **Probador en vivo** (`POST /agents/:id/test`): sandbox con **lecturas reales** (servicios, precios, agenda, conocimiento) y **escrituras simuladas** (no persiste nada; muta el contacto en memoria y registra cada intento). Usa la config actual sin publicar, respeta kill switch/suspensión/vigencia/tope diario y contabiliza el consumo real. UI con pestañas Chat / Campos del contacto, chips de tools/acciones simuladas y uso (tokens/costo/latencia).
+5. **Fuentes de conocimiento**: `config.knowledgeSources[]` filtra `searchKnowledge` por base; `GET /agents/meta/knowledge` lista las bases; toggles por base en el editor (undefined = todas para agentes previos).
+6. **Plantillas + calidad**: galería de 5 plantillas genéricas (recepcionista, agendador, calificador, soporte, derivador) sin datos de ningún tenant; primeros tests del paquete `agents` (assembleSystemPrompt, specsFor, validación zod, renderTemplate anti-inyección).
+
+**Resto de la sesión** (plataforma): gestión de usuarios operadores con permisos segmentados y roles personalizados; modelo de IA a `gpt-4o-mini` + transcripción de audio (Whisper) con audio reproducible en la bandeja; asignación del **agente de IA** a cargo de una conversación (toma el control según su config); gestor por tenant en Super Admin (vigencia, tope de tokens, indicador de uso, costo de máximos); flujo de **demo** (acceso mínimo, sin gastar tokens hasta habilitar) + CRM de prospectos + landings funcionales; optimización móvil de todas las páginas; gestión de la cuenta admin por tenant (reset de contraseña, envío por correo, editar email); **pagos**: Flow (CLP) + Lemon Squeezy (MoR) con credenciales cifradas en `platform_settings` configurables desde el Super Admin y proveedor por tenant — **Flow ya operativo**, Lemon en pendientes.
+
 ## 2026-07-26 — Iteración: identidad visual + Centro Meta + integraciones profundas
 
 - **Fix de seguridad crítico**: los servicios conectaban como superusuario (bypasea RLS) → fuga real entre tenants detectada (agentes del demo visibles en Digital Dent). Ahora cliente dual: rol `conversia_app` (RLS activo) para datos de tenant + cliente admin SOLO para registro/login/ruteo/scheduler.

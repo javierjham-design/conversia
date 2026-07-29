@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
 import { AGENT_ACTIONS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
+import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 
 type ActionState = Record<string, { enabled: boolean; instructions: string }>;
 interface Mention { label: string; type: "equipo" | "usuario" | "agente" }
@@ -175,6 +176,7 @@ export default function AgentEditorPage() {
   const [busy, setBusy] = useState(false);
   const [help, setHelp] = useState<SectionHelp | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   const load = useCallback(async () => {
     const [detail, chans, users, teams, agents, kbs] = await Promise.all([
@@ -258,6 +260,21 @@ export default function AgentEditorPage() {
   }
   function insertSnippet(text: string) {
     setSystemPrompt((p) => (p.trim() ? `${p.trim()}\n\n${text}` : text));
+  }
+  function applyTemplate(t: AgentTemplate) {
+    setEmoji(t.emoji);
+    setKind(t.kind);
+    setSystemPrompt(t.systemPrompt);
+    setActions(t.actions);
+    setExtraTools([]);
+    if (t.model) setModel(t.model);
+    if (!name.trim()) setName(t.name);
+    if (!description.trim()) {
+      setDescription(t.description);
+      setShowDescription(true);
+    }
+    setShowTemplates(false);
+    toast.push("Plantilla aplicada — revisa las instrucciones y guarda", "ok");
   }
 
   async function saveDraft(): Promise<boolean> {
@@ -349,6 +366,19 @@ export default function AgentEditorPage() {
         {/* Izquierda: formulario */}
         <div className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-5">
           <div className="mx-auto max-w-2xl">
+            {/* Punto de partida: plantillas */}
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3">
+              <p className="text-sm text-navy-900">
+                ¿Quieres un punto de partida? Aplica una <span className="font-medium">plantilla</span> y ajústala a tu negocio.
+              </p>
+              <button
+                onClick={() => setShowTemplates(true)}
+                className="shrink-0 rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
+              >
+                Ver plantillas
+              </button>
+            </div>
+
             {/* Configuración */}
             <Section title="Configuración">
               <div className="flex gap-3">
@@ -513,6 +543,39 @@ export default function AgentEditorPage() {
       {/* Modal de ayuda por sección */}
       <Modal open={!!help} onClose={() => setHelp(null)} title={help?.title} wide>
         {help && <HelpContent help={help} />}
+      </Modal>
+
+      {/* Galería de plantillas */}
+      <Modal open={showTemplates} onClose={() => setShowTemplates(false)} title="Plantillas de agente" wide>
+        <p className="mb-3 text-sm text-slate-500">
+          Aplica una plantilla como punto de partida. Reemplaza las instrucciones y las acciones actuales; luego ajústalas a tu negocio.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {AGENT_TEMPLATES.map((t) => (
+            <div key={t.key} className="flex flex-col rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{t.emoji}</span>
+                <p className="font-semibold text-navy-900">{t.name}</p>
+              </div>
+              <p className="mt-1 flex-1 text-sm text-slate-500">{t.description}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {Object.entries(t.actions)
+                  .filter(([, a]) => a.enabled)
+                  .map(([k]) => (
+                    <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                      {AGENT_ACTIONS.find((a) => a.key === k)?.label ?? k}
+                    </span>
+                  ))}
+              </div>
+              <button
+                onClick={() => applyTemplate(t)}
+                className="mt-3 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                Usar esta plantilla
+              </button>
+            </div>
+          ))}
+        </div>
       </Modal>
     </div>
   );

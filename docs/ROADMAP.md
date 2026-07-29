@@ -17,11 +17,14 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - 🔶 Tiempo real (sondeo 4s; falta pub/sub) · ⬜ Media (imágenes/audio/documentos) · ⬜ Plantillas + ventana 24h · ⬜ Multi-número UI
 
 ## Fase 3 — Agentes IA
-- ✅ AIProvider (Anthropic + Mock), registro de costos por request
-- ✅ Agentes + versiones publicables (seed), prompts con variables
-- ✅ 9 tools core validadas con zod (precios, agenda, lead, tags, KB, transferencias)
-- ✅ Orquestador v0: agente activo por canal, loop de tools, transferencia agente↔agente y a humano
-- 🔶 RAG (búsqueda textual; falta pgvector+embeddings) · ⬜ CRUD/editor de agentes en panel · ⬜ Simulador de conversaciones UI · ⬜ A/B y métricas por versión · ⬜ Detección de intención/sentimiento como paso separado (Haiku)
+- ✅ AIProvider (OpenAI gpt-4o-mini por defecto + Anthropic) vía RoutingAIProvider por modelo; transcripción de audio (Whisper); registro de costos por request
+- ✅ Agentes + versiones publicables (seed + panel), prompts con variables
+- ✅ 15 tools core validadas con zod (precios, agenda, lead, tags, KB, transferencias, cerrar/asignar/derivar, datos de contacto, disparar workflow, nota interna)
+- ✅ Orquestador v0: agente activo por canal, loop de tools, transferencia agente↔agente y a humano; instrucciones NL por acción inyectadas al prompt
+- ✅ **Editor de agentes en panel** estilo Respond.io (config, instrucciones con variables/tokens, acciones toggle+NL, plantillas genéricas)
+- ✅ **Probador de conversaciones en vivo** (`/agents/:id/test`): lecturas reales + escrituras simuladas, respeta presupuesto, contabiliza uso
+- ✅ Fuentes de conocimiento por agente (`config.knowledgeSources` filtra `searchKnowledge`)
+- 🔶 RAG (búsqueda textual; falta pgvector+embeddings) · ⬜ A/B y métricas por versión · ⬜ Detección de intención/sentimiento como paso separado (Haiku)
 
 ## Fase 4 — Workflows
 - ✅ Motor puro testeado: triggers, nodos v0 (send_text, run_agent, wait, condition, lead, tags, human, stop), ramas, timers persistentes, cancelación por respuesta, idempotencia de runs
@@ -47,8 +50,8 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 3. Cliente Prisma admin separado para registro/lookup de ruteo.
 4. Embeddings (OpenAI) + búsqueda pgvector en searchKnowledgeBase.
 5. Trigger `appointment_upcoming` (scheduled_job por cita) para confirmaciones.
-6. CRUD de agentes y prompts en panel (editar borrador → publicar versión).
-7. Recepción de media (imágenes/audio) + transcripción (AIProvider.transcribe).
+6. ✅ CRUD/editor de agentes y prompts en panel (editar borrador → publicar versión) + probador en vivo.
+7. 🔶 Recepción de media: audio + transcripción (Whisper) hecho; falta imágenes/documentos.
 8. Plantillas de WhatsApp (sincronización + envío fuera de ventana 24h).
 9. Editor visual de workflows (React Flow) sobre el JSON existente.
 10. Panel de métricas (conversaciones, conversión a cita, costo IA por tenant).
