@@ -116,7 +116,9 @@ export default function BillingPage() {
               <input value={flowForm.baseUrl} onChange={(e) => setFlowForm({ ...flowForm, baseUrl: e.target.value })} placeholder={`Base URL (actual: ${providers.flow.baseUrl})`} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               <p className="text-[11px] text-slate-400">Producción: https://www.flow.cl/api · Sandbox: https://sandbox.flow.cl/api</p>
             </div>
-            {copyable(providers.flow.webhookUrl)}
+            <p className="mt-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
+              ✓ Flow no requiere configurar webhook en su panel: la URL de confirmación se envía automáticamente en cada pago. Con las dos llaves basta.
+            </p>
             <Button className="mt-3" disabled={saving} onClick={() => void saveProvider("flow")}>Guardar Flow</Button>
           </div>
 
@@ -132,6 +134,7 @@ export default function BillingPage() {
               <input value={lsForm.storeId} onChange={(e) => setLsForm({ ...lsForm, storeId: e.target.value })} placeholder="Store ID" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               <input type="password" value={lsForm.webhookSecret} onChange={(e) => setLsForm({ ...lsForm, webhookSecret: e.target.value })} placeholder="Webhook Signing Secret" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
             </div>
+            <p className="mt-2 text-[11px] text-slate-500">Pega esta URL en Lemon Squeezy → Settings → Webhooks (con el mismo Signing Secret):</p>
             {copyable(providers.lemonSqueezy.webhookUrl)}
             <Button className="mt-3" variant="secondary" disabled={saving} onClick={() => void saveProvider("lemonsqueezy")}>Guardar Lemon Squeezy</Button>
           </div>
