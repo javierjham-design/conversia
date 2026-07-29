@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
 // Gestión de plantillas de mensaje de WhatsApp (HSM) de la WABA del canal.
-// Crear deja la plantilla PENDING hasta que Meta la apruebe; el estado se
-// refleja igual que en el WhatsApp Manager.
+// El cuerpo se escribe con CAMPOS REALES de la plataforma ({{Nombre del contacto}});
+// al crear se convierten a las variables numéricas {{1}},{{2}}… que exige Meta y el
+// mapeo posición→campo se guarda en el canal para resolver los valores al enviar.
 
 interface Template {
   id: string;
@@ -15,7 +16,25 @@ interface Template {
   language: string;
   rejectedReason: string | null;
   components: { type: string; text?: string; format?: string }[];
+  variableFields: string[] | null;
 }
+
+// Catálogo de campos disponibles como variables. Fuente de verdad:
+// TEMPLATE_FIELDS en packages/types/src/index.ts (mantener en sincronía).
+const FIELDS = [
+  { id: "contact.firstName", label: "Nombre del contacto", sample: "María" },
+  { id: "contact.lastName", label: "Apellido del contacto", sample: "Pérez" },
+  { id: "contact.fullName", label: "Nombre completo", sample: "María Pérez" },
+  { id: "contact.phone", label: "Teléfono del contacto", sample: "+56 9 1234 5678" },
+  { id: "appointment.date", label: "Fecha de la cita", sample: "martes 5 de agosto" },
+  { id: "appointment.time", label: "Hora de la cita", sample: "15:30" },
+  { id: "appointment.service", label: "Servicio de la cita", sample: "Control dental" },
+  { id: "appointment.professional", label: "Profesional de la cita", sample: "Dra. Soto" },
+  { id: "organization.name", label: "Nombre del negocio", sample: "Clínica Sonrisa" },
+] as const;
+
+const FIELD_BY_LABEL = new Map(FIELDS.map((f) => [f.label as string, f]));
+const FIELD_BY_ID = new Map(FIELDS.map((f) => [f.id as string, f]));
 
 const CATEGORY_LABEL: Record<string, string> = {
   UTILITY: "Utilidad",
@@ -30,6 +49,48 @@ const LANGUAGES = [
   { value: "es_ES", label: "Español (España)" },
   { value: "en_US", label: "Inglés (EE. UU.)" },
 ];
+
+/** Tokens {{…}} del cuerpo, separados en numéricos y con nombre. */
+function parseTokens(body: string): { named: string[]; numeric: number[] } {
+  const named: string[] = [];
+  const numeric: number[] = [];
+  for (const m of body.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)) {
+    const inner = m[1];
+    if (/^\d+$/.test(inner)) numeric.push(Number(inner));
+    else named.push(inner);
+  }
+  return { named, numeric };
+}
+
+/**
+ * Convierte el cuerpo con campos con nombre al formato de Meta: cada campo
+ * distinto recibe un número (por orden de aparición; repetirlo reutiliza el
+ * mismo número). Devuelve también los ejemplos y el mapeo posición→campo.
+ */
+function compileBody(body: string): { bodyText: string; examples: string[]; fields: string[]; unknown: string[] } {
+  const order: string[] = []; // ids de campo en orden de asignación
+  const unknown: string[] = [];
+  const bodyText = body.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (raw, inner: string) => {
+    if (/^\d+$/.test(inner)) return raw; // numérica manual: se deja tal cual
+    const field = FIELD_BY_LABEL.get(inner.trim());
+    if (!field) {
+      if (!unknown.includes(inner.trim())) unknown.push(inner.trim());
+      return raw;
+    }
+    let idx = order.indexOf(field.id);
+    if (idx === -1) {
+      order.push(field.id);
+      idx = order.length - 1;
+    }
+    return `{{${idx + 1}}}`;
+  });
+  return {
+    bodyText,
+    examples: order.map((id) => FIELD_BY_ID.get(id)!.sample),
+    fields: order,
+    unknown,
+  };
+}
 
 function StatusBadge({ status }: { status: string }) {
   const cls =
@@ -48,6 +109,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -58,13 +120,20 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
     footerText: "",
     quickReplies: "",
   });
-  const [examples, setExamples] = useState<string[]>([]);
 
-  // Variables {{n}} usadas en el cuerpo → Meta exige un ejemplo por cada una.
-  const varCount = useMemo(() => {
-    const nums = [...form.bodyText.matchAll(/\{\{\s*(\d+)\s*\}\}/g)].map((m) => Number(m[1]));
-    return nums.length ? Math.max(...nums) : 0;
-  }, [form.bodyText]);
+  // Análisis en vivo del cuerpo: campos usados, numéricas manuales, desconocidos.
+  const compiled = useMemo(() => compileBody(form.bodyText), [form.bodyText]);
+  const hasNumeric = useMemo(() => parseTokens(form.bodyText).numeric.length > 0, [form.bodyText]);
+
+  // Vista previa con los valores de ejemplo (lo que verá el revisor de Meta).
+  const preview = useMemo(
+    () =>
+      form.bodyText.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (raw, inner: string) => {
+        const field = FIELD_BY_LABEL.get(inner.trim());
+        return field ? field.sample : raw;
+      }),
+    [form.bodyText],
+  );
 
   const load = useCallback(async () => {
     setError(null);
@@ -81,11 +150,37 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
     void load();
   }, [load]);
 
+  /** Inserta {{Etiqueta del campo}} en la posición del cursor del cuerpo. */
+  function insertField(label: string) {
+    const el = bodyRef.current;
+    const token = `{{${label}}}`;
+    if (!el) {
+      setForm((f) => ({ ...f, bodyText: f.bodyText + token }));
+      return;
+    }
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    const next = el.value.slice(0, start) + token + el.value.slice(end);
+    setForm((f) => ({ ...f, bodyText: next }));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.selectionStart = el.selectionEnd = start + token.length;
+    });
+  }
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setError(null);
     setNotice(null);
+    if (compiled.unknown.length) {
+      setError(`Campo desconocido: ${compiled.unknown.join(", ")}. Usa los botones de "Insertar campo".`);
+      return;
+    }
+    if (hasNumeric && compiled.fields.length) {
+      setError("Mezclar variables numéricas {{1}} con campos con nombre no está soportado: usa solo los campos.");
+      return;
+    }
+    setSaving(true);
     try {
       const quickReplies = form.quickReplies
         .split(",")
@@ -99,16 +194,16 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
           category: form.category,
           language: form.language,
           headerText: form.headerText || undefined,
-          bodyText: form.bodyText,
+          bodyText: compiled.bodyText,
           footerText: form.footerText || undefined,
-          bodyExamples: varCount > 0 ? examples.slice(0, varCount) : undefined,
+          bodyExamples: compiled.examples.length ? compiled.examples : undefined,
+          variableFields: compiled.fields.length ? compiled.fields : undefined,
           quickReplies: quickReplies.length ? quickReplies : undefined,
         }),
       });
       setNotice("Plantilla enviada a Meta ✔ — queda «En revisión» hasta que la aprueben (suele tardar minutos).");
       setShowForm(false);
       setForm({ name: "", category: "UTILITY", language: "es", headerText: "", bodyText: "", footerText: "", quickReplies: "" });
-      setExamples([]);
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -126,6 +221,16 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
     } catch (err) {
       setError((err as Error).message);
     }
+  }
+
+  /** Cuerpo de una plantilla existente con sus campos por nombre (si hay mapeo). */
+  function displayBody(t: Template): string {
+    const body = t.components.find((c) => c.type === "BODY")?.text ?? "";
+    if (!t.variableFields?.length) return body;
+    return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (raw, n: string) => {
+      const field = FIELD_BY_ID.get(t.variableFields![Number(n) - 1] ?? "");
+      return field ? `{{${field.label}}}` : raw;
+    });
   }
 
   return (
@@ -189,6 +294,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
               </select>
             </label>
           </div>
+
           <label className="mt-2 block text-xs text-slate-600">
             Encabezado (opcional, texto)
             <input
@@ -198,37 +304,55 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
               className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
             />
           </label>
-          <label className="mt-2 block text-xs text-slate-600">
-            Cuerpo del mensaje — usa variables {"{{1}}"}, {"{{2}}"}…
+
+          <div className="mt-2">
+            <p className="text-xs text-slate-600">Cuerpo del mensaje</p>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {FIELDS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => insertField(f.label)}
+                  title={`Ejemplo: ${f.sample}`}
+                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100"
+                >
+                  + {f.label}
+                </button>
+              ))}
+            </div>
             <textarea
+              ref={bodyRef}
               value={form.bodyText}
               onChange={(e) => setForm({ ...form, bodyText: e.target.value })}
               required
               rows={3}
               maxLength={1024}
-              placeholder={"Hola {{1}}, te recordamos tu cita el {{2}} a las {{3}}. Responde CONFIRMAR para confirmarla."}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+              placeholder="Hola {{Nombre del contacto}}, te recordamos tu cita el {{Fecha de la cita}} a las {{Hora de la cita}}. Responde CONFIRMAR para confirmarla."
+              className="mt-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
             />
-          </label>
-          {varCount > 0 && (
-            <div className="mt-2 grid gap-2 md:grid-cols-3">
-              {Array.from({ length: varCount }, (_, i) => (
-                <label key={i} className="text-xs text-slate-600">
-                  Ejemplo para {`{{${i + 1}}}`}
-                  <input
-                    value={examples[i] ?? ""}
-                    onChange={(e) => {
-                      const next = [...examples];
-                      next[i] = e.target.value;
-                      setExamples(next);
-                    }}
-                    required
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
-                  />
-                </label>
-              ))}
+            <p className="text-[10px] text-slate-400">
+              Pulsa un campo para insertarlo donde esté el cursor. Al crear, la plataforma lo convierte al formato de Meta y
+              recuerda qué dato real va en cada posición.
+            </p>
+          </div>
+
+          {form.bodyText.trim() && (
+            <div className="mt-2 rounded-lg bg-slate-50 p-2.5">
+              <p className="text-[10px] font-medium uppercase text-slate-400">Vista previa (con datos de ejemplo)</p>
+              <div className="mt-1.5 max-w-md rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-xs text-slate-700 shadow-sm">
+                {form.headerText && <p className="mb-1 font-semibold">{form.headerText}</p>}
+                <p className="whitespace-pre-wrap">{preview}</p>
+                {form.footerText && <p className="mt-1 text-[10px] text-slate-400">{form.footerText}</p>}
+              </div>
+              {compiled.fields.length > 0 && (
+                <p className="mt-1.5 text-[10px] text-slate-400">
+                  Campos cableados:{" "}
+                  {compiled.fields.map((id) => FIELD_BY_ID.get(id)?.label ?? id).join(" · ")}
+                </p>
+              )}
             </div>
           )}
+
           <div className="mt-2 grid gap-3 md:grid-cols-2">
             <label className="text-xs text-slate-600">
               Pie (opcional)
@@ -249,6 +373,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
               />
             </label>
           </div>
+
           <button
             type="submit"
             disabled={saving}
@@ -278,7 +403,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
             </thead>
             <tbody>
               {templates.map((t) => {
-                const body = t.components.find((c) => c.type === "BODY")?.text ?? "";
+                const body = displayBody(t);
                 return (
                   <tr key={t.id} className="border-t border-slate-200 align-top">
                     <td className="py-1.5 pr-3 font-mono">{t.name}</td>
@@ -290,7 +415,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
                     </td>
                     <td className="py-1.5 pr-3">{CATEGORY_LABEL[t.category] ?? t.category}</td>
                     <td className="py-1.5 pr-3 font-mono">{t.language}</td>
-                    <td className="max-w-[360px] py-1.5 pr-3 text-slate-500">{body.length > 140 ? `${body.slice(0, 140)}…` : body}</td>
+                    <td className="max-w-[360px] py-1.5 pr-3 text-slate-500">{body.length > 160 ? `${body.slice(0, 160)}…` : body}</td>
                     <td className="py-1.5 text-right">
                       <button onClick={() => void remove(t.name)} className="text-[10px] text-red-500 hover:underline">
                         Eliminar

@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
+import { TEMPLATE_FIELD_IDS } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { enforcePlanLimit } from "../common/plan-limits";
@@ -51,6 +52,10 @@ const createTemplateSchema = z.object({
   footerText: z.string().trim().max(60).optional(),
   bodyExamples: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
   quickReplies: z.array(z.string().trim().min(1).max(25)).max(3).optional(),
+  // Campo de la plataforma detrás de cada variable {{n}} (posición i = variable i+1),
+  // p. ej. ["contact.firstName","appointment.date"]. Se persiste en el config del
+  // canal para resolver los valores reales al enviar la plantilla.
+  variableFields: z.array(z.enum(TEMPLATE_FIELD_IDS)).max(10).optional(),
 });
 
 /** Variables {{n}} del cuerpo; Meta exige que sean consecutivas desde {{1}}. */
@@ -486,6 +491,11 @@ export class ChannelsController {
     );
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
+    // Mapeo variable→campo guardado al crear cada plantilla desde el panel.
+    const mappings = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const channel = await tx.channelConnection.findUnique({ where: { id }, select: { config: true } });
+      return ((channel?.config as any)?.templateMappings ?? {}) as Record<string, { fields?: string[] }>;
+    });
     return {
       wabaId,
       templates: ((json?.data as any[]) ?? []).map((t) => ({
@@ -496,6 +506,7 @@ export class ChannelsController {
         language: t.language,
         rejectedReason: t.rejected_reason ?? null,
         components: t.components ?? [],
+        variableFields: mappings[t.name]?.fields ?? null,
       })),
     };
   }
@@ -509,6 +520,9 @@ export class ChannelsController {
     const varCount = bodyVariableCount(input.bodyText);
     if (varCount > 0 && (input.bodyExamples?.length ?? 0) < varCount) {
       throw new BadRequestException(`El cuerpo usa ${varCount} variable(s): entrega un valor de ejemplo por cada una`);
+    }
+    if (input.variableFields && input.variableFields.length !== varCount) {
+      throw new BadRequestException(`El mapeo de campos (${input.variableFields.length}) no coincide con las variables del cuerpo (${varCount})`);
     }
     const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
 
@@ -536,8 +550,16 @@ export class ChannelsController {
     if (!res.ok) {
       throw new BadRequestException(json?.error?.error_user_msg ?? json?.error?.message ?? `Meta respondió ${res.status}`);
     }
-    await this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.auditLog.create({
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // Persistir el mapeo variable→campo en el config del canal (para el envío).
+      if (input.variableFields?.length) {
+        const channel = await tx.channelConnection.findUnique({ where: { id }, select: { config: true } });
+        const config = ((channel?.config as object) ?? {}) as Record<string, unknown>;
+        const templateMappings = ((config.templateMappings as object) ?? {}) as Record<string, unknown>;
+        templateMappings[input.name] = { language: input.language, fields: input.variableFields };
+        await tx.channelConnection.update({ where: { id }, data: { config: { ...config, templateMappings } as object } });
+      }
+      await tx.auditLog.create({
         data: {
           organizationId: ctx.organizationId,
           actorType: "user",
@@ -545,10 +567,10 @@ export class ChannelsController {
           action: "channel.template_create",
           entityType: "channel_connection",
           entityId: id,
-          after: { wabaId, name: input.name, category: input.category, language: input.language },
+          after: { wabaId, name: input.name, category: input.category, language: input.language, fields: input.variableFields ?? [] },
         },
-      }),
-    );
+      });
+    });
     return { ok: true, id: json?.id ?? null, status: json?.status ?? "PENDING", category: json?.category ?? input.category };
   }
 
@@ -565,8 +587,16 @@ export class ChannelsController {
     );
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
-    await this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.auditLog.create({
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // Retirar el mapeo variable→campo de la plantilla eliminada.
+      const channel = await tx.channelConnection.findUnique({ where: { id }, select: { config: true } });
+      const config = ((channel?.config as object) ?? {}) as Record<string, unknown>;
+      const templateMappings = ((config.templateMappings as object) ?? {}) as Record<string, unknown>;
+      if (templateMappings[name]) {
+        delete templateMappings[name];
+        await tx.channelConnection.update({ where: { id }, data: { config: { ...config, templateMappings } as object } });
+      }
+      await tx.auditLog.create({
         data: {
           organizationId: ctx.organizationId,
           actorType: "user",
@@ -576,8 +606,8 @@ export class ChannelsController {
           entityId: id,
           after: { wabaId, name },
         },
-      }),
-    );
+      });
+    });
     return { ok: true };
   }
 
