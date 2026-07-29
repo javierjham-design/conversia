@@ -1,5 +1,6 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
+import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { runAgentTurn } from "./agent-turn";
 import { transcribeWhatsappAudio } from "./audio";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
@@ -14,6 +15,7 @@ interface ParsedInbound {
   profileName?: string;
   type: string;
   text?: string;
+  referral?: any; // objeto referral de Meta (anuncios Click-to-WhatsApp)
   payload: unknown;
 }
 
@@ -41,6 +43,7 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
           profileName,
           type: m.type ?? "unknown",
           text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title,
+          referral: m.referral,
           payload: m,
         });
       }
@@ -159,23 +162,18 @@ export async function processInbound(job: InboundJob): Promise<void> {
         include: { contact: true },
       });
       let contact = identity?.contact ?? null;
+      // Captura MÁXIMA desde Meta: perfil (separado del nombre real), teléfono
+      // E.164, país inferido, atribución CTWA (referral) + payload crudo.
+      const parsedContact = { waId: msg.from, profileName: msg.profileName ?? null, referral: msg.referral };
       if (!contact) {
         contact = await tx.contact.create({
-          data: {
-            organizationId,
-            clinicId: tenant.clinicId,
-            firstName: msg.profileName ?? null,
-            phone: msg.from,
-            source: "whatsapp",
-            firstContactAt: new Date(),
-            lastContactAt: new Date(),
-          },
+          data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate(parsedContact, new Date()) },
         });
         await tx.contactIdentity.create({
           data: { organizationId, contactId: contact.id, channelType, externalId: msg.from },
         });
       } else {
-        await tx.contact.update({ where: { id: contact.id }, data: { lastContactAt: new Date() } });
+        await tx.contact.update({ where: { id: contact.id }, data: buildContactUpdate(contact, parsedContact, new Date()) });
       }
 
       // Conversación abierta o nueva

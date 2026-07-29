@@ -55,7 +55,7 @@ export class ConversationsController {
               }
             : {}),
         },
-        include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true } } },
+        include: { contact: { select: { id: true, firstName: true, lastName: true, profileName: true, phone: true } } },
         orderBy: { lastMessageAt: { sort: "desc", nulls: "last" } },
         take: 50,
       }),
@@ -350,7 +350,7 @@ export class ConversationsController {
         const updated = await this.prisma.withTenant(ctx.organizationId, (tx) =>
           tx.conversation.findMany({
             where: { updatedAt: { gt: since } },
-            include: { contact: { select: { firstName: true, lastName: true, phone: true } } },
+            include: { contact: { select: { firstName: true, lastName: true, profileName: true, phone: true } } },
             take: 20,
           }),
         );
