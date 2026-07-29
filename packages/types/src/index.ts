@@ -375,6 +375,28 @@ export const QUEUE_NAMES = {
   imports: "contact-imports",
 } as const;
 
+/**
+ * Campos de la plataforma disponibles como variables de plantillas de WhatsApp.
+ * Meta solo acepta {{1}},{{2}}… — el panel muestra estos campos con nombre, los
+ * convierte a numéricas al crear y el mapeo (posición → campo) se persiste en el
+ * config del canal para resolver los valores reales al enviar.
+ * `sample` es el valor de ejemplo que se manda a Meta en la revisión (genérico,
+ * jamás datos de un cliente).
+ */
+export const TEMPLATE_FIELDS = [
+  { id: "contact.firstName", label: "Nombre del contacto", sample: "María" },
+  { id: "contact.lastName", label: "Apellido del contacto", sample: "Pérez" },
+  { id: "contact.fullName", label: "Nombre completo", sample: "María Pérez" },
+  { id: "contact.phone", label: "Teléfono del contacto", sample: "+56 9 1234 5678" },
+  { id: "appointment.date", label: "Fecha de la cita", sample: "martes 5 de agosto" },
+  { id: "appointment.time", label: "Hora de la cita", sample: "15:30" },
+  { id: "appointment.service", label: "Servicio de la cita", sample: "Control dental" },
+  { id: "appointment.professional", label: "Profesional de la cita", sample: "Dra. Soto" },
+  { id: "organization.name", label: "Nombre del negocio", sample: "Clínica Sonrisa" },
+] as const;
+export type TemplateFieldId = (typeof TEMPLATE_FIELDS)[number]["id"];
+export const TEMPLATE_FIELD_IDS = TEMPLATE_FIELDS.map((f) => f.id) as [TemplateFieldId, ...TemplateFieldId[]];
+
 /** Eventos públicos que Conversia emite hacia webhooks salientes y CAPI. */
 export const PLATFORM_PUBLIC_EVENTS = [
   "conversation.started",
