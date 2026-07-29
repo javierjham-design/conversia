@@ -439,11 +439,11 @@ export class ChannelsController {
     if (!data.token) return { ok: false, detail: "Sin token: carga el access token del canal" };
 
     try {
-      const res = await fetch(
+      // graphFetch reintenta con el token global si el del canal está vencido.
+      const { res, json } = await this.graphFetch(
         `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${data.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`,
-        { headers: { authorization: `Bearer ${data.token}` } },
+        data.token,
       );
-      const json: any = await res.json();
       if (!res.ok) {
         return { ok: false, detail: json?.error?.message ?? `Meta respondió ${res.status}` };
       }
@@ -479,17 +479,39 @@ export class ChannelsController {
     return { wabaId: data.wabaId, token: data.token };
   }
 
+  /**
+   * Llama a la Graph API con el token del canal; si Meta responde token
+   * inválido/vencido (código 190) reintenta con el token global de la
+   * plataforma. Cubre canales creados con tokens temporales que expiraron
+   * (el permanente vive en el env y es el que usa el worker para enviar).
+   */
+  private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any }> {
+    const doFetch = async (tk: string) => {
+      const res = await fetch(url, {
+        ...init,
+        headers: { ...((init?.headers as Record<string, string>) ?? {}), authorization: `Bearer ${tk}` },
+      });
+      const json: any = await res.json().catch(() => ({}));
+      return { res, json };
+    };
+    let out = await doFetch(token);
+    const globalToken = getEnv().META_ACCESS_TOKEN;
+    if (!out.res.ok && out.json?.error?.code === 190 && globalToken && globalToken !== token) {
+      out = await doFetch(globalToken);
+    }
+    return out;
+  }
+
   /** Lista las plantillas de la WABA del canal (estado, categoría, idioma, contenido). */
   @Get(":id/templates")
   async listTemplates(@Param("id") id: string) {
     const ctx = requireContext();
     const env = getEnv();
     const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
-    const res = await fetch(
+    const { res, json } = await this.graphFetch(
       `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=100`,
-      { headers: { authorization: `Bearer ${token}` } },
+      token,
     );
-    const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
     // Mapeo variable→campo guardado al crear cada plantilla desde el panel.
     const mappings = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -538,15 +560,15 @@ export class ChannelsController {
       components.push({ type: "BUTTONS", buttons: input.quickReplies.map((text) => ({ type: "QUICK_REPLY", text })) });
     }
 
-    const res = await fetch(
+    const { res, json } = await this.graphFetch(
       `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates`,
+      token,
       {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: input.name, category: input.category, language: input.language, components }),
       },
     );
-    const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new BadRequestException(json?.error?.error_user_msg ?? json?.error?.message ?? `Meta respondió ${res.status}`);
     }
@@ -581,11 +603,11 @@ export class ChannelsController {
     const env = getEnv();
     if (!/^[a-z0-9_]+$/.test(name)) throw new BadRequestException("Nombre de plantilla inválido");
     const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
-    const res = await fetch(
+    const { res, json } = await this.graphFetch(
       `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?name=${encodeURIComponent(name)}`,
-      { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+      token,
+      { method: "DELETE" },
     );
-    const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
     await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       // Retirar el mapeo variable→campo de la plantilla eliminada.
