@@ -192,11 +192,15 @@ export async function runAgentTurn(opts: {
     tools: Array.isArray(version.tools) ? (version.tools as string[]) : [],
   };
 
-  const services = await buildToolServices(organizationId, {
-    conversationId,
-    contactId: conversation.contactId,
-    clinicId: conversation.clinicId,
-  });
+  const services = await buildToolServices(
+    organizationId,
+    {
+      conversationId,
+      contactId: conversation.contactId,
+      clinicId: conversation.clinicId,
+    },
+    { knowledgeSources: Array.isArray(cfg.knowledgeSources) ? (cfg.knowledgeSources as string[]) : null },
+  );
   const toolCtx: ToolContext = {
     organizationId,
     clinicId: conversation.clinicId,

@@ -69,6 +69,7 @@ const testSchema = z.object({
     .passthrough(),
   tools: z.array(z.string()).default([]),
   actions: z.record(actionStateSchema).optional(),
+  knowledgeSources: z.array(z.string()).optional(),
   messages: z
     .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) }))
     .min(1)
@@ -113,6 +114,19 @@ export class AgentsController {
   @Get("meta/tools")
   toolCatalog() {
     return buildCoreTools().map((t) => ({ name: t.name, description: t.description }));
+  }
+
+  /** Bases de conocimiento del tenant, para elegir cuáles usa cada agente. */
+  @Get("meta/knowledge")
+  knowledgeBases() {
+    const ctx = requirePermission("agents:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const bases = await tx.knowledgeBase.findMany({
+        orderBy: { createdAt: "asc" },
+        include: { _count: { select: { documents: { where: { status: "PUBLISHED" } } } } },
+      });
+      return bases.map((b) => ({ id: b.id, name: b.name, description: b.description, publishedDocs: b._count.documents }));
+    });
   }
 
   @Get()
@@ -323,7 +337,7 @@ export class AgentsController {
       },
       simulated: [],
     };
-    const services = await buildSandboxServices(orgId, state);
+    const services = await buildSandboxServices(orgId, state, { knowledgeSources: input.knowledgeSources ?? null });
     const toolCtx: ToolContext = {
       organizationId: orgId,
       clinicId: clinic?.id ?? null,

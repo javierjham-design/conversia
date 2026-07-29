@@ -32,7 +32,12 @@ export interface SandboxState {
  *   se muta solo en memoria. Así el operador prueba el comportamiento del agente
  *   sin ensuciar conversaciones, leads ni la agenda reales.
  */
-export async function buildSandboxServices(orgId: string, state: SandboxState): Promise<ToolServices> {
+export async function buildSandboxServices(
+  orgId: string,
+  state: SandboxState,
+  opts: { knowledgeSources?: string[] | null } = {},
+): Promise<ToolServices> {
+  const knowledgeSources = opts.knowledgeSources;
   // Agenda mock alimentada con datos REALES del tenant (idéntica a la de
   // producción cuando no hay proveedor externo). createAppointment queda en
   // memoria del mock; recordAppointment (que sí escribiría en BD) es no-op.
@@ -116,6 +121,7 @@ export async function buildSandboxServices(orgId: string, state: SandboxState): 
         const docs = await tx.knowledgeDocument.findMany({
           where: {
             status: "PUBLISHED",
+            ...(Array.isArray(knowledgeSources) ? { baseId: { in: knowledgeSources } } : {}),
             AND: [
               { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
               { OR: [{ validTo: null }, { validTo: { gte: now } }] },

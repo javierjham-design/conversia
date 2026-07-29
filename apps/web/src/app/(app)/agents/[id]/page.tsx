@@ -9,6 +9,7 @@ import { AGENT_ACTIONS, deriveTools, inferActions, type AgentActionDef } from "@
 
 type ActionState = Record<string, { enabled: boolean; instructions: string }>;
 interface Mention { label: string; type: "equipo" | "usuario" | "agente" }
+interface KnowledgeBase { id: string; name: string; description: string | null; publishedDocs: number }
 
 interface VersionRow {
   version: number;
@@ -167,6 +168,8 @@ export default function AgentEditorPage() {
   const [actions, setActions] = useState<ActionState>({});
   const [extraTools, setExtraTools] = useState<string[]>([]);
   const [mentions, setMentions] = useState<Mention[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [knowledgeSources, setKnowledgeSources] = useState<string[]>([]);
 
   const [snapshot, setSnapshot] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -174,15 +177,17 @@ export default function AgentEditorPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const load = useCallback(async () => {
-    const [detail, chans, users, teams, agents] = await Promise.all([
+    const [detail, chans, users, teams, agents, kbs] = await Promise.all([
       api<AgentDetail>(`/agents/${id}`),
       api<Channel[]>("/organizations/me/channels").catch(() => []),
       api<{ userId: string; name: string }[]>("/users/assignable").catch(() => []),
       api<{ id: string; name: string }[]>("/users/teams").catch(() => []),
       api<{ id: string; name: string }[]>("/agents/assignable").catch(() => []),
+      api<KnowledgeBase[]>("/agents/meta/knowledge").catch(() => []),
     ]);
     setAgent(detail);
     setChannels(chans);
+    setKnowledgeBases(kbs);
     setMentions([
       ...teams.map((t) => ({ label: t.name, type: "equipo" as const })),
       ...users.map((u) => ({ label: u.name, type: "usuario" as const })),
@@ -203,6 +208,8 @@ export default function AgentEditorPage() {
     const nextActions: ActionState = cfg.actions && typeof cfg.actions === "object" ? cfg.actions : inferActions(nextTools);
     const actionTools = new Set(AGENT_ACTIONS.flatMap((a) => a.tools));
     const nextExtra = nextTools.filter((t) => !actionTools.has(t));
+    // Fuentes de conocimiento: selección explícita del agente o, si es antiguo, todas.
+    const nextKnowledge: string[] = Array.isArray(cfg.knowledgeSources) ? cfg.knowledgeSources : kbs.map((k) => k.id);
     setEmoji(nextEmoji);
     setSystemPrompt(nextPrompt);
     setModel(nextModel);
@@ -210,8 +217,9 @@ export default function AgentEditorPage() {
     setMaxToolRounds(nextRounds);
     setActions(nextActions);
     setExtraTools(nextExtra);
+    setKnowledgeSources(nextKnowledge);
     setSnapshot(
-      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions }),
+      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions, knowledgeSources: nextKnowledge }),
     );
   }, [id]);
 
@@ -220,8 +228,20 @@ export default function AgentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions });
+  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions, knowledgeSources });
   const dirty = snapshot !== "" && current !== snapshot;
+
+  function toggleKnowledge(kbId: string, on: boolean) {
+    setKnowledgeSources((prev) => (on ? [...new Set([...prev, kbId])] : prev.filter((x) => x !== kbId)));
+  }
+
+  // Tools efectivas: las de las acciones + extras preservadas; si hay al menos
+  // una fuente de conocimiento activa, el agente necesita poder buscarla.
+  const derivedTools = useMemo(() => {
+    const base = deriveTools(actions, extraTools);
+    if (knowledgeSources.length > 0 && !base.includes("searchKnowledgeBase")) base.push("searchKnowledgeBase");
+    return base;
+  }, [actions, extraTools, knowledgeSources]);
 
   // Validación de variables {{...}} contra las disponibles.
   const unknownVars = useMemo(() => {
@@ -250,8 +270,8 @@ export default function AgentEditorPage() {
           kind,
           description: description || null,
           systemPrompt,
-          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions },
-          tools: deriveTools(actions, extraTools),
+          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions, knowledgeSources },
+          tools: derivedTools,
         }),
       });
       toast.push("Borrador guardado", "ok");
@@ -407,8 +427,30 @@ export default function AgentEditorPage() {
             </Section>
 
             {/* Fuentes de conocimiento — Fase 5 */}
-            <Section title="Fuentes de conocimiento" subtitle="Documentos que este agente puede consultar." helpKey="knowledge" onHelp={(k) => setHelp(AGENT_HELP[k])}>
-              <p className="text-sm text-slate-400">Selección de fuentes por agente — próxima entrega.</p>
+            <Section title="Fuentes de conocimiento" subtitle="Qué bases de conocimiento puede consultar este agente para responder dudas." helpKey="knowledge" onHelp={(k) => setHelp(AGENT_HELP[k])}>
+              {knowledgeBases.length === 0 ? (
+                <p className="text-sm text-slate-400">Aún no hay bases de conocimiento cargadas para esta organización.</p>
+              ) : (
+                <div className="space-y-2">
+                  {knowledgeBases.map((kb) => {
+                    const on = knowledgeSources.includes(kb.id);
+                    return (
+                      <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40" : "border-slate-200")}>
+                        <div>
+                          <p className="text-sm font-medium text-navy-900">{kb.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {kb.description || "Sin descripción"} · {kb.publishedDocs} doc{kb.publishedDocs === 1 ? "" : "s"} publicado{kb.publishedDocs === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <Toggle checked={on} onChange={(v) => toggleKnowledge(kb.id, v)} />
+                      </div>
+                    );
+                  })}
+                  {knowledgeSources.length === 0 && (
+                    <p className="text-[11px] text-amber-600">Ninguna fuente activa: el agente no consultará la base de conocimiento.</p>
+                  )}
+                </div>
+              )}
             </Section>
 
             {/* Avanzado */}
@@ -463,7 +505,8 @@ export default function AgentEditorPage() {
           maxTokens={maxTokens}
           maxToolRounds={maxToolRounds}
           actions={actions}
-          tools={deriveTools(actions, extraTools)}
+          tools={derivedTools}
+          knowledgeSources={knowledgeSources}
         />
       </div>
 
@@ -502,7 +545,7 @@ type TestResponse = {
   humanHandoff?: boolean;
 };
 
-function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools }: {
+function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools, knowledgeSources }: {
   id: string;
   systemPrompt: string;
   model: string;
@@ -510,6 +553,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
   maxToolRounds: number;
   actions: ActionState;
   tools: string[];
+  knowledgeSources: string[];
 }) {
   const [tab, setTab] = useState<"chat" | "contact">("chat");
   const [messages, setMessages] = useState<TestMsg[]>([]);
@@ -535,6 +579,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
         config: { model, maxTokens, maxToolRounds },
         tools,
         actions,
+        knowledgeSources,
         messages: nextMsgs.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })),
         contact: {
           firstName: contact.firstName || null,

@@ -62,13 +62,19 @@ export interface ToolTargets {
   clinicId?: string | null;
 }
 
+export interface ToolOptions {
+  /** Bases de conocimiento habilitadas para el agente. undefined = todas. */
+  knowledgeSources?: string[] | null;
+}
+
 /**
  * Construye los servicios que las tools de IA pueden usar. Cada método abre
  * su propia transacción withTenant: las tools se ejecutan FUERA de la
  * transacción que cargó la conversación (la llamada al modelo es lenta).
  */
-export async function buildToolServices(orgId: string, t: ToolTargets): Promise<ToolServices> {
+export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
   const scheduling = await getSchedulingProviderFor(orgId);
+  const knowledgeSources = opts.knowledgeSources;
 
   return {
     scheduling,
@@ -239,6 +245,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets): Promise<
         const docs = await tx.knowledgeDocument.findMany({
           where: {
             status: "PUBLISHED",
+            // Fuentes habilitadas del agente. undefined = todas; [] = ninguna.
+            ...(Array.isArray(knowledgeSources) ? { baseId: { in: knowledgeSources } } : {}),
             AND: [
               { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
               { OR: [{ validTo: null }, { validTo: { gte: now } }] },
