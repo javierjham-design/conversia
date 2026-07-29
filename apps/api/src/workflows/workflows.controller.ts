@@ -16,6 +16,7 @@ import { PrismaService } from "../prisma.service";
 import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { simulateWorkflow, type SimNames } from "./workflow-sandbox";
 
 const createSchema = z.object({
   name: z.string().min(2).max(80),
@@ -287,6 +288,57 @@ export class WorkflowsController {
         currentNodeId: r.currentNodeId,
         steps: r.steps.map((s) => ({ nodeId: s.nodeId, nodeType: s.nodeType, status: s.status, error: s.error })),
       }));
+    });
+  }
+
+  /**
+   * Modo prueba: recorre la definición ACTUAL (sin publicar) contra un contacto
+   * ficticio y devuelve, paso a paso, qué haría cada nodo. No persiste nada ni
+   * envía nada por los canales (sandbox).
+   */
+  @Post(":id/test")
+  test(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("workflows:write");
+    const input = parse(
+      z.object({
+        definition: z.unknown(),
+        assumeNoReply: z.boolean().default(true),
+        contact: z
+          .object({ firstName: z.string().max(80).nullable().optional(), lastName: z.string().max(80).nullable().optional() })
+          .optional(),
+      }),
+      body,
+    );
+    const definition = workflowDefinitionSchema.safeParse(input.definition);
+    if (!definition.success) {
+      throw new BadRequestException(`Definición inválida: ${definition.error.issues.map((i) => i.message).join("; ")}`);
+    }
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({ where: { id, deletedAt: null } });
+      if (!wf) throw new NotFoundException("Flujo no encontrado");
+      const [org, clinic, statuses, agents, teams, members] = await Promise.all([
+        tx.organization.findUnique({ where: { id: ctx.organizationId } }),
+        tx.clinic.findFirst({ where: { active: true, deletedAt: null } }),
+        tx.leadStatus.findMany({ select: { code: true, name: true } }),
+        tx.agent.findMany({ where: { deletedAt: null }, select: { slug: true, name: true } }),
+        tx.team.findMany({ select: { id: true, name: true } }),
+        tx.organizationUser.findMany({ where: { active: true }, include: { user: { select: { id: true, name: true } } } }),
+      ]);
+      const names: SimNames = {
+        leadStatus: Object.fromEntries(statuses.map((s) => [s.code, s.name])),
+        agent: Object.fromEntries(agents.map((a) => [a.slug, a.name])),
+        team: Object.fromEntries(teams.map((t) => [t.id, t.name])),
+        user: Object.fromEntries(members.map((m) => [m.userId, m.user.name])),
+      };
+      const vars: Record<string, string> = {
+        "organization.name": org?.name ?? "",
+        "clinic.name": clinic?.name ?? "",
+        "clinic.city": clinic?.city ?? "",
+        "clinic.address": clinic?.address ?? "",
+        "contact.firstName": input.contact?.firstName || "Prueba",
+      };
+      const trace = simulateWorkflow(definition.data, { vars, names, assumeNoReply: input.assumeNoReply ?? true });
+      return { ok: true, trace };
     });
   }
 

@@ -212,6 +212,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
 // ---------------------------------------------------------------------------
 
 interface DefTrigger { type: string; config: Record<string, unknown> }
+interface SimStep { nodeId: string; nodeType: string; label: string; detail: string }
 
 function defToFlow(def: any): { nodes: Node[]; edges: Edge[]; trigger: DefTrigger } {
   const trigger: DefTrigger = { type: def?.trigger?.type ?? "conversation_started", config: def?.trigger?.config ?? {} };
@@ -305,6 +306,11 @@ function Editor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addFromState, setAddFromState] = useState<{ parentId: string; branch?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
+  const [testContact, setTestContact] = useState("");
+  const [assumeNoReply, setAssumeNoReply] = useState(true);
+  const [testTrace, setTestTrace] = useState<SimStep[] | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
 
   const history = useRef<{ past: { n: Node[]; e: Edge[] }[]; future: { n: Node[]; e: Edge[] }[] }>({ past: [], future: [] });
   const [, forceRender] = useState(0);
@@ -493,6 +499,26 @@ function Editor() {
     }
   }
 
+  async function runTest() {
+    setTestBusy(true);
+    setTestTrace(null);
+    try {
+      const r = await api<{ trace: SimStep[] }>(`/workflows/${id}/test`, {
+        method: "POST",
+        body: JSON.stringify({
+          definition: flowToDef(nodes, edges, trigger),
+          contact: { firstName: testContact || null },
+          assumeNoReply,
+        }),
+      });
+      setTestTrace(r.trace);
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   const editorApi = useMemo<EditorApi>(
     () => ({ selectedId, select: setSelectedId, addFrom, catalog, triggerType: trigger.type }),
     [selectedId, addFrom, catalog, trigger.type],
@@ -527,7 +553,7 @@ function Editor() {
             <button onClick={undo} disabled={!history.current.past.length} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30" title="Deshacer"><Undo2 size={16} /></button>
             <button onClick={redo} disabled={!history.current.future.length} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30" title="Rehacer"><Redo2 size={16} /></button>
             <span className="mx-1 h-5 w-px bg-slate-200" />
-            <Button variant="secondary" disabled title="Disponible en la próxima entrega">Probar</Button>
+            <Button variant="secondary" onClick={() => { setTestTrace(null); setTestOpen(true); }} disabled={busy}>Probar</Button>
             <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy}>Guardar</Button>
             <Button onClick={() => void publish()} disabled={busy}>Publicar</Button>
           </div>
@@ -572,6 +598,42 @@ function Editor() {
           </aside>
         </div>
       </div>
+
+      {/* Modo prueba */}
+      <Modal open={testOpen} onClose={() => setTestOpen(false)} title="Probar flujo" wide>
+        <p className="mb-3 text-sm text-slate-500">
+          Recorre el flujo con un contacto ficticio y muestra qué haría cada paso. No envía nada ni cambia datos reales.
+        </p>
+        <div className="mb-3 flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Nombre del contacto de prueba</span>
+            <input value={testContact} onChange={(e) => setTestContact(e.target.value)} placeholder="Prueba" className="mt-1 block w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="flex items-center gap-1.5 pb-2 text-xs text-slate-500">
+            <input type="checkbox" checked={assumeNoReply} onChange={(e) => setAssumeNoReply(e.target.checked)} />
+            En las condiciones, asumir que el contacto no respondió
+          </label>
+          <Button onClick={() => void runTest()} disabled={testBusy}>{testBusy ? "Ejecutando…" : "Ejecutar prueba"}</Button>
+        </div>
+
+        {testTrace && (
+          testTrace.length === 0 ? (
+            <p className="text-sm text-slate-400">El flujo no tiene pasos para recorrer.</p>
+          ) : (
+            <ol className="space-y-2">
+              {testTrace.map((s, i) => (
+                <li key={i} className="flex gap-3 rounded-lg border border-slate-200 p-3">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">{i + 1}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-navy-900">{s.label}</p>
+                    <p className="whitespace-pre-wrap text-xs text-slate-500">{s.detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )
+        )}
+      </Modal>
 
       {/* Menú para agregar paso */}
       <Modal open={!!addFromState} onClose={() => setAddFromState(null)} title="Agregar paso">
