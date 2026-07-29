@@ -10,11 +10,25 @@ import {
   Put,
 } from "@nestjs/common";
 import { z } from "zod";
-import { buildCoreTools } from "@conversia/agents";
+import {
+  ToolRegistry,
+  assembleSystemPrompt,
+  buildCoreTools,
+  createAIRouter,
+  orchestrate,
+  type AgentRuntime,
+} from "@conversia/agents";
+import { getEnv } from "@conversia/config";
+import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { enforcePlanLimit } from "../common/plan-limits";
+import { buildSandboxServices, type SandboxState } from "./agent-sandbox";
+
+// Registro de tools compartido para el probador (una sola vez por proceso).
+const sandboxRegistry = new ToolRegistry();
+for (const tool of buildCoreTools()) sandboxRegistry.register(tool);
 
 const createAgentSchema = z.object({
   name: z.string().min(2).max(60),
@@ -37,6 +51,36 @@ const draftSchema = z.object({
     .passthrough(),
   tools: z.array(z.string()).default([]),
   changelog: z.string().max(300).optional(),
+});
+
+const actionStateSchema = z
+  .object({ enabled: z.boolean(), instructions: z.string().max(2000).optional() })
+  .passthrough();
+
+const testSchema = z.object({
+  // El probador usa el estado ACTUAL del editor (aún sin guardar), no la BD.
+  systemPrompt: z.string().min(1).max(20000),
+  config: z
+    .object({
+      model: z.string().default("gpt-4o-mini"),
+      maxTokens: z.coerce.number().int().min(50).max(4000).default(400),
+      maxToolRounds: z.coerce.number().int().min(0).max(10).default(5),
+    })
+    .passthrough(),
+  tools: z.array(z.string()).default([]),
+  actions: z.record(actionStateSchema).optional(),
+  messages: z
+    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) }))
+    .min(1)
+    .max(40),
+  contact: z
+    .object({
+      firstName: z.string().max(80).nullable().optional(),
+      lastName: z.string().max(80).nullable().optional(),
+      email: z.string().max(160).nullable().optional(),
+      phone: z.string().max(40).nullable().optional(),
+    })
+    .optional(),
 });
 
 function slugify(name: string): string {
@@ -204,6 +248,151 @@ export class AgentsController {
         })),
       };
     });
+  }
+
+  /**
+   * Probador en vivo del editor. Ejecuta un turno del agente con la configuración
+   * ACTUAL (aún sin publicar) contra un entorno de PRUEBA:
+   *  - Lecturas reales (servicios, precios, agenda, conocimiento del tenant).
+   *  - Escrituras SIMULADAS: no persiste conversaciones, leads, citas ni notas.
+   * Respeta el kill switch, la suspensión, la vigencia y el tope diario de tokens
+   * (la prueba consume tokens reales del proveedor), y registra ese consumo.
+   */
+  @Post(":id/test")
+  async test(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("agents:write");
+    const input = parse(testSchema, body);
+    const orgId = ctx.organizationId;
+    const env = getEnv();
+
+    const loaded = await this.prisma.withTenant(orgId, async (tx) => {
+      const agent = await tx.agent.findFirst({ where: { id, deletedAt: null } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      const [org, clinic] = await Promise.all([
+        tx.organization.findUnique({ where: { id: orgId } }),
+        tx.clinic.findFirst({ where: { active: true, deletedAt: null } }),
+      ]);
+      return { agent, org, clinic };
+    });
+    const { agent, org, clinic } = loaded;
+    const orgSettings = (org?.settings ?? {}) as Record<string, any>;
+
+    // ---- Controles de consumo (mismos que el worker; aquí solo bloquean) ----
+    if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
+      return { ok: false, blocked: true, error: "La IA está pausada (kill switch). Actívala para probar." };
+    }
+    if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
+      return { ok: false, blocked: true, error: `La organización está ${org.status}; la IA está detenida.` };
+    }
+    const validUntil = orgSettings.validUntil;
+    if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
+      return { ok: false, blocked: true, error: "La vigencia del servicio venció; la IA está detenida." };
+    }
+    const budget = await this.prisma.withTenant(orgId, async (tx) => {
+      const override = (orgSettings.limits as Record<string, number> | undefined)?.aiTokensDaily;
+      if (typeof override === "number") return override;
+      const sub = await tx.subscription.findFirst({
+        where: { status: { in: ["ACTIVE", "TRIALING"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (sub) {
+        const plan = await tx.plan.findUnique({ where: { id: sub.planId } });
+        const planLimit = (plan?.limits as Record<string, number> | undefined)?.aiTokensDaily;
+        if (typeof planLimit === "number") return planLimit;
+      }
+      return env.AI_DAILY_TOKEN_BUDGET_PER_ORG;
+    });
+    if (budget > 0) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const spent = await this.prisma.withTenant(orgId, (tx) =>
+        tx.usageEvent.aggregate({ where: { type: "ai_tokens", occurredAt: { gte: startOfDay } }, _sum: { quantity: true } }),
+      );
+      if (Number(spent._sum.quantity ?? 0) >= budget) {
+        return { ok: false, blocked: true, error: "Se alcanzó el tope diario de tokens de IA. Intenta mañana o súbelo en el plan." };
+      }
+    }
+
+    // ---- Entorno de prueba: contacto en memoria + escrituras simuladas ----
+    const state: SandboxState = {
+      contact: {
+        firstName: input.contact?.firstName ?? "Prueba",
+        lastName: input.contact?.lastName ?? null,
+        phone: input.contact?.phone ?? "+56900000000",
+        email: input.contact?.email ?? null,
+      },
+      simulated: [],
+    };
+    const services = await buildSandboxServices(orgId, state);
+    const toolCtx: ToolContext = {
+      organizationId: orgId,
+      clinicId: clinic?.id ?? null,
+      conversationId: "sandbox",
+      contactId: "sandbox",
+      agentId: agent.id,
+      agentVersionId: "sandbox",
+      services: services as unknown as Record<string, unknown>,
+    };
+
+    const cfg = input.config as Record<string, any>;
+    const runtime: AgentRuntime = {
+      agentId: agent.id,
+      agentVersionId: "sandbox",
+      slug: agent.slug,
+      name: agent.name,
+      systemPrompt: assembleSystemPrompt(input.systemPrompt, input.actions),
+      model: cfg.model ?? env.AI_DEFAULT_MODEL,
+      maxTokens: cfg.maxTokens ?? 400,
+      maxToolRounds: cfg.maxToolRounds ?? 5,
+      tools: input.tools ?? [],
+    };
+
+    const history: AIChatMessage[] = input.messages.map((m) => ({ role: m.role, content: m.content }));
+    while (history.length && history[0].role !== "user") history.shift();
+    if (!history.length) throw new BadRequestException("El primer mensaje debe ser del usuario");
+
+    const vars: Record<string, string> = {
+      "organization.name": org?.name ?? "",
+      "clinic.name": clinic?.name ?? "",
+      "clinic.city": clinic?.city ?? "",
+      "clinic.address": clinic?.address ?? "",
+      "contact.firstName": state.contact.firstName ?? "",
+      "agent.name": agent.name,
+    };
+
+    const ai = createAIRouter({ anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
+    try {
+      const result = await orchestrate(ai, sandboxRegistry, { ctx: toolCtx, agent: runtime, history, vars });
+
+      // La prueba consumió tokens reales del proveedor: se contabiliza para que
+      // el tope diario sea fiel. Se marca como test para no confundir métricas.
+      await this.prisma.withTenant(orgId, (tx) =>
+        tx.usageEvent.create({
+          data: {
+            organizationId: orgId,
+            type: "ai_tokens",
+            quantity: result.usage.inputTokens + result.usage.outputTokens,
+            costUsd: result.usage.costUsd,
+            meta: { test: true, source: "agent_tester", agentSlug: agent.slug, model: runtime.model },
+          },
+        }),
+      );
+
+      return {
+        ok: true,
+        reply: result.reply,
+        toolEvents: result.toolEvents,
+        simulated: state.simulated,
+        contact: state.contact,
+        usage: result.usage,
+        latencyMs: result.latencyMs,
+        stopReason: result.stopReason,
+        transferToAgentSlug: result.transferToAgentSlug ?? null,
+        humanHandoff: result.humanHandoff ?? false,
+      };
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message ?? e).slice(0, 300), model: runtime.model };
+    }
   }
 
   /** Guarda el borrador: actualiza el DRAFT vigente o crea la versión siguiente. */

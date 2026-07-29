@@ -10,10 +10,6 @@ import { AGENT_ACTIONS, deriveTools, inferActions, type AgentActionDef } from "@
 type ActionState = Record<string, { enabled: boolean; instructions: string }>;
 interface Mention { label: string; type: "equipo" | "usuario" | "agente" }
 
-interface ToolMeta {
-  name: string;
-  description: string;
-}
 interface VersionRow {
   version: number;
   status: string;
@@ -460,21 +456,226 @@ export default function AgentEditorPage() {
         </div>
 
         {/* Derecha: Probar Agente IA (Fase 4) */}
-        <aside className="hidden w-96 shrink-0 flex-col border-l border-slate-200 bg-white lg:flex">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="font-semibold text-navy-900">Probar Agente IA</h2>
-            <p className="text-[11px] text-slate-400">Conversa con el agente usando la configuración actual, sin efectos reales.</p>
-          </div>
-          <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-slate-400">
-            El probador en vivo llega en la próxima entrega.
-          </div>
-        </aside>
+        <AgentTester
+          id={id}
+          systemPrompt={systemPrompt}
+          model={model}
+          maxTokens={maxTokens}
+          maxToolRounds={maxToolRounds}
+          actions={actions}
+          tools={deriveTools(actions, extraTools)}
+        />
       </div>
 
       {/* Modal de ayuda por sección */}
       <Modal open={!!help} onClose={() => setHelp(null)} title={help?.title} wide>
         {help && <HelpContent help={help} />}
       </Modal>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Probador en vivo (Fase 4). Envía el estado ACTUAL del editor a
+// POST /agents/:id/test (lecturas reales, escrituras simuladas).
+// ---------------------------------------------------------------------------
+
+type TestMeta = {
+  simulated?: { action: string; detail: string }[];
+  toolEvents?: { name: string; isError: boolean }[];
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+  latencyMs?: number;
+};
+type TestMsg = { role: "user" | "assistant" | "system"; content: string; meta?: TestMeta };
+type TestResponse = {
+  ok: boolean;
+  blocked?: boolean;
+  error?: string;
+  reply?: string | null;
+  toolEvents?: { name: string; input: unknown; output: string; isError: boolean }[];
+  simulated?: { action: string; detail: string }[];
+  contact?: { firstName: string | null; lastName: string | null; email: string | null; phone: string | null };
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+  latencyMs?: number;
+  stopReason?: string;
+  transferToAgentSlug?: string | null;
+  humanHandoff?: boolean;
+};
+
+function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools }: {
+  id: string;
+  systemPrompt: string;
+  model: string;
+  maxTokens: number;
+  maxToolRounds: number;
+  actions: ActionState;
+  tools: string[];
+}) {
+  const [tab, setTab] = useState<"chat" | "contact">("chat");
+  const [messages, setMessages] = useState<TestMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [contact, setContact] = useState({ firstName: "", lastName: "", email: "", phone: "" });
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
+
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
+    const nextMsgs: TestMsg[] = [...messages, { role: "user", content: text }];
+    setMessages(nextMsgs);
+    setInput("");
+    setLoading(true);
+    try {
+      const payload = {
+        systemPrompt,
+        config: { model, maxTokens, maxToolRounds },
+        tools,
+        actions,
+        messages: nextMsgs.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })),
+        contact: {
+          firstName: contact.firstName || null,
+          lastName: contact.lastName || null,
+          email: contact.email || null,
+          phone: contact.phone || null,
+        },
+      };
+      const r = await api<TestResponse>(`/agents/${id}/test`, { method: "POST", body: JSON.stringify(payload) });
+      if (!r.ok) {
+        setMessages((m) => [...m, { role: "system", content: r.error ?? "No se pudo completar la prueba" }]);
+        return;
+      }
+      if (r.contact) {
+        setContact({
+          firstName: r.contact.firstName ?? "",
+          lastName: r.contact.lastName ?? "",
+          email: r.contact.email ?? "",
+          phone: r.contact.phone ?? "",
+        });
+      }
+      const extras: TestMsg[] = [];
+      if (r.humanHandoff) extras.push({ role: "system", content: "El agente escaló a un humano — en producción dejaría de responder." });
+      if (r.transferToAgentSlug) extras.push({ role: "system", content: `El agente transfirió la conversación a "${r.transferToAgentSlug}".` });
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: r.reply || "(el agente no devolvió texto en este turno)",
+          meta: { simulated: r.simulated, toolEvents: r.toolEvents, usage: r.usage, latencyMs: r.latencyMs },
+        },
+        ...extras,
+      ]);
+    } catch (e) {
+      setMessages((m) => [...m, { role: "system", content: (e as Error).message }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <aside className="hidden w-96 shrink-0 flex-col border-l border-slate-200 bg-white lg:flex">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div>
+          <h2 className="font-semibold text-navy-900">Probar Agente IA</h2>
+          <p className="text-[11px] text-slate-400">Lee datos reales · simula acciones · no envía nada.</p>
+        </div>
+        {messages.length > 0 && (
+          <button onClick={() => setMessages([])} className="text-xs text-slate-400 hover:text-slate-600">Reiniciar</button>
+        )}
+      </div>
+      <div className="flex gap-1 border-b border-slate-200 px-2 pt-2">
+        {(["chat", "contact"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={cn(
+              "rounded-t-lg px-3 py-1.5 text-sm",
+              tab === t ? "bg-slate-100 font-medium text-navy-900" : "text-slate-500 hover:text-slate-700",
+            )}
+          >
+            {t === "chat" ? "Chat" : "Campos del contacto"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "chat" ? (
+        <>
+          <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
+            {messages.length === 0 && (
+              <p className="mt-8 text-center text-sm text-slate-400">
+                Escribe un mensaje como si fueras el cliente para probar el comportamiento del agente.
+              </p>
+            )}
+            {messages.map((m, i) => (
+              <TesterBubble key={i} m={m} />
+            ))}
+            {loading && <p className="text-xs text-slate-400">El agente está pensando…</p>}
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="border-t border-slate-200 p-2">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
+                rows={1}
+                placeholder="Escribe como el cliente…"
+                className="max-h-24 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+              <Button type="submit" disabled={loading || !input.trim()}>Enviar</Button>
+            </div>
+          </form>
+        </>
+      ) : (
+        <div className="flex-1 space-y-3 overflow-y-auto p-4">
+          <p className="text-xs text-slate-500">Datos del contacto simulado. El agente los lee y puede actualizarlos durante la prueba.</p>
+          {([["firstName", "Nombre"], ["lastName", "Apellido"], ["email", "Email"], ["phone", "Teléfono"]] as const).map(([key, label]) => (
+            <label key={key} className="block">
+              <span className="text-xs text-slate-500">{label}</span>
+              <input
+                value={contact[key]}
+                onChange={(e) => setContact((c) => ({ ...c, [key]: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              />
+            </label>
+          ))}
+          <p className="text-[11px] text-slate-400">Si dejas un campo vacío se usa un valor por defecto (teléfono ficticio para poder agendar).</p>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function TesterBubble({ m }: { m: TestMsg }) {
+  if (m.role === "system") {
+    return <div className="mx-auto max-w-[90%] rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs text-amber-700">{m.content}</div>;
+  }
+  const isUser = m.role === "user";
+  const tools = m.meta?.toolEvents?.filter((t) => !["transferToAgent", "transferToHuman"].includes(t.name)) ?? [];
+  const hasFooter = tools.length > 0 || (m.meta?.simulated?.length ?? 0) > 0 || !!m.meta?.usage;
+  return (
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-slate-100 text-navy-900")}>
+        <p className="whitespace-pre-wrap">{m.content}</p>
+        {!isUser && hasFooter && (
+          <div className="mt-2 space-y-1 border-t border-slate-200 pt-1.5 text-[11px] text-slate-500">
+            {tools.map((t, i) => (
+              <div key={`t${i}`}>🛠 {t.name}{t.isError ? " (error)" : ""}</div>
+            ))}
+            {m.meta?.simulated?.map((s, i) => (
+              <div key={`s${i}`}>✓ {s.action}: {s.detail} <span className="opacity-60">(simulado)</span></div>
+            ))}
+            {m.meta?.usage && (
+              <div className="opacity-70">
+                {m.meta.usage.inputTokens + m.meta.usage.outputTokens} tok · US${m.meta.usage.costUsd.toFixed(5)}
+                {m.meta.latencyMs ? ` · ${(m.meta.latencyMs / 1000).toFixed(1)}s` : ""}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
