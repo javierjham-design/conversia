@@ -3,19 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
+  Bookmark,
   ChevronDown,
   Columns3,
   Contact2,
   Filter,
   Plus,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
+  Tag,
+  Trash2,
   Upload,
+  UserCog,
   Users2,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
 import { ContactDrawer } from "./contact-drawer";
 
 // ------------------------------- Tipos -------------------------------
@@ -118,6 +124,20 @@ const COLUMNS: { key: ColKey; label: string; def: boolean }[] = [
   { key: "createdAt", label: "Creado", def: false },
 ];
 
+// Segmentos sugeridos (presets genéricos, sin fila en BD).
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+const SUGGESTED: { key: string; label: string; sec: Record<string, string> }[] = [
+  { key: "new7", label: "Nuevos (7 días)", sec: { dateFrom: daysAgo(7) } },
+  { key: "ads", label: "Vinieron de anuncios", sec: { source: "ad" } },
+  { key: "organic", label: "Orgánicos", sec: { source: "organic" } },
+];
+function isPresetActive(preset: { sec: Record<string, string> }, primary: Primary, sec: Record<string, any>): boolean {
+  if (primary.kind !== "all") return false;
+  const active = Object.entries(sec).filter(([, v]) => v);
+  const keys = Object.keys(preset.sec);
+  return active.length === keys.length && keys.every((k) => sec[k] === preset.sec[k]);
+}
+
 // =============================== Página ===============================
 
 export default function ContactsPage() {
@@ -144,6 +164,8 @@ export default function ContactsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [confirmBulkDel, setConfirmBulkDel] = useState(false);
+  const [saveSegOpen, setSaveSegOpen] = useState(false);
 
   const agentName = useMemo(() => new Map(meta?.agents.map((a) => [a.id, a.name]) ?? []), [meta]);
   const userName = useMemo(() => new Map(meta?.users.map((u) => [u.id, u.name]) ?? []), [meta]);
@@ -207,6 +229,49 @@ export default function ContactsPage() {
     setPage(1);
     setSelected(new Set());
   }
+  function applyPreset(nextSec: Record<string, string>) {
+    setPrimary({ kind: "all" });
+    setSec(nextSec);
+    setPage(1);
+    setSelected(new Set());
+  }
+  async function deleteSegment(id: string) {
+    try {
+      await api(`/contacts/segments/${id}`, { method: "DELETE" });
+      if (primary.kind === "segment" && primary.value === id) setPrimary({ kind: "all" });
+      toast.push("Segmento eliminado", "ok");
+      loadMeta();
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al eliminar", "error");
+    }
+  }
+
+  function refresh() {
+    setRefreshKey((k) => k + 1);
+    loadMeta();
+  }
+  async function runBulk(action: string, params: Record<string, unknown> = {}) {
+    try {
+      const r = await api<{ affected: number }>("/contacts/bulk", { method: "POST", body: JSON.stringify({ ids: [...selected], action, ...params }) });
+      toast.push(`${r.affected} contacto(s) actualizados`, "ok");
+      setSelected(new Set());
+      refresh();
+    } catch (e: any) {
+      toast.push(e.message ?? "Error en la acción masiva", "error");
+    }
+  }
+
+  // Definición del filtro actual (para guardarlo como segmento).
+  const currentDefinition = useMemo(() => {
+    const def: Record<string, unknown> = {};
+    if (primary.kind === "blocked") def.blocked = "true";
+    if (primary.kind === "stage" && primary.value) def.stage = primary.value;
+    if (primary.kind === "agent" && primary.value) def.assignedAgent = primary.value;
+    if (q) def.q = q;
+    Object.entries(sec).forEach(([k, v]) => v && (def[k] = v));
+    return def;
+  }, [primary, sec, q]);
+  const canSaveSegment = Object.keys(currentDefinition).length > 0;
 
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -259,15 +324,22 @@ export default function ContactsPage() {
           </SideGroup>
         )}
 
+        <SideGroup title="Sugeridos">
+          {SUGGESTED.map((s) => (
+            <SideItem key={s.key} icon={<Sparkles size={15} />} label={s.label} active={isPresetActive(s, primary, sec)} onClick={() => applyPreset(s.sec)} />
+          ))}
+        </SideGroup>
+
         {(meta?.segments.length ?? 0) > 0 && (
           <SideGroup title="Segmentos">
             {meta!.segments.map((s) => (
               <SideItem
                 key={s.id}
-                icon={<SlidersHorizontal size={15} />}
+                icon={<Bookmark size={15} />}
                 label={s.name}
                 active={primary.kind === "segment" && primary.value === s.id}
                 onClick={() => setPrimaryReset({ kind: "segment", value: s.id })}
+                onDelete={() => void deleteSegment(s.id)}
               />
             ))}
           </SideGroup>
@@ -354,14 +426,31 @@ export default function ContactsPage() {
                 <X size={14} /> Limpiar
               </button>
             )}
+            {canSaveSegment && (
+              <button onClick={() => setSaveSegOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-white px-2.5 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
+                <Bookmark size={14} /> Guardar segmento
+              </button>
+            )}
           </div>
         )}
 
-        {/* Barra de acciones masivas (checkpoint 5 la completará) */}
-        {selected.size > 0 && (
-          <div className="flex items-center gap-3 border-b border-brand-200 bg-brand-50 px-4 py-2 text-sm">
+        {/* Barra de acciones masivas */}
+        {selected.size > 0 && meta && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-brand-200 bg-brand-50 px-4 py-2 text-sm">
             <span className="font-medium text-brand-800">{selected.size} seleccionados</span>
-            <span className="text-brand-500">Las acciones masivas llegan en el checkpoint 5.</span>
+            <BulkMenu icon={<Tag size={14} />} label="Etiquetar" options={meta.tags.map((t) => ({ label: t.name, onClick: () => runBulk("tag_add", { tagId: t.id }) }))} empty="Sin etiquetas" />
+            <BulkMenu icon={<SlidersHorizontal size={14} />} label="Etapa" options={meta.lifecycle.map((s) => ({ label: s.name, onClick: () => runBulk("stage", { statusCode: s.code }) }))} />
+            <BulkMenu
+              icon={<UserCog size={14} />}
+              label="Asignar"
+              options={[
+                ...meta.agents.map((a) => ({ label: `🤖 ${a.name}`, onClick: () => runBulk("assign", { activeAgentId: a.id, assignedUserId: null }) })),
+                ...meta.users.map((u) => ({ label: `👤 ${u.name}`, onClick: () => runBulk("assign", { assignedUserId: u.id, activeAgentId: null }) })),
+              ]}
+            />
+            <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("block")}><Ban size={14} /> Bloquear</Button>
+            <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("unblock")}><ShieldCheck size={14} /> Desbloquear</Button>
+            <Button variant="danger" className="px-2.5 py-1" onClick={() => setConfirmBulkDel(true)}><Trash2 size={14} /> Eliminar</Button>
             <button onClick={() => setSelected(new Set())} className="ml-auto text-brand-600 hover:underline">Deseleccionar</button>
           </div>
         )}
@@ -533,14 +622,19 @@ export default function ContactsPage() {
 
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); loadMeta(); setPrimaryReset({ kind: "all" }); }} />
 
-      <ContactDrawer
-        id={openId}
-        onClose={() => setOpenId(null)}
-        onChanged={() => {
-          setRefreshKey((k) => k + 1);
-          loadMeta();
-        }}
+      <ContactDrawer id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />
+
+      <ConfirmDialog
+        open={confirmBulkDel}
+        onClose={() => setConfirmBulkDel(false)}
+        onConfirm={() => runBulk("delete")}
+        title={`Eliminar ${selected.size} contacto(s)`}
+        description="Se dan de baja (borrado lógico). Sus conversaciones se conservan."
+        confirmLabel="Eliminar"
+        danger
       />
+
+      <SaveSegmentModal open={saveSegOpen} onClose={() => setSaveSegOpen(false)} definition={currentDefinition} onSaved={() => { setSaveSegOpen(false); loadMeta(); }} />
     </div>
   );
 }
@@ -563,6 +657,7 @@ function SideItem({
   count,
   active,
   onClick,
+  onDelete,
 }: {
   icon?: React.ReactNode;
   dot?: string;
@@ -570,19 +665,27 @@ function SideItem({
   count?: number;
   active?: boolean;
   onClick: () => void;
+  onDelete?: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
+    <div
       className={cn(
-        "mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13.5px] transition-colors",
+        "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13.5px] transition-colors",
         active ? "bg-brand-50 font-medium text-brand-700" : "text-slate-600 hover:bg-slate-100",
       )}
     >
-      {dot ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot }} /> : <span className="shrink-0 text-slate-400">{icon}</span>}
-      <span className="flex-1 truncate">{label}</span>
-      {count !== undefined && <span className={cn("shrink-0 text-xs", active ? "text-brand-500" : "text-slate-400")}>{count}</span>}
-    </button>
+      <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        {dot ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot }} /> : <span className="shrink-0 text-slate-400">{icon}</span>}
+        <span className="flex-1 truncate">{label}</span>
+      </button>
+      {onDelete ? (
+        <button onClick={onDelete} className="hidden shrink-0 text-slate-400 hover:text-red-500 group-hover:block" aria-label="Eliminar segmento" title="Eliminar segmento">
+          <X size={13} />
+        </button>
+      ) : (
+        count !== undefined && <span className={cn("shrink-0 text-xs", active ? "text-brand-500" : "text-slate-400")}>{count}</span>
+      )}
+    </div>
   );
 }
 
@@ -699,5 +802,77 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}
     </label>
+  );
+}
+
+function BulkMenu({ icon, label, options, empty }: { icon: React.ReactNode; label: string; options: { label: string; onClick: () => void }[]; empty?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-sm font-medium text-slate-600 hover:bg-slate-50">
+        {icon} {label} <ChevronDown size={13} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-20 mt-1 max-h-64 w-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
+            {options.length === 0 && <p className="px-2 py-1.5 text-sm text-slate-400">{empty ?? "Sin opciones"}</p>}
+            {options.map((o, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  o.onClick();
+                  setOpen(false);
+                }}
+                className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50"
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SaveSegmentModal({ open, onClose, definition, onSaved }: { open: boolean; onClose: () => void; definition: Record<string, unknown>; onSaved: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (open) setName("");
+  }, [open]);
+
+  async function save() {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await api("/contacts/segments", { method: "POST", body: JSON.stringify({ name: name.trim(), definition }) });
+      toast.push("Segmento guardado", "ok");
+      onSaved();
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo guardar", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Guardar segmento">
+      <p className="mb-3 text-sm text-slate-500">Se guardan los filtros actuales como una vista reutilizable en el panel lateral.</p>
+      <Field label="Nombre del segmento">
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="Ej.: Prospectos de anuncios" className={inputCls} autoFocus />
+      </Field>
+      <div className="mt-3 flex flex-wrap gap-1">
+        {Object.entries(definition).map(([k, v]) => (
+          <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{k}: {String(v)}</span>
+        ))}
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+        <Button onClick={save} disabled={saving || !name.trim()}>{saving ? "Guardando…" : "Guardar"}</Button>
+      </div>
+    </Modal>
   );
 }

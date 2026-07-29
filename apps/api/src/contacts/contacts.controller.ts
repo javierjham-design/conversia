@@ -65,6 +65,36 @@ const updateBody = z.object({
   customFields: z.record(z.string(), z.any()).optional(),
 });
 
+const bulkBody = z.object({
+  ids: z.array(z.string()).min(1).max(1000),
+  action: z.enum(["tag_add", "tag_remove", "stage", "assign", "block", "unblock", "delete"]),
+  tagId: z.string().optional(),
+  statusCode: z.string().optional(),
+  assignedUserId: z.string().nullable().optional(),
+  assignedTeamId: z.string().nullable().optional(),
+  activeAgentId: z.string().nullable().optional(),
+});
+
+// La definición del segmento es un subconjunto de los filtros de la lista.
+const segmentDefinition = z
+  .object({
+    q: z.string().optional(),
+    stage: z.string().optional(),
+    tag: z.string().optional(),
+    channel: z.string().optional(),
+    assignedUser: z.string().optional(),
+    assignedTeam: z.string().optional(),
+    assignedAgent: z.string().optional(),
+    country: z.string().optional(),
+    source: z.enum(["ad", "organic"]).optional(),
+    blocked: z.enum(["true", "false"]).optional(),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    createdWithinDays: z.number().int().positive().max(3650).optional(),
+  })
+  .strip();
+const segmentBody = z.object({ name: z.string().trim().min(1).max(80), definition: segmentDefinition });
+
 /** Traduce la definición de un segmento (o los query params) al `where` de Prisma. */
 function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
   const where: any = { deletedAt: null };
@@ -78,8 +108,8 @@ function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
     ];
   }
   if (f.country) where.country = f.country;
-  if (f.blocked === "true") where.blocked = true;
-  if (f.blocked === "false") where.blocked = false;
+  if (f.blocked === "true" || f.blocked === true) where.blocked = true;
+  if (f.blocked === "false" || f.blocked === false) where.blocked = false;
   if (f.source) where.acquisitionSource = f.source; // "ad" | "organic"
   if (f.stage) where.leads = { some: { status: { code: f.stage } } };
   if (f.channel) where.identities = { some: { channelType: f.channel } };
@@ -93,6 +123,10 @@ function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
       ...(f.dateFrom ? { gte: new Date(f.dateFrom) } : {}),
       ...(f.dateTo ? { lte: new Date(f.dateTo) } : {}),
     };
+  }
+  // Segmento dinámico "últimos N días" (relativo, no se queda obsoleto).
+  if (f.createdWithinDays && !f.dateFrom) {
+    where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(Date.now() - Number(f.createdWithinDays) * 86_400_000) };
   }
   if (tagContactIds) where.id = { in: tagContactIds };
   return where;
@@ -108,11 +142,15 @@ export class ContactsController {
     const ctx = requirePermission("contacts:read");
     const q = parse(listQuery, query);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      // Filtro por segmento: expande su definición sobre los mismos campos.
-      let filters: Record<string, any> = { ...q };
+      // Filtro por segmento como base + los filtros explícitos del query encima
+      // (solo los definidos, para no pisar la definición con undefined).
+      let filters: Record<string, any> = {};
       if (q.segmentId) {
         const seg = await tx.contactSegment.findUnique({ where: { id: q.segmentId } });
-        if (seg) filters = { ...(seg.definition as Record<string, any>), ...filters };
+        if (seg) filters = { ...(seg.definition as Record<string, any>) };
+      }
+      for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "blocked", "dateFrom", "dateTo"] as const) {
+        if (q[k] !== undefined) filters[k] = q[k];
       }
       // Filtro por etiqueta → resolver contactIds con esa etiqueta primero.
       let tagContactIds: string[] | undefined;
@@ -260,6 +298,139 @@ export class ContactsController {
         countries: countryRows.map((r) => r.country).filter(Boolean),
         segments: segments.map((s) => ({ id: s.id, name: s.name, isDefault: s.isDefault })),
       };
+    });
+  }
+
+  // --------------------------- Segmentos (filtros guardados) ---------------------------
+
+  /** Segmentos guardados del tenant (con su definición). Declarado ANTES de :id. */
+  @Get("segments")
+  listSegments() {
+    const ctx = requirePermission("contacts:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const segments = await tx.contactSegment.findMany({ orderBy: { name: "asc" } });
+      return segments.map((s) => ({ id: s.id, name: s.name, definition: s.definition, isDefault: s.isDefault }));
+    });
+  }
+
+  @Post("segments")
+  createSegment(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(segmentBody, body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const exists = await tx.contactSegment.findFirst({ where: { name: b.name }, select: { id: true } });
+      if (exists) throw new BadRequestException("Ya existe un segmento con ese nombre");
+      const seg = await tx.contactSegment.create({
+        data: { organizationId: ctx.organizationId, name: b.name, definition: b.definition as object, createdById: ctx.userId },
+        select: { id: true, name: true, definition: true },
+      });
+      return seg;
+    });
+  }
+
+  @Patch("segments/:id")
+  updateSegment(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(segmentBody.partial(), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const seg = await tx.contactSegment.findFirst({ where: { id }, select: { id: true } });
+      if (!seg) throw new NotFoundException("Segmento no encontrado");
+      await tx.contactSegment.update({
+        where: { id },
+        data: { ...(b.name ? { name: b.name } : {}), ...(b.definition ? { definition: b.definition as object } : {}) },
+      });
+      return { ok: true };
+    });
+  }
+
+  @Delete("segments/:id")
+  deleteSegment(@Param("id") id: string) {
+    const ctx = requirePermission("contacts:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.contactSegment.deleteMany({ where: { id } });
+      return { ok: true };
+    });
+  }
+
+  // --------------------------------- Acciones masivas ---------------------------------
+
+  /** Acción sobre múltiples contactos (etiquetar, etapa, asignar, bloquear, borrar). */
+  @Post("bulk")
+  bulk(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(bulkBody, body);
+    const orgId = ctx.organizationId;
+    return this.prisma.withTenant(orgId, async (tx) => {
+      // Solo IDs que realmente pertenecen al tenant (RLS ya aísla, pero validamos).
+      const valid = (await tx.contact.findMany({ where: { id: { in: b.ids }, deletedAt: null }, select: { id: true } })).map((c) => c.id);
+      if (valid.length === 0) return { affected: 0 };
+      let affected = 0;
+
+      switch (b.action) {
+        case "tag_add": {
+          if (!b.tagId) throw new BadRequestException("Falta tagId");
+          const tag = await tx.tag.findFirst({ where: { id: b.tagId }, select: { id: true } });
+          if (!tag) throw new BadRequestException("Etiqueta inválida");
+          const res = await tx.tagAssignment.createMany({
+            data: valid.map((entityId) => ({ organizationId: orgId, tagId: b.tagId!, entityType: "contact", entityId })),
+            skipDuplicates: true,
+          });
+          affected = res.count;
+          break;
+        }
+        case "tag_remove": {
+          if (!b.tagId) throw new BadRequestException("Falta tagId");
+          const res = await tx.tagAssignment.deleteMany({ where: { tagId: b.tagId, entityType: "contact", entityId: { in: valid } } });
+          affected = res.count;
+          break;
+        }
+        case "stage": {
+          if (!b.statusCode) throw new BadRequestException("Falta statusCode");
+          const status = await tx.leadStatus.findFirst({ where: { code: b.statusCode }, select: { id: true } });
+          if (!status) throw new BadRequestException("Etapa inválida");
+          for (const contactId of valid) {
+            const lead = await tx.lead.findFirst({ where: { contactId }, orderBy: { createdAt: "desc" }, select: { id: true } });
+            if (lead) await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
+            else await tx.lead.create({ data: { organizationId: orgId, contactId, statusId: status.id } });
+            affected++;
+          }
+          break;
+        }
+        case "assign": {
+          const data: Record<string, unknown> = {};
+          if (b.assignedUserId !== undefined) data.assignedUserId = b.assignedUserId;
+          if (b.assignedTeamId !== undefined) data.assignedTeamId = b.assignedTeamId;
+          if (b.activeAgentId !== undefined) data.activeAgentId = b.activeAgentId;
+          if (Object.keys(data).length === 0) throw new BadRequestException("Nada que asignar");
+          for (const contactId of valid) {
+            const conv = await tx.conversation.findFirst({ where: { contactId }, orderBy: { lastMessageAt: "desc" }, select: { id: true } });
+            if (conv) {
+              await tx.conversation.update({ where: { id: conv.id }, data });
+              affected++;
+            }
+          }
+          break;
+        }
+        case "block":
+        case "unblock": {
+          const res = await tx.contact.updateMany({
+            where: { id: { in: valid } },
+            data: b.action === "block" ? { blocked: true, doNotContact: true } : { blocked: false },
+          });
+          affected = res.count;
+          break;
+        }
+        case "delete": {
+          const res = await tx.contact.updateMany({ where: { id: { in: valid } }, data: { deletedAt: new Date() } });
+          affected = res.count;
+          break;
+        }
+      }
+
+      await tx.auditLog.create({
+        data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: `contact.bulk.${b.action}`, entityType: "contact", after: { count: affected, ids: valid.length } },
+      });
+      return { affected };
     });
   }
 
