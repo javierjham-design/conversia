@@ -58,7 +58,18 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
+      # Repo PRIVADO sin Advanced Security: la pestaña Code Scanning no está
+      # disponible y el upload falla el job. Se analiza igual y el SARIF queda
+      # como artefacto. Si algún día se habilita GHAS: quitar `upload: never`
+      # y el paso de artefacto.
       - uses: github/codeql-action/analyze@v3
+        with:
+          upload: never
+          output: codeql-results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: codeql-results
 
   # --- SBOM (CycloneDX) publicado como artefacto ---
   sbom:
