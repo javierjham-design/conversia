@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { ContactDrawer } from "./contact-drawer";
 
 // ------------------------------- Tipos -------------------------------
 
@@ -141,6 +142,8 @@ export default function ContactsPage() {
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(COLUMNS.filter((c) => c.def).map((c) => c.key)));
   const [colMenu, setColMenu] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const agentName = useMemo(() => new Map(meta?.agents.map((a) => [a.id, a.name]) ?? []), [meta]);
   const userName = useMemo(() => new Map(meta?.users.map((u) => [u.id, u.name]) ?? []), [meta]);
@@ -191,7 +194,7 @@ export default function ContactsPage() {
     return () => {
       alive = false;
     };
-  }, [query, toast]);
+  }, [query, refreshKey, toast]);
 
   // Al cambiar filtros primarios/secundarios, vuelve a la página 1 y limpia selección.
   function setPrimaryReset(p: Primary) {
@@ -413,8 +416,12 @@ export default function ContactsPage() {
                         ? userName.get(c.conversation.assignedUserId)
                         : null;
                     return (
-                      <tr key={c.id} className={cn("border-t border-slate-100 hover:bg-slate-50/70", selected.has(c.id) && "bg-brand-50/40")}>
-                        <td className="px-3 py-2.5">
+                      <tr
+                        key={c.id}
+                        onClick={() => setOpenId(c.id)}
+                        className={cn("cursor-pointer border-t border-slate-100 hover:bg-slate-50/70", selected.has(c.id) && "bg-brand-50/40")}
+                      >
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={selected.has(c.id)}
@@ -525,6 +532,15 @@ export default function ContactsPage() {
       </div>
 
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); loadMeta(); setPrimaryReset({ kind: "all" }); }} />
+
+      <ContactDrawer
+        id={openId}
+        onClose={() => setOpenId(null)}
+        onChanged={() => {
+          setRefreshKey((k) => k + 1);
+          loadMeta();
+        }}
+      />
     </div>
   );
 }

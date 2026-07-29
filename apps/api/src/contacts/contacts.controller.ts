@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requirePermission } from "../tenancy/permissions";
@@ -48,6 +49,21 @@ const createBody = z
     notes: z.string().trim().max(2000).optional(),
   })
   .refine((b) => b.firstName || b.lastName || b.phone || b.email, "Indica al menos nombre, teléfono o email");
+
+const updateBody = z.object({
+  firstName: z.string().trim().max(120).nullable().optional(),
+  lastName: z.string().trim().max(120).nullable().optional(),
+  email: z.string().trim().max(160).email("email inválido").nullable().optional().or(z.literal("")),
+  phone: z.string().trim().max(32).nullable().optional(),
+  documentId: z.string().trim().max(40).nullable().optional(),
+  birthDate: z.string().trim().nullable().optional(),
+  locale: z.string().trim().max(10).optional(),
+  timezone: z.string().trim().max(64).nullable().optional(),
+  country: z.string().trim().max(2).nullable().optional(),
+  consent: z.boolean().optional(),
+  doNotContact: z.boolean().optional(),
+  customFields: z.record(z.string(), z.any()).optional(),
+});
 
 /** Traduce la definición de un segmento (o los query params) al `where` de Prisma. */
 function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
@@ -244,6 +260,191 @@ export class ContactsController {
         countries: countryRows.map((r) => r.country).filter(Boolean),
         segments: segments.map((s) => ({ id: s.id, name: s.name, isDefault: s.isDefault })),
       };
+    });
+  }
+
+  /** Ficha completa del contacto: identidad, atribución, conversaciones,
+   *  ciclo de vida, campos personalizados, notas y actividad. */
+  @Get(":id")
+  detail(@Param("id") id: string) {
+    const ctx = requirePermission("contacts:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const c = await tx.contact.findFirst({
+        where: { id, deletedAt: null },
+        include: {
+          identities: { select: { channelType: true, externalId: true } },
+          conversations: {
+            orderBy: { lastMessageAt: "desc" },
+            take: 10,
+            select: { id: true, status: true, lastMessageAt: true, lastMessagePreview: true, unreadCount: true, activeAgentId: true, assignedUserId: true },
+          },
+          leads: { orderBy: { createdAt: "desc" }, take: 10, include: { status: { select: { code: true, name: true, color: true, category: true } } } },
+        },
+      });
+      if (!c) throw new NotFoundException("Contacto no encontrado");
+
+      // Etiquetas
+      const assigns = await tx.tagAssignment.findMany({ where: { entityType: "contact", entityId: id }, select: { tagId: true } });
+      const tags = assigns.length ? await tx.tag.findMany({ where: { id: { in: assigns.map((a) => a.tagId) } }, select: { id: true, name: true, color: true } }) : [];
+
+      // Campos personalizados (definición del tenant + valor de este contacto)
+      const [defs, values] = await Promise.all([
+        tx.customFieldDefinition.findMany({ where: { entity: "contact" }, orderBy: { createdAt: "asc" } }),
+        tx.customFieldValue.findMany({ where: { entityId: id } }),
+      ]);
+      const valueByDef = new Map(values.map((v) => [v.definitionId, v.value]));
+      const customFields = defs.map((d) => ({ id: d.id, key: d.key, label: d.label, type: d.type, options: d.options, required: d.required, value: valueByDef.get(d.id) ?? null }));
+
+      // Actividad (audit log) + nombres de actores
+      const activity = await tx.auditLog.findMany({ where: { entityType: "contact", entityId: id }, orderBy: { createdAt: "desc" }, take: 25 });
+      const actorIds = [...new Set(activity.map((a) => a.actorId).filter(Boolean) as string[])];
+      const actors = actorIds.length ? await tx.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } }) : [];
+      const actorName = new Map(actors.map((u) => [u.id, u.name]));
+
+      const attrs = (c.attributes as Record<string, any>) ?? {};
+      const notes = Array.isArray(attrs.notes) ? attrs.notes : [];
+
+      return {
+        id: c.id,
+        firstName: c.firstName,
+        lastName: c.lastName,
+        phone: c.phone,
+        email: c.email,
+        documentId: c.documentId,
+        birthDate: c.birthDate,
+        locale: c.locale,
+        timezone: c.timezone,
+        country: c.country,
+        consent: c.consent,
+        doNotContact: c.doNotContact,
+        blocked: c.blocked,
+        // Perfil de WhatsApp (solo lectura, separado del nombre real)
+        profileName: c.profileName,
+        // Bloque "Origen" (atribución, solo lectura)
+        origin: {
+          source: c.source,
+          createdVia: c.createdVia,
+          acquisitionSource: c.acquisitionSource,
+          adId: c.adId,
+          ctwaClid: c.ctwaClid,
+          campaignId: c.campaignId,
+          referral: (c.meta as Record<string, any>)?.referral ?? null,
+          firstContactAt: c.firstContactAt,
+          lastContactAt: c.lastContactAt,
+          createdAt: c.createdAt,
+        },
+        identities: c.identities,
+        conversations: c.conversations,
+        leads: c.leads.map((l) => ({ id: l.id, createdAt: l.createdAt, status: l.status })),
+        tags,
+        customFields,
+        notes,
+        activity: activity.map((a) => ({ id: a.id, action: a.action, actor: a.actorId ? actorName.get(a.actorId) ?? null : null, actorType: a.actorType, before: a.before, after: a.after, createdAt: a.createdAt })),
+      };
+    });
+  }
+
+  /** Edición de campos del contacto + valores de campos personalizados. */
+  @Patch(":id")
+  update(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(updateBody, body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const current = await tx.contact.findFirst({ where: { id, deletedAt: null } });
+      if (!current) throw new NotFoundException("Contacto no encontrado");
+
+      const data: Record<string, unknown> = {};
+      if (b.firstName !== undefined) data.firstName = b.firstName || null;
+      if (b.lastName !== undefined) data.lastName = b.lastName || null;
+      if (b.email !== undefined) data.email = b.email || null;
+      if (b.phone !== undefined) data.phone = normalizePhone(b.phone || undefined);
+      if (b.documentId !== undefined) data.documentId = b.documentId || null;
+      if (b.birthDate !== undefined) data.birthDate = b.birthDate ? new Date(b.birthDate) : null;
+      if (b.locale !== undefined) data.locale = b.locale || "es";
+      if (b.timezone !== undefined) data.timezone = b.timezone || null;
+      if (b.country !== undefined) data.country = b.country ? b.country.toUpperCase() : null;
+      if (b.consent !== undefined) data.consent = b.consent;
+      if (b.doNotContact !== undefined) data.doNotContact = b.doNotContact;
+
+      // Dedupe de teléfono al editar
+      if (typeof data.phone === "string" && data.phone && data.phone !== current.phone) {
+        const dup = await tx.contact.findFirst({ where: { phone: data.phone as string, deletedAt: null, id: { not: id } }, select: { id: true } });
+        if (dup) throw new BadRequestException("Ya existe otro contacto con ese teléfono");
+      }
+
+      if (Object.keys(data).length) await tx.contact.update({ where: { id }, data });
+
+      // Campos personalizados (solo definiciones válidas de entidad "contact")
+      if (b.customFields && Object.keys(b.customFields).length) {
+        const validDefs = new Set((await tx.customFieldDefinition.findMany({ where: { entity: "contact" }, select: { id: true } })).map((d) => d.id));
+        for (const [definitionId, value] of Object.entries(b.customFields)) {
+          if (!validDefs.has(definitionId)) continue;
+          await tx.customFieldValue.upsert({
+            where: { organizationId_definitionId_entityId: { organizationId: ctx.organizationId, definitionId, entityId: id } },
+            create: { organizationId: ctx.organizationId, definitionId, entityId: id, value: value as object },
+            update: { value: value as object },
+          });
+        }
+      }
+
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "contact.update", entityType: "contact", entityId: id, after: data as object },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Bloquear / desbloquear (bloquear implica no-contactar). */
+  @Post(":id/block")
+  block(@Param("id") id: string) {
+    return this.setBlocked(id, true);
+  }
+  @Post(":id/unblock")
+  unblock(@Param("id") id: string) {
+    return this.setBlocked(id, false);
+  }
+  private setBlocked(id: string, blocked: boolean) {
+    const ctx = requirePermission("contacts:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const current = await tx.contact.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (!current) throw new NotFoundException("Contacto no encontrado");
+      await tx.contact.update({ where: { id }, data: blocked ? { blocked: true, doNotContact: true } : { blocked: false } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: blocked ? "contact.block" : "contact.unblock", entityType: "contact", entityId: id },
+      });
+      return { ok: true, blocked };
+    });
+  }
+
+  /** Nota interna (se guarda en attributes.notes, sin tabla nueva). */
+  @Post(":id/notes")
+  addNote(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const { text } = parse(z.object({ text: z.string().trim().min(1).max(2000) }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const c = await tx.contact.findFirst({ where: { id, deletedAt: null }, select: { attributes: true } });
+      if (!c) throw new NotFoundException("Contacto no encontrado");
+      const author = await tx.user.findUnique({ where: { id: ctx.userId }, select: { name: true } });
+      const attrs = (c.attributes as Record<string, any>) ?? {};
+      const notes = Array.isArray(attrs.notes) ? attrs.notes : [];
+      const note = { id: randomUUID(), text, authorId: ctx.userId, authorName: author?.name ?? null, createdAt: new Date().toISOString() };
+      await tx.contact.update({ where: { id }, data: { attributes: { ...attrs, notes: [note, ...notes] } } });
+      return note;
+    });
+  }
+
+  /** Baja lógica del contacto. */
+  @Delete(":id")
+  remove(@Param("id") id: string) {
+    const ctx = requirePermission("contacts:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const current = await tx.contact.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (!current) throw new NotFoundException("Contacto no encontrado");
+      await tx.contact.update({ where: { id }, data: { deletedAt: new Date() } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "contact.delete", entityType: "contact", entityId: id },
+      });
+      return { ok: true };
     });
   }
 }
