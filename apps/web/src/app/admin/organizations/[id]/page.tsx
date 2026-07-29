@@ -176,6 +176,18 @@ export default function OrgDetailPage() {
               <option key={p.code} value={p.code}>{p.name}</option>
             ))}
           </select>
+          <label className="mt-3 block text-xs text-slate-500">
+            Proveedor de pago del tenant
+            <select
+              value={d.paymentProvider ?? ""}
+              onChange={(e) => void saveConfig({ paymentProvider: e.target.value || null })}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Automático (por moneda)</option>
+              <option value="flow">Flow (CLP)</option>
+              <option value="lemonsqueezy">Lemon Squeezy (USD)</option>
+            </select>
+          </label>
         </section>
 
         {/* Límites (token limiter + caps) */}

@@ -219,6 +219,16 @@ model DemoLead {
   @@map("demo_leads")
 }
 
+// Ajustes globales de plataforma (clave-valor). Los secretos (credenciales de
+// pasarelas) se guardan CIFRADOS (AES-256-GCM) y nunca se devuelven al frontend.
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
 model Plan {
   id        String   @id @default(cuid())
   code      String   @unique

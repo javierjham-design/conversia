@@ -200,22 +200,29 @@ export function verifyStripeSignature(rawBody: Buffer, sigHeader: string | undef
   }
 }
 
+/** Credenciales efectivas de las pasarelas (BD cifrada, con fallback a env). */
+export interface PaymentSettings {
+  flow?: { apiKey: string; secretKey: string; baseUrl: string };
+  lemonSqueezy?: { apiKey: string; storeId: string; webhookSecret: string };
+}
+
 /**
- * Selección de pasarela por moneda: CLP → Flow, resto → Stripe. Cae a Mock si
- * no hay credenciales de la pasarela correspondiente (dev sin romper).
+ * Selección de pasarela: si el tenant tiene un proveedor asignado (`preferred`),
+ * se usa ese; si no, por moneda (CLP → Flow, resto → Lemon Squeezy). Cae a Mock
+ * si no hay credenciales. Las credenciales vienen del gestor (BD) o de env.
  */
-export function createPaymentProvider(currency = "CLP"): PaymentProvider {
-  const env = getEnv();
+export function createPaymentProvider(settings: PaymentSettings, currency = "CLP", preferred?: string): PaymentProvider {
   const isClp = currency.toUpperCase() === "CLP";
-  const hasLs = !!(env.LEMONSQUEEZY_API_KEY && env.LEMONSQUEEZY_STORE_ID);
-  if (isClp && env.FLOW_API_KEY && env.FLOW_SECRET_KEY) {
-    return new FlowPaymentProvider(env.FLOW_API_KEY, env.FLOW_SECRET_KEY, env.FLOW_BASE_URL);
-  }
-  // USD/internacional → Lemon Squeezy (MoR) si está; si no, Stripe.
-  if (!isClp && hasLs) return new LemonSqueezyPaymentProvider(env.LEMONSQUEEZY_API_KEY, env.LEMONSQUEEZY_STORE_ID);
-  if (!isClp && env.STRIPE_SECRET_KEY) return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
-  // Respaldo: lo que haya configurado; si nada, mock.
-  if (hasLs) return new LemonSqueezyPaymentProvider(env.LEMONSQUEEZY_API_KEY, env.LEMONSQUEEZY_STORE_ID);
-  if (env.STRIPE_SECRET_KEY) return new StripePaymentProvider(env.STRIPE_SECRET_KEY);
+  const flow = () => new FlowPaymentProvider(settings.flow!.apiKey, settings.flow!.secretKey, settings.flow!.baseUrl);
+  const ls = () => new LemonSqueezyPaymentProvider(settings.lemonSqueezy!.apiKey, settings.lemonSqueezy!.storeId);
+  // 1) Preferencia explícita del tenant.
+  if (preferred === "flow" && settings.flow) return flow();
+  if (preferred === "lemonsqueezy" && settings.lemonSqueezy) return ls();
+  // 2) Por moneda.
+  if (isClp && settings.flow) return flow();
+  if (!isClp && settings.lemonSqueezy) return ls();
+  // 3) Lo que haya configurado.
+  if (settings.flow) return flow();
+  if (settings.lemonSqueezy) return ls();
   return new MockPaymentProvider();
 }

@@ -17,6 +17,7 @@ import { MODEL_PRICING, createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { AuthService } from "../auth/auth.service";
+import { PaymentSettingsService } from "../billing/payment-settings.service";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -32,6 +33,7 @@ export class PlatformController {
   constructor(
     private prisma: PrismaService,
     private auth: AuthService,
+    private paymentSettings: PaymentSettingsService,
   ) {}
 
   private audit(req: PlatformRequest, action: string, entityType: string, entityId: string, after?: object) {
@@ -158,6 +160,7 @@ export class PlatformController {
       limitsOverride: override,
       validUntil: typeof settings.validUntil === "string" ? settings.validUntil : null,
       aiKillSwitch: settings.aiKillSwitch === true,
+      paymentProvider: settings.paymentProvider ?? null,
       availablePlans: plans.map((p) => ({ code: p.code, name: p.name })),
       invoices,
       usage,
@@ -182,6 +185,7 @@ export class PlatformController {
         validUntil: z.string().nullable().optional(), // ISO date o null (sin vencimiento)
         aiKillSwitch: z.boolean().optional(),
         limits: z.record(z.coerce.number().int().min(0)).optional(), // override por-tenant; 0 = ilimitado
+        paymentProvider: z.enum(["flow", "lemonsqueezy"]).nullable().optional(), // proveedor de pago del tenant
       })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
@@ -193,6 +197,7 @@ export class PlatformController {
     }
     if (parsed.data.aiKillSwitch !== undefined) settings.aiKillSwitch = parsed.data.aiKillSwitch;
     if (parsed.data.limits !== undefined) settings.limits = parsed.data.limits;
+    if (parsed.data.paymentProvider !== undefined) settings.paymentProvider = parsed.data.paymentProvider || null;
     const data: any = { settings };
     if (parsed.data.name) data.name = parsed.data.name;
     if (parsed.data.country) data.country = parsed.data.country;
@@ -311,39 +316,46 @@ export class PlatformController {
 
   // --------------------------- Pagos (config) ---------------------------
 
-  /** Estado de conexión de los proveedores de pago/correo. NO devuelve secretos:
-   *  solo si está configurado + datos públicos (store id, webhook URL, env vars). */
+  /** Estado de las pasarelas (credenciales en BD cifrada o env). NO devuelve secretos. */
   @Get("billing/providers")
-  billingProviders() {
+  async billingProviders() {
     const env = getEnv();
+    const st = await this.paymentSettings.status();
     return {
-      lemonSqueezy: {
-        label: "Lemon Squeezy (USD / internacional)",
-        configured: !!(env.LEMONSQUEEZY_API_KEY && env.LEMONSQUEEZY_STORE_ID),
-        hasWebhookSecret: !!env.LEMONSQUEEZY_WEBHOOK_SECRET,
-        storeId: env.LEMONSQUEEZY_STORE_ID || null,
-        webhookUrl: `${env.API_URL}/billing/webhooks/lemonsqueezy`,
-        envVars: ["LEMONSQUEEZY_API_KEY", "LEMONSQUEEZY_STORE_ID", "LEMONSQUEEZY_WEBHOOK_SECRET"],
-      },
       flow: {
         label: "Flow (CLP / Chile)",
-        configured: !!(env.FLOW_API_KEY && env.FLOW_SECRET_KEY),
-        baseUrl: env.FLOW_BASE_URL,
+        configured: st.flow.configured,
+        source: st.flow.source,
+        baseUrl: st.flow.baseUrl,
         webhookUrl: `${env.API_URL}/billing/webhooks/flow`,
-        envVars: ["FLOW_API_KEY", "FLOW_SECRET_KEY", "FLOW_BASE_URL"],
       },
-      stripe: {
-        label: "Stripe (directo, opcional)",
-        configured: !!env.STRIPE_SECRET_KEY,
-        webhookUrl: `${env.API_URL}/billing/webhooks/stripe`,
-        envVars: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+      lemonSqueezy: {
+        label: "Lemon Squeezy (USD / internacional)",
+        configured: st.lemonSqueezy.configured,
+        source: st.lemonSqueezy.source,
+        storeId: st.lemonSqueezy.storeId,
+        hasWebhookSecret: st.lemonSqueezy.hasWebhookSecret,
+        webhookUrl: `${env.API_URL}/billing/webhooks/lemonsqueezy`,
       },
-      resend: {
-        label: "Resend (correos)",
-        configured: !!env.RESEND_API_KEY,
-        envVars: ["RESEND_API_KEY", "RESEND_FROM"],
-      },
+      resend: { label: "Resend (correos)", configured: !!env.RESEND_API_KEY, source: env.RESEND_API_KEY ? "env" : null, envVars: ["RESEND_API_KEY", "RESEND_FROM"] },
     };
+  }
+
+  /** Guarda credenciales de pasarela (se CIFRAN en BD; nunca se devuelven). */
+  @Post("billing/settings")
+  async saveBillingSettings(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        provider: z.enum(["flow", "lemonsqueezy"]),
+        flow: z.object({ apiKey: z.string().optional(), secretKey: z.string().optional(), baseUrl: z.string().optional() }).optional(),
+        lemonsqueezy: z.object({ apiKey: z.string().optional(), storeId: z.string().optional(), webhookSecret: z.string().optional() }).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    if (parsed.data.provider === "flow" && parsed.data.flow) await this.paymentSettings.saveFlow(parsed.data.flow);
+    if (parsed.data.provider === "lemonsqueezy" && parsed.data.lemonsqueezy) await this.paymentSettings.saveLemonSqueezy(parsed.data.lemonsqueezy);
+    await this.audit(req, "platform.billing.settings", "billing", parsed.data.provider);
+    return { ok: true };
   }
 
   // ------------------------------ Alertas -------------------------------

@@ -19,15 +19,6 @@ interface Org {
   id: string;
   name: string;
 }
-interface Provider {
-  label: string;
-  configured: boolean;
-  webhookUrl?: string;
-  storeId?: string | null;
-  hasWebhookSecret?: boolean;
-  baseUrl?: string;
-  envVars: string[];
-}
 
 const KIND: Record<string, StatusKind> = { PAID: "connected", OPEN: "beta", DRAFT: "disconnected", VOID: "disconnected", UNCOLLECTIBLE: "attention" };
 
@@ -35,14 +26,17 @@ export default function BillingPage() {
   const toast = useToast();
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [orgs, setOrgs] = useState<Org[]>([]);
-  const [providers, setProviders] = useState<Record<string, Provider> | null>(null);
+  const [providers, setProviders] = useState<any | null>(null);
   const [form, setForm] = useState({ organizationId: "", amount: 0, currency: "CLP", concept: "Suscripción TuBot" });
+  const [flowForm, setFlowForm] = useState({ apiKey: "", secretKey: "", baseUrl: "" });
+  const [lsForm, setLsForm] = useState({ apiKey: "", storeId: "", webhookSecret: "" });
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     const [inv, o, prov] = await Promise.all([
       padmin<Invoice[]>("/platform/invoices"),
       padmin<Org[]>("/platform/organizations"),
-      padmin<Record<string, Provider>>("/platform/billing/providers"),
+      padmin<any>("/platform/billing/providers"),
     ]);
     setInvoices(inv);
     setOrgs(o);
@@ -52,6 +46,25 @@ export default function BillingPage() {
     void load().catch((e) => toast.push((e as Error).message, "error"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  async function saveProvider(provider: "flow" | "lemonsqueezy") {
+    setSaving(true);
+    try {
+      const payload =
+        provider === "flow"
+          ? { provider, flow: { apiKey: flowForm.apiKey || undefined, secretKey: flowForm.secretKey || undefined, baseUrl: flowForm.baseUrl || undefined } }
+          : { provider, lemonsqueezy: { apiKey: lsForm.apiKey || undefined, storeId: lsForm.storeId || undefined, webhookSecret: lsForm.webhookSecret || undefined } };
+      await padmin("/platform/billing/settings", { method: "POST", body: JSON.stringify(payload) });
+      toast.push("Credenciales guardadas ✔", "ok");
+      setFlowForm({ apiKey: "", secretKey: "", baseUrl: "" });
+      setLsForm({ apiKey: "", storeId: "", webhookSecret: "" });
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function emit(e: React.FormEvent) {
     e.preventDefault();
@@ -70,41 +83,57 @@ export default function BillingPage() {
     await load();
   }
 
+  const badge = (configured: boolean, source: string | null) => (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${configured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+      {configured ? `configurado${source ? ` · ${source}` : ""}` : "falta configurar"}
+    </span>
+  );
+  const copyable = (url?: string) =>
+    url ? (
+      <div className="mt-2 flex items-center gap-2">
+        <code className="flex-1 truncate rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-600">{url}</code>
+        <button onClick={() => { void navigator.clipboard.writeText(url); toast.push("URL copiada", "ok"); }} className="shrink-0 text-xs text-brand-600 hover:underline">copiar</button>
+      </div>
+    ) : null;
+
   return (
     <div className="mx-auto max-w-[1300px] px-6 py-6 lg:px-8">
-      <PageHeader title="Facturación" description="Facturas de la plataforma hacia los tenants. Emisión manual y confirmación de pago." />
+      <PageHeader title="Facturación y pagos" description="Configura las pasarelas, emite facturas y confirma pagos." />
 
+      {/* Configuración de pasarelas */}
       {providers && (
-        <div className="mb-6 rounded-card border border-slate-200 bg-white p-4 shadow-card">
-          <h2 className="mb-1 font-semibold text-navy-900">Proveedores de pago</h2>
-          <p className="mb-3 text-xs text-slate-500">
-            Las llaves secretas se cargan como variables de entorno en <b>Railway</b> (nunca en esta pantalla, por seguridad). Aquí ves el estado de conexión y la URL de webhook para pegar en cada proveedor.
-          </p>
-          <div className="grid gap-3 md:grid-cols-2">
-            {Object.entries(providers).map(([key, p]) => (
-              <div key={key} className="rounded-lg border border-slate-200 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-navy-900">{p.label}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${p.configured ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                    {p.configured ? "configurado" : "falta configurar"}
-                  </span>
-                </div>
-                {p.storeId && <p className="mt-1 text-xs text-slate-500">Store ID: <span className="font-mono">{p.storeId}</span></p>}
-                {p.hasWebhookSecret === false && p.configured && <p className="mt-1 text-[11px] text-amber-700">Falta el secreto del webhook.</p>}
-                {p.webhookUrl && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <code className="flex-1 truncate rounded bg-slate-50 px-2 py-1 text-[11px] text-slate-600">{p.webhookUrl}</code>
-                    <button
-                      onClick={() => { void navigator.clipboard.writeText(p.webhookUrl!); toast.push("URL copiada", "ok"); }}
-                      className="shrink-0 text-xs text-brand-600 hover:underline"
-                    >
-                      copiar
-                    </button>
-                  </div>
-                )}
-                <p className="mt-2 text-[11px] text-slate-400">Variables en Railway: {p.envVars.join(", ")}</p>
-              </div>
-            ))}
+        <div className="mb-6 grid gap-4 lg:grid-cols-2">
+          {/* Flow */}
+          <div className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="font-semibold text-navy-900">{providers.flow.label}</h2>
+              {badge(providers.flow.configured, providers.flow.source)}
+            </div>
+            <p className="mb-3 text-xs text-slate-500">Pega tus credenciales de Flow. Se guardan cifradas; no se muestran de vuelta (deja vacío para no cambiar).</p>
+            <div className="space-y-2">
+              <input type="password" value={flowForm.apiKey} onChange={(e) => setFlowForm({ ...flowForm, apiKey: e.target.value })} placeholder="API Key" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+              <input type="password" value={flowForm.secretKey} onChange={(e) => setFlowForm({ ...flowForm, secretKey: e.target.value })} placeholder="Secret Key" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+              <input value={flowForm.baseUrl} onChange={(e) => setFlowForm({ ...flowForm, baseUrl: e.target.value })} placeholder={`Base URL (actual: ${providers.flow.baseUrl})`} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <p className="text-[11px] text-slate-400">Producción: https://www.flow.cl/api · Sandbox: https://sandbox.flow.cl/api</p>
+            </div>
+            {copyable(providers.flow.webhookUrl)}
+            <Button className="mt-3" disabled={saving} onClick={() => void saveProvider("flow")}>Guardar Flow</Button>
+          </div>
+
+          {/* Lemon Squeezy */}
+          <div className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
+            <div className="mb-1 flex items-center justify-between">
+              <h2 className="font-semibold text-navy-900">{providers.lemonSqueezy.label}</h2>
+              {badge(providers.lemonSqueezy.configured, providers.lemonSqueezy.source)}
+            </div>
+            <p className="mb-3 text-xs text-slate-500">Para USD/internacional (lo habilitas después). {providers.lemonSqueezy.storeId ? `Store: ${providers.lemonSqueezy.storeId}` : ""}</p>
+            <div className="space-y-2">
+              <input type="password" value={lsForm.apiKey} onChange={(e) => setLsForm({ ...lsForm, apiKey: e.target.value })} placeholder="API Key" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+              <input value={lsForm.storeId} onChange={(e) => setLsForm({ ...lsForm, storeId: e.target.value })} placeholder="Store ID" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <input type="password" value={lsForm.webhookSecret} onChange={(e) => setLsForm({ ...lsForm, webhookSecret: e.target.value })} placeholder="Webhook Signing Secret" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+            </div>
+            {copyable(providers.lemonSqueezy.webhookUrl)}
+            <Button className="mt-3" variant="secondary" disabled={saving} onClick={() => void saveProvider("lemonsqueezy")}>Guardar Lemon Squeezy</Button>
           </div>
         </div>
       )}

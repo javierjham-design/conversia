@@ -6,15 +6,19 @@ import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStripeSignature } from "./payment-provider";
+import { PaymentSettingsService } from "./payment-settings.service";
 
 /**
  * Facturación del TENANT (su propia suscripción). Vista del plan actual, uso
  * vs. límites, facturas y checkout para cambiar de plan. Todo tenant-scoped
- * (withTenant / RLS). El checkout usa la pasarela configurada (mock en dev).
+ * (withTenant / RLS). Las credenciales de pasarela salen del gestor (BD/env).
  */
 @Controller("billing")
 export class BillingController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private paymentSettings: PaymentSettingsService,
+  ) {}
 
   @Get("me")
   overview() {
@@ -80,7 +84,9 @@ export class BillingController {
     const applied = await this.applyCoupon(parsed.data.couponCode, listAmount, currency);
     const amount = applied.amount;
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
-    const provider = createPaymentProvider(currency); // CLP→Flow, resto→Stripe
+    const settings = await this.paymentSettings.get();
+    const preferred = (org?.settings as any)?.paymentProvider as string | undefined; // proveedor asignado al tenant
+    const provider = createPaymentProvider(settings, currency, preferred);
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: plan.code,
@@ -178,14 +184,14 @@ export class BillingController {
   /** Webhook de Flow: consulta el estado firmado (getStatus) y activa si está pagado. */
   @Post("webhooks/flow")
   async flowWebhook(@Body() body: any) {
-    const env = getEnv();
     const token = body?.token;
-    if (!token || !env.FLOW_API_KEY || !env.FLOW_SECRET_KEY) {
+    const settings = await this.paymentSettings.get();
+    if (!token || !settings.flow) {
       throw new BadRequestException("Webhook de Flow inválido o no configurado");
     }
-    const params: Record<string, string> = { apiKey: env.FLOW_API_KEY, token };
-    params.s = flowSign(params, env.FLOW_SECRET_KEY);
-    const res = await fetch(`${env.FLOW_BASE_URL}/payment/getStatus?${new URLSearchParams(params).toString()}`);
+    const params: Record<string, string> = { apiKey: settings.flow.apiKey, token };
+    params.s = flowSign(params, settings.flow.secretKey);
+    const res = await fetch(`${settings.flow.baseUrl}/payment/getStatus?${new URLSearchParams(params).toString()}`);
     const status: any = await res.json().catch(() => ({}));
     // status.status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
     if (status?.status === 2 && status?.optional) {
@@ -209,11 +215,12 @@ export class BillingController {
   /** Webhook de Lemon Squeezy (MoR). Firma X-Signature (HMAC del raw body). */
   @Post("webhooks/lemonsqueezy")
   async lemonSqueezyWebhook(@Req() req: Request & { rawBody?: Buffer }) {
-    const env = getEnv();
-    if (!env.LEMONSQUEEZY_WEBHOOK_SECRET) throw new BadRequestException("Webhook de Lemon Squeezy no configurado");
+    const settings = await this.paymentSettings.get();
+    const secret = settings.lemonSqueezy?.webhookSecret;
+    if (!secret) throw new BadRequestException("Webhook de Lemon Squeezy no configurado");
     const sig = req.headers["x-signature"] as string | undefined;
     const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), "utf-8");
-    if (!verifyLemonSqueezySignature(raw, sig, env.LEMONSQUEEZY_WEBHOOK_SECRET)) {
+    if (!verifyLemonSqueezySignature(raw, sig, secret)) {
       throw new UnauthorizedException("Firma de Lemon Squeezy inválida");
     }
     const event: any = JSON.parse(raw.toString("utf8"));

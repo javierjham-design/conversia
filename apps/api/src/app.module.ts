@@ -12,6 +12,7 @@ import { OrganizationsController } from "./organizations/organizations.controlle
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
 import { BillingController } from "./billing/billing.controller";
+import { PaymentSettingsService } from "./billing/payment-settings.service";
 import { RateLimitService } from "./common/rate-limit";
 import { RateLimitMiddleware } from "./common/rate-limit.middleware";
 import { PlatformAuthController } from "./platform/platform-auth.controller";
@@ -44,7 +45,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     PlatformAuthController,
     PlatformController,
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
