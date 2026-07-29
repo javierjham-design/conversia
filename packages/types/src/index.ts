@@ -372,6 +372,7 @@ export const QUEUE_NAMES = {
   events: "platform-events",
   webhooks: "webhook-deliveries",
   capi: "capi-events",
+  imports: "contact-imports",
 } as const;
 
 /** Eventos públicos que Conversia emite hacia webhooks salientes y CAPI. */
@@ -479,6 +480,39 @@ export interface OutboundJob {
 }
 
 export interface EventJob extends PlatformEvent {}
+
+/** Fila de import CSV de contactos (ya mapeada a campos destino). */
+export interface ContactImportRow {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  country?: string;
+  locale?: string;
+  /** etiquetas separadas por coma */
+  tags?: string;
+}
+
+/** Import CSV en 2.º plano: la API valida y encola; el worker procesa por lotes. */
+export interface ContactImportJob {
+  organizationId: string;
+  /** usuario que inició el import (para el audit log) */
+  userId: string;
+  rows: ContactImportRow[];
+  updateExisting: boolean;
+}
+
+/** Progreso/resultado del import (job.progress / job.returnvalue). */
+export interface ContactImportProgress {
+  processed: number;
+  total: number;
+}
+export interface ContactImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { row: number; reason: string }[];
+}
 
 // ============================================================
 // Roles/permisos por defecto

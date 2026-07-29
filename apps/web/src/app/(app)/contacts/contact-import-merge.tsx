@@ -27,6 +27,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
   const [mapping, setMapping] = useState<Record<number, string>>({});
   const [updateExisting, setUpdateExisting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
       setParsed(null);
       setMapping({});
       setUpdateExisting(false);
+      setProgress(null);
       setResult(null);
     }
   }, [open]);
@@ -55,6 +57,8 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
   const mappedFields = useMemo(() => new Set(Object.values(mapping).filter(Boolean)), [mapping]);
   const canImport = parsed && (mappedFields.has("phone") || mappedFields.has("email") || mappedFields.has("firstName"));
 
+  // El import corre como job en 2.º plano: encolamos y hacemos polling del
+  // estado hasta que el worker termina (o falla).
   async function doImport() {
     if (!parsed) return;
     setBusy(true);
@@ -66,13 +70,27 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
         });
         return obj;
       });
-      const res = await api<typeof result>("/contacts/import", { method: "POST", body: JSON.stringify({ rows, updateExisting }) });
-      setResult(res);
-      onDone();
+      const queued = await api<{ jobId: string; total: number }>("/contacts/import", { method: "POST", body: JSON.stringify({ rows, updateExisting }) });
+      setProgress({ processed: 0, total: queued.total });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const st = await api<{ state: string; progress: { processed: number; total: number }; result: typeof result; error: string | null }>(`/contacts/import/${queued.jobId}`);
+        if (st.state === "completed" && st.result) {
+          setResult(st.result);
+          onDone();
+          break;
+        }
+        if (st.state === "failed") {
+          toast.push(st.error ?? "El import falló", "error");
+          break;
+        }
+        setProgress(st.progress ?? { processed: 0, total: queued.total });
+      }
     } catch (e: any) {
       toast.push(e.message ?? "Error al importar", "error");
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -132,8 +150,16 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
             Actualizar contactos existentes (mismo teléfono) rellenando campos vacíos
           </label>
           {!canImport && <p className="text-xs text-amber-600">Mapea al menos Teléfono, Email o Nombre para poder importar.</p>}
+          {progress && (
+            <div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${Math.round((progress.processed / Math.max(progress.total, 1)) * 100)}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Procesando {progress.processed} de {progress.total}…</p>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setParsed(null)}>Volver</Button>
+            <Button variant="secondary" onClick={() => setParsed(null)} disabled={busy}>Volver</Button>
             <Button onClick={doImport} disabled={busy || !canImport}><Upload size={15} /> {busy ? "Importando…" : `Importar ${parsed.rows.length}`}</Button>
           </div>
         </div>

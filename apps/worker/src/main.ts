@@ -6,12 +6,14 @@ import {
   QUEUE_NAMES,
   TRIGGER_TYPES,
   type CapiJob,
+  type ContactImportJob,
   type EventJob,
   type InboundJob,
   type OutboundJob,
   type WebhookDeliveryJob,
 } from "@conversia/types";
 import { processCapiJob } from "./capi";
+import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
@@ -46,6 +48,12 @@ async function main() {
     async (job) => processCapiJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Imports CSV: concurrencia 1 para no saturar la BD con lotes paralelos.
+  const importsWorker = new Worker<ContactImportJob>(
+    QUEUE_NAMES.imports,
+    async (job) => processContactImport(job),
+    { connection, concurrency: 1 },
+  );
   // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
   // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
   // workflow (conversation.closed → conversation_closed), inicia los flujos.
@@ -72,7 +80,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -91,6 +99,7 @@ async function main() {
       webhookWorker.close(),
       capiWorker.close(),
       eventsWorker.close(),
+      importsWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();
