@@ -65,6 +65,28 @@ Actualizado 2026-07-26. Marco NIST (Preparación → Detección → Análisis �
 2. Recuperación desde backups de Railway (procedimiento de restauración — pendiente de prueba, roadmap 30d).
 3. Postmortem y refuerzo de inmutabilidad de backups.
 
+## Política de solicitudes de autoridades públicas
+
+Adoptada 2026-07-30. Aplica a cualquier solicitud de una autoridad pública (nacional o extranjera,
+incluidas solicitudes de seguridad nacional) de acceso a datos personales de usuarios o de la
+plataforma (incluye "Platform Data" de Meta). A la fecha de adopción, la plataforma NUNCA ha
+recibido una solicitud de este tipo.
+
+1. **Revisión de legalidad (obligatoria)**: toda solicitud se revisa antes de responder — autoridad
+   emisora, base legal citada, alcance y jurisdicción. Sin base legal válida no se entrega nada.
+   Se consulta asesoría legal externa antes de responder cualquier solicitud.
+2. **Recusación de solicitudes ilícitas**: si la solicitud parece carecer de base legal, ser
+   desproporcionada o defectuosa, se objeta/recusa por las vías disponibles (respuesta formal a la
+   autoridad, impugnación judicial con asesoría legal) antes de entregar dato alguno.
+3. **Minimización de datos**: si tras la revisión corresponde responder, se divulga únicamente la
+   información mínima estrictamente exigida por la solicitud — jamás volcados completos ni datos de
+   tenants/usuarios no comprendidos en ella.
+4. **Documentación**: cada solicitud se registra por escrito — solicitud recibida, autoridad y
+   fundamentos legales invocados, análisis interno, respuesta entregada (o recusación) y datos
+   divulgados, con fecha y responsable. El registro se conserva de forma permanente.
+5. **Notificación al afectado**: cuando la ley lo permita, se notifica al tenant/usuario afectado
+   antes de divulgar sus datos, dándole oportunidad de oponerse.
+
 ## Post-incidente
 
 - Postmortem sin culpas: qué pasó, impacto, causa raíz, detección, tiempo de respuesta, acciones.
