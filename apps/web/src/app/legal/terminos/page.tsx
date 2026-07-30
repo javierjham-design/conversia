@@ -8,7 +8,7 @@ export default function TerminosPage() {
 
       <p>
         Estos términos regulan el uso de <strong>TuBot</strong> (“la Plataforma”), un servicio de atención
-        conversacional multi-tenant con WhatsApp Business y agentes de IA, operado por Servicios DigitalDent SpA (Chile). Al
+        conversacional multi-tenant con WhatsApp Business y agentes de IA, operado por Servicios Digital-Dent SpA, RUT 77.911.025-7 (Chile). Al
         crear una cuenta o usar el servicio, la empresa cliente (“Tenant”) acepta estos términos.
       </p>
 
@@ -78,7 +78,8 @@ export default function TerminosPage() {
 
       <h2>11. Contacto</h2>
       <p>
-        Servicios DigitalDent SpA · <a href="mailto:soporte@tubot.cl">soporte@tubot.cl</a>
+        Servicios Digital-Dent SpA · RUT 77.911.025-7 · Manuel Montt 820 of. 21, Temuco, Chile ·{" "}
+        <a href="mailto:soporte@tubot.cl">soporte@tubot.cl</a>
       </p>
     </>
   );

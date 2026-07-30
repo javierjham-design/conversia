@@ -41,7 +41,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
         </article>
       </main>
       <footer className="mx-auto max-w-3xl px-6 pb-12 text-xs text-slate-400">
-        © {new Date().getFullYear()} Servicios DigitalDent SpA · TuBot.cl — Atención conversacional multi-tenant
+        © {new Date().getFullYear()} Servicios Digital-Dent SpA · TuBot.cl — Atención conversacional multi-tenant
       </footer>
     </div>
   );
