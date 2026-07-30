@@ -9,8 +9,8 @@ export default function PrivacidadPage() {
       <p>
         Esta política describe cómo <strong>TuBot</strong> (“la Plataforma”, “nosotros”) trata los datos
         personales al prestar un servicio de atención conversacional multi-tenant que integra WhatsApp Business
-        y agentes de inteligencia artificial. TuBot es operada por Servicios DigitalDent SpA, con
-        domicilio en Manuel Montt 820 of. 21, Temuco (Chile). Para consultas de privacidad: {""}
+        y agentes de inteligencia artificial. TuBot es operada por Servicios Digital-Dent SpA (RUT 77.911.025-7), con
+        domicilio en Manuel Montt 820 of. 21, Temuco, Región de La Araucanía (Chile). Para consultas de privacidad: {""}
         <a href="mailto:privacidad@tubot.cl">privacidad@tubot.cl</a>.
       </p>
 
@@ -109,7 +109,7 @@ export default function PrivacidadPage() {
 
       <h2>11. Contacto</h2>
       <p>
-        Servicios DigitalDent SpA · Manuel Montt 820 of. 21, Temuco, Chile ·{" "}
+        Servicios Digital-Dent SpA · RUT 77.911.025-7 · Manuel Montt 820 of. 21, Temuco, Chile ·{" "}
         <a href="mailto:privacidad@tubot.cl">privacidad@tubot.cl</a>
       </p>
     </>

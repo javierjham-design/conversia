@@ -229,7 +229,7 @@ export default async function LandingPage() {
             <Link href="/legal/eliminacion-datos" className="hover:text-white">Eliminación de datos</Link>
             <a href="mailto:hola@tubot.cl" className="hover:text-white">Contacto</a>
           </nav>
-          <span className="text-xs text-slate-400">© {new Date().getFullYear()} Servicios DigitalDent SpA</span>
+          <span className="text-xs text-slate-400">© {new Date().getFullYear()} Servicios Digital-Dent SpA</span>
         </div>
       </footer>
     </div>
