@@ -14,6 +14,7 @@ import { getEnv } from "@conversia/config";
 import { QUEUE_NAMES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
+import { encryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -207,18 +208,45 @@ export class MetaController {
     });
   }
 
-  /** Registra una conexión manual (los ids/token ya cargados vía Canales). */
+  /** Registra una conexión manual (los ids/token ya cargados vía Canales).
+   *  `accessToken` (opcional) se cifra y queda como credencial PROPIA de la
+   *  conexión: la usan Conversions API y Lead Ads en vez del token global —
+   *  necesario cuando el global no tiene esos permisos (p. ej.
+   *  whatsapp_business_manage_events). Reenviar con token = rotarlo. */
   @Post("manual-connect")
   manualConnect(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
     const input = parse(
-      z.object({ businessId: z.string().optional(), businessName: z.string().optional() }),
+      z.object({
+        businessId: z.string().optional(),
+        businessName: z.string().optional(),
+        accessToken: z.string().trim().min(10).optional(),
+      }),
       body ?? {},
     );
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      let credentialId: string | undefined;
+      if (input.accessToken) {
+        const credential = await tx.integrationCredential.create({
+          data: {
+            organizationId: ctx.organizationId,
+            provider: "meta",
+            label: "Token conexión manual Meta",
+            ciphertext: encryptSecret(input.accessToken),
+          },
+        });
+        credentialId = credential.id;
+      }
       const connection = await tx.metaBusinessConnection.upsert({
         where: { organizationId: ctx.organizationId },
-        update: { status: "CONNECTED", mode: "MANUAL", businessId: input.businessId, businessName: input.businessName, lastError: null },
+        update: {
+          status: "CONNECTED",
+          mode: "MANUAL",
+          businessId: input.businessId,
+          businessName: input.businessName,
+          lastError: null,
+          ...(credentialId ? { credentialId } : {}),
+        },
         create: {
           organizationId: ctx.organizationId,
           status: "CONNECTED",
@@ -226,6 +254,7 @@ export class MetaController {
           businessId: input.businessId,
           businessName: input.businessName ?? "Conexión manual",
           connectedById: ctx.userId,
+          ...(credentialId ? { credentialId } : {}),
         },
       });
       // Deriva activos desde los números ya conectados en Canales

@@ -59,6 +59,7 @@ export function MetaWizard({
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [testLog, setTestLog] = useState<string[]>([]);
+  const [manualToken, setManualToken] = useState("");
   const connected = data.connection?.status === "CONNECTED";
 
   async function run(label: string, fn: () => Promise<{ detail?: string } | void>) {
@@ -127,6 +128,24 @@ export function MetaWizard({
             <p className="mt-1 text-xs text-amber-700">{data.embeddedSignup.pendingReason}</p>
           </div>
 
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">
+              Token de acceso propio de la conexión (opcional — recomendado para Conversions API / Lead Ads)
+            </span>
+            <input
+              type="password"
+              value={manualToken}
+              onChange={(e) => setManualToken(e.target.value)}
+              placeholder="EAAG… — vacío = usar el token de la plataforma"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+            />
+            <span className="mt-1 block text-[10px] text-slate-400">
+              Se guarda cifrado (AES-256) y solo lo usan las integraciones de esta conexión. Para enviar eventos de
+              conversión el token debe incluir el permiso <span className="font-mono">whatsapp_business_manage_events</span>.
+              Volver a conectar con un token nuevo lo rota.
+            </span>
+          </label>
+
           <div className="flex flex-wrap gap-2">
             <Button disabled title="Disponible cuando Meta apruebe la app (META_APP_ID + META_CONFIG_ID)">
               Continuar con Meta (oficial)
@@ -136,7 +155,11 @@ export function MetaWizard({
               disabled={busy}
               onClick={() =>
                 void run("Conexión manual registrada", async () => {
-                  await api("/integrations/meta/manual-connect", { method: "POST", body: JSON.stringify({}) });
+                  await api("/integrations/meta/manual-connect", {
+                    method: "POST",
+                    body: JSON.stringify(manualToken.trim() ? { accessToken: manualToken.trim() } : {}),
+                  });
+                  setManualToken("");
                   onChanged();
                   setStep(1);
                 })
