@@ -19,6 +19,7 @@ import { processInbound } from "./inbound";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
+import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
 
@@ -92,6 +93,7 @@ async function main() {
   }
 
   const stopScheduler = startScheduler();
+  const stopTemplateSync = startTemplateSync();
 
   console.log(
     `✔ Worker Conversia activo — colas: ${QUEUE_NAMES.inbound}, ${QUEUE_NAMES.outbound} | IA: ${env.AI_PROVIDER} | WhatsApp: ${env.WHATSAPP_PROVIDER}`,
@@ -100,6 +102,7 @@ async function main() {
   const shutdown = async () => {
     console.log("Cerrando worker…");
     stopScheduler();
+    stopTemplateSync();
     await Promise.all([
       inboundWorker.close(),
       outboundWorker.close(),

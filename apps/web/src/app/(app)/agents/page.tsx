@@ -34,12 +34,17 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const [hasWhatsapp, setHasWhatsapp] = useState<boolean | null>(null);
+
   const load = useCallback(async () => {
     setAgents(await api<AgentRow[]>("/agents"));
   }, []);
 
   useEffect(() => {
     void load();
+    void api<{ type: string; status: string }[]>("/channels")
+      .then((ch) => setHasWhatsapp(ch.some((c) => c.type === "WHATSAPP_CLOUD" && c.status !== "inactive")))
+      .catch(() => setHasWhatsapp(null));
   }, [load]);
 
   async function createAgent(e: React.FormEvent) {
@@ -60,6 +65,16 @@ export default function AgentsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
+      {hasWhatsapp === false && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
+          <p className="text-sm text-cyan-900">
+            Tus agentes aún no tienen canal: <b>conecta WhatsApp</b> para que respondan conversaciones reales.
+          </p>
+          <a href="/channels" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">
+            Conectar WhatsApp
+          </a>
+        </div>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Agentes de IA</h1>

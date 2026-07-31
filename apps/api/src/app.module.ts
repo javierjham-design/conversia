@@ -7,8 +7,11 @@ import { WhatsappController } from "./channels/whatsapp.controller";
 import { ContactsController } from "./contacts/contacts.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { HealthController } from "./health.controller";
+import { DevelopersController } from "./integrations/developers.controller";
+import { InboundHookController } from "./integrations/inbound-hook.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
 import { MetaController } from "./integrations/meta.controller";
+import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
@@ -39,6 +42,9 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     UsersController,
     IntegrationsController,
     MetaController,
+    DevelopersController,
+    InboundHookController,
+    PublicApiController, // API pública v1 (auth por API key del tenant)
     WorkflowsController,
     ReportsController,
     BillingController,

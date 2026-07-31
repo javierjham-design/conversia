@@ -38,6 +38,8 @@ export interface EngineDeps {
   addNote(ctx: RunCtx, text: string): Promise<void>;
   /** Encola un evento de Conversions API (Meta) con el ctwa_clid del contacto. */
   sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
+  /** Envía una plantilla HSM aprobada (funciona fuera de la ventana de 24 h). */
+  sendTemplate(ctx: RunCtx, config: Record<string, unknown>): Promise<void>;
   /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
    *  ramifican de inmediato; "pending" (multi-turno) deja al agente
    *  conversando y el run espera: respuestas del contacto lo reanudan con la
@@ -241,9 +243,11 @@ async function executeNode(
     case "call_api":
       await deps.callApi(ctx, cfg);
       return {};
+    case "send_template":
+      await deps.sendTemplate(ctx, cfg);
+      return {};
     case "send_tiktok_event":
     case "google_sheets_append":
-    case "send_template":
       // "Próximamente": sin integración aún. No-op registrado (no se finge).
       return {};
     case "wait":

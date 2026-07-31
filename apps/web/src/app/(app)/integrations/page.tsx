@@ -211,6 +211,9 @@ export default function IntegrationsPage() {
           description="Conecta Meta, tu agenda clínica y tus sistemas. Todo con credenciales cifradas por organización."
           actions={
             <>
+              <Button variant="secondary" onClick={() => (window.location.href = "/integrations/developers")}>
+                {"</>"} Desarrolladores
+              </Button>
               <Button variant="secondary" onClick={() => setActivityOpen(true)}>
                 <Activity size={15} /> Actividad
               </Button>

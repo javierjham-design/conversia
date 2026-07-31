@@ -8,20 +8,22 @@ const MAX_BYTES = 24 * 1024 * 1024; // límite de Whisper (25MB) con margen
  * la transcribe con OpenAI. Devuelve el texto o null si no se pudo (sin llaves,
  * error de red, archivo muy grande…) — el llamador degrada a "[audio]".
  */
-export async function transcribeWhatsappAudio(mediaId: string): Promise<string | null> {
+export async function transcribeWhatsappAudio(mediaId: string, accessToken?: string | null): Promise<string | null> {
   const env = getEnv();
-  if (!env.OPENAI_API_KEY || !env.META_ACCESS_TOKEN) return null;
+  // El media pertenece a la WABA receptora → su token; fallback al global.
+  const token = accessToken || env.META_ACCESS_TOKEN;
+  if (!env.OPENAI_API_KEY || !token) return null;
   try {
     // 1) Resolver la URL temporal del media
     const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, {
-      headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` },
+      headers: { authorization: `Bearer ${token}` },
     });
     if (!metaRes.ok) return null;
     const meta: any = await metaRes.json();
     if (!meta?.url) return null;
 
     // 2) Descargar los bytes (requiere el mismo Bearer)
-    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` } });
+    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${token}` } });
     if (!audioRes.ok) return null;
     const buf = Buffer.from(await audioRes.arrayBuffer());
     if (buf.length === 0 || buf.length > MAX_BYTES) return null;

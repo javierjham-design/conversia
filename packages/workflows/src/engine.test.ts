@@ -21,6 +21,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     openConversation: async (c) => { (c as any).conversationId = "conv-new"; calls.push("open"); },
     addNote: async (_c, text) => void calls.push(`note:${text}`),
     sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
+    sendTemplate: async (_c, config) => void calls.push(`template:${(config as any).templateId ?? ""}`),
     runAgentWithObjective: async (_c, _nodeId, cfg) => { calls.push(`objective:${(cfg as any).objective}`); return "met"; },
     callApi: async (c, config) => { (c as any).variables.__http_ok = "true"; calls.push(`http:${(config as any).url ?? ""}`); },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),

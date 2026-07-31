@@ -3,6 +3,7 @@ import type { InboundJob } from "@conversia/types";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { runAgentTurn } from "./agent-turn";
 import { transcribeWhatsappAudio } from "./audio";
+import { resolveChannelAuth } from "./channel-auth";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
@@ -133,8 +134,15 @@ export async function processInbound(job: InboundJob): Promise<void> {
     let transcribed = false;
     if (!text && (msg.type === "audio" || msg.type === "voice")) {
       const mediaId = (msg.payload as any)?.audio?.id ?? (msg.payload as any)?.voice?.id;
-      if (mediaId) {
-        const t = await transcribeWhatsappAudio(String(mediaId));
+      // Switch por tenant (org.settings.transcription.enabled; activada por defecto).
+      const transcriptionOn = await withTenant(organizationId, async (tx) => {
+        const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+        return ((org?.settings as any)?.transcription?.enabled ?? true) !== false;
+      });
+      if (mediaId && transcriptionOn) {
+        // El media se descarga con el token de la WABA receptora (por-canal).
+        const auth = await resolveChannelAuth(organizationId, { phoneNumberId: msg.phoneNumberId });
+        const t = await transcribeWhatsappAudio(String(mediaId), auth.accessToken);
         if (t) {
           text = t;
           transcribed = true;

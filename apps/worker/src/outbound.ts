@@ -1,6 +1,8 @@
 import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
+import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
+import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 
 /** Envía mensajes salientes creados desde el panel (autor humano). */
 export async function processOutbound(job: OutboundJob): Promise<void> {
@@ -14,29 +16,49 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       include: { contact: true },
     });
     if (!conversation?.contact.phone) return null;
-
-    let phoneNumberId: string | null = null;
-    if (conversation.channelConnectionId) {
-      const number = await tx.whatsappPhoneNumber.findFirst({
-        where: { channelConnectionId: conversation.channelConnectionId },
-      });
-      phoneNumberId = number?.phoneNumberId ?? null;
-      if (!phoneNumberId) {
-        const org = await tx.organization.findUnique({ where: { id: organizationId } });
-        phoneNumberId = `mock:${org?.slug ?? organizationId}`;
-      }
-    }
-    return { message, phone: conversation.contact.phone, phoneNumberId: phoneNumberId ?? "mock:unknown" };
+    return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
   });
 
   if (!data) return;
+  const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId });
+
+  // Plantilla HSM (fuera de la ventana de 24 h): parámetros resueltos con los
+  // datos reales del contacto según el mapeo posición→campo de la plantilla.
+  let outbound: import("@conversia/types").OutboundMessage;
+  if (data.message.type === "TEMPLATE") {
+    const payload = (data.message.payload as Record<string, any>) ?? {};
+    const template = await withTenant(organizationId, (tx) =>
+      tx.whatsappTemplate.findUnique({ where: { id: String(payload.templateId ?? "") } }),
+    );
+    if (!template) {
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: "Plantilla no encontrada" } }),
+      );
+      return;
+    }
+    const body = (template.body as Record<string, any>) ?? {};
+    const fields: string[] = Array.isArray(body.variableFields) ? body.variableFields : [];
+    const conversation = await withTenant(organizationId, (tx) =>
+      tx.conversation.findUnique({ where: { id: data.message.conversationId }, select: { contactId: true } }),
+    );
+    const params = await resolveTemplateParams(organizationId, conversation?.contactId ?? null, fields);
+    const rendered = renderTemplateBody(body.components ?? [], params);
+    await withTenant(organizationId, (tx) =>
+      tx.message.update({ where: { id: data.message.id }, data: { body: rendered || data.message.body } }),
+    );
+    outbound = {
+      to: data.phone,
+      type: "template",
+      templateName: template.name,
+      templateLanguage: template.language,
+      templateParams: params,
+    };
+  } else {
+    outbound = { to: data.phone, type: "text", text: data.message.body ?? "" };
+  }
 
   try {
-    const sent = await getChannelProvider().send(data.phoneNumberId, {
-      to: data.phone,
-      type: "text",
-      text: data.message.body ?? "",
-    });
+    const sent = await getChannelProvider().send(auth.phoneNumberId, outbound, { accessToken: auth.accessToken });
     await withTenant(organizationId, (tx) =>
       tx.message.update({
         where: { id: data.message.id },
@@ -50,6 +72,12 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
         data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
       }),
     );
+    // Error de auth: marcar el canal (banner Reautorizar) y NO reintentar en
+    // bucle — el token no se arregla solo. Otros errores sí reintentan.
+    if (err instanceof ChannelAuthError) {
+      await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+      return;
+    }
     throw err; // BullMQ reintenta según la política del worker
   }
 }

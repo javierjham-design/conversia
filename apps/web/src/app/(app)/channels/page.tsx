@@ -26,6 +26,8 @@ export default function ChannelsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [templatesOpen, setTemplatesOpen] = useState<Record<string, boolean>>({});
+  const [health, setHealth] = useState<{ id: string; type: string; status: string; message: string | null; createdAt: string }[]>([]);
+  const [transcription, setTranscription] = useState<boolean | null>(null);
   const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string; featureType?: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [fbReady, setFbReady] = useState(false);
@@ -48,7 +50,27 @@ export default function ChannelsPage() {
     ]);
     setChannels(ch);
     setAgents(ag.map((a: any) => ({ id: a.id, name: a.name })));
+    // Salud (best-effort, no bloquea la carga principal)
+    api<{ events: { id: string; type: string; status: string; message: string | null; createdAt: string }[] }>("/channels/health/events")
+      .then((r) => setHealth(r.events))
+      .catch(() => undefined);
+    api<{ enabled: boolean }>("/organizations/me/transcription")
+      .then((r) => setTranscription(r.enabled))
+      .catch(() => undefined);
   }, []);
+
+  async function toggleTranscription() {
+    if (transcription === null) return;
+    try {
+      const r = await api<{ enabled: boolean }>("/organizations/me/transcription", {
+        method: "PUT",
+        body: JSON.stringify({ enabled: !transcription }),
+      });
+      setTranscription(r.enabled);
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  }
 
   useEffect(() => {
     void load().catch((e) => setMsg((e as Error).message));
@@ -88,6 +110,7 @@ export default function ChannelsPage() {
     try {
       const r = await api<{ ok: boolean; detail: string }>(`/channels/${id}/test`, { method: "POST" });
       setTestResult((p) => ({ ...p, [id]: `${r.ok ? "✔" : "✖"} ${r.detail}` }));
+      await load(); // la prueba puede cambiar el estado del canal (error ↔ activo)
     } catch (err) {
       setTestResult((p) => ({ ...p, [id]: `✖ ${(err as Error).message}` }));
     }
@@ -296,8 +319,12 @@ export default function ChannelsPage() {
               <div>
                 <h3 className="font-medium">
                   {c.type === "WHATSAPP_CLOUD" ? "📱" : "🧪"} {c.name}{" "}
-                  <span className={`text-[10px] ${c.status === "active" ? "text-emerald-600" : "text-slate-400"}`}>
-                    {c.status === "active" ? "● activo" : "○ inactivo"}
+                  <span
+                    className={`text-[10px] ${
+                      c.status === "active" ? "text-emerald-600" : c.status === "error" ? "text-red-600" : "text-slate-400"
+                    }`}
+                  >
+                    {c.status === "active" ? "● activo" : c.status === "error" ? "⚠ requiere reautorización" : "○ inactivo"}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400">
@@ -330,12 +357,74 @@ export default function ChannelsPage() {
                 )}
               </div>
             </div>
+            {c.status === "error" && (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                <p className="text-xs font-medium text-red-700">
+                  El token de este canal está vencido o fue revocado — los mensajes salientes están fallando.
+                </p>
+                <p className="mt-0.5 text-[11px] text-red-600">
+                  Reautoriza con <b>Conectar con Meta</b> (renueva el token automáticamente) o carga un token nuevo con el
+                  formulario <b>Manual</b>. Al pasar la prueba de conexión, el canal vuelve a activo.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => void connectWithMeta()}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                  >
+                    Reautorizar con Meta
+                  </button>
+                  <button
+                    onClick={() => void test(c.id)}
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100"
+                  >
+                    Volver a probar
+                  </button>
+                </div>
+              </div>
+            )}
             {testResult[c.id] && <p className="mt-2 text-xs text-slate-600">{testResult[c.id]}</p>}
             {c.type === "WHATSAPP_CLOUD" && templatesOpen[c.id] && <TemplatesPanel channelId={c.id} />}
           </div>
         ))}
         {channels.length === 0 && <p className="text-sm text-slate-400">Sin canales aún.</p>}
       </div>
+
+      {/* Transcripción de audios (Whisper) — switch por tenant */}
+      {transcription !== null && (
+        <div className="mt-6 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+          <div>
+            <h2 className="text-sm font-medium">Transcripción de audios</h2>
+            <p className="text-xs text-slate-500">
+              Las notas de voz entrantes se transcriben automáticamente para leerlas en la bandeja y que el agente IA las
+              entienda. Desactívala si no quieres usarla (tiene costo de IA).
+            </p>
+          </div>
+          <button
+            onClick={() => void toggleTranscription()}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              transcription ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+            }`}
+          >
+            {transcription ? "● Activada" : "○ Desactivada"}
+          </button>
+        </div>
+      )}
+
+      {/* Salud del canal: últimos eventos de WhatsApp (auth, calidad, cuenta, plantillas) */}
+      {health.length > 0 && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-medium">Salud de WhatsApp — últimos eventos</h2>
+          <ul className="space-y-1">
+            {health.map((e) => (
+              <li key={e.id} className="flex items-start gap-2 text-xs">
+                <span className={e.status === "error" ? "text-red-500" : e.status === "warning" ? "text-amber-500" : "text-emerald-500"}>●</span>
+                <span className="text-slate-600">{e.message ?? e.type}</span>
+                <span className="ml-auto shrink-0 text-slate-400">{new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

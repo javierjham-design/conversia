@@ -131,9 +131,14 @@ export interface ChannelSendResult {
   raw?: unknown;
 }
 
+export interface ChannelSendOptions {
+  /** Token por-canal (WABA del tenant). Sin él, el proveedor usa el global de la plataforma. */
+  accessToken?: string | null;
+}
+
 export interface ChannelProvider {
   readonly kind: string; // meta | mock
-  send(phoneNumberId: string, message: OutboundMessage): Promise<ChannelSendResult>;
+  send(phoneNumberId: string, message: OutboundMessage, options?: ChannelSendOptions): Promise<ChannelSendResult>;
 }
 
 /** Mensaje entrante normalizado (independiente del proveedor). */
