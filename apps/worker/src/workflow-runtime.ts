@@ -15,6 +15,7 @@ import { runAgentTurn } from "./agent-turn";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
+import { resolveApiPreset } from "./api-presets";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
@@ -453,9 +454,24 @@ function makeDeps(): EngineDeps {
     },
 
     async callApi(ctx, config) {
+      // Preset de API del tenant (tarjeta "API personalizada"): base URL + auth
+      // con secreto cifrado + allowlist — el nodo solo aporta la ruta relativa.
+      let effective = { ...(config as HttpNodeConfig) };
+      const presetId = String((config as any).presetId ?? "");
+      if (presetId) {
+        const resolved = await resolveApiPreset(ctx.organizationId, presetId);
+        if (!resolved) throw new Error("El preset de API del paso ya no existe — revísalo en Integraciones → API personalizada");
+        const path = String((config as any).path ?? (config as any).url ?? "");
+        effective = {
+          ...effective,
+          url: resolved.baseUrl.replace(/\/$/, "") + (path.startsWith("/") ? path : `/${path}`),
+          headers: { ...(resolved.headers ?? {}), ...(effective.headers ?? {}) },
+          allowlist: resolved.allowlist,
+        };
+      }
       // Guard SSRF + timeout dentro de callHttp; el resultado (incluye
       // __http_ok/__http_status y el mapeo JSON) queda disponible para los pasos.
-      const result = await callHttp(config as HttpNodeConfig, ctx.variables);
+      const result = await callHttp(effective, ctx.variables);
       Object.assign(ctx.variables, result);
     },
 

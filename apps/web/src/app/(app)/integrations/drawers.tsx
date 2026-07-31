@@ -765,3 +765,162 @@ export function EmailDrawer({
     </Drawer>
   );
 }
+
+// --------------------------- API personalizada ---------------------------
+
+interface ApiPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  authType: "none" | "bearer" | "header";
+  headerName: string | null;
+  hasSecret: boolean;
+  usedBy: string[];
+}
+
+export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const [presets, setPresets] = useState<ApiPreset[] | null>(null);
+  const [editing, setEditing] = useState<(Partial<ApiPreset> & { secret?: string }) | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api<{ presets: ApiPreset[] }>("/integrations/api-presets");
+      setPresets(r.presets);
+    } catch {
+      setPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  async function save() {
+    if (!editing?.name || !editing.baseUrl) return;
+    setBusy(true);
+    try {
+      await api("/integrations/api-presets", {
+        method: "POST",
+        body: JSON.stringify({
+          id: editing.id,
+          name: editing.name,
+          baseUrl: editing.baseUrl,
+          authType: editing.authType ?? "none",
+          headerName: editing.headerName || undefined,
+          secret: editing.secret || undefined,
+        }),
+      });
+      toast.push("Preset guardado ✔", "ok");
+      setEditing(null);
+      await load();
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test(id: string) {
+    setTestDetail((p) => ({ ...p, [id]: "probando…" }));
+    try {
+      const r = await api<{ ok: boolean; detail: string }>(`/integrations/api-presets/${id}/test`, { method: "POST" });
+      setTestDetail((p) => ({ ...p, [id]: `${r.ok ? "✔" : "✖"} ${r.detail}` }));
+    } catch (err) {
+      setTestDetail((p) => ({ ...p, [id]: `✖ ${(err as Error).message}` }));
+    }
+  }
+
+  async function remove(preset: ApiPreset) {
+    if (preset.usedBy.length && !window.confirm(`Este preset lo usan: ${preset.usedBy.join(", ")}. ¿Eliminar igual? Esos pasos fallarán.`)) return;
+    if (!preset.usedBy.length && !window.confirm("¿Eliminar este preset?")) return;
+    await api(`/integrations/api-presets/${preset.id}`, { method: "DELETE" });
+    await load();
+    onChanged();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="API personalizada — presets del paso HTTP">
+      <p className="mb-3 text-xs text-slate-500">
+        Define tus APIs una vez (URL base + autenticación con secreto <b>cifrado</b>) y en el canvas el paso «Petición
+        HTTP» solo elige el preset y la ruta — sin pegar tokens en cada nodo. El dominio del preset queda como allowlist.
+      </p>
+
+      {editing ? (
+        <div className="mb-3 space-y-2 rounded-xl border border-slate-200 p-3">
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Nombre</span>
+            <input value={editing.name ?? ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="CRM interno" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">URL base</span>
+            <input value={editing.baseUrl ?? ""} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} placeholder="https://api.miempresa.cl/v1" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <label className="text-sm">
+              <span className="text-xs text-slate-500">Autenticación</span>
+              <select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+                <option value="none">Sin auth</option>
+                <option value="bearer">Bearer token</option>
+                <option value="header">Header personalizado</option>
+              </select>
+            </label>
+            {editing.authType === "header" && (
+              <label className="flex-1 text-sm">
+                <span className="text-xs text-slate-500">Nombre del header</span>
+                <input value={editing.headerName ?? ""} onChange={(e) => setEditing({ ...editing, headerName: e.target.value })} placeholder="X-Api-Key" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+            )}
+            {editing.authType !== "none" && (
+              <label className="flex-1 text-sm">
+                <span className="text-xs text-slate-500">Secreto {editing.id && editing.hasSecret ? "(vacío = conservar)" : ""}</span>
+                <input type="password" value={editing.secret ?? ""} onChange={(e) => setEditing({ ...editing, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={() => void save()} disabled={busy || !editing.name || !editing.baseUrl}>Guardar preset</Button>
+            <Button variant="secondary" onClick={() => setEditing(null)}>Cancelar</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <Button onClick={() => setEditing({ authType: "none" })}>
+            <Plus size={14} /> Nuevo preset
+          </Button>
+        </div>
+      )}
+
+      {presets === null ? (
+        <Skeleton className="h-24" />
+      ) : presets.length === 0 ? (
+        <EmptyState icon={<Activity size={28} />} title="Sin presets aún" description="Crea el primero para usarlo en el paso «Petición HTTP» de tus flujos." />
+      ) : (
+        <ul className="space-y-2">
+          {presets.map((p) => (
+            <li key={p.id} className="rounded-lg border border-slate-100 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">{p.name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    <code>{p.baseUrl}</code> · {p.authType === "none" ? "sin auth" : p.authType === "bearer" ? "Bearer" : `header ${p.headerName}`}
+                  </p>
+                  {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700">Usado por: {p.usedBy.join(", ")}</p>}
+                </div>
+                <div className="flex shrink-0 gap-2 text-xs">
+                  <button onClick={() => void test(p.id)} className="text-slate-500 hover:underline">Probar</button>
+                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline">Editar</button>
+                  <button onClick={() => void remove(p)} className="text-red-400 hover:underline">Eliminar</button>
+                </div>
+              </div>
+              {testDetail[p.id] && <p className="mt-1 text-[11px] text-slate-600">{testDetail[p.id]}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Drawer>
+  );
+}

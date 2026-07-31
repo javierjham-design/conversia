@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ClarivaDrawer, EmailDrawer, WebhooksDrawer, type ClarivaState, type EmailState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, WebhooksDrawer, type ClarivaState, type EmailState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -53,6 +53,7 @@ interface Overview {
   clariva: ClarivaState | null;
   email: EmailState | null;
   platformEmailReady: boolean;
+  apiPresets: { count: number; status: string | null };
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -83,6 +84,7 @@ export default function IntegrationsPage() {
   const [clarivaOpen, setClarivaOpen] = useState(false);
   const [webhooksOpen, setWebhooksOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -156,6 +158,18 @@ export default function IntegrationsPage() {
         onManage: () => setWebhooksOpen(true),
       });
     }
+    if (data.apiPresets.count > 0) {
+      rows.push({
+        key: "custom_api",
+        name: `API personalizada (${data.apiPresets.count} preset${data.apiPresets.count > 1 ? "s" : ""})`,
+        category: "Productividad y datos",
+        icon: <Webhook size={22} />,
+        status: "connected",
+        detail: "Presets del paso «Petición HTTP» con auth cifrada",
+        health: "ok",
+        onManage: () => setPresetsOpen(true),
+      });
+    }
     if (data.email) {
       const uses = [
         data.email.escalation?.enabled ? "escalamientos" : null,
@@ -207,6 +221,8 @@ export default function IntegrationsPage() {
         return setWebhooksOpen(true);
       case "email":
         return setEmailOpen(true);
+      case "custom_api":
+        return setPresetsOpen(true);
       default:
         return void notifyInterest(item.key);
     }
@@ -447,6 +463,7 @@ export default function IntegrationsPage() {
         platformReady={data?.platformEmailReady ?? false}
         onChanged={() => void load()}
       />
+      <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

@@ -95,9 +95,14 @@ export class IntegrationsController {
         tx.integrationEvent.findFirst({ orderBy: { createdAt: "desc" } }),
         tx.integrationConnection.findUnique({ where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "email" } } }),
       ]);
+      const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email"], { email: "Correo electrónico" }).catch(() => undefined);
+      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api"], {
+        email: "Correo electrónico",
+        custom_api: "API personalizada",
+      }).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
       const failing = deliveries.filter((d) => d.status === "FAILED" || d.status === "DEAD");
@@ -145,6 +150,7 @@ export class IntegrationsController {
             }
           : null,
         platformEmailReady: Boolean(getEnv().RESEND_API_KEY),
+        apiPresets: { count: presetCount, status: presetsConn?.status ?? null },
         webhooks: webhooks.map((w) => {
           const mine = deliveries.filter((d) => d.endpointId === w.id);
           const okCount = mine.filter((d) => d.status === "DELIVERED").length;
@@ -180,7 +186,7 @@ export class IntegrationsController {
           { key: "webhooks", name: "Webhooks salientes", category: "datos", status: "disponible", description: "Recibe los eventos de Conversia en tus sistemas, firmados HMAC.", capabilities: ["14 eventos", "Reintentos", "Firma HMAC"] },
           { key: "sheets", name: "Google Sheets", category: "datos", status: "proximamente", description: "Exporta leads y citas a planillas.", capabilities: ["Export"] },
           { key: "email", name: "Correo electrónico", category: "datos", status: "disponible", description: "Escalamientos, resúmenes diarios y alertas al equipo (remitente de plataforma o SMTP propio).", capabilities: ["Escalamientos", "Resumen diario", "Alertas", "Paso de workflow"] },
-          { key: "custom_api", name: "API personalizada", category: "datos", status: "proximamente", description: "Llama APIs propias desde los workflows.", capabilities: ["Workflows"] },
+          { key: "custom_api", name: "API personalizada", category: "datos", status: "disponible", description: "Presets de tus APIs (URL + auth cifrada) para usarlos en el paso «Petición HTTP» sin pegar tokens en cada nodo.", capabilities: ["Presets", "Auth cifrada", "Allowlist", "Workflows"] },
           { key: "zapier", name: "Zapier", category: "datos", status: "proximamente", description: "Conecta con miles de apps.", capabilities: ["Automatización"] },
           { key: "make", name: "Make", category: "datos", status: "proximamente", description: "Escenarios avanzados de automatización.", capabilities: ["Automatización"] },
           { key: "hubspot", name: "HubSpot", category: "crm", status: "proximamente", description: "Sincroniza contactos y negocios.", capabilities: ["CRM"] },
@@ -376,6 +382,146 @@ export class IntegrationsController {
       await tx.integrationConnection.deleteMany({ where: { provider: "email" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ API personalizada (presets) ------------------------
+
+  /** Presets del paso "Petición HTTP": base URL + auth con secreto cifrado. */
+  @Get("api-presets")
+  listApiPresets() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const presets = (((conn?.config as any)?.presets ?? []) as any[]).map((p) => ({
+        id: p.id,
+        name: p.name,
+        baseUrl: p.baseUrl,
+        authType: p.authType ?? "none",
+        headerName: p.headerName ?? null,
+        hasSecret: Boolean(p.credentialId),
+      }));
+      // Qué workflows usan cada preset (búsqueda textual en las definiciones).
+      const versions = await tx.workflowVersion.findMany({
+        where: { status: { in: ["PUBLISHED", "DRAFT"] } },
+        select: { workflowId: true, definition: true },
+      });
+      const workflows = await tx.workflow.findMany({ where: { deletedAt: null }, select: { id: true, name: true } });
+      const nameById = new Map(workflows.map((w) => [w.id, w.name]));
+      const usage: Record<string, string[]> = {};
+      for (const p of presets) {
+        const users = new Set<string>();
+        for (const v of versions) {
+          if (JSON.stringify(v.definition).includes(`"${p.id}"`)) {
+            const n = nameById.get(v.workflowId);
+            if (n) users.add(n);
+          }
+        }
+        usage[p.id] = [...users];
+      }
+      return { presets: presets.map((p) => ({ ...p, usedBy: usage[p.id] ?? [] })) };
+    });
+  }
+
+  /** Crea o actualiza un preset (el secreto se cifra; vacío = conservar). */
+  @Post("api-presets")
+  saveApiPreset(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        id: z.string().optional(),
+        name: z.string().trim().min(2).max(60),
+        baseUrl: z.string().url(),
+        authType: z.enum(["none", "bearer", "header"]).default("none"),
+        headerName: z.string().trim().max(60).optional(),
+        secret: z.string().max(500).optional(),
+      }),
+      body,
+    );
+    assertUrlAllowed(input.baseUrl);
+    if (input.authType === "header" && !input.headerName) throw new BadRequestException("Indica el nombre del header de auth");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const presets = (((conn?.config as any)?.presets ?? []) as any[]).slice();
+      const existing = input.id ? presets.find((p) => p.id === input.id) : null;
+      let credentialId = existing?.credentialId ?? null;
+      if (input.authType === "none") credentialId = null;
+      else if (input.secret) {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: ctx.organizationId, provider: "api_preset", label: `Preset ${input.name}`, ciphertext: encryptSecret(input.secret) },
+        });
+        credentialId = credential.id;
+      }
+      if (input.authType !== "none" && !credentialId) throw new BadRequestException("Este tipo de auth requiere un secreto");
+      const preset = {
+        id: existing?.id ?? randomBytes(6).toString("base64url"),
+        name: input.name,
+        baseUrl: input.baseUrl,
+        authType: input.authType,
+        headerName: input.headerName ?? null,
+        credentialId,
+      };
+      const next = existing ? presets.map((p) => (p.id === preset.id ? preset : p)) : [...presets, preset];
+      if (next.length > 20) throw new BadRequestException("Máximo 20 presets");
+      if (conn) {
+        await tx.integrationConnection.update({ where: { id: conn.id }, data: { config: { presets: next } as object, status: "active", lastError: null } });
+      } else {
+        await tx.integrationConnection.create({
+          data: { organizationId: ctx.organizationId, provider: "api_presets", config: { presets: next } as object },
+        });
+      }
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.api_preset_save", entityType: "integration_connection", entityId: preset.id, after: { name: input.name, baseUrl: input.baseUrl, authType: input.authType } },
+      });
+      return { ok: true, id: preset.id };
+    });
+  }
+
+  /** Prueba el preset: GET a la base URL con su auth (vale cualquier 2xx-4xx ≠ 401/403). */
+  @Post("api-presets/:id/test")
+  async testApiPreset(@Param("id") id: string) {
+    const ctx = requirePermission("integrations:write");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const preset = (((conn?.config as any)?.presets ?? []) as any[]).find((p) => p.id === id);
+      if (!preset) throw new NotFoundException("Preset no encontrado");
+      let secret = "";
+      if (preset.credentialId) {
+        const cred = await tx.integrationCredential.findUnique({ where: { id: preset.credentialId } });
+        if (cred) secret = decryptSecret(cred.ciphertext);
+      }
+      return { preset, secret };
+    });
+    const headers: Record<string, string> = {};
+    if (data.preset.authType === "bearer" && data.secret) headers.authorization = `Bearer ${data.secret}`;
+    if (data.preset.authType === "header" && data.preset.headerName && data.secret) headers[data.preset.headerName] = data.secret;
+    try {
+      assertUrlAllowed(data.preset.baseUrl);
+      const res = await fetch(data.preset.baseUrl, { headers, redirect: "error", signal: AbortSignal.timeout(10_000) });
+      const authOk = res.status !== 401 && res.status !== 403;
+      return {
+        ok: authOk,
+        detail: authOk
+          ? `La API respondió ${res.status} — conexión y credenciales OK`
+          : `La API respondió ${res.status}: revisa el secreto/las credenciales`,
+      };
+    } catch (err) {
+      return { ok: false, detail: `No se pudo llamar a la API: ${(err as Error).message.slice(0, 200)}` };
+    }
+  }
+
+  @Delete("api-presets/:id")
+  deleteApiPreset(@Param("id") id: string) {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      if (!conn) return { ok: true };
+      const presets = (((conn.config as any)?.presets ?? []) as any[]).filter((p) => p.id !== id);
+      await tx.integrationConnection.update({ where: { id: conn.id }, data: { config: { presets } as object } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.api_preset_delete", entityType: "integration_connection", entityId: id },
       });
       return { ok: true };
     });

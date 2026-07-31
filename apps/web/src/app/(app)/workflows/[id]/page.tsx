@@ -109,6 +109,7 @@ interface Catalog {
   teams: { id: string; name: string }[];
   workflows: { name: string }[];
   templates: { id: string; name: string; language: string }[];
+  apiPresets?: { id: string; name: string; baseUrl: string }[];
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -1003,7 +1004,7 @@ function NodePanel({
         </div>
       )}
 
-      {type === "call_api" && <HttpForm config={config} onChange={onChange} />}
+      {type === "call_api" && <HttpForm config={config} onChange={onChange} presets={catalog.apiPresets ?? []} />}
 
       {type === "send_internal_email" && (
         <div className="space-y-2">
@@ -1166,7 +1167,7 @@ function CapiForm({ config, onChange }: { config: Record<string, any>; onChange:
   );
 }
 
-function HttpForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+function HttpForm({ config, onChange, presets = [] }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void; presets?: { id: string; name: string; baseUrl: string }[] }) {
   const [headersText, setHeadersText] = useState(JSON.stringify(config.headers ?? {}));
   const [mapText, setMapText] = useState(JSON.stringify(config.responseMapping ?? {}));
   const method = config.method ?? "GET";
@@ -1183,6 +1184,19 @@ function HttpForm({ config, onChange }: { config: Record<string, any>; onChange:
       <p className="rounded bg-brand-50 px-2 py-1 text-[10px] text-brand-700">
         Paso <b>Premium</b>. Con guard SSRF (bloquea IPs internas). Luego tendrás <span className="font-mono">{"{{__http_ok}} {{__http_status}}"}</span> + lo que mapees.
       </p>
+      {presets.length > 0 && (
+        <label className="block">
+          <span className="text-xs text-slate-500">Preset de API (Integraciones → API personalizada)</span>
+          <select
+            value={config.presetId ?? ""}
+            onChange={(e) => onChange({ presetId: e.target.value || undefined })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">— sin preset (URL completa manual) —</option>
+            {presets.map((p) => (<option key={p.id} value={p.id}>{p.name} · {p.baseUrl}</option>))}
+          </select>
+        </label>
+      )}
       <div className="flex gap-2">
         <label className="w-28">
           <span className="text-xs text-slate-500">Método</span>
@@ -1191,10 +1205,18 @@ function HttpForm({ config, onChange }: { config: Record<string, any>; onChange:
           </select>
         </label>
         <label className="flex-1">
-          <span className="text-xs text-slate-500">URL</span>
-          <input value={config.url ?? ""} onChange={(e) => onChange({ url: e.target.value })} placeholder="https://api.tuservicio.com/…" className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          <span className="text-xs text-slate-500">{config.presetId ? "Ruta (relativa al preset)" : "URL"}</span>
+          <input
+            value={(config.presetId ? config.path : config.url) ?? ""}
+            onChange={(e) => onChange(config.presetId ? { path: e.target.value } : { url: e.target.value })}
+            placeholder={config.presetId ? "/leads" : "https://api.tuservicio.com/…"}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          />
         </label>
       </div>
+      {config.presetId && (
+        <p className="text-[10px] text-slate-400">La auth y el dominio permitido vienen del preset — sin tokens en el nodo.</p>
+      )}
       <label className="block">
         <span className="text-xs text-slate-500">Headers (JSON)</span>
         <textarea value={headersText} onChange={(e) => { setHeadersText(e.target.value); tryJson(e.target.value, "headers"); }} rows={2} placeholder='{"Authorization":"Bearer …"}' className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />

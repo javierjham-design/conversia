@@ -121,6 +121,8 @@ export class WorkflowsController {
         tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
         tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, select: { id: true, name: true, language: true }, orderBy: { name: "asc" } }),
       ]);
+      const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
       return {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
@@ -130,6 +132,7 @@ export class WorkflowsController {
         teams,
         workflows: workflows.map((w) => ({ name: w.name })),
         templates,
+        apiPresets,
       };
     });
   }
