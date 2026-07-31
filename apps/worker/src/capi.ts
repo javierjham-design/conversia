@@ -95,6 +95,16 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
       dest: config.rule.dest,
       test: Boolean(job.test),
     });
+    // Espejo opcional a Google Analytics (switch "enviar también a Analytics").
+    if (!job.test) {
+      const { mirrorCapiToGa4 } = await import("./ga4.js");
+      await mirrorCapiToGa4(organizationId, {
+        name: eventName,
+        value: value != null ? Number(value) : null,
+        currency,
+        contactKey: job.contactPhone ?? job.leadId ?? null,
+      });
+    }
   } catch (err) {
     await log("error", `Error de red hacia Meta: ${(err as Error).message.slice(0, 200)}`);
   }

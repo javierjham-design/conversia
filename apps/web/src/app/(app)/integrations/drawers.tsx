@@ -924,3 +924,111 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
     </Drawer>
   );
 }
+
+// --------------------------- Google Analytics (GA4) ---------------------------
+
+export interface Ga4State {
+  status: string;
+  measurementId: string | null;
+  mirrorCapi: boolean;
+  lastError: string | null;
+}
+
+export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; onClose: () => void; state: Ga4State | null; onChanged: () => void }) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [form, setForm] = useState({ measurementId: "", apiSecret: "", mirrorCapi: false });
+
+  useEffect(() => {
+    if (open) {
+      setTestDetail(null);
+      setForm({ measurementId: state?.measurementId ?? "", apiSecret: "", mirrorCapi: Boolean(state?.mirrorCapi) });
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/ga4", {
+        method: "POST",
+        body: JSON.stringify({
+          measurementId: form.measurementId.trim(),
+          apiSecret: form.apiSecret || undefined,
+          mirrorCapi: form.mirrorCapi,
+        }),
+      });
+      toast.push("GA4 conectado — prueba la conexión", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestDetail("Validando con Google…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/ga4/test", { method: "POST" });
+      setTestDetail(`${r.ok ? "✔" : "✖"} ${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/ga4", { method: "DELETE" });
+    toast.push("GA4 desconectado — el paso de workflow y el espejo CAPI dejarán de enviar", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Google Analytics (GA4)">
+      <p className="mb-3 text-xs text-slate-500">
+        Measurement Protocol — sin OAuth. En Analytics: <b>Administrar → Flujos de datos → tu flujo → Secretos de la API
+        de Measurement Protocol</b> para crear el <code>api_secret</code>; el <code>measurement_id</code> (G-XXXX) está en
+        los detalles del flujo.
+      </p>
+      <div className="space-y-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Measurement ID</span>
+          <input value={form.measurementId} onChange={(e) => setForm({ ...form, measurementId: e.target.value.toUpperCase() })} placeholder="G-ABC123XYZ" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">API secret {connected ? "(vacío = conservar)" : ""}</span>
+          <input type="password" value={form.apiSecret} onChange={(e) => setForm({ ...form, apiSecret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.mirrorCapi} onChange={(e) => setForm({ ...form, mirrorCapi: e.target.checked })} />
+          Enviar también a Analytics los eventos CAPI (lead, agenda, compra)
+        </label>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button onClick={() => void save()} disabled={busy || !form.measurementId}>{connected ? "Guardar" : "Conectar"}</Button>
+        {connected && (
+          <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+        )}
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Google Analytics?"
+        description="El paso «Enviar evento GA4» de los flujos y el espejo de eventos CAPI dejarán de funcionar."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}

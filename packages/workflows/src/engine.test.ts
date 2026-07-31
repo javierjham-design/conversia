@@ -23,6 +23,7 @@ function makeDeps(overrides: Partial<EngineDeps> = {}) {
     sendCapiEvent: async (_c, config) => void calls.push(`capi:${config.eventName}`),
     sendTemplate: async (_c, config) => void calls.push(`template:${(config as any).templateId ?? ""}`),
     sendInternalEmail: async (_c, config) => void calls.push(`email:${config.subject}`),
+    sendGa4Event: async (_c, config) => void calls.push(`ga4:${config.eventName}`),
     runAgentWithObjective: async (_c, _nodeId, cfg) => { calls.push(`objective:${(cfg as any).objective}`); return "met"; },
     callApi: async (c, config) => { (c as any).variables.__http_ok = "true"; calls.push(`http:${(config as any).url ?? ""}`); },
     scheduleTimer: async (_c, nodeId) => void calls.push(`timer:${nodeId}`),

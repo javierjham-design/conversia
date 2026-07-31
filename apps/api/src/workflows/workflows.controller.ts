@@ -123,6 +123,7 @@ export class WorkflowsController {
       ]);
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
+      const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
       return {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
@@ -133,6 +134,7 @@ export class WorkflowsController {
         workflows: workflows.map((w) => ({ name: w.name })),
         templates,
         apiPresets,
+        ga4Connected: Boolean(ga4Conn && ga4Conn.status !== "error"),
       };
     });
   }
@@ -465,6 +467,16 @@ export class WorkflowsController {
         if (!mapping?.datasetId || !mapping.active) {
           throw new BadRequestException(
             "El paso «Enviar evento CAPI» requiere conectar Conversions API (dataset) en Integraciones → Centro Meta antes de publicar.",
+          );
+        }
+      }
+      if (nodes.some((n) => n.type === "send_ga4_event")) {
+        const ga4 = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "ga4" } },
+        });
+        if (!ga4 || ga4.status === "error") {
+          throw new BadRequestException(
+            "El paso «Enviar evento GA4» requiere conectar Google Analytics en Integraciones antes de publicar.",
           );
         }
       }

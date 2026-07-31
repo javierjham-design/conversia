@@ -150,6 +150,10 @@ export function simulateWorkflow(
         label = "Correo interno";
         detail = `enviaría «${renderVars(String(cfg.subject ?? ""), vars)}» a ${(Array.isArray(cfg.to) ? (cfg.to as string[]) : []).join(", ") || "(sin destinatarios)"} — equipo interno, no se envía en la prueba`;
         break;
+      case "send_ga4_event":
+        label = "Evento GA4";
+        detail = `enviaría «${String(cfg.eventName ?? "")}» a Google Analytics (no se envía en la prueba)`;
+        break;
       case "send_tiktok_event":
       case "google_sheets_append":
         label = "Integración";

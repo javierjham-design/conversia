@@ -42,6 +42,8 @@ export interface EngineDeps {
   sendTemplate(ctx: RunCtx, config: Record<string, unknown>): Promise<void>;
   /** Correo interno al EQUIPO (nunca masivo a contactos); subject/body ya renderizados. */
   sendInternalEmail(ctx: RunCtx, config: { to: string[]; subject: string; body: string }): Promise<void>;
+  /** Evento GA4 vía Measurement Protocol; params ya renderizados. */
+  sendGa4Event(ctx: RunCtx, config: { eventName: string; params: Record<string, string> }): Promise<void>;
   /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
    *  ramifican de inmediato; "pending" (multi-turno) deja al agente
    *  conversando y el run espera: respuestas del contacto lo reanudan con la
@@ -255,6 +257,14 @@ async function executeNode(
         body: renderVars(String(cfg.body ?? ""), ctx.variables),
       });
       return {};
+    case "send_ga4_event": {
+      const params: Record<string, string> = {};
+      for (const [k, v] of Object.entries((cfg.params as Record<string, unknown>) ?? {})) {
+        params[k] = renderVars(String(v ?? ""), ctx.variables);
+      }
+      await deps.sendGa4Event(ctx, { eventName: String(cfg.eventName ?? ""), params });
+      return {};
+    }
     case "send_tiktok_event":
     case "google_sheets_append":
       // "Próximamente": sin integración aún. No-op registrado (no se finge).

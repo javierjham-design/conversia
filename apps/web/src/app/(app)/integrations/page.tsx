@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, WebhooksDrawer, type ClarivaState, type EmailState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -54,6 +54,7 @@ interface Overview {
   email: EmailState | null;
   platformEmailReady: boolean;
   apiPresets: { count: number; status: string | null };
+  ga4: Ga4State | null;
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -85,6 +86,7 @@ export default function IntegrationsPage() {
   const [webhooksOpen, setWebhooksOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
+  const [ga4Open, setGa4Open] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -170,6 +172,18 @@ export default function IntegrationsPage() {
         onManage: () => setPresetsOpen(true),
       });
     }
+    if (data.ga4) {
+      rows.push({
+        key: "ga4",
+        name: "Google Analytics",
+        category: "CRM y analítica",
+        icon: <Webhook size={22} />,
+        status: data.ga4.status === "error" ? "attention" : "connected",
+        detail: `${data.ga4.measurementId ?? ""}${data.ga4.mirrorCapi ? " · espejo CAPI activo" : ""}`,
+        health: data.ga4.status === "error" ? "warn" : "ok",
+        onManage: () => setGa4Open(true),
+      });
+    }
     if (data.email) {
       const uses = [
         data.email.escalation?.enabled ? "escalamientos" : null,
@@ -223,6 +237,8 @@ export default function IntegrationsPage() {
         return setEmailOpen(true);
       case "custom_api":
         return setPresetsOpen(true);
+      case "ga4":
+        return setGa4Open(true);
       default:
         return void notifyInterest(item.key);
     }
@@ -464,6 +480,7 @@ export default function IntegrationsPage() {
         onChanged={() => void load()}
       />
       <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
+      <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

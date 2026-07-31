@@ -82,6 +82,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: "stop", label: "Terminar flujo", description: "Finaliza la ejecución", category: "Control de flujo", icon: <Square size={15} />, defaultConfig: {}, terminal: true },
   // Marketing
   { type: "send_capi", label: "Enviar evento CAPI (Meta)", description: "Envía un evento de conversión a Meta (Lead, Schedule, Purchase…)", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "Lead", value: "", currency: "CLP" } },
+  { type: "send_ga4_event", label: "Enviar evento GA4", description: "Envía un evento a Google Analytics con parámetros y variables", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "", params: {} } },
   { type: "send_tiktok_event", label: "Enviar evento TikTok", description: "Evento a TikTok Events API", category: "Marketing", icon: <Megaphone size={15} />, defaultConfig: {}, soon: true },
   // IA
   { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
@@ -110,6 +111,7 @@ interface Catalog {
   workflows: { name: string }[];
   templates: { id: string; name: string; language: string }[];
   apiPresets?: { id: string; name: string; baseUrl: string }[];
+  ga4Connected?: boolean;
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -249,6 +251,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
     case "send_template": return config.templateName ? `📄 ${config.templateName}` : "(elige la plantilla)";
     case "send_internal_email": return config.subject ? `✉ ${String(config.subject).slice(0, 40)}` : "(configura el correo)";
+    case "send_ga4_event": return config.eventName ? `📊 ${config.eventName}` : "(configura el evento)";
     case "call_api": return config.url ? `${config.method ?? "GET"} ${String(config.url).slice(0, 30)}` : "(configura la petición)";
     case "google_sheets_append": return "(Próximamente)";
     default: return "";
@@ -1005,6 +1008,43 @@ function NodePanel({
       )}
 
       {type === "call_api" && <HttpForm config={config} onChange={onChange} presets={catalog.apiPresets ?? []} />}
+
+      {type === "send_ga4_event" && (
+        <div className="space-y-2">
+          {!catalog.ga4Connected && (
+            <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-700">
+              Requiere conectar <a href="/integrations" className="underline">Google Analytics</a> — la publicación se bloquea
+              hasta conectarlo.
+            </p>
+          )}
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Nombre del evento (snake_case)</span>
+            <input
+              value={config.eventName ?? ""}
+              onChange={(e) => onChange({ eventName: e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, "_") })}
+              placeholder="lead_calificado"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Parámetros (JSON, admite variables en los valores)</span>
+            <textarea
+              defaultValue={JSON.stringify(config.params ?? {}, null, 0)}
+              onChange={(e) => {
+                try {
+                  const obj = JSON.parse(e.target.value || "{}");
+                  if (obj && typeof obj === "object") onChange({ params: obj });
+                } catch {
+                  /* JSON incompleto mientras escribe */
+                }
+              }}
+              rows={2}
+              placeholder='{"origen": "whatsapp", "nombre": "{{contact.firstName}}"}'
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+            />
+          </label>
+        </div>
+      )}
 
       {type === "send_internal_email" && (
         <div className="space-y-2">

@@ -11,6 +11,7 @@ import {
   type EventJob,
   type InboundJob,
   type OutboundJob,
+  type SyncJob,
   type WebhookDeliveryJob,
 } from "@conversia/types";
 import { processCapiJob } from "./capi";
@@ -21,6 +22,7 @@ import { processEmailJob, startDailyDigests } from "./mailer";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
+import { processSyncJob } from "./sync-worker";
 import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
@@ -64,6 +66,12 @@ async function main() {
     async (job) => processEmailJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot).
+  const syncWorker = new Worker<SyncJob>(
+    QUEUE_NAMES.sync,
+    async (job) => processSyncJob(job.data),
+    { connection, concurrency: 2 },
+  );
   // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
   // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
   // workflow (conversation.closed → conversation_closed), inicia los flujos.
@@ -96,7 +104,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -121,6 +129,7 @@ async function main() {
       eventsWorker.close(),
       importsWorker.close(),
       emailsWorker.close(),
+      syncWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

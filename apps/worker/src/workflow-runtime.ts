@@ -16,6 +16,7 @@ import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./ch
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
 import { resolveApiPreset } from "./api-presets";
+import { ga4ClientId, getSyncQueue } from "./ga4";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
@@ -418,6 +419,26 @@ function makeDeps(): EngineDeps {
           to,
           subject: config.subject,
           html: `<p>${config.body.replace(/\n/g, "<br/>")}</p><p style="color:#94a3b8;font-size:12px">Enviado por un flujo de TuBot</p>`,
+        },
+        { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
+    async sendGa4Event(ctx, config) {
+      if (!config.eventName) return;
+      const contact = ctx.contactId
+        ? await withTenant(ctx.organizationId, (tx) => tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true } }))
+        : null;
+      await getSyncQueue().add(
+        "ga4",
+        {
+          organizationId: ctx.organizationId,
+          kind: "ga4_event",
+          payload: {
+            name: config.eventName,
+            params: { ...config.params, source: "workflow" },
+            clientId: ga4ClientId(ctx.organizationId, contact?.phone ?? ctx.contactId ?? null),
+          },
         },
         { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
       );

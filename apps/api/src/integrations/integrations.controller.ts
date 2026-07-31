@@ -97,11 +97,13 @@ export class IntegrationsController {
       ]);
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
+      const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api"], {
+      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4"], {
         email: "Correo electrónico",
         custom_api: "API personalizada",
+        ga4: "Google Analytics",
       }).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
@@ -151,6 +153,9 @@ export class IntegrationsController {
           : null,
         platformEmailReady: Boolean(getEnv().RESEND_API_KEY),
         apiPresets: { count: presetCount, status: presetsConn?.status ?? null },
+        ga4: ga4Conn
+          ? { status: ga4Conn.status, measurementId: (ga4Conn.config as any)?.measurementId ?? null, mirrorCapi: Boolean((ga4Conn.config as any)?.mirrorCapi), lastError: ga4Conn.lastError }
+          : null,
         webhooks: webhooks.map((w) => {
           const mine = deliveries.filter((d) => d.endpointId === w.id);
           const okCount = mine.filter((d) => d.status === "DELIVERED").length;
@@ -191,7 +196,7 @@ export class IntegrationsController {
           { key: "make", name: "Make", category: "datos", status: "proximamente", description: "Escenarios avanzados de automatización.", capabilities: ["Automatización"] },
           { key: "hubspot", name: "HubSpot", category: "crm", status: "proximamente", description: "Sincroniza contactos y negocios.", capabilities: ["CRM"] },
           { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "proximamente", description: "Métricas de eventos enviados a Meta.", capabilities: ["Analítica"] },
-          { key: "ga4", name: "Google Analytics", category: "crm", status: "proximamente", description: "Mide conversiones en tu analítica.", capabilities: ["Analítica"] },
+          { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
         ],
       };
     });
@@ -382,6 +387,114 @@ export class IntegrationsController {
       await tx.integrationConnection.deleteMany({ where: { provider: "email" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ Google Analytics (GA4) ------------------------
+
+  /** Conecta GA4 por Measurement Protocol (measurement_id + api_secret cifrado). */
+  @Post("ga4")
+  saveGa4(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        measurementId: z.string().trim().regex(/^G-[A-Z0-9]{4,16}$/, "Formato G-XXXXXXX"),
+        apiSecret: z.string().trim().max(200).optional(),
+        mirrorCapi: z.boolean().default(false),
+      }),
+      body,
+    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const existing = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "ga4" } },
+      });
+      let credentialId = existing?.credentialId ?? null;
+      if (input.apiSecret) {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: ctx.organizationId, provider: "ga4", label: "GA4 api_secret", ciphertext: encryptSecret(input.apiSecret) },
+        });
+        credentialId = credential.id;
+      }
+      if (!credentialId) throw new BadRequestException("Falta el api_secret (Events Manager → Measurement Protocol)");
+      const config = { measurementId: input.measurementId, mirrorCapi: input.mirrorCapi } as object;
+      if (existing) {
+        await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, credentialId, status: "active", lastError: null } });
+      } else {
+        await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider: "ga4", config, credentialId } });
+      }
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.ga4_save", entityType: "integration_connection", after: { measurementId: input.measurementId, mirrorCapi: input.mirrorCapi } },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Prueba real contra el endpoint de VALIDACIÓN de GA4 (reporta errores de config). */
+  @Post("ga4/test")
+  async testGa4() {
+    const ctx = requirePermission("integrations:write");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "ga4" } },
+      });
+      if (!conn?.credentialId) throw new BadRequestException("GA4 no está conectado");
+      const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+      return { conn, measurementId: (conn.config as any)?.measurementId as string, apiSecret: cred ? decryptSecret(cred.ciphertext) : "" };
+    });
+    let ok = false;
+    let detail = "";
+    try {
+      const res = await fetch(
+        `https://www.google-analytics.com/debug/mp/collect?measurement_id=${encodeURIComponent(data.measurementId)}&api_secret=${encodeURIComponent(data.apiSecret)}`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ client_id: "555.tubot-test", events: [{ name: "tubot_test", params: { engagement_time_msec: 1 } }] }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      const json: any = await res.json().catch(() => ({}));
+      const messages = (json?.validationMessages ?? []) as { description?: string }[];
+      ok = res.ok && messages.length === 0;
+      detail = ok
+        ? "Evento de prueba válido — GA4 lo aceptará (revisa el informe en tiempo real de Analytics)"
+        : messages[0]?.description ?? `GA4 respondió ${res.status}`;
+      // Si validó, enviar el evento REAL para verlo en tiempo real en Analytics.
+      if (ok) {
+        await fetch(
+          `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(data.measurementId)}&api_secret=${encodeURIComponent(data.apiSecret)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ client_id: "555.tubot-test", events: [{ name: "tubot_test", params: { engagement_time_msec: 1 } }] }),
+            signal: AbortSignal.timeout(10_000),
+          },
+        ).catch(() => undefined);
+      }
+    } catch (err) {
+      detail = (err as Error).message.slice(0, 200);
+    }
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.integrationConnection.update({
+        where: { id: data.conn.id },
+        data: { lastSyncAt: new Date(), status: ok ? "active" : "error", lastError: ok ? null : detail },
+      });
+      await tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "ga4", type: ok ? "ga4.test_ok" : "ga4.test_error", status: ok ? "ok" : "error", message: detail },
+      });
+    });
+    return { ok, detail };
+  }
+
+  @Delete("ga4")
+  disconnectGa4() {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.integrationConnection.deleteMany({ where: { provider: "ga4" } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.ga4_disconnect", entityType: "integration_connection" },
       });
       return { ok: true };
     });

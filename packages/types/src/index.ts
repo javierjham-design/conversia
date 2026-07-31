@@ -320,6 +320,7 @@ export const NODE_TYPES = [
   "send_internal_email",
   // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
   "send_capi",
+  "send_ga4_event",
   "send_tiktok_event",
   "google_sheets_append",
   "ai_objective",
@@ -380,7 +381,15 @@ export const QUEUE_NAMES = {
   capi: "capi-events",
   imports: "contact-imports",
   emails: "tenant-emails",
+  sync: "integration-sync",
 } as const;
+
+/** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
+export interface SyncJob {
+  organizationId: string;
+  kind: "ga4_event" | "calendar_sync" | "sheets_append" | "hubspot_contact";
+  payload: Record<string, unknown>;
+}
 
 /** Correo interno del tenant (equipo — nunca masivo a pacientes). */
 export interface EmailJob {
