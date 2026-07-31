@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -87,6 +87,7 @@ export default function IntegrationsPage() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [ga4Open, setGa4Open] = useState(false);
+  const [emOpen, setEmOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -239,6 +240,8 @@ export default function IntegrationsPage() {
         return setPresetsOpen(true);
       case "ga4":
         return setGa4Open(true);
+      case "events_manager":
+        return setEmOpen(true);
       default:
         return void notifyInterest(item.key);
     }
@@ -481,6 +484,7 @@ export default function IntegrationsPage() {
       />
       <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
       <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
+      <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

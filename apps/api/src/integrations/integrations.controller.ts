@@ -100,10 +100,11 @@ export class IntegrationsController {
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4"], {
+      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager"], {
         email: "Correo electrónico",
         custom_api: "API personalizada",
         ga4: "Google Analytics",
+        events_manager: "Meta Events Manager",
       }).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
@@ -195,7 +196,7 @@ export class IntegrationsController {
           { key: "zapier", name: "Zapier", category: "datos", status: "proximamente", description: "Conecta con miles de apps.", capabilities: ["Automatización"] },
           { key: "make", name: "Make", category: "datos", status: "proximamente", description: "Escenarios avanzados de automatización.", capabilities: ["Automatización"] },
           { key: "hubspot", name: "HubSpot", category: "crm", status: "proximamente", description: "Sincroniza contactos y negocios.", capabilities: ["CRM"] },
-          { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "proximamente", description: "Métricas de eventos enviados a Meta.", capabilities: ["Analítica"] },
+          { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "disponible", description: "Métricas de los eventos CAPI: envíos por día y por tipo, tasa de éxito y últimos rechazos de Meta.", capabilities: ["Métricas", "Errores", "Link directo"] },
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
         ],
       };
@@ -389,6 +390,58 @@ export class IntegrationsController {
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
       });
       return { ok: true };
+    });
+  }
+
+  // ------------------------ Meta Events Manager (métricas CAPI) ------------------------
+
+  /** Métricas de lo que CAPI ya envía: por día, por evento, errores recientes. */
+  @Get("events-manager/stats")
+  eventsManagerStats() {
+    const ctx = requireContext();
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [mapping, events] = await Promise.all([
+        tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }),
+        tx.integrationEvent.findMany({
+          where: { provider: "capi", createdAt: { gte: since } },
+          orderBy: { createdAt: "desc" },
+          take: 2000,
+          select: { type: true, status: true, message: true, payload: true, createdAt: true },
+        }),
+      ]);
+      if (!mapping?.datasetId) return { configured: false };
+
+      const byDay = new Map<string, { ok: number; error: number }>();
+      const byEvent = new Map<string, { ok: number; error: number }>();
+      const recentErrors: { message: string; at: Date }[] = [];
+      for (const e of events) {
+        const day = e.createdAt.toISOString().slice(0, 10);
+        const dest = String((e.payload as any)?.dest ?? "otro");
+        const dayAgg = byDay.get(day) ?? { ok: 0, error: 0 };
+        const eventAgg = byEvent.get(dest) ?? { ok: 0, error: 0 };
+        if (e.status === "ok") {
+          dayAgg.ok++;
+          eventAgg.ok++;
+        } else {
+          dayAgg.error++;
+          eventAgg.error++;
+          if (recentErrors.length < 10 && e.message) recentErrors.push({ message: e.message, at: e.createdAt });
+        }
+        byDay.set(day, dayAgg);
+        byEvent.set(dest, eventAgg);
+      }
+      const total = events.length;
+      const okTotal = events.filter((e) => e.status === "ok").length;
+      return {
+        configured: true,
+        datasetId: mapping.datasetId,
+        eventsManagerUrl: `https://business.facebook.com/events_manager2/list/dataset/${mapping.datasetId}`,
+        totals: { total, ok: okTotal, error: total - okTotal, successRate: total ? Math.round((okTotal / total) * 100) : null },
+        byDay: [...byDay.entries()].map(([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day)).slice(-14),
+        byEvent: [...byEvent.entries()].map(([event, v]) => ({ event, ...v })).sort((a, b) => b.ok + b.error - (a.ok + a.error)),
+        recentErrors,
+      };
     });
   }
 

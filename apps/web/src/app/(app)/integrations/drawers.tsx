@@ -1032,3 +1032,105 @@ export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; 
     </Drawer>
   );
 }
+
+// --------------------------- Meta Events Manager ---------------------------
+
+interface EmStats {
+  configured: boolean;
+  datasetId?: string;
+  eventsManagerUrl?: string;
+  totals?: { total: number; ok: number; error: number; successRate: number | null };
+  byDay?: { day: string; ok: number; error: number }[];
+  byEvent?: { event: string; ok: number; error: number }[];
+  recentErrors?: { message: string; at: string }[];
+}
+
+export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [stats, setStats] = useState<EmStats | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setStats(null);
+      void api<EmStats>("/integrations/events-manager/stats").then(setStats).catch(() => setStats({ configured: false }));
+    }
+  }, [open]);
+
+  const maxDay = Math.max(1, ...(stats?.byDay ?? []).map((d) => d.ok + d.error));
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Meta Events Manager — métricas CAPI">
+      {stats === null ? (
+        <Skeleton className="h-40" />
+      ) : !stats.configured ? (
+        <EmptyState
+          icon={<Activity size={28} />}
+          title="Conecta Meta CAPI primero"
+          description="Este panel muestra las métricas de los eventos de conversión que tu cuenta envía a Meta. Configura el dataset en Integraciones → Centro Meta → Conversions API."
+          action={<Button onClick={() => (window.location.href = "/integrations/meta")}>Ir al Centro Meta</Button>}
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold">{stats.totals?.total ?? 0}</p>
+              <p className="text-[10px] text-slate-400">eventos (30 d)</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold text-emerald-600">{stats.totals?.successRate ?? "—"}%</p>
+              <p className="text-[10px] text-slate-400">tasa de éxito</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold text-red-500">{stats.totals?.error ?? 0}</p>
+              <p className="text-[10px] text-slate-400">errores</p>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Últimos 14 días</p>
+            <div className="flex items-end gap-1" style={{ height: 60 }}>
+              {(stats.byDay ?? []).map((d) => (
+                <div key={d.day} className="flex-1" title={`${d.day}: ${d.ok} ok · ${d.error} error`}>
+                  <div className="w-full rounded-t bg-red-300" style={{ height: (d.error / maxDay) * 56 }} />
+                  <div className="w-full rounded-b bg-emerald-400" style={{ height: (d.ok / maxDay) * 56 }} />
+                </div>
+              ))}
+              {(stats.byDay ?? []).length === 0 && <p className="text-xs text-slate-400">Sin eventos aún.</p>}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Por tipo de evento</p>
+            <ul className="space-y-1">
+              {(stats.byEvent ?? []).map((e) => (
+                <li key={e.event} className="flex items-center justify-between text-xs">
+                  <span className="font-mono">{e.event}</span>
+                  <span>
+                    <span className="text-emerald-600">{e.ok} ok</span>
+                    {e.error > 0 && <span className="ml-2 text-red-500">{e.error} error</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {(stats.recentErrors ?? []).length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-red-600">Últimos rechazos de Meta</p>
+              <ul className="space-y-1">
+                {stats.recentErrors!.map((e, i) => (
+                  <li key={i} className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                    {e.message} <span className="text-red-400">· {new Date(e.at).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-cyan-700 underline">
+            Abrir el Events Manager de Meta (dataset {stats.datasetId}) →
+          </a>
+        </div>
+      )}
+    </Drawer>
+  );
+}
