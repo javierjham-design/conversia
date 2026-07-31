@@ -134,7 +134,12 @@ export async function processInbound(job: InboundJob): Promise<void> {
     let transcribed = false;
     if (!text && (msg.type === "audio" || msg.type === "voice")) {
       const mediaId = (msg.payload as any)?.audio?.id ?? (msg.payload as any)?.voice?.id;
-      if (mediaId) {
+      // Switch por tenant (org.settings.transcription.enabled; activada por defecto).
+      const transcriptionOn = await withTenant(organizationId, async (tx) => {
+        const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+        return ((org?.settings as any)?.transcription?.enabled ?? true) !== false;
+      });
+      if (mediaId && transcriptionOn) {
         // El media se descarga con el token de la WABA receptora (por-canal).
         const auth = await resolveChannelAuth(organizationId, { phoneNumberId: msg.phoneNumberId });
         const t = await transcribeWhatsappAudio(String(mediaId), auth.accessToken);

@@ -127,6 +127,42 @@ export class OrganizationsController {
     });
   }
 
+  /** Estado del switch de transcripción de audios (activada por defecto). */
+  @Get("me/transcription")
+  transcription() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const enabled = ((org?.settings as any)?.transcription?.enabled ?? true) !== false;
+      return { enabled };
+    });
+  }
+
+  /** Activa/desactiva la transcripción de audios entrantes (Whisper) del tenant. */
+  @Put("me/transcription")
+  setTranscription(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("enabled (boolean) requerido");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const prev = ((org?.settings as object) ?? {}) as Record<string, unknown>;
+      const settings = { ...prev, transcription: { ...((prev.transcription as object) ?? {}), enabled: parsed.data.enabled } };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: parsed.data.enabled ? "transcription.on" : "transcription.off",
+          entityType: "organization",
+          entityId: ctx.organizationId,
+        },
+      });
+      return { ok: true, enabled: parsed.data.enabled };
+    });
+  }
+
   @Get("me/usage")
   async usage() {
     const ctx = requireContext();

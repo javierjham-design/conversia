@@ -56,9 +56,17 @@ interface Conversation {
   aiEnabled: boolean;
   assignedUserId: string | null;
   activeAgentId: string | null;
+  channelConnectionId: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   contact: Contact;
+}
+interface ChannelInfo {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  displayPhone: string | null;
 }
 interface Message {
   id: string;
@@ -97,6 +105,10 @@ export default function InboxPage() {
   const [templates, setTemplates] = useState<{ id: string; name: string; language: string; bodyText: string }[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [sendingTemplate, setSendingTemplate] = useState(false);
+  const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  const channelOf = (c: Conversation | null) => channels.find((ch) => ch.id === c?.channelConnectionId) ?? null;
+  const hasWhatsapp = channels.some((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status !== "inactive");
+  const channelError = channels.find((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status === "error");
 
   // Ventana de servicio de 24 h: desde el último mensaje ENTRANTE del contacto.
   const lastInboundAt = messages.reduce<number | null>((acc, m) => {
@@ -140,6 +152,8 @@ export default function InboxPage() {
     void api<{ templates: { id: string; name: string; language: string; bodyText: string }[] }>("/channels/templates/approved")
       .then((r) => setTemplates(r.templates))
       .catch(() => setTemplates([]));
+    // Canales: indicador de número por conversación + CTA si falta WhatsApp.
+    void api<ChannelInfo[]>("/channels").then(setChannels).catch(() => setChannels([]));
   }, []);
 
   async function sendTemplate(templateId: string) {
@@ -234,8 +248,32 @@ export default function InboxPage() {
     return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.profileName || c.phone || "Sin nombre";
   }
 
+  const showChecklist = channels.length > 0 && (!hasWhatsapp || workflows.length === 0);
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      {/* Banners transversales: estado del canal + puesta en marcha */}
+      {channelError && (
+        <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
+          ⚠ El canal <b>{channelError.name}</b> necesita reautorización — los mensajes salientes están fallando.{" "}
+          <a href="/channels" className="font-medium underline">Ir a Canales</a>
+        </div>
+      )}
+      {!channelError && showChecklist && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-cyan-100 bg-cyan-50 px-4 py-2 text-xs text-cyan-900">
+          <span className="font-medium">Puesta en marcha:</span>
+          <a href="/channels" className={hasWhatsapp ? "text-emerald-600" : "underline"}>
+            {hasWhatsapp ? "✔ WhatsApp conectado" : "1. Conecta WhatsApp"}
+          </a>
+          <a href="/agents" className={agents.length > 0 ? "text-emerald-600" : "underline"}>
+            {agents.length > 0 ? "✔ Agente IA creado" : "2. Crea tu agente IA"}
+          </a>
+          <a href="/workflows" className={workflows.length > 0 ? "text-emerald-600" : "underline"}>
+            {workflows.length > 0 ? "✔ Flujo publicado" : "3. Publica tu primer flujo"}
+          </a>
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1">
       <aside className={`${selected ? "hidden md:flex" : "flex"} w-full flex-col border-r border-slate-200 bg-white md:w-96`}>
         <header className="space-y-2 border-b border-slate-200 p-3">
           <div className="flex items-center justify-between">
@@ -303,7 +341,16 @@ export default function InboxPage() {
                 <button onClick={() => setSelected(null)} className="text-lg text-slate-500 hover:text-slate-800 md:hidden" aria-label="Volver a la lista">←</button>
                 <div>
                   <h2 className="font-medium">{displayName(selected.contact)}</h2>
-                  <p className="text-xs text-slate-400">{selected.contact.phone}</p>
+                  <p className="text-xs text-slate-400">
+                    {selected.contact.phone}
+                    {channelOf(selected) && (
+                      <span title="Número por el que se habla">
+                        {" "}· 📱 {channelOf(selected)!.name}
+                        {channelOf(selected)!.displayPhone ? ` (${channelOf(selected)!.displayPhone})` : ""}
+                        {channelOf(selected)!.status === "error" && <span className="text-red-500"> ⚠ reautorizar</span>}
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -454,6 +501,7 @@ export default function InboxPage() {
           </>
         )}
       </section>
+      </div>
     </div>
   );
 }

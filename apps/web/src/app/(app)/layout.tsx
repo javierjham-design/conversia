@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  Bell,
   Bot,
   Building2,
   CalendarDays,
@@ -33,6 +34,73 @@ interface Me {
 const MeContext = createContext<Me | null>(null);
 export function useMe() {
   return useContext(MeContext);
+}
+
+/** Campana: incidencias de integraciones (token vencido, sync fallida, CAPI…). */
+function NotificationsBell() {
+  const [events, setEvents] = useState<{ id: string; provider: string; status: string; message: string | null; createdAt: string }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [seenAt, setSeenAt] = useState<number>(() => Number(typeof window !== "undefined" ? localStorage.getItem("notifSeenAt") ?? 0 : 0));
+
+  useEffect(() => {
+    const load = () =>
+      api<{ events: { id: string; provider: string; status: string; message: string | null; createdAt: string }[] }>("/integrations/notifications")
+        .then((r) => setEvents(r.events))
+        .catch(() => undefined);
+    void load();
+    const t = setInterval(() => void load(), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const unread = events.filter((e) => new Date(e.createdAt).getTime() > seenAt).length;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => {
+          setOpen(!open);
+          const now = Date.now();
+          setSeenAt(now);
+          localStorage.setItem("notifSeenAt", String(now));
+        }}
+        aria-label="Notificaciones"
+        className="relative text-slate-500 hover:text-navy-900"
+      >
+        <Bell size={17} />
+        {unread > 0 && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-8 z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+            <p className="px-2 py-1 text-xs font-medium text-slate-500">Incidencias de integraciones</p>
+            {events.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-slate-400">Sin incidencias recientes ✔</p>
+            ) : (
+              <ul className="max-h-80 overflow-y-auto">
+                {events.map((e) => (
+                  <li key={e.id} className="rounded-lg px-2 py-1.5 text-xs hover:bg-slate-50">
+                    <span className={e.status === "error" ? "text-red-500" : "text-amber-500"}>●</span>{" "}
+                    <span className="text-slate-600">{e.message ?? e.provider}</span>
+                    <span className="block pl-3 text-[10px] text-slate-400">
+                      {e.provider} · {new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <a href="/integrations" className="block px-2 py-1.5 text-[11px] text-cyan-700 hover:underline">
+              Ver integraciones →
+            </a>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** ¿El usuario tiene el permiso? owner/admin llevan "*". Espeja hasPermission del backend. */
@@ -297,6 +365,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 </nav>
               </div>
               <div className="flex items-center gap-4">
+                <NotificationsBell />
                 <span className="flex items-center gap-1.5 text-xs text-slate-500" title="Estado del API">
                   <HealthDot level={apiOk === null ? "off" : apiOk ? "ok" : "error"} />
                   {apiOk === false ? "Sin conexión" : "Operativo"}

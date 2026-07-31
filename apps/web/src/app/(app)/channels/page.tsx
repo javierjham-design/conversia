@@ -27,6 +27,7 @@ export default function ChannelsPage() {
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [templatesOpen, setTemplatesOpen] = useState<Record<string, boolean>>({});
   const [health, setHealth] = useState<{ id: string; type: string; status: string; message: string | null; createdAt: string }[]>([]);
+  const [transcription, setTranscription] = useState<boolean | null>(null);
   const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string; featureType?: string } | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [fbReady, setFbReady] = useState(false);
@@ -53,7 +54,23 @@ export default function ChannelsPage() {
     api<{ events: { id: string; type: string; status: string; message: string | null; createdAt: string }[] }>("/channels/health/events")
       .then((r) => setHealth(r.events))
       .catch(() => undefined);
+    api<{ enabled: boolean }>("/organizations/me/transcription")
+      .then((r) => setTranscription(r.enabled))
+      .catch(() => undefined);
   }, []);
+
+  async function toggleTranscription() {
+    if (transcription === null) return;
+    try {
+      const r = await api<{ enabled: boolean }>("/organizations/me/transcription", {
+        method: "PUT",
+        body: JSON.stringify({ enabled: !transcription }),
+      });
+      setTranscription(r.enabled);
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  }
 
   useEffect(() => {
     void load().catch((e) => setMsg((e as Error).message));
@@ -371,6 +388,27 @@ export default function ChannelsPage() {
         ))}
         {channels.length === 0 && <p className="text-sm text-slate-400">Sin canales aún.</p>}
       </div>
+
+      {/* Transcripción de audios (Whisper) — switch por tenant */}
+      {transcription !== null && (
+        <div className="mt-6 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
+          <div>
+            <h2 className="text-sm font-medium">Transcripción de audios</h2>
+            <p className="text-xs text-slate-500">
+              Las notas de voz entrantes se transcriben automáticamente para leerlas en la bandeja y que el agente IA las
+              entienda. Desactívala si no quieres usarla (tiene costo de IA).
+            </p>
+          </div>
+          <button
+            onClick={() => void toggleTranscription()}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+              transcription ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+            }`}
+          >
+            {transcription ? "● Activada" : "○ Desactivada"}
+          </button>
+        </div>
+      )}
 
       {/* Salud del canal: últimos eventos de WhatsApp (auth, calidad, cuenta, plantillas) */}
       {health.length > 0 && (

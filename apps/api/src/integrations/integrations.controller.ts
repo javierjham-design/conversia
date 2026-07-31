@@ -169,6 +169,21 @@ export class IntegrationsController {
     );
   }
 
+  /** Campana del panel: incidencias recientes de integraciones (errores/avisos). */
+  @Get("notifications")
+  notifications() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const events = await tx.integrationEvent.findMany({
+        where: { status: { in: ["error", "warning"] } },
+        orderBy: { createdAt: "desc" },
+        take: 15,
+        select: { id: true, provider: true, type: true, status: true, message: true, createdAt: true },
+      });
+      return { events };
+    });
+  }
+
   /** Interés en integraciones "próximamente" (queda auditado). */
   @Post("interest")
   interest(@Body() body: unknown) {
