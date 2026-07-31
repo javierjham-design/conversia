@@ -1,5 +1,6 @@
 import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
+import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 
 /** Envía mensajes salientes creados desde el panel (autor humano). */
@@ -14,29 +15,18 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       include: { contact: true },
     });
     if (!conversation?.contact.phone) return null;
-
-    let phoneNumberId: string | null = null;
-    if (conversation.channelConnectionId) {
-      const number = await tx.whatsappPhoneNumber.findFirst({
-        where: { channelConnectionId: conversation.channelConnectionId },
-      });
-      phoneNumberId = number?.phoneNumberId ?? null;
-      if (!phoneNumberId) {
-        const org = await tx.organization.findUnique({ where: { id: organizationId } });
-        phoneNumberId = `mock:${org?.slug ?? organizationId}`;
-      }
-    }
-    return { message, phone: conversation.contact.phone, phoneNumberId: phoneNumberId ?? "mock:unknown" };
+    return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
   });
 
   if (!data) return;
+  const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId });
 
   try {
-    const sent = await getChannelProvider().send(data.phoneNumberId, {
+    const sent = await getChannelProvider().send(auth.phoneNumberId, {
       to: data.phone,
       type: "text",
       text: data.message.body ?? "",
-    });
+    }, { accessToken: auth.accessToken });
     await withTenant(organizationId, (tx) =>
       tx.message.update({
         where: { id: data.message.id },
@@ -50,6 +40,12 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
         data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
       }),
     );
+    // Error de auth: marcar el canal (banner Reautorizar) y NO reintentar en
+    // bucle — el token no se arregla solo. Otros errores sí reintentan.
+    if (err instanceof ChannelAuthError) {
+      await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+      return;
+    }
     throw err; // BullMQ reintenta según la política del worker
   }
 }

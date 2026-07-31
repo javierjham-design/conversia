@@ -1,5 +1,6 @@
 import { getEnv } from "@conversia/config";
-import type { ChannelProvider, ChannelSendResult, OutboundMessage } from "@conversia/types";
+import type { ChannelProvider, ChannelSendOptions, ChannelSendResult, OutboundMessage } from "@conversia/types";
+import { ChannelAuthError } from "./channel-auth";
 
 /** Mock: imprime el mensaje saliente. Permite E2E sin credenciales de Meta. */
 export class MockChannelProvider implements ChannelProvider {
@@ -16,7 +17,7 @@ export class MockChannelProvider implements ChannelProvider {
 export class MetaChannelProvider implements ChannelProvider {
   readonly kind = "meta";
 
-  async send(phoneNumberId: string, message: OutboundMessage): Promise<ChannelSendResult> {
+  async send(phoneNumberId: string, message: OutboundMessage, options?: ChannelSendOptions): Promise<ChannelSendResult> {
     const env = getEnv();
     const url = `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${phoneNumberId}/messages`;
     const body: Record<string, unknown> = {
@@ -38,16 +39,22 @@ export class MetaChannelProvider implements ChannelProvider {
       body.text = { body: message.text ?? "" };
     }
 
+    const token = options?.accessToken || env.META_ACCESS_TOKEN;
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${env.META_ACCESS_TOKEN}`,
+        authorization: `Bearer ${token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      // Token inválido/vencido/revocado → error tipado para que el llamador
+      // marque el canal en estado "error" (banner Reautorizar) sin reintentos.
+      if (res.status === 401 || text.includes('"code":190')) {
+        throw new ChannelAuthError(`Meta send ${res.status}: ${text.slice(0, 300)}`);
+      }
       throw new Error(`Meta send ${res.status}: ${text.slice(0, 500)}`);
     }
     const data: any = await res.json();

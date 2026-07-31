@@ -12,6 +12,7 @@ import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition }
 import { createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
+import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
@@ -46,17 +47,34 @@ function makeDeps(): EngineDeps {
         return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
       });
       if (!data) return;
-      const sent = await getChannelProvider().send(`wf:${ctx.organizationId}`, {
-        to: data.phone,
-        type: "text",
-        text,
-      });
-      await withTenant(ctx.organizationId, (tx) =>
-        tx.message.update({
-          where: { id: data.message.id },
-          data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
-        }),
-      );
+      // Número + token reales del canal de la conversación (antes se enviaba
+      // con un id sintético "wf:<org>" que solo funcionaba en mock).
+      const auth = await resolveChannelAuth(ctx.organizationId, { channelConnectionId: data.channelConnectionId });
+      try {
+        const sent = await getChannelProvider().send(auth.phoneNumberId, {
+          to: data.phone,
+          type: "text",
+          text,
+        }, { accessToken: auth.accessToken });
+        await withTenant(ctx.organizationId, (tx) =>
+          tx.message.update({
+            where: { id: data.message.id },
+            data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
+          }),
+        );
+      } catch (err) {
+        await withTenant(ctx.organizationId, (tx) =>
+          tx.message.update({
+            where: { id: data.message.id },
+            data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
+          }),
+        );
+        if (err instanceof ChannelAuthError) {
+          await markChannelAuthError(ctx.organizationId, auth.channelConnectionId, err.message);
+          return; // el flujo continúa; el mensaje quedó FAILED y el canal marcado
+        }
+        throw err;
+      }
     },
 
     async runAgent(ctx, agentSlug) {

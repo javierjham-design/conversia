@@ -9,6 +9,7 @@ import {
 import { getEnv } from "@conversia/config";
 import { getPrisma, withTenant } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
+import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { buildToolServices } from "./tool-services";
@@ -285,15 +286,15 @@ export async function runAgentTurn(opts: {
     return message;
   });
 
-  // 5. Enviar por el canal
+  // 5. Enviar por el canal (token por-WABA del tenant; fallback al global)
   if (persisted && conversation.contact.phone) {
-    const phoneNumberId = await resolvePhoneNumberId(organizationId, conversation.channelConnectionId);
+    const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
     try {
-      const sent = await getChannelProvider().send(phoneNumberId, {
+      const sent = await getChannelProvider().send(auth.phoneNumberId, {
         to: conversation.contact.phone,
         type: "text",
         text: persisted.body ?? "",
-      });
+      }, { accessToken: auth.accessToken });
       await withTenant(organizationId, (tx) =>
         tx.message.update({
           where: { id: persisted.id },
@@ -306,6 +307,9 @@ export async function runAgentTurn(opts: {
         text: (persisted.body ?? "").slice(0, 200),
       });
     } catch (err) {
+      if (err instanceof ChannelAuthError) {
+        await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+      }
       await withTenant(organizationId, (tx) =>
         tx.message.update({
           where: { id: persisted.id },
@@ -335,24 +339,6 @@ export async function runAgentTurn(opts: {
       });
     });
   }
-}
-
-async function resolvePhoneNumberId(organizationId: string, channelConnectionId?: string | null): Promise<string> {
-  return withTenant(organizationId, async (tx) => {
-    if (channelConnectionId) {
-      const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId } });
-      if (number) return number.phoneNumberId;
-      const channel = await tx.channelConnection.findUnique({ where: { id: channelConnectionId } });
-      if (channel?.type === "MOCK") {
-        const org = await tx.organization.findUnique({ where: { id: organizationId } });
-        return `mock:${org?.slug ?? organizationId}`;
-      }
-    }
-    const any = await tx.whatsappPhoneNumber.findFirst({ where: { status: "active" } });
-    if (any) return any.phoneNumberId;
-    const org = await tx.organization.findUnique({ where: { id: organizationId } });
-    return `mock:${org?.slug ?? organizationId}`;
-  });
 }
 
 export function getGlobalPrisma() {

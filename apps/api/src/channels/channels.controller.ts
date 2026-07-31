@@ -440,20 +440,43 @@ export class ChannelsController {
 
     try {
       // graphFetch reintenta con el token global si el del canal está vencido.
-      const { res, json } = await this.graphFetch(
+      const { res, json, usedFallback } = await this.graphFetch(
         `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${data.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`,
         data.token,
       );
       if (!res.ok) {
+        if (json?.error?.code === 190 || res.status === 401) {
+          await this.setChannelHealth(ctx.organizationId, id, "error", `Prueba de conexión: ${json?.error?.message ?? res.status}`);
+        }
         return { ok: false, detail: json?.error?.message ?? `Meta respondió ${res.status}` };
       }
-      return {
-        ok: true,
-        detail: `Número verificado: ${json.display_phone_number ?? "?"} (${json.verified_name ?? "sin nombre"}) · calidad: ${json.quality_rating ?? "?"}`,
-      };
+      const detail = `Número verificado: ${json.display_phone_number ?? "?"} (${json.verified_name ?? "sin nombre"}) · calidad: ${json.quality_rating ?? "?"}`;
+      if (usedFallback) {
+        // El token PROPIO del canal está vencido (funcionó solo el global):
+        // marcar para que el equipo reautorice antes de que fallen los envíos.
+        await this.setChannelHealth(ctx.organizationId, id, "error", "El token del canal está vencido (la prueba funcionó con el token global). Reautoriza WhatsApp.");
+        return { ok: true, detail: `${detail} · ⚠ token del canal vencido — reautoriza WhatsApp` };
+      }
+      await this.setChannelHealth(ctx.organizationId, id, "active");
+      return { ok: true, detail };
     } catch (err) {
       return { ok: false, detail: `Error de red: ${(err as Error).message}` };
     }
+  }
+
+  /** Salud del canal: últimos eventos de WhatsApp (auth, calidad, plantillas, cuenta). */
+  @Get("health/events")
+  healthEvents() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const events = await tx.integrationEvent.findMany({
+        where: { provider: "whatsapp" },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: { id: true, type: true, status: true, message: true, createdAt: true },
+      });
+      return { events };
+    });
   }
 
   // ------------------- Plantillas de mensaje (WABA) -------------------
@@ -485,7 +508,7 @@ export class ChannelsController {
    * plataforma. Cubre canales creados con tokens temporales que expiraron
    * (el permanente vive en el env y es el que usa el worker para enviar).
    */
-  private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any }> {
+  private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any; usedFallback: boolean }> {
     const doFetch = async (tk: string) => {
       const res = await fetch(url, {
         ...init,
@@ -495,11 +518,36 @@ export class ChannelsController {
       return { res, json };
     };
     let out = await doFetch(token);
+    let usedFallback = false;
     const globalToken = getEnv().META_ACCESS_TOKEN;
     if (!out.res.ok && out.json?.error?.code === 190 && globalToken && globalToken !== token) {
       out = await doFetch(globalToken);
+      usedFallback = true;
     }
-    return out;
+    return { ...out, usedFallback };
+  }
+
+  /** Actualiza el estado del canal + registra el evento en la actividad (best-effort). */
+  private async setChannelHealth(organizationId: string, channelId: string, status: "active" | "error", message?: string) {
+    try {
+      await this.prisma.withTenant(organizationId, async (tx) => {
+        const channel = await tx.channelConnection.findUnique({ where: { id: channelId }, select: { status: true } });
+        // No revivir canales desactivados a mano ni repetir el mismo estado.
+        if (!channel || channel.status === "inactive" || channel.status === status) return;
+        await tx.channelConnection.update({ where: { id: channelId }, data: { status } });
+        await tx.integrationEvent.create({
+          data: {
+            organizationId,
+            provider: "whatsapp",
+            type: status === "error" ? "channel.auth_error" : "channel.recovered",
+            status: status === "error" ? "error" : "ok",
+            message: message ?? (status === "error" ? "Token del canal inválido — reautoriza WhatsApp" : "Canal reautorizado correctamente"),
+          },
+        });
+      });
+    } catch {
+      /* best-effort */
+    }
   }
 
   /** Lista las plantillas de la WABA del canal (estado, categoría, idioma, contenido). */
