@@ -1245,6 +1245,40 @@ model IntegrationCredential {
   @@map("integration_credentials")
 }
 
+// Webhook ENTRANTE por tenant: URL pública /hooks/t/{token} que dispara el
+// trigger "Webhook entrante" de workflows (Make/Zapier/landings → Conversia).
+model InboundWebhook {
+  id               String    @id @default(cuid())
+  organizationId   String    @map("organization_id")
+  name             String
+  token            String    @unique // segmento de la URL pública
+  secretCiphertext String?   @map("secret_ciphertext") // HMAC opcional (cifrado)
+  active           Boolean   @default(true)
+  lastReceivedAt   DateTime? @map("last_received_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@map("inbound_webhooks")
+}
+
+// API key por tenant para la API pública de Conversia (solo hash en reposo).
+model ApiKey {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  name           String
+  prefix         String // visible en el panel (cnvk_xxxx…)
+  hash           String    @unique @map("key_hash") // sha256 del secreto completo
+  scopes         Json      @default("[]")
+  lastUsedAt     DateTime? @map("last_used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  createdById    String?   @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
 model WebhookEndpoint {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")

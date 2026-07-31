@@ -872,6 +872,23 @@ async function buildRunVars(event: PlatformEvent): Promise<Record<string, string
       const contact = await tx.contact.findUnique({ where: { id: event.contactId } });
       if (contact) vars["contact.firstName"] = contact.firstName ?? "";
     }
+    // Webhook entrante: el payload queda disponible como variables del flujo
+    // (webhook.campo, webhook.objeto.campo, …) para usarlas en {{…}}.
+    if (event.type === "webhook_received" && event.data && typeof event.data === "object") {
+      const flatten = (obj: Record<string, unknown>, prefix: string, depth: number) => {
+        if (depth > 2) return;
+        for (const [k, v] of Object.entries(obj)) {
+          if (v === null || v === undefined) continue;
+          const key = `${prefix}.${k}`;
+          if (typeof v === "object" && !Array.isArray(v)) flatten(v as Record<string, unknown>, key, depth + 1);
+          else if (typeof v !== "object") vars[key] = String(v).slice(0, 500);
+        }
+      };
+      const payload = (event.data as Record<string, unknown>).payload;
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        flatten(payload as Record<string, unknown>, "webhook", 0);
+      }
+    }
     return vars;
   });
 }
