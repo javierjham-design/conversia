@@ -65,7 +65,7 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 5. Trigger `appointment_upcoming` (scheduled_job por cita) para confirmaciones.
 6. ✅ CRUD/editor de agentes y prompts en panel (editar borrador → publicar versión) + probador en vivo.
 7. 🔶 Recepción de media: audio + transcripción (Whisper) hecho; falta imágenes/documentos.
-8. Plantillas de WhatsApp (sincronización + envío fuera de ventana 24h).
+8. ✅ Plantillas de WhatsApp (sincronización + nodo de workflow + envío desde bandeja fuera de ventana 24h) — 2026-07-31, feature/integrations. Además: webhooks entrantes por tenant (/hooks/t/{token} → trigger webhook_received), API keys + API pública v1, envío con token por-WABA, switch de transcripción, campana de incidencias y checklist de onboarding.
 9. ✅ Editor visual de workflows (React Flow) sobre el JSON existente + modo prueba + plantillas.
 10. Panel de métricas (conversaciones, conversión a cita, costo IA por tenant).
 
