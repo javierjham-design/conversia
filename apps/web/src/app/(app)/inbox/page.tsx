@@ -93,6 +93,22 @@ export default function InboxPage() {
   const [fAssigned, setFAssigned] = useState("all");
   const [q, setQ] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Plantillas HSM aprobadas (envío fuera de la ventana de 24 h)
+  const [templates, setTemplates] = useState<{ id: string; name: string; language: string; bodyText: string }[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [sendingTemplate, setSendingTemplate] = useState(false);
+
+  // Ventana de servicio de 24 h: desde el último mensaje ENTRANTE del contacto.
+  const lastInboundAt = messages.reduce<number | null>((acc, m) => {
+    if (m.direction !== "INBOUND") return acc;
+    const t = new Date(m.createdAt).getTime();
+    return acc === null || t > acc ? t : acc;
+  }, null);
+  const windowMsLeft = lastInboundAt === null ? 0 : lastInboundAt + 24 * 60 * 60 * 1000 - Date.now();
+  const windowOpen = windowMsLeft > 0;
+  const windowLabel = windowOpen
+    ? `ventana 24 h abierta · quedan ${Math.floor(windowMsLeft / 3_600_000)} h ${Math.floor((windowMsLeft % 3_600_000) / 60_000)} m`
+    : "ventana de 24 h cerrada — solo plantillas aprobadas";
 
   const loadConversations = useCallback(async () => {
     const params = new URLSearchParams();
@@ -120,7 +136,28 @@ export default function InboxPage() {
     void api<{ id: string; name: string; status: string }[]>("/workflows")
       .then((r) => setWorkflows(r.filter((w) => w.status === "published").map((w) => ({ id: w.id, name: w.name }))))
       .catch(() => setWorkflows([]));
+    // Plantillas aprobadas del tenant (para escribir fuera de la ventana de 24 h).
+    void api<{ templates: { id: string; name: string; language: string; bodyText: string }[] }>("/channels/templates/approved")
+      .then((r) => setTemplates(r.templates))
+      .catch(() => setTemplates([]));
   }, []);
+
+  async function sendTemplate(templateId: string) {
+    if (!selected) return;
+    setSendingTemplate(true);
+    try {
+      await api(`/conversations/${selected.id}/send-template`, {
+        method: "POST",
+        body: JSON.stringify({ templateId }),
+      });
+      setShowTemplates(false);
+      await loadMessages(selected.id);
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setSendingTemplate(false);
+    }
+  }
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -344,21 +381,76 @@ export default function InboxPage() {
               ))}
               <div ref={bottomRef} />
             </div>
-            <footer className="flex gap-2 border-t border-slate-200 bg-white p-4">
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void send()}
-                placeholder="Escribe un mensaje…"
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <button
-                onClick={() => void send()}
-                className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800"
-              >
-                Enviar
-              </button>
+            <footer className="border-t border-slate-200 bg-white p-4">
+              <p className={`mb-2 text-[10px] ${windowOpen ? "text-slate-400" : "font-medium text-amber-600"}`}>
+                {windowLabel}
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void send()}
+                  placeholder={windowOpen ? "Escribe un mensaje…" : "Ventana cerrada — usa una plantilla"}
+                  disabled={!windowOpen}
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                />
+                <button
+                  onClick={() => setShowTemplates(true)}
+                  title="Enviar plantilla aprobada (funciona con la ventana cerrada)"
+                  className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                    windowOpen
+                      ? "border border-slate-300 text-slate-600 hover:bg-slate-50"
+                      : "bg-amber-500 text-white hover:bg-amber-600"
+                  }`}
+                >
+                  📄 Plantilla
+                </button>
+                <button
+                  onClick={() => void send()}
+                  disabled={!windowOpen}
+                  className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-40"
+                >
+                  Enviar
+                </button>
+              </div>
             </footer>
+
+            {showTemplates && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog">
+                <div className="absolute inset-0 bg-navy-950/50" onClick={() => setShowTemplates(false)} />
+                <div className="relative max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+                  <h2 className="mb-1 text-lg font-semibold">Enviar plantilla</h2>
+                  <p className="mb-3 text-xs text-slate-500">
+                    Las variables se completan solas con los datos del contacto. Las plantillas aprobadas funcionan aunque la
+                    ventana de 24 h esté cerrada.
+                  </p>
+                  {templates.length === 0 ? (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                      No hay plantillas aprobadas. Créalas o sincronízalas en <a href="/channels" className="underline">Canales → Plantillas</a>.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {templates.map((t) => (
+                        <button
+                          key={t.id}
+                          disabled={sendingTemplate}
+                          onClick={() => void sendTemplate(t.id)}
+                          className="block w-full rounded-lg border border-slate-200 p-3 text-left hover:border-cyan-400 hover:bg-cyan-50 disabled:opacity-50"
+                        >
+                          <p className="font-mono text-xs font-medium">{t.name} · {t.language}</p>
+                          <p className="mt-1 text-xs text-slate-500">{t.bodyText.slice(0, 140)}{t.bodyText.length > 140 ? "…" : ""}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={() => setShowTemplates(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>

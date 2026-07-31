@@ -95,7 +95,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: "call_api", label: "Petición HTTP", description: "Llama a un endpoint externo y mapea la respuesta a variables", category: "Integraciones", icon: <Webhook size={15} />, premium: true, defaultConfig: { method: "GET", url: "", headers: {}, body: "", responseMapping: {} } },
   { type: "google_sheets_append", label: "Añadir fila a Google Sheets", description: "Agrega una fila a una hoja de cálculo", category: "Integraciones", icon: <Sheet size={15} />, defaultConfig: {}, soon: true },
   // Agenda
-  { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM (fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {}, soon: true },
+  { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM aprobada (funciona fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {} },
 ];
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 
@@ -107,6 +107,7 @@ interface Catalog {
   users: { id: string; name: string }[];
   teams: { id: string; name: string }[];
   workflows: { name: string }[];
+  templates: { id: string; name: string; language: string }[];
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -244,7 +245,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "send_capi": return `CAPI: ${config.eventName ?? "Lead"}${config.value ? ` ($${config.value} ${config.currency ?? "CLP"})` : ""}`;
     case "send_tiktok_event": return "(Próximamente)";
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
-    case "send_template": return "(Próximamente)";
+    case "send_template": return config.templateName ? `📄 ${config.templateName}` : "(elige la plantilla)";
     case "call_api": return config.url ? `${config.method ?? "GET"} ${String(config.url).slice(0, 30)}` : "(configura la petición)";
     case "google_sheets_append": return "(Próximamente)";
     default: return "";
@@ -967,7 +968,37 @@ function NodePanel({
       )}
 
       {type === "send_template" && (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere gestión de plantillas HSM aprobadas en el canal de WhatsApp.</p>
+        <div className="space-y-2">
+          {catalog.templates.length === 0 ? (
+            <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
+              Requiere conectar WhatsApp y tener plantillas <b>aprobadas</b>. Crea o sincroniza plantillas en{" "}
+              <a href="/channels" className="underline">Canales → Plantillas</a> y vuelve a abrir este panel.
+            </p>
+          ) : (
+            <>
+              <label className="block text-sm">
+                <span className="text-xs text-slate-500">Plantilla aprobada</span>
+                <select
+                  value={config.templateId ?? ""}
+                  onChange={(e) => {
+                    const t = catalog.templates.find((x) => x.id === e.target.value);
+                    onChange({ templateId: e.target.value, templateName: t?.name ?? "" });
+                  }}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">— elegir —</option>
+                  {catalog.templates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} · {t.language}</option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-[10px] text-slate-400">
+                Las variables de la plantilla se completan solas con los datos reales del contacto (nombre, cita, etc.)
+                según el mapeo definido al crearla. Funciona aunque la ventana de 24 h esté cerrada.
+              </p>
+            </>
+          )}
+        </div>
       )}
 
       {type === "call_api" && <HttpForm config={config} onChange={onChange} />}

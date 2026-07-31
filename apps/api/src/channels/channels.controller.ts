@@ -482,7 +482,10 @@ export class ChannelsController {
   // ------------------- Plantillas de mensaje (WABA) -------------------
 
   /** WABA + token del canal (token por-canal cifrado; fallback al global). */
-  private async resolveWaba(organizationId: string, channelId: string): Promise<{ wabaId: string; token: string }> {
+  private async resolveWaba(
+    organizationId: string,
+    channelId: string,
+  ): Promise<{ wabaId: string; token: string; accountId: string; mappings: Record<string, { fields?: string[] }> }> {
     const env = getEnv();
     const data = await this.prisma.withTenant(organizationId, async (tx) => {
       const channel = await tx.channelConnection.findUnique({ where: { id: channelId } });
@@ -496,10 +499,58 @@ export class ChannelsController {
       const credential = account.credentialId
         ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } })
         : null;
-      return { wabaId: account.wabaId, token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN };
+      return {
+        wabaId: account.wabaId,
+        accountId: account.id,
+        token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN,
+        mappings: (((channel.config as any)?.templateMappings ?? {}) as Record<string, { fields?: string[] }>),
+      };
     });
     if (!data.token) throw new BadRequestException("Sin token de acceso: carga el access token del canal");
-    return { wabaId: data.wabaId, token: data.token };
+    return { wabaId: data.wabaId, token: data.token, accountId: data.accountId, mappings: data.mappings };
+  }
+
+  /** Proyecta la lista de plantillas de Graph hacia whatsapp_templates (sync). */
+  private async persistTemplates(
+    organizationId: string,
+    accountId: string,
+    templates: any[],
+    mappings: Record<string, { fields?: string[] }>,
+  ): Promise<number> {
+    let synced = 0;
+    await this.prisma.withTenant(organizationId, async (tx) => {
+      const seen = new Set<string>();
+      for (const t of templates) {
+        const language = String(t.language ?? "es");
+        seen.add(`${t.name}::${language}`);
+        const body = {
+          components: t.components ?? [],
+          rejectedReason: t.rejected_reason ?? null,
+          variableFields: mappings[t.name]?.fields ?? null,
+          syncedAt: new Date().toISOString(),
+        } as object;
+        await tx.whatsappTemplate.upsert({
+          where: {
+            organizationId_accountId_name_language: { organizationId, accountId, name: String(t.name), language },
+          },
+          update: { status: String(t.status ?? "PENDING"), category: String(t.category ?? "UTILITY"), body },
+          create: {
+            organizationId,
+            accountId,
+            name: String(t.name),
+            language,
+            category: String(t.category ?? "UTILITY"),
+            status: String(t.status ?? "PENDING"),
+            body,
+          },
+        });
+        synced++;
+      }
+      const existing = await tx.whatsappTemplate.findMany({ where: { accountId }, select: { id: true, name: true, language: true } });
+      const stale = existing.filter((e) => !seen.has(`${e.name}::${e.language}`));
+      if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+    });
+    return synced;
   }
 
   /**
@@ -550,22 +601,57 @@ export class ChannelsController {
     }
   }
 
+  /** Plantillas APROBADAS del tenant (proyección local) — para bandeja y workflows. */
+  @Get("templates/approved")
+  approvedTemplates() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const rows = await tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } });
+      return {
+        templates: rows.map((t) => {
+          const body = (t.body as Record<string, any>) ?? {};
+          const components = Array.isArray(body.components) ? body.components : [];
+          return {
+            id: t.id,
+            name: t.name,
+            language: t.language,
+            category: t.category,
+            bodyText: components.find((c: any) => c?.type === "BODY")?.text ?? "",
+            variableFields: Array.isArray(body.variableFields) ? body.variableFields : [],
+          };
+        }),
+      };
+    });
+  }
+
+  /** Sincroniza AHORA las plantillas del canal desde Graph hacia la proyección local. */
+  @Post(":id/templates/sync")
+  async syncTemplates(@Param("id") id: string) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    const { wabaId, token, accountId, mappings } = await this.resolveWaba(ctx.organizationId, id);
+    const { res, json } = await this.graphFetch(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=200`,
+      token,
+    );
+    if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
+    const synced = await this.persistTemplates(ctx.organizationId, accountId, (json?.data as any[]) ?? [], mappings);
+    return { ok: true, synced };
+  }
+
   /** Lista las plantillas de la WABA del canal (estado, categoría, idioma, contenido). */
   @Get(":id/templates")
   async listTemplates(@Param("id") id: string) {
     const ctx = requireContext();
     const env = getEnv();
-    const { wabaId, token } = await this.resolveWaba(ctx.organizationId, id);
+    const { wabaId, token, accountId, mappings } = await this.resolveWaba(ctx.organizationId, id);
     const { res, json } = await this.graphFetch(
       `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=100`,
       token,
     );
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Meta respondió ${res.status}`);
-    // Mapeo variable→campo guardado al crear cada plantilla desde el panel.
-    const mappings = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const channel = await tx.channelConnection.findUnique({ where: { id }, select: { config: true } });
-      return ((channel?.config as any)?.templateMappings ?? {}) as Record<string, { fields?: string[] }>;
-    });
+    // Cada vista del panel refresca también la proyección local (sync implícita).
+    await this.persistTemplates(ctx.organizationId, accountId, (json?.data as any[]) ?? [], mappings).catch(() => 0);
     return {
       wabaId,
       templates: ((json?.data as any[]) ?? []).map((t) => ({

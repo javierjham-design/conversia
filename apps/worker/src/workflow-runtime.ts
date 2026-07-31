@@ -15,6 +15,7 @@ import { runAgentTurn } from "./agent-turn";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
+import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
 /** Implementación de efectos del motor sobre la plataforma real. */
@@ -333,6 +334,72 @@ function makeDeps(): EngineDeps {
         currency: config.currency ?? null,
         ctwaClid: ctwaClid ?? null,
       });
+    },
+
+    async sendTemplate(ctx, cfg) {
+      if (!ctx.conversationId) return;
+      const templateId = String(cfg.templateId ?? "");
+      const data = await withTenant(ctx.organizationId, async (tx) => {
+        const conversation = await tx.conversation.findUnique({
+          where: { id: ctx.conversationId! },
+          include: { contact: true },
+        });
+        if (!conversation?.contact.phone) return null;
+        const template = await tx.whatsappTemplate.findUnique({ where: { id: templateId } });
+        return { conversation, template };
+      });
+      if (!data) return;
+      if (!data.template) throw new Error("Plantilla no encontrada — sincroniza las plantillas del canal");
+      if (data.template.status !== "APPROVED") {
+        throw new Error(`La plantilla «${data.template.name}» no está aprobada por Meta (estado: ${data.template.status})`);
+      }
+      const body = (data.template.body as Record<string, any>) ?? {};
+      const fields: string[] = Array.isArray(body.variableFields) ? body.variableFields : [];
+      const params = await resolveTemplateParams(ctx.organizationId, data.conversation.contactId, fields);
+      const rendered = renderTemplateBody(body.components ?? [], params);
+
+      const message = await withTenant(ctx.organizationId, async (tx) => {
+        const msg = await tx.message.create({
+          data: {
+            organizationId: ctx.organizationId,
+            conversationId: ctx.conversationId!,
+            direction: "OUTBOUND",
+            type: "TEMPLATE",
+            body: rendered || `[plantilla ${data.template!.name}]`,
+            authorType: "SYSTEM",
+            status: "PENDING",
+            payload: { templateId, workflowRunId: ctx.runId },
+          },
+        });
+        await tx.conversation.update({
+          where: { id: ctx.conversationId! },
+          data: { lastMessageAt: new Date(), lastMessagePreview: (rendered || data.template!.name).slice(0, 120) },
+        });
+        return msg;
+      });
+
+      const auth = await resolveChannelAuth(ctx.organizationId, { channelConnectionId: data.conversation.channelConnectionId });
+      try {
+        const sent = await getChannelProvider().send(auth.phoneNumberId, {
+          to: data.conversation.contact.phone!,
+          type: "template",
+          templateName: data.template.name,
+          templateLanguage: data.template.language,
+          templateParams: params,
+        }, { accessToken: auth.accessToken });
+        await withTenant(ctx.organizationId, (tx) =>
+          tx.message.update({ where: { id: message.id }, data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() } }),
+        );
+      } catch (err) {
+        await withTenant(ctx.organizationId, (tx) =>
+          tx.message.update({ where: { id: message.id }, data: { status: "FAILED", error: (err as Error).message.slice(0, 500) } }),
+        );
+        if (err instanceof ChannelAuthError) {
+          await markChannelAuthError(ctx.organizationId, auth.channelConnectionId, err.message);
+          return;
+        }
+        throw err;
+      }
     },
 
     async runAgentWithObjective(ctx, nodeId, cfg) {

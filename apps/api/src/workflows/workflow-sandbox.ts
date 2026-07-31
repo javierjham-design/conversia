@@ -142,9 +142,12 @@ export function simulateWorkflow(
         label = "Petición HTTP";
         detail = `${cfg.method ?? "GET"} ${renderVars(String(cfg.url ?? ""), vars) || "(sin URL)"} (no se ejecuta en la prueba)`;
         break;
+      case "send_template":
+        label = "Plantilla WhatsApp";
+        detail = "(enviaría la plantilla HSM elegida con las variables reales del contacto — sirve fuera de la ventana de 24 h; no se envía en la prueba)";
+        break;
       case "send_tiktok_event":
       case "google_sheets_append":
-      case "send_template":
         label = "Integración";
         detail = "(Próximamente — este paso aún no envía nada)";
         break;

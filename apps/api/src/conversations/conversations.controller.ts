@@ -231,6 +231,64 @@ export class ConversationsController {
     return message;
   }
 
+  /**
+   * Envía una plantilla HSM aprobada (única vía de contacto fuera de la ventana
+   * de 24 h). El worker resuelve las variables con los datos reales del contacto
+   * según el mapeo posición→campo guardado al crear la plantilla.
+   */
+  @Post(":id/send-template")
+  async sendTemplate(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ templateId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("templateId requerido");
+    const message = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const template = await tx.whatsappTemplate.findUnique({ where: { id: parsed.data.templateId } });
+      if (!template) throw new BadRequestException("Plantilla no encontrada — sincroniza las plantillas del canal");
+      if (template.status !== "APPROVED") {
+        throw new BadRequestException(`La plantilla «${template.name}» no está aprobada por Meta (estado: ${template.status})`);
+      }
+      const components = ((template.body as Record<string, any>)?.components ?? []) as any[];
+      const preview = components.find((c) => c?.type === "BODY")?.text ?? `[plantilla ${template.name}]`;
+      const msg = await tx.message.create({
+        data: {
+          organizationId: ctx.organizationId,
+          conversationId: id,
+          direction: "OUTBOUND",
+          type: "TEMPLATE",
+          body: preview,
+          authorType: "USER",
+          authorUserId: ctx.userId,
+          status: "PENDING",
+          payload: { templateId: template.id, templateName: template.name },
+        },
+      });
+      await tx.conversation.update({
+        where: { id },
+        data: { lastMessageAt: new Date(), lastMessagePreview: preview.slice(0, 120) },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "conversation.send_template",
+          entityType: "conversation",
+          entityId: id,
+          after: { template: template.name, language: template.language },
+        },
+      });
+      return msg;
+    });
+    await this.queues.outbound.add("send", {
+      organizationId: ctx.organizationId,
+      conversationId: id,
+      messageId: message.id,
+    });
+    return message;
+  }
+
   /** Toma de control humano: la IA deja de responder (sección 7). */
   @Post(":id/takeover")
   takeover(@Param("id") id: string) {

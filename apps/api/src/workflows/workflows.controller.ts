@@ -112,12 +112,13 @@ export class WorkflowsController {
   catalog() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [statuses, agents, members, teams, workflows] = await Promise.all([
+      const [statuses, agents, members, teams, workflows, templates] = await Promise.all([
         tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true } }),
         tx.agent.findMany({ where: { deletedAt: null, active: true }, select: { slug: true, name: true } }),
         tx.organizationUser.findMany({ where: { active: true }, include: { user: { select: { id: true, name: true } } } }),
         tx.team.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
         tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
+        tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, select: { id: true, name: true, language: true }, orderBy: { name: "asc" } }),
       ]);
       return {
         triggers: TRIGGER_CATALOG,
@@ -127,6 +128,7 @@ export class WorkflowsController {
         users: members.map((m) => ({ id: m.userId, name: m.user.name })),
         teams,
         workflows: workflows.map((w) => ({ name: w.name })),
+        templates,
       };
     });
   }
@@ -437,9 +439,30 @@ export class WorkflowsController {
       });
       if (!draft) throw new BadRequestException("No hay borrador para publicar");
       // Gating por plan: la "Petición HTTP" (call_api) es un paso premium.
-      const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string }[];
+      const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string; config?: Record<string, unknown> }[];
       if (nodes.some((n) => n.type === "call_api") && !(await canUseFeature(tx, "http_step"))) {
         throw new BadRequestException("El paso «Petición HTTP» requiere un plan superior. Actualiza tu plan para publicar este flujo.");
+      }
+      // Requisitos de integraciones: no publicar pasos que no pueden ejecutarse.
+      for (const n of nodes.filter((x) => x.type === "send_template")) {
+        const templateId = String((n.config as any)?.templateId ?? "");
+        if (!templateId) {
+          throw new BadRequestException("El paso «Enviar plantilla WhatsApp» no tiene plantilla elegida. Selecciónala en el panel del paso.");
+        }
+        const template = await tx.whatsappTemplate.findUnique({ where: { id: templateId } });
+        if (!template || template.status !== "APPROVED") {
+          throw new BadRequestException(
+            "La plantilla del paso «Enviar plantilla WhatsApp» no existe o no está aprobada por Meta. Sincroniza las plantillas en Canales → Plantillas.",
+          );
+        }
+      }
+      if (nodes.some((n) => n.type === "send_capi")) {
+        const mapping = await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } });
+        if (!mapping?.datasetId || !mapping.active) {
+          throw new BadRequestException(
+            "El paso «Enviar evento CAPI» requiere conectar Conversions API (dataset) en Integraciones → Centro Meta antes de publicar.",
+          );
+        }
       }
       const published = await tx.workflowVersion.update({
         where: { id: draft.id },
