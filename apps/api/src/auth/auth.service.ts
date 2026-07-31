@@ -187,6 +187,7 @@ export class AuthService {
     if (!membership) throw new UnauthorizedException("El usuario no pertenece a ninguna organización");
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
+    await this.touchLastLogin(user.id);
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
   }
 
@@ -206,7 +207,17 @@ export class AuthService {
     }
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
+    await this.touchLastLogin(user.id);
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
+  }
+
+  /** Marca la última conexión — best-effort, jamás bloquea el login. */
+  private async touchLastLogin(userId: string) {
+    try {
+      await this.prisma.admin.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
+    } catch {
+      /* ignore */
+    }
   }
 
   private issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
