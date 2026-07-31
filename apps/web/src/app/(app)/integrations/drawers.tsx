@@ -485,3 +485,283 @@ export function WebhooksDrawer({
     </Drawer>
   );
 }
+
+// --------------------------- Correo electrónico ---------------------------
+
+export interface EmailState {
+  status: string;
+  mode?: "platform" | "smtp";
+  from?: string | null;
+  smtp?: { host: string; port: number; secure: boolean; user: string; hasPass?: boolean } | null;
+  escalation?: { enabled: boolean; minutes: number; recipients: string[] };
+  dailySummary?: { enabled: boolean; hour: number; recipients: string[] };
+  alerts?: { enabled: boolean; recipients: string[] };
+  lastError?: string | null;
+}
+
+function RecipientsInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  return (
+    <input
+      value={value.join(", ")}
+      onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+      placeholder={placeholder ?? "correo@equipo.cl, otro@equipo.cl"}
+      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+    />
+  );
+}
+
+export function EmailDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: EmailState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [busy, setBusy] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [testTo, setTestTo] = useState("");
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    mode: "platform" as "platform" | "smtp",
+    from: "",
+    smtpHost: "",
+    smtpPort: 587,
+    smtpSecure: false,
+    smtpUser: "",
+    smtpPass: "",
+    escalationEnabled: false,
+    escalationMinutes: 10,
+    escalationRecipients: [] as string[],
+    dailyEnabled: false,
+    dailyHour: 8,
+    dailyRecipients: [] as string[],
+    alertsEnabled: true,
+    alertsRecipients: [] as string[],
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    setTestDetail(null);
+    if (state) {
+      setForm((f) => ({
+        ...f,
+        mode: state.mode ?? "platform",
+        from: state.from ?? "",
+        smtpHost: state.smtp?.host ?? "",
+        smtpPort: state.smtp?.port ?? 587,
+        smtpSecure: Boolean(state.smtp?.secure),
+        smtpUser: state.smtp?.user ?? "",
+        smtpPass: "",
+        escalationEnabled: Boolean(state.escalation?.enabled),
+        escalationMinutes: state.escalation?.minutes ?? 10,
+        escalationRecipients: state.escalation?.recipients ?? [],
+        dailyEnabled: Boolean(state.dailySummary?.enabled),
+        dailyHour: state.dailySummary?.hour ?? 8,
+        dailyRecipients: state.dailySummary?.recipients ?? [],
+        alertsEnabled: state.alerts?.enabled ?? true,
+        alertsRecipients: state.alerts?.recipients ?? [],
+      }));
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/email", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: form.mode,
+          from: form.from || undefined,
+          smtp:
+            form.mode === "smtp"
+              ? { host: form.smtpHost, port: form.smtpPort, secure: form.smtpSecure, user: form.smtpUser, ...(form.smtpPass ? { pass: form.smtpPass } : {}) }
+              : undefined,
+          escalation: { enabled: form.escalationEnabled, minutes: form.escalationMinutes, recipients: form.escalationRecipients },
+          dailySummary: { enabled: form.dailyEnabled, hour: form.dailyHour, recipients: form.dailyRecipients },
+          alerts: { enabled: form.alertsEnabled, recipients: form.alertsRecipients },
+        }),
+      });
+      toast.push("Correo configurado ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    if (!testTo) return;
+    setBusy(true);
+    setTestDetail("Enviando correo de prueba…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/email/test", {
+        method: "POST",
+        body: JSON.stringify({ to: testTo }),
+      });
+      setTestDetail(`${r.ok ? "✔" : "✖"} ${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/email", { method: "DELETE" });
+    toast.push("Correo desconectado — escalamientos, resúmenes y alertas dejarán de enviarse", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Correo electrónico — avisos al equipo">
+      <p className="mb-3 text-xs text-slate-500">
+        Correo <b>interno para tu equipo</b> (escalamientos, resúmenes, alertas y el paso de workflow «Enviar correo
+        interno»). No es correo masivo a pacientes.
+      </p>
+
+      {/* Modo */}
+      <div className="mb-3 flex gap-2">
+        {(["platform", "smtp"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setForm({ ...form, mode: m })}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-cyan-700 text-white" : "border border-slate-300 text-slate-600"}`}
+          >
+            {m === "platform" ? "Remitente de plataforma" : "SMTP propio"}
+          </button>
+        ))}
+      </div>
+      {form.mode === "platform" && !platformReady && (
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          El remitente de plataforma aún no está configurado a nivel de sistema — usa SMTP propio o avísanos.
+        </p>
+      )}
+      {form.mode === "smtp" && (
+        <div className="mb-3 grid gap-2 md:grid-cols-2">
+          <label className="text-sm md:col-span-2">
+            <span className="text-xs text-slate-500">Remitente (From)</span>
+            <input value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} placeholder="Clínica <avisos@tuclinica.cl>" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Servidor (host)</span>
+            <input value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} placeholder="smtp.tuclinica.cl" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Puerto</span>
+            <input type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Usuario</span>
+            <input value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Contraseña {state?.smtp?.hasPass ? "(dejar vacío para conservar)" : ""}</span>
+            <input type="password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={form.smtpSecure} onChange={(e) => setForm({ ...form, smtpSecure: e.target.checked })} />
+            Conexión segura (TLS/465)
+          </label>
+        </div>
+      )}
+
+      {/* Usos */}
+      <div className="mb-3 space-y-3 rounded-xl border border-slate-200 p-3">
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.escalationEnabled} onChange={(e) => setForm({ ...form, escalationEnabled: e.target.checked })} />
+            Escalamiento sin atender
+          </label>
+          <p className="text-[11px] text-slate-400">Si un agente deriva a humano y nadie toma la conversación en X minutos.</p>
+          {form.escalationEnabled && (
+            <div className="mt-1 flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Minutos
+                <input type="number" min={2} max={240} value={form.escalationMinutes} onChange={(e) => setForm({ ...form, escalationMinutes: Number(e.target.value) || 10 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              </label>
+              <div className="min-w-64 flex-1">
+                <span className="text-xs text-slate-500">Destinatarios</span>
+                <RecipientsInput value={form.escalationRecipients} onChange={(v) => setForm({ ...form, escalationRecipients: v })} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.dailyEnabled} onChange={(e) => setForm({ ...form, dailyEnabled: e.target.checked })} />
+            Resumen diario
+          </label>
+          <p className="text-[11px] text-slate-400">Conversaciones, contactos, leads y citas de las últimas 24 h.</p>
+          {form.dailyEnabled && (
+            <div className="mt-1 flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Hora
+                <input type="number" min={0} max={23} value={form.dailyHour} onChange={(e) => setForm({ ...form, dailyHour: Number(e.target.value) || 8 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              </label>
+              <div className="min-w-64 flex-1">
+                <span className="text-xs text-slate-500">Destinatarios</span>
+                <RecipientsInput value={form.dailyRecipients} onChange={(v) => setForm({ ...form, dailyRecipients: v })} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} />
+            Alertas de integraciones
+          </label>
+          <p className="text-[11px] text-slate-400">P. ej. el token de WhatsApp venció y hay que reautorizar.</p>
+          {form.alertsEnabled && (
+            <div className="mt-1">
+              <span className="text-xs text-slate-500">Destinatarios</span>
+              <RecipientsInput value={form.alertsRecipients} onChange={(v) => setForm({ ...form, alertsRecipients: v })} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <Button onClick={() => void save()} disabled={busy}>
+          {connected ? "Guardar cambios" : "Conectar"}
+        </Button>
+        <div className="flex items-end gap-1">
+          <label className="text-xs text-slate-500">
+            Probar con
+            <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="tu@correo.cl" className="mt-1 block w-48 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          </label>
+          <Button variant="secondary" onClick={() => void test()} disabled={busy || !testTo}>
+            Probar conexión
+          </Button>
+        </div>
+        {connected && (
+          <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>
+            Desconectar
+          </Button>
+        )}
+      </div>
+      {testDetail && <p className="mb-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar el correo?"
+        description="Dejarán de enviarse los escalamientos, resúmenes diarios, alertas y el paso de workflow «Enviar correo interno»."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}

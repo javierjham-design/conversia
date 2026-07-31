@@ -11,6 +11,7 @@ import {
   Put,
 } from "@nestjs/common";
 import { z } from "zod";
+import { getEnv } from "@conversia/config";
 import { workflowDefinitionSchema } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -461,6 +462,21 @@ export class WorkflowsController {
         if (!mapping?.datasetId || !mapping.active) {
           throw new BadRequestException(
             "El paso «Enviar evento CAPI» requiere conectar Conversions API (dataset) en Integraciones → Centro Meta antes de publicar.",
+          );
+        }
+      }
+      for (const n of nodes.filter((x) => x.type === "send_internal_email")) {
+        const cfg = (n.config ?? {}) as Record<string, unknown>;
+        const to = Array.isArray(cfg.to) ? (cfg.to as string[]) : [];
+        if (!to.length || !cfg.subject) {
+          throw new BadRequestException("El paso «Enviar correo interno» necesita destinatarios y asunto.");
+        }
+        const emailConn = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "email" } },
+        });
+        if (!emailConn && !getEnv().RESEND_API_KEY) {
+          throw new BadRequestException(
+            "El paso «Enviar correo interno» requiere conectar Correo electrónico en Integraciones antes de publicar.",
           );
         }
       }

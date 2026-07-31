@@ -15,6 +15,7 @@ import { runAgentTurn } from "./agent-turn";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
+import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
@@ -170,9 +171,9 @@ function makeDeps(): EngineDeps {
 
     async transferHuman(ctx, reason) {
       if (!ctx.conversationId) return;
-      await withTenant(ctx.organizationId, async (tx) => {
+      const handoff = await withTenant(ctx.organizationId, async (tx) => {
         await tx.conversation.update({ where: { id: ctx.conversationId! }, data: { aiEnabled: false } });
-        await tx.humanHandoff.create({
+        return tx.humanHandoff.create({
           data: {
             organizationId: ctx.organizationId,
             conversationId: ctx.conversationId!,
@@ -182,6 +183,8 @@ function makeDeps(): EngineDeps {
           },
         });
       });
+      // Aviso por correo si nadie toma la conversación en X min (config del tenant).
+      await enqueueEscalationEmail(ctx.organizationId, handoff.id, ctx.conversationId);
     },
 
     async setAiEnabled(ctx, enabled) {
@@ -400,6 +403,23 @@ function makeDeps(): EngineDeps {
         }
         throw err;
       }
+    },
+
+    async sendInternalEmail(ctx, config) {
+      // Correo interno al EQUIPO — nunca a contactos. Cola con reintentos.
+      const to = config.to.filter((e) => /.+@.+\..+/.test(e)).slice(0, 10);
+      if (!to.length || !config.subject) return;
+      await getEmailQueue().add(
+        "workflow",
+        {
+          organizationId: ctx.organizationId,
+          kind: "workflow",
+          to,
+          subject: config.subject,
+          html: `<p>${config.body.replace(/\n/g, "<br/>")}</p><p style="color:#94a3b8;font-size:12px">Enviado por un flujo de TuBot</p>`,
+        },
+        { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
     },
 
     async runAgentWithObjective(ctx, nodeId, cfg) {

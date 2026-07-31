@@ -7,6 +7,7 @@ import {
   TRIGGER_TYPES,
   type CapiJob,
   type ContactImportJob,
+  type EmailJob,
   type EventJob,
   type InboundJob,
   type OutboundJob,
@@ -16,6 +17,7 @@ import { processCapiJob } from "./capi";
 import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
+import { processEmailJob, startDailyDigests } from "./mailer";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
@@ -56,6 +58,12 @@ async function main() {
     async (job) => processContactImport(job),
     { connection, concurrency: 1 },
   );
+  // Correos internos del tenant (escalamientos, resúmenes, alertas, workflows).
+  const emailsWorker = new Worker<EmailJob>(
+    QUEUE_NAMES.emails,
+    async (job) => processEmailJob(job.data),
+    { connection, concurrency: 2 },
+  );
   // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
   // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
   // workflow (conversation.closed → conversation_closed), inicia los flujos.
@@ -88,12 +96,13 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
   const stopScheduler = startScheduler();
   const stopTemplateSync = startTemplateSync();
+  const stopDailyDigests = startDailyDigests();
 
   console.log(
     `✔ Worker Conversia activo — colas: ${QUEUE_NAMES.inbound}, ${QUEUE_NAMES.outbound} | IA: ${env.AI_PROVIDER} | WhatsApp: ${env.WHATSAPP_PROVIDER}`,
@@ -103,6 +112,7 @@ async function main() {
     console.log("Cerrando worker…");
     stopScheduler();
     stopTemplateSync();
+    stopDailyDigests();
     await Promise.all([
       inboundWorker.close(),
       outboundWorker.close(),
@@ -110,6 +120,7 @@ async function main() {
       capiWorker.close(),
       eventsWorker.close(),
       importsWorker.close(),
+      emailsWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

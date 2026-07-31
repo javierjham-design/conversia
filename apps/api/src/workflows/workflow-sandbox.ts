@@ -146,6 +146,10 @@ export function simulateWorkflow(
         label = "Plantilla WhatsApp";
         detail = "(enviaría la plantilla HSM elegida con las variables reales del contacto — sirve fuera de la ventana de 24 h; no se envía en la prueba)";
         break;
+      case "send_internal_email":
+        label = "Correo interno";
+        detail = `enviaría «${renderVars(String(cfg.subject ?? ""), vars)}» a ${(Array.isArray(cfg.to) ? (cfg.to as string[]) : []).join(", ") || "(sin destinatarios)"} — equipo interno, no se envía en la prueba`;
+        break;
       case "send_tiktok_event":
       case "google_sheets_append":
         label = "Integración";

@@ -93,6 +93,7 @@ const NODE_DEFS: NodeDef[] = [
   },
   // Integraciones
   { type: "call_api", label: "Petición HTTP", description: "Llama a un endpoint externo y mapea la respuesta a variables", category: "Integraciones", icon: <Webhook size={15} />, premium: true, defaultConfig: { method: "GET", url: "", headers: {}, body: "", responseMapping: {} } },
+  { type: "send_internal_email", label: "Enviar correo interno", description: "Aviso por correo al equipo (nunca a contactos), con variables", category: "Integraciones", icon: <FileText size={15} />, defaultConfig: { to: [], subject: "", body: "" } },
   { type: "google_sheets_append", label: "Añadir fila a Google Sheets", description: "Agrega una fila a una hoja de cálculo", category: "Integraciones", icon: <Sheet size={15} />, defaultConfig: {}, soon: true },
   // Agenda
   { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM aprobada (funciona fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {} },
@@ -246,6 +247,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "send_tiktok_event": return "(Próximamente)";
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
     case "send_template": return config.templateName ? `📄 ${config.templateName}` : "(elige la plantilla)";
+    case "send_internal_email": return config.subject ? `✉ ${String(config.subject).slice(0, 40)}` : "(configura el correo)";
     case "call_api": return config.url ? `${config.method ?? "GET"} ${String(config.url).slice(0, 30)}` : "(configura la petición)";
     case "google_sheets_append": return "(Próximamente)";
     default: return "";
@@ -1002,6 +1004,46 @@ function NodePanel({
       )}
 
       {type === "call_api" && <HttpForm config={config} onChange={onChange} />}
+
+      {type === "send_internal_email" && (
+        <div className="space-y-2">
+          <p className="rounded-lg bg-slate-50 p-2 text-[10px] text-slate-500">
+            Correo <b>interno al equipo</b> — no es correo masivo a contactos/pacientes (para eso están las plantillas de
+            WhatsApp con consentimiento).
+          </p>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Destinatarios (emails del equipo, separados por coma)</span>
+            <input
+              value={(Array.isArray(config.to) ? config.to : []).join(", ")}
+              onChange={(e) => onChange({ to: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
+              placeholder="recepcion@tuclinica.cl, dueno@tuclinica.cl"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Asunto</span>
+            <input
+              value={config.subject ?? ""}
+              onChange={(e) => onChange({ subject: e.target.value })}
+              placeholder="Nuevo lead: {{contact.firstName}}"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Cuerpo (admite variables {"{{contact.firstName}}"}…)</span>
+            <textarea
+              value={config.body ?? ""}
+              onChange={(e) => onChange({ body: e.target.value })}
+              rows={3}
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <p className="text-[10px] text-slate-400">
+            Usa el remitente configurado en <a href="/integrations" className="underline">Integraciones → Correo electrónico</a>
+            {" "}(o el de la plataforma por defecto).
+          </p>
+        </div>
+      )}
 
       {type === "google_sheets_append" && (
         <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere conectar Google (OAuth por tenant). Te propongo el diseño de la conexión aparte antes de implementarlo.</p>

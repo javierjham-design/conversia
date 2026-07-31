@@ -1,5 +1,6 @@
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
+import { enqueueEscalationEmail } from "./mailer";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
@@ -298,9 +299,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async requestHumanHandoff(reason: string) {
-      await withTenant(orgId, async (tx) => {
+      const handoff = await withTenant(orgId, async (tx) => {
         await tx.conversation.update({ where: { id: t.conversationId }, data: { aiEnabled: false } });
-        await tx.humanHandoff.create({
+        const h = await tx.humanHandoff.create({
           data: {
             organizationId: orgId,
             conversationId: t.conversationId,
@@ -319,11 +320,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             after: { reason },
           },
         });
+        return h;
       });
       await emitPlatformEvent(orgId, "human_handoff.requested", {
         conversationId: t.conversationId,
         reason,
       });
+      // Aviso por correo si nadie la toma en X min (config de correo del tenant).
+      await enqueueEscalationEmail(orgId, handoff.id, t.conversationId);
     },
 
     async closeConversation() {

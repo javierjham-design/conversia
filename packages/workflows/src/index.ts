@@ -40,6 +40,8 @@ export interface EngineDeps {
   sendCapiEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string }): Promise<void>;
   /** Envía una plantilla HSM aprobada (funciona fuera de la ventana de 24 h). */
   sendTemplate(ctx: RunCtx, config: Record<string, unknown>): Promise<void>;
+  /** Correo interno al EQUIPO (nunca masivo a contactos); subject/body ya renderizados. */
+  sendInternalEmail(ctx: RunCtx, config: { to: string[]; subject: string; body: string }): Promise<void>;
   /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
    *  ramifican de inmediato; "pending" (multi-turno) deja al agente
    *  conversando y el run espera: respuestas del contacto lo reanudan con la
@@ -245,6 +247,13 @@ async function executeNode(
       return {};
     case "send_template":
       await deps.sendTemplate(ctx, cfg);
+      return {};
+    case "send_internal_email":
+      await deps.sendInternalEmail(ctx, {
+        to: Array.isArray(cfg.to) ? cfg.to.map(String) : [],
+        subject: renderVars(String(cfg.subject ?? ""), ctx.variables),
+        body: renderVars(String(cfg.body ?? ""), ctx.variables),
+      });
       return {};
     case "send_tiktok_event":
     case "google_sheets_append":

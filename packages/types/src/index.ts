@@ -317,6 +317,7 @@ export const NODE_TYPES = [
   "call_api",
   "send_webhook",
   "notify_team",
+  "send_internal_email",
   // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
   "send_capi",
   "send_tiktok_event",
@@ -378,7 +379,19 @@ export const QUEUE_NAMES = {
   webhooks: "webhook-deliveries",
   capi: "capi-events",
   imports: "contact-imports",
+  emails: "tenant-emails",
 } as const;
+
+/** Correo interno del tenant (equipo — nunca masivo a pacientes). */
+export interface EmailJob {
+  organizationId: string;
+  kind: "workflow" | "escalation" | "daily_summary" | "alert" | "test";
+  to: string[];
+  subject: string;
+  html: string;
+  /** Escalamiento: solo se envía si el handoff sigue pendiente al vencer el plazo. */
+  handoffId?: string;
+}
 
 /**
  * Campos de la plataforma disponibles como variables de plantillas de WhatsApp.

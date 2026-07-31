@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ClarivaDrawer, WebhooksDrawer, type ClarivaState, type WebhookRow } from "./drawers";
+import { ClarivaDrawer, EmailDrawer, WebhooksDrawer, type ClarivaState, type EmailState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -51,6 +51,8 @@ interface Overview {
   };
   meta: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
   clariva: ClarivaState | null;
+  email: EmailState | null;
+  platformEmailReady: boolean;
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -80,6 +82,7 @@ export default function IntegrationsPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("todas");
   const [clarivaOpen, setClarivaOpen] = useState(false);
   const [webhooksOpen, setWebhooksOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -153,6 +156,23 @@ export default function IntegrationsPage() {
         onManage: () => setWebhooksOpen(true),
       });
     }
+    if (data.email) {
+      const uses = [
+        data.email.escalation?.enabled ? "escalamientos" : null,
+        data.email.dailySummary?.enabled ? "resumen diario" : null,
+        data.email.alerts?.enabled ? "alertas" : null,
+      ].filter(Boolean);
+      rows.push({
+        key: "email",
+        name: "Correo electrónico",
+        category: "Productividad y datos",
+        icon: <MessageCircle size={22} />,
+        status: data.email.status === "error" ? "attention" : "connected",
+        detail: `${data.email.mode === "smtp" ? "SMTP propio" : "remitente de plataforma"}${uses.length ? ` · ${uses.join(", ")}` : ""}`,
+        health: data.email.status === "error" ? "warn" : "ok",
+        onManage: () => setEmailOpen(true),
+      });
+    }
     return rows;
   }, [data, router]);
 
@@ -185,6 +205,8 @@ export default function IntegrationsPage() {
         return setClarivaOpen(true);
       case "webhooks":
         return setWebhooksOpen(true);
+      case "email":
+        return setEmailOpen(true);
       default:
         return void notifyInterest(item.key);
     }
@@ -418,6 +440,13 @@ export default function IntegrationsPage() {
 
       {/* Drawers */}
       <ClarivaDrawer open={clarivaOpen} onClose={() => setClarivaOpen(false)} state={data?.clariva ?? null} onChanged={() => void load()} />
+      <EmailDrawer
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        state={data?.email ?? null}
+        platformReady={data?.platformEmailReady ?? false}
+        onChanged={() => void load()}
+      />
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}
