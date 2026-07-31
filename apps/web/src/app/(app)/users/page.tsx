@@ -8,6 +8,8 @@ interface Member {
   userId: string;
   email: string;
   name: string;
+  phone: string | null;
+  lastLoginAt: string | null;
   active: boolean;
   roleCode: string;
   roleName: string;
@@ -40,6 +42,20 @@ interface RoleDraft {
 
 const RESERVED = ["owner", "admin"];
 
+/** "hoy 14:30", "ayer 09:12" o "28-07-2026, 18:45"; "—" si nunca entró. */
+function fmtLastLogin(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const now = new Date();
+  const time = d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (sameDay(d, now)) return `hoy ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, yesterday)) return `ayer ${time}`;
+  return `${d.toLocaleDateString("es-CL")} ${time}`;
+}
+
 function expandPerms(perms: string[], catalog: CatalogModule[]): string[] {
   const out = new Set<string>();
   for (const p of perms) {
@@ -60,6 +76,51 @@ export default function UsersPage() {
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [newTeam, setNewTeam] = useState("");
   const [draft, setDraft] = useState<RoleDraft | null>(null);
+  // Panel de edición de un usuario (click en la fila)
+  const [selected, setSelected] = useState<Member | null>(null);
+  const [profile, setProfile] = useState({ name: "", email: "", phone: "" });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+
+  function openMember(m: Member) {
+    setSelected(m);
+    setProfile({ name: m.name, email: m.email, phone: m.phone ?? "" });
+    setResetResult(null);
+  }
+
+  async function saveProfile() {
+    if (!selected) return;
+    setSavingProfile(true);
+    setMsg(null);
+    try {
+      await api(`/users/${selected.membershipId}/profile`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: profile.name.trim(),
+          email: profile.email.trim().toLowerCase(),
+          phone: profile.phone.trim() || null,
+        }),
+      });
+      await load();
+      setSelected(null);
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function resetPassword() {
+    if (!selected) return;
+    if (!window.confirm(`¿Restablecer la contraseña de ${selected.name}? La actual dejará de funcionar.`)) return;
+    setMsg(null);
+    try {
+      const r = await api<{ tempPassword: string }>(`/users/${selected.membershipId}/reset-password`, { method: "POST" });
+      setResetResult(r.tempPassword);
+    } catch (err) {
+      setMsg((err as Error).message);
+    }
+  }
 
   const load = useCallback(async () => {
     const [m, r, t, c] = await Promise.all([
@@ -198,17 +259,23 @@ export default function UsersPage() {
                   <th className="p-3">Usuario</th>
                   <th className="p-3">Rol</th>
                   <th className="p-3">Equipos</th>
+                  <th className="p-3">Última conexión</th>
                   <th className="p-3">Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {members.map((m) => (
-                  <tr key={m.membershipId} className="border-t border-slate-100">
+                  <tr
+                    key={m.membershipId}
+                    onClick={() => openMember(m)}
+                    className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                    title="Editar usuario"
+                  >
                     <td className="p-3">
                       <div className="font-medium">{m.name}</div>
                       <div className="text-xs text-slate-400">{m.email}</div>
                     </td>
-                    <td className="p-3">
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
                       <select value={m.roleCode} onChange={(e) => void changeRole(m.membershipId, e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs">
                         {roles.map((r) => (
                           <option key={r.code} value={r.code}>{r.name}</option>
@@ -216,7 +283,10 @@ export default function UsersPage() {
                       </select>
                     </td>
                     <td className="p-3 text-xs text-slate-500">{m.teams.join(", ") || "—"}</td>
-                    <td className="p-3">
+                    <td className="p-3 text-xs text-slate-500" title={m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("es-CL") : "Nunca ha iniciado sesión"}>
+                      {fmtLastLogin(m.lastLoginAt)}
+                    </td>
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
                       <button onClick={() => void toggleActive(m)} className={`rounded-lg px-2 py-1 text-xs ${m.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
                         {m.active ? "activo" : "inactivo"}
                       </button>
@@ -293,6 +363,91 @@ export default function UsersPage() {
           })}
         </div>
       </section>
+
+      {/* Editor de usuario (click en la fila) */}
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog">
+          <div className="absolute inset-0 bg-navy-950/50" onClick={() => setSelected(null)} />
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <h2 className="mb-1 text-lg font-semibold">{selected.name}</h2>
+            <p className="mb-4 text-xs text-slate-400">
+              {selected.roleName} · {selected.teams.join(", ") || "sin equipos"} · última conexión:{" "}
+              {fmtLastLogin(selected.lastLoginAt)}
+            </p>
+
+            <div className="space-y-3">
+              <label className="block text-sm">
+                Nombre
+                <input
+                  value={profile.name}
+                  onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm">
+                Email
+                <input
+                  type="email"
+                  value={profile.email}
+                  onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+                <span className="mt-1 block text-[10px] text-slate-400">Es el email con el que inicia sesión.</span>
+              </label>
+              <label className="block text-sm">
+                Teléfono (opcional)
+                <input
+                  value={profile.phone}
+                  onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                  placeholder="+56 9 …"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-sm font-medium">Contraseña</p>
+              {resetResult ? (
+                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Contraseña temporal (se muestra solo una vez): <b className="font-mono">{resetResult}</b>
+                  <button
+                    onClick={() => void navigator.clipboard.writeText(resetResult)}
+                    className="ml-2 rounded border border-amber-300 px-1.5 py-0.5 text-[10px] hover:bg-amber-100"
+                  >
+                    Copiar
+                  </button>
+                  <span className="mt-1 block">Compártela por un canal seguro; al entrar conviene cambiarla.</span>
+                </p>
+              ) : (
+                <>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Genera una contraseña temporal nueva. La actual deja de funcionar de inmediato.
+                  </p>
+                  <button
+                    onClick={() => void resetPassword()}
+                    className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                  >
+                    Restablecer contraseña
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setSelected(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">
+                Cerrar
+              </button>
+              <button
+                onClick={() => void saveProfile()}
+                disabled={savingProfile || !profile.name.trim() || !profile.email.trim()}
+                className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
+              >
+                {savingProfile ? "Guardando…" : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Editor de rol */}
       {draft && (

@@ -50,6 +50,14 @@ const updateMemberSchema = z.object({
   active: z.boolean().optional(),
 });
 
+const updateProfileSchema = z
+  .object({
+    name: z.string().trim().min(2).max(60).optional(),
+    email: z.string().trim().toLowerCase().email("Email inválido").optional(),
+    phone: z.string().trim().max(32).nullable().optional(),
+  })
+  .refine((b) => b.name !== undefined || b.email !== undefined || b.phone !== undefined, "Nada que actualizar");
+
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body);
   if (!r.success) {
@@ -156,7 +164,7 @@ export class UsersController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const [members, roles, teams] = await Promise.all([
         tx.organizationUser.findMany({
-          include: { user: { select: { id: true, email: true, name: true } } },
+          include: { user: { select: { id: true, email: true, name: true, phone: true, lastLoginAt: true } } },
           orderBy: { createdAt: "asc" },
         }),
         tx.role.findMany(),
@@ -168,6 +176,8 @@ export class UsersController {
         userId: m.user.id,
         email: m.user.email,
         name: m.user.name,
+        phone: m.user.phone,
+        lastLoginAt: m.user.lastLoginAt,
         active: m.active,
         roleCode: roleById.get(m.roleId)?.code ?? "?",
         roleName: roleById.get(m.roleId)?.name ?? "?",
@@ -246,6 +256,97 @@ export class UsersController {
         where: { id: membershipId },
         data: { roleId, ...(input.active !== undefined ? { active: input.active } : {}) },
       });
+    });
+  }
+
+  /**
+   * Solo un propietario puede gestionar (editar/restablecer) la cuenta de otro
+   * propietario — evita que un admin tome control de la cuenta dueña del tenant.
+   */
+  private async assertCanManage(tx: any, ctx: { organizationId: string; userId?: string | null }, targetRoleId: string) {
+    const targetRole = await tx.role.findUnique({ where: { id: targetRoleId } });
+    if (targetRole?.code !== "owner") return;
+    const actor = ctx.userId
+      ? await tx.organizationUser.findUnique({
+          where: { organizationId_userId: { organizationId: ctx.organizationId, userId: ctx.userId } },
+        })
+      : null;
+    const actorRole = actor ? await tx.role.findUnique({ where: { id: actor.roleId } }) : null;
+    if (actorRole?.code !== "owner") {
+      throw new BadRequestException("Solo un propietario puede gestionar la cuenta de otro propietario");
+    }
+  }
+
+  /** Edita los datos del usuario (nombre, email, teléfono). */
+  @Patch(":membershipId/profile")
+  updateProfile(@Param("membershipId") membershipId: string, @Body() body: unknown) {
+    const ctx = requirePermission("users:write");
+    const input = parse(updateProfileSchema, body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const member = await tx.organizationUser.findUnique({ where: { id: membershipId } });
+      if (!member) throw new NotFoundException("Miembro no encontrado");
+      await this.assertCanManage(tx, ctx, member.roleId);
+
+      if (input.email) {
+        const existing = await this.prisma.admin.user.findUnique({ where: { email: input.email } });
+        if (existing && existing.id !== member.userId) throw new BadRequestException("Ese email ya está en uso por otro usuario");
+      }
+      const data: Record<string, unknown> = {};
+      if (input.name !== undefined) data.name = input.name;
+      if (input.email !== undefined) data.email = input.email;
+      if (input.phone !== undefined) data.phone = input.phone || null;
+      const user = await this.prisma.admin.user.update({
+        where: { id: member.userId },
+        data,
+        select: { id: true, name: true, email: true, phone: true },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "user.profile_update",
+          entityType: "user",
+          entityId: member.userId,
+          after: data as object,
+        },
+      });
+      return { ok: true, ...user };
+    });
+  }
+
+  /**
+   * Restablece la contraseña: genera una temporal que se muestra UNA sola vez
+   * al administrador (sin servicio de correo aún). Invalida la anterior.
+   */
+  @Post(":membershipId/reset-password")
+  resetPassword(@Param("membershipId") membershipId: string) {
+    const ctx = requirePermission("users:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const member = await tx.organizationUser.findUnique({
+        where: { id: membershipId },
+        include: { user: { select: { id: true, email: true } } },
+      });
+      if (!member) throw new NotFoundException("Miembro no encontrado");
+      await this.assertCanManage(tx, ctx, member.roleId);
+
+      const tempPassword = randomBytes(9).toString("base64url");
+      await this.prisma.admin.user.update({
+        where: { id: member.userId },
+        data: { passwordHash: bcrypt.hashSync(tempPassword, 10) },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "user.password_reset",
+          entityType: "user",
+          entityId: member.userId,
+          after: { email: member.user.email },
+        },
+      });
+      return { ok: true, tempPassword };
     });
   }
 
