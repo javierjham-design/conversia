@@ -18,6 +18,7 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { sendEmail as sendPlatformEmail } from "../common/email";
+import { hashApiKey } from "./developers.controller";
 import { validateOutboundUrl } from "../common/url-guard";
 import { getEnv } from "@conversia/config";
 import { requireContext } from "../tenancy/context";
@@ -101,12 +102,14 @@ export class IntegrationsController {
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager", "custom_scheduling"], {
+      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make"], {
         email: "Correo electrónico",
         custom_api: "API personalizada",
         ga4: "Google Analytics",
         events_manager: "Meta Events Manager",
         custom_scheduling: "Agenda personalizada",
+        zapier: "Zapier",
+        make: "Make",
       }).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
@@ -163,6 +166,14 @@ export class IntegrationsController {
           ? { status: customSched.status, baseUrl: (customSched.config as any)?.baseUrl ?? null, lastSyncAt: customSched.lastSyncAt, lastError: customSched.lastError }
           : null,
         capiConfigured: Boolean((await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }))?.datasetId),
+        automations: {
+          zapier: await tx.integrationConnection
+            .findUnique({ where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "zapier" } } })
+            .then((c) => (c ? { status: c.status, webhookEndpointId: (c.config as any)?.webhookEndpointId ?? null } : null)),
+          make: await tx.integrationConnection
+            .findUnique({ where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "make" } } })
+            .then((c) => (c ? { status: c.status, webhookEndpointId: (c.config as any)?.webhookEndpointId ?? null } : null)),
+        },
         webhooks: webhooks.map((w) => {
           const mine = deliveries.filter((d) => d.endpointId === w.id);
           const okCount = mine.filter((d) => d.status === "DELIVERED").length;
@@ -199,8 +210,8 @@ export class IntegrationsController {
           { key: "sheets", name: "Google Sheets", category: "datos", status: "proximamente", description: "Exporta leads y citas a planillas.", capabilities: ["Export"] },
           { key: "email", name: "Correo electrónico", category: "datos", status: "disponible", description: "Escalamientos, resúmenes diarios y alertas al equipo (remitente de plataforma o SMTP propio).", capabilities: ["Escalamientos", "Resumen diario", "Alertas", "Paso de workflow"] },
           { key: "custom_api", name: "API personalizada", category: "datos", status: "disponible", description: "Presets de tus APIs (URL + auth cifrada) para usarlos en el paso «Petición HTTP» sin pegar tokens en cada nodo.", capabilities: ["Presets", "Auth cifrada", "Allowlist", "Workflows"] },
-          { key: "zapier", name: "Zapier", category: "datos", status: "proximamente", description: "Conecta con miles de apps.", capabilities: ["Automatización"] },
-          { key: "make", name: "Make", category: "datos", status: "proximamente", description: "Escenarios avanzados de automatización.", capabilities: ["Automatización"] },
+          { key: "zapier", name: "Zapier", category: "datos", status: "disponible", description: "Asistente guiado: trigger con nuestros webhooks + acciones con la API de Conversia (sin app nativa).", capabilities: ["Asistente", "Webhook + API key", "Plantillas"] },
+          { key: "make", name: "Make", category: "datos", status: "disponible", description: "Asistente guiado: escenarios de Make con nuestros webhooks y API (sin app nativa).", capabilities: ["Asistente", "Webhook + API key", "Plantillas"] },
           { key: "hubspot", name: "HubSpot", category: "crm", status: "proximamente", description: "Sincroniza contactos y negocios.", capabilities: ["CRM"] },
           { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "disponible", description: "Métricas de los eventos CAPI: envíos por día y por tipo, tasa de éxito y últimos rechazos de Meta.", capabilities: ["Métricas", "Errores", "Link directo"] },
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
@@ -394,6 +405,106 @@ export class IntegrationsController {
       await tx.integrationConnection.deleteMany({ where: { provider: "email" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ Zapier / Make (asistente guiado) ------------------------
+
+  /**
+   * Conecta Zapier o Make sobre lo que ya existe: crea (o reusa) un webhook
+   * saliente hacia su URL "catch" + una API key con scopes de contactos.
+   * Los secretos se muestran UNA sola vez.
+   */
+  @Post("automation")
+  async connectAutomation(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        kind: z.enum(["zapier", "make"]),
+        webhookUrl: z.string().url(),
+        events: z.array(z.string()).min(1).default(["lead.created", "appointment.created", "lead.status_changed"]),
+      }),
+      body,
+    );
+    assertUrlAllowed(input.webhookUrl);
+    const label = input.kind === "zapier" ? "Zapier" : "Make";
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const existing = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: input.kind } },
+      });
+      // 1) Webhook saliente hacia el catch de Zapier/Make (reusa si ya existe)
+      const cfg = (existing?.config as Record<string, any>) ?? {};
+      let endpointId: string | null = cfg.webhookEndpointId ?? null;
+      let webhookSecret: string | null = null;
+      const endpoint = endpointId ? await tx.webhookEndpoint.findUnique({ where: { id: endpointId } }) : null;
+      if (endpoint) {
+        await tx.webhookEndpoint.update({ where: { id: endpoint.id }, data: { url: input.webhookUrl, events: input.events, active: true } });
+      } else {
+        webhookSecret = `whsec_${randomBytes(24).toString("base64url")}`;
+        const created = await tx.webhookEndpoint.create({
+          data: {
+            organizationId: ctx.organizationId,
+            name: label,
+            description: `Conector ${label} (creado por el asistente)`,
+            url: input.webhookUrl,
+            secret: webhookSecret,
+            events: input.events,
+          },
+        });
+        endpointId = created.id;
+      }
+      // 2) API key para las acciones (consultar/crear contactos desde ${label})
+      let apiKeyId: string | null = cfg.apiKeyId ?? null;
+      let apiKeySecret: string | null = null;
+      const key = apiKeyId ? await tx.apiKey.findUnique({ where: { id: apiKeyId } }) : null;
+      if (!key || key.revokedAt) {
+        apiKeySecret = `cnvk_${randomBytes(24).toString("base64url")}`;
+        const createdKey = await tx.apiKey.create({
+          data: {
+            organizationId: ctx.organizationId,
+            name: label,
+            prefix: apiKeySecret.slice(0, 12),
+            hash: hashApiKey(apiKeySecret),
+            scopes: ["contacts:read", "contacts:write"],
+            createdById: ctx.userId,
+          },
+        });
+        apiKeyId = createdKey.id;
+      }
+      // 3) Conexión
+      const config = { webhookEndpointId: endpointId, apiKeyId } as object;
+      if (existing) {
+        await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, status: "active", lastError: null } });
+      } else {
+        await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider: input.kind, config } });
+      }
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: `integration.${input.kind}_connect`, entityType: "integration_connection", after: { webhookUrl: input.webhookUrl } },
+      });
+      return { ok: true, webhookSecret, apiKeySecret };
+    });
+  }
+
+  @Delete("automation/:kind")
+  disconnectAutomation(@Param("kind") kind: string) {
+    const ctx = requirePermission("integrations:write");
+    if (kind !== "zapier" && kind !== "make") throw new BadRequestException("Integración desconocida");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: kind } },
+      });
+      const cfg = (conn?.config as Record<string, any>) ?? {};
+      if (cfg.webhookEndpointId) {
+        await tx.webhookEndpoint.updateMany({ where: { id: cfg.webhookEndpointId }, data: { active: false } });
+      }
+      if (cfg.apiKeyId) {
+        await tx.apiKey.updateMany({ where: { id: cfg.apiKeyId, revokedAt: null }, data: { revokedAt: new Date() } });
+      }
+      await tx.integrationConnection.deleteMany({ where: { provider: kind } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: `integration.${kind}_disconnect`, entityType: "integration_connection" },
       });
       return { ok: true };
     });

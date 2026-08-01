@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -57,6 +57,7 @@ interface Overview {
   ga4: Ga4State | null;
   customScheduling: CustomSchedState | null;
   capiConfigured: boolean;
+  automations: { zapier: AutomationState | null; make: AutomationState | null };
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -91,6 +92,7 @@ export default function IntegrationsPage() {
   const [ga4Open, setGa4Open] = useState(false);
   const [emOpen, setEmOpen] = useState(false);
   const [customSchedOpen, setCustomSchedOpen] = useState(false);
+  const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -176,6 +178,24 @@ export default function IntegrationsPage() {
         onManage: () => setPresetsOpen(true),
       });
     }
+    for (const kind of ["zapier", "make"] as const) {
+      const auto = data.automations?.[kind];
+      if (!auto) continue;
+      const ep = data.webhooks.find((w) => w.id === auto.webhookEndpointId);
+      const failing = ep?.successRate !== null && ep !== undefined && (ep.successRate as number) < 80 && (ep.deliveries7d ?? 0) > 0;
+      rows.push({
+        key: kind,
+        name: kind === "zapier" ? "Zapier" : "Make",
+        category: "Productividad y datos",
+        icon: <Webhook size={22} />,
+        status: failing ? "attention" : "connected",
+        detail: ep
+          ? `${ep.deliveries7d} entrega(s) 7d${ep.successRate !== null ? ` · ${ep.successRate}% OK` : ""}`
+          : "sin entregas aún",
+        health: failing ? "warn" : "ok",
+        onManage: () => setAutomationOpen(kind),
+      });
+    }
     if (data.customScheduling) {
       rows.push({
         key: "custom_scheduling",
@@ -259,6 +279,9 @@ export default function IntegrationsPage() {
         return setEmOpen(true);
       case "custom_scheduling":
         return setCustomSchedOpen(true);
+      case "zapier":
+      case "make":
+        return setAutomationOpen(item.key);
       default:
         return void notifyInterest(item.key);
     }
@@ -503,6 +526,17 @@ export default function IntegrationsPage() {
       <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
       <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
       <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
+      {(["zapier", "make"] as const).map((kind) => (
+        <AutomationDrawer
+          key={kind}
+          open={automationOpen === kind}
+          onClose={() => setAutomationOpen(null)}
+          kind={kind}
+          state={data?.automations?.[kind] ?? null}
+          webhooks={data?.webhooks ?? []}
+          onChanged={() => void load()}
+        />
+      ))}
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

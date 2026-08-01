@@ -1233,3 +1233,176 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
     </Drawer>
   );
 }
+
+// --------------------------- Zapier / Make ---------------------------
+
+export interface AutomationState {
+  status: string;
+  webhookEndpointId: string | null;
+}
+
+const AUTOMATION_TEMPLATES: Record<"zapier" | "make", { title: string; steps: string[] }[]> = {
+  make: [
+    {
+      title: "Nuevo lead → Google Sheets",
+      steps: [
+        "En Make crea un escenario con el módulo «Webhooks → Custom webhook» y pega su URL aquí al conectar.",
+        "Suscribe el evento lead.created (ya viene marcado).",
+        "Agrega el módulo «Google Sheets → Add a Row» y mapea data.contactId, data.source y la fecha.",
+      ],
+    },
+    {
+      title: "Cita creada → aviso (Slack/Telegram/correo)",
+      steps: [
+        "Mismo webhook; el evento appointment.created llega con los datos de la cita.",
+        "Agrega el módulo de aviso que uses (Slack, Telegram, Email) y arma el mensaje con los campos del payload.",
+      ],
+    },
+    {
+      title: "Lead calificado → tu CRM",
+      steps: [
+        "El evento lead.status_changed incluye statusCode (p. ej. calificado).",
+        "Filtra por statusCode y usa «HTTP → Make a request» hacia tu CRM, o consulta más datos del contacto con nuestra API (Authorization: Bearer tu API key).",
+      ],
+    },
+  ],
+  zapier: [
+    {
+      title: "Nuevo lead → Google Sheets",
+      steps: [
+        "En Zapier crea un Zap con trigger «Webhooks by Zapier → Catch Hook» y pega su URL aquí al conectar.",
+        "El evento lead.created llegará con el payload del lead.",
+        "Acción: «Google Sheets → Create Spreadsheet Row» mapeando los campos.",
+      ],
+    },
+    {
+      title: "Cita creada → aviso",
+      steps: [
+        "Mismo Catch Hook; filtra por event = appointment.created (paso Filter).",
+        "Acción: Gmail/Slack/SMS con los datos de la cita.",
+      ],
+    },
+    {
+      title: "Lead calificado → CRM",
+      steps: [
+        "Filtra event = lead.status_changed y data.statusCode = calificado.",
+        "Acción: «Webhooks by Zapier → POST» a tu CRM, o enriquece con nuestra API (GET /public/v1/contacts).",
+      ],
+    },
+  ],
+};
+
+export function AutomationDrawer({
+  open,
+  onClose,
+  kind,
+  state,
+  webhooks,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  kind: "zapier" | "make";
+  state: AutomationState | null;
+  webhooks: WebhookRow[];
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const label = kind === "zapier" ? "Zapier" : "Make";
+  const connected = Boolean(state);
+  const endpoint = webhooks.find((w) => w.id === state?.webhookEndpointId) ?? null;
+  const [busy, setBusy] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [secrets, setSecrets] = useState<{ webhookSecret: string | null; apiKeySecret: string | null } | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setSecrets(null);
+      setWebhookUrl(endpoint?.url ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const r = await api<{ webhookSecret: string | null; apiKeySecret: string | null }>("/integrations/automation", {
+        method: "POST",
+        body: JSON.stringify({ kind, webhookUrl: webhookUrl.trim() }),
+      });
+      setSecrets(r);
+      toast.push(`${label} conectado ✔`, "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api(`/integrations/automation/${kind}`, { method: "DELETE" });
+    toast.push(`${label} desconectado — el webhook quedó pausado y la API key revocada`, "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title={`${label} — automatizaciones`}>
+      <p className="mb-3 text-xs text-slate-500">
+        Sin app nativa (queda como mejora futura): el asistente conecta {label} con lo que ya tienes — un <b>webhook
+        saliente</b> como trigger y una <b>API key</b> para las acciones.
+      </p>
+
+      <label className="block text-sm">
+        <span className="text-xs text-slate-500">URL del webhook de {label} ({kind === "zapier" ? "Catch Hook" : "Custom webhook"})</span>
+        <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder={kind === "zapier" ? "https://hooks.zapier.com/hooks/catch/…" : "https://hook.us1.make.com/…"} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+      </label>
+      <div className="mt-2 flex gap-2">
+        <Button onClick={() => void connect()} disabled={busy || !webhookUrl.trim()}>{connected ? "Actualizar" : "Conectar"}</Button>
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+
+      {secrets && (secrets.apiKeySecret || secrets.webhookSecret) && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-medium">Guarda estos secretos — se muestran una sola vez:</p>
+          {secrets.apiKeySecret && <p className="mt-1">API key (acciones): <code className="rounded bg-white px-1.5 py-0.5">{secrets.apiKeySecret}</code></p>}
+          {secrets.webhookSecret && <p className="mt-1">Secreto del webhook (firma sha256): <code className="rounded bg-white px-1.5 py-0.5">{secrets.webhookSecret}</code></p>}
+        </div>
+      )}
+
+      {connected && endpoint && (
+        <p className="mt-3 text-xs text-slate-600">
+          Estado: {endpoint.deliveries7d} entrega(s) en 7 días
+          {endpoint.successRate !== null ? ` · ${endpoint.successRate}% OK` : ""} · última:{" "}
+          {endpoint.lastDeliveryAt ? new Date(endpoint.lastDeliveryAt).toLocaleString("es-CL") : "sin entregas aún"}
+        </p>
+      )}
+
+      <div className="mt-4">
+        <h3 className="text-sm font-medium">Plantillas de casos comunes</h3>
+        <div className="mt-2 space-y-3">
+          {AUTOMATION_TEMPLATES[kind].map((t) => (
+            <div key={t.title} className="rounded-lg border border-slate-200 p-3">
+              <p className="text-sm font-medium">{t.title}</p>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-slate-600">
+                {t.steps.map((s, i) => (<li key={i}>{s}</li>))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title={`¿Desconectar ${label}?`}
+        description="El webhook saliente quedará pausado y la API key revocada: tus escenarios dejarán de recibir eventos y de poder llamar a la API."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
