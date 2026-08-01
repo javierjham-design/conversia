@@ -241,6 +241,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
 
     if (!result) continue; // duplicado
 
+    // Bandeja en vivo: nuevo mensaje entrante + conteos del clasificador.
+    const { publishRealtime } = await import("./realtime.js");
+    await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
+    await publishRealtime(organizationId, { type: "counters.dirty" });
+
     // Sincronización unidireccional a HubSpot (si el tenant la activó)
     const { enqueueHubspotContact } = await import("./hubspot.js");
     await enqueueHubspotContact(organizationId, result.contactId);

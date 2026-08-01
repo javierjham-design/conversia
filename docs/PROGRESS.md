@@ -1,5 +1,20 @@
 # Registro de progreso
 
+## 2026-08-01 — Bandeja Pro nivel Respond.io (rama `feature/inbox-pro`)
+
+Reescritura de la Bandeja en 4 zonas + backend nuevo. Migración `20260801120000_inbox_pro` (inbox_views, snippets, conversation_ai_notes + índices por agente/equipo) — **pendiente aplicar a prod**. Nada de la bandeja anterior se rompió (plantillas/ventana 24 h, audio+transcripción, tomar control, ejecutar flujo, checklist verificados).
+
+- **Clasificador (zona 1)**: grupos colapsables con conteos en vivo — fijas (Todas/Mías/Sin asignar/No respondidas=unread>0), por agente IA, por etapa del ciclo de vida (lead más reciente vía lateral join, sin N+1), bandejas de equipo, **bandejas personalizadas guardadas** (modal +: estado/canal/asignado/IA/etapa/tags/origen-anuncio; patrón contact_segments) y Contactos bloqueados. `GET /inbox/counters` agregado único.
+- **Lista (zona 2)**: búsqueda, orden (nuevas/antiguas/sin responder primero), toggle solo-no-respondidas, avatar con badge IA/humano, etapa con color, no leídos, asignado, paginación por cursor ("Cargar más", take 40).
+- **Cabecera (zona 3)**: **selector de etapa editable** → evento SYSTEM en el hilo + trigger `lead_status_changed` + **oferta de envío CAPI** si la etapa es categoría WON y la integración está activa (`POST /conversations/:id/stage|capi`); asignar a usuario **y equipo**; agente IA; ejecutar flujo; tomar control/devolver (con eventos inline); **cerrar con nota** (comentario interno); **semáforo de ventana 24 h** (verde >6 h, amarillo <6 h, rojo cerrada); número/canal con estado.
+- **Hilo**: banner "Conversación iniciada desde anuncio" (headline, imagen, ctwa_clid, Ver anuncio) y tarjeta de formulario Meta Lead Ads (datos capturados en el contacto); eventos del sistema centrados (etapas, asignaciones, control, flujos); **comentarios internos** como burbujas amarillas solo-equipo (visibility INTERNAL, jamás encolados al canal); ticks de estado y errores de envío visibles.
+- **Indicaciones al bot por conversación** (diferencial): sección en el panel derecho con historial (quién/cuándo/activa) — `conversation_ai_notes`; el orquestador inyecta las activas al system prompt en CADA turno de esa conversación con prioridad alta pero **explícitamente bajo las reglas de seguridad**; tests de aislamiento (bloque por conversación, sin fuga entre conversaciones; tenant por RLS).
+- **Compositor (zona abajo)**: pestañas Responder/Comentario interno; **snippets con "/"** (CRUD en modal, `{{contact.*}}` resueltas); **variables con "$"**; emojis; **adjuntos imagen/documento** (≤5 MB, subidos como media de Meta — sin S3; `OutboundMessage.mediaId` + provider extendido); **asistente IA** (sugerir respuesta con base de conocimiento publicada, mejorar en 3 tonos, traducir — `POST /inbox/assist` con el modelo del tenant y costo en usage_events) y **Resumir** → comentario interno.
+- **Tiempo real (zona transversal)**: pub/sub Redis con **canal por tenant** (`rt:{orgId}`); publican worker (entrante, respuesta del agente, estados de envío) y API (asignación/etapa/cierre/envíos); SSE `GET /conversations/stream/updates` consumido por **fetch streaming** (Authorization normal, sin token en query); indicador "en vivo"/"sondeo", reconexión con backoff y **fallback automático a sondeo de 5 s**. Suscripción nace del JWT → imposible escuchar otro tenant.
+- Panel derecho **colapsable** (drawer en pantallas chicas) con ficha del contacto, etapa, tags, origen y link a Contactos.
+
+Typecheck 22/22 · 107 tests en verde. **Pendiente al desplegar: migración inbox_pro en prod.**
+
 ## 2026-07-31 (2) — TODAS las tarjetas del hub habilitadas (rama `feature/integrations-enable`)
 
 Las 11 tarjetas "Próximamente" pasaron a "Disponible" con conexión real, "Probar conexión" y cableado a Workflows/Agentes/Bandeja. Migración `20260731170000_integration_connections` (unique (org, provider) + enum CUSTOM) — **pendiente aplicar a prod**. Un commit por tarjeta (9 commits):

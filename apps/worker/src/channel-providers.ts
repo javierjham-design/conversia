@@ -34,6 +34,16 @@ export class MetaChannelProvider implements ChannelProvider {
           ? [{ type: "body", parameters: message.templateParams.map((t) => ({ type: "text", text: t })) }]
           : undefined,
       };
+    } else if ((message.type === "image" || message.type === "document" || message.type === "audio") && (message.mediaId || message.mediaUrl)) {
+      // Media saliente: por id ya subido a Meta (preferido) o por link público.
+      body.type = message.type;
+      const media: Record<string, unknown> = message.mediaId ? { id: message.mediaId } : { link: message.mediaUrl };
+      if (message.type === "image" && message.text) media.caption = message.text;
+      if (message.type === "document") {
+        if (message.text) media.caption = message.text;
+        if (message.filename) media.filename = message.filename;
+      }
+      body[message.type] = media;
     } else {
       body.type = "text";
       body.text = { body: message.text ?? "" };

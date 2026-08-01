@@ -14,7 +14,8 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ Resolución de tenant por número, contactos+identidades, conversaciones, mensajes idempotentes
 - ✅ Envío (Meta real + Mock), estados sent/delivered/read
 - ✅ Bandeja v0 (lista, chat, envío manual, tomar control / devolver a IA)
-- 🔶 Tiempo real (sondeo 4s; falta pub/sub) · ⬜ Media (imágenes/audio/documentos) · ⬜ Plantillas + ventana 24h · ⬜ Multi-número UI
+- ✅ **Bandeja Pro** (rama feature/inbox-pro, nivel Respond.io): 4 zonas — clasificador con conteos en vivo (fijas/agentes IA/ciclo de vida/equipos/bandejas personalizadas guardadas/bloqueados), lista con orden+badges+paginación, cabecera con etapa editable (trigger + oferta CAPI en conversión) + asignación usuario/equipo + semáforo 24 h, panel derecho de contacto con atribución de anuncio/formulario, **indicaciones al bot por conversación** (inyectadas al prompt con historial), comentarios internos, compositor con snippets "/", variables "$", emojis, adjuntos (media Meta), asistente IA (sugerir/mejorar/traducir) y Resumir
+- ✅ Tiempo real: pub/sub Redis por tenant → SSE con fallback automático a sondeo · ✅ Media saliente imagen/documento · ✅ Plantillas + ventana 24h · 🔶 Multi-número UI (indicador por conversación; gestión en Canales) · ⬜ Nota de voz saliente
 
 ## Fase 3 — Agentes IA
 - ✅ AIProvider (OpenAI gpt-4o-mini por defecto + Anthropic) vía RoutingAIProvider por modelo; transcripción de audio (Whisper); registro de costos por request

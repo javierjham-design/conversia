@@ -181,6 +181,10 @@ export async function runAgentTurn(opts: {
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return;
 
+  // Indicaciones del equipo para ESTA conversación (panel derecho de la Bandeja).
+  const { buildConversationInstructions, getActiveConversationInstructions } = await import("./ai-notes.js");
+  const aiNotes = await getActiveConversationInstructions(organizationId, conversationId);
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -193,6 +197,7 @@ export async function runAgentTurn(opts: {
     // Prompt base + instrucciones NL de cada acción + objetivo puntual del flujo.
     systemPrompt:
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
+      buildConversationInstructions(aiNotes) +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     model: aiCfg.model ?? getEnv().AI_DEFAULT_MODEL,
     maxTokens: aiCfg.maxTokens ?? 400,
@@ -285,6 +290,12 @@ export async function runAgentTurn(opts: {
     });
     return message;
   });
+
+  // Bandeja en vivo: la respuesta del agente aparece al instante en el panel.
+  if (persisted) {
+    const { publishRealtime } = await import("./realtime.js");
+    await publishRealtime(organizationId, { type: "message.created", conversationId });
+  }
 
   // 5. Enviar por el canal (token por-WABA del tenant; fallback al global)
   if (persisted && conversation.contact.phone) {
