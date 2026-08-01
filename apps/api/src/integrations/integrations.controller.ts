@@ -12,7 +12,7 @@ import {
 } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider } from "@conversia/scheduling";
 import { PLATFORM_PUBLIC_EVENTS } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -82,9 +82,10 @@ export class IntegrationsController {
     const ctx = requireContext();
     const since24h = new Date(Date.now() - 24 * 3600 * 1000);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [scheduling, customSched, webhooks, credentials, meta, channels, events24h, deliveries, lastEvent, emailConn] = await Promise.all([
+      const [scheduling, customSched, dentalinkConn, webhooks, credentials, meta, channels, events24h, deliveries, lastEvent, emailConn] = await Promise.all([
         tx.schedulingConnection.findFirst({ where: { provider: "CLARIVA" } }),
         tx.schedulingConnection.findFirst({ where: { provider: "CUSTOM" } }),
+        tx.schedulingConnection.findFirst({ where: { provider: "DENTALINK" } }),
         tx.webhookEndpoint.findMany({ orderBy: { createdAt: "asc" } }),
         tx.integrationCredential.findMany({ where: { provider: "clariva" } }),
         tx.metaBusinessConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
@@ -107,8 +108,9 @@ export class IntegrationsController {
       await this.notifyInterested(
         tx,
         ctx.organizationId,
-        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", ...(platformGoogleReady ? ["google_calendar", "sheets"] : [])],
+        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", "dentalink", ...(platformGoogleReady ? ["google_calendar", "sheets"] : [])],
         {
+          dentalink: "Dentalink",
           email: "Correo electrónico",
           custom_api: "API personalizada",
           ga4: "Google Analytics",
@@ -174,6 +176,16 @@ export class IntegrationsController {
         customScheduling: customSched
           ? { status: customSched.status, baseUrl: (customSched.config as any)?.baseUrl ?? null, lastSyncAt: customSched.lastSyncAt, lastError: customSched.lastError }
           : null,
+        dentalink: dentalinkConn
+          ? {
+              status: dentalinkConn.status,
+              workStartHour: (dentalinkConn.config as any)?.workStartHour ?? 9,
+              workEndHour: (dentalinkConn.config as any)?.workEndHour ?? 19,
+              slotMinutes: (dentalinkConn.config as any)?.slotMinutes ?? 30,
+              lastSyncAt: dentalinkConn.lastSyncAt,
+              lastError: dentalinkConn.lastError,
+            }
+          : null,
         capiConfigured: Boolean((await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }))?.datasetId),
         platformGoogleReady,
         google: googleConn
@@ -222,7 +234,7 @@ export class IntegrationsController {
           { key: "instagram", name: "Instagram Direct", category: "meta", status: "proximamente", description: "Atiende los DM de Instagram con los mismos agentes.", capabilities: ["Mensajes"] },
           { key: "messenger", name: "Facebook Messenger", category: "meta", status: "proximamente", description: "Conversaciones de tu página de Facebook en la misma bandeja.", capabilities: ["Mensajes"] },
           { key: "clariva", name: "Cláriva", category: "agenda", status: "disponible", description: "Agenda clínica: disponibilidad y citas reales de tus sedes.", capabilities: ["Disponibilidad", "Citas", "Sincronización"] },
-          { key: "dentalink", name: "Dentalink", category: "agenda", status: "proximamente", description: "Proveedor de agenda dental.", capabilities: ["Disponibilidad", "Citas"] },
+          { key: "dentalink", name: "Dentalink", category: "agenda", status: "disponible", description: "Agenda dental de Healthatom: los agentes ofrecen horas reales (ventana laboral menos citas de Dentalink) y agendan directo.", capabilities: ["Token API", "Disponibilidad", "Citas", "Pacientes"] },
           { key: "google_calendar", name: "Google Calendar", category: "agenda", status: platformGoogleReady ? "disponible" : "config_pendiente", description: "Espejo de tus citas de Conversia en el calendario que elijas (OAuth de Google).", capabilities: ["OAuth", "Espejo de citas", "Cancelaciones"] },
           { key: "custom_scheduling", name: "Agenda personalizada", category: "agenda", status: "disponible", description: "Conecta tu propio software clínico implementando el contrato estándar de agenda (HMAC). Los agentes IA lo usan igual que cualquier proveedor.", capabilities: ["Contrato estándar", "HMAC", "Disponibilidad", "Citas"] },
           { key: "webhooks", name: "Webhooks salientes", category: "datos", status: "disponible", description: "Recibe los eventos de Conversia en tus sistemas, firmados HMAC.", capabilities: ["14 eventos", "Reintentos", "Firma HMAC"] },
@@ -610,6 +622,105 @@ export class IntegrationsController {
       await tx.schedulingConnection.deleteMany({ where: { provider: "CUSTOM" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.custom_scheduling_disconnect", entityType: "scheduling_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ Dentalink (Healthatom) ------------------------
+
+  /** Conecta Dentalink: token de la sección «Configuración API» de Dentalink. */
+  @Post("dentalink")
+  saveDentalink(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        token: z.string().min(10).max(500).optional(),
+        workStartHour: z.number().int().min(0).max(23).optional(),
+        workEndHour: z.number().int().min(1).max(24).optional(),
+        slotMinutes: z.number().int().min(10).max(120).optional(),
+      }),
+      body,
+    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const existing = await tx.schedulingConnection.findFirst({ where: { provider: "DENTALINK" } });
+      const other = await tx.schedulingConnection.findFirst({ where: { provider: { not: "DENTALINK" }, status: "active" } });
+      if (other) {
+        throw new BadRequestException("Ya hay otra agenda activa (Cláriva/personalizada). Desconéctala antes de usar Dentalink.");
+      }
+      let credentialId = existing?.credentialId ?? null;
+      if (input.token) {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: ctx.organizationId, provider: "dentalink", label: "Token API Dentalink", ciphertext: encryptSecret(input.token) },
+        });
+        credentialId = credential.id;
+      }
+      if (!credentialId) throw new BadRequestException("Falta el token de la API de Dentalink");
+      const config = {
+        workStartHour: input.workStartHour ?? (existing?.config as any)?.workStartHour ?? 9,
+        workEndHour: input.workEndHour ?? (existing?.config as any)?.workEndHour ?? 19,
+        slotMinutes: input.slotMinutes ?? (existing?.config as any)?.slotMinutes ?? 30,
+        utcOffset: "-04:00",
+      } as object;
+      if (existing) {
+        await tx.schedulingConnection.update({
+          where: { id: existing.id },
+          data: { config, credentialId, status: "active", lastError: null },
+        });
+      } else {
+        await tx.schedulingConnection.create({
+          data: { organizationId: ctx.organizationId, provider: "DENTALINK", config, credentialId },
+        });
+      }
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.dentalink_save", entityType: "scheduling_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Prueba real contra Dentalink: sucursales + dentistas habilitados. */
+  @Post("dentalink/test")
+  async testDentalink() {
+    const ctx = requirePermission("integrations:write");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.schedulingConnection.findFirst({ where: { provider: "DENTALINK" } });
+      if (!conn) throw new BadRequestException("Dentalink no está conectado");
+      const cred = conn.credentialId ? await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } }) : null;
+      return { conn, token: cred ? decryptSecret(cred.ciphertext) : "" };
+    });
+    const provider = new DentalinkSchedulingProvider({ token: data.token });
+    let ok = false;
+    let detail = "";
+    try {
+      const [clinics, professionals] = await Promise.all([provider.getClinics(), provider.getProfessionals()]);
+      ok = true;
+      detail = `✔ ${clinics.length} sucursal(es) · ${professionals.length} dentista(s) habilitados — ${clinics
+        .slice(0, 3)
+        .map((c) => c.name)
+        .join(", ")}`;
+    } catch (err) {
+      detail = (err as Error).message.slice(0, 300);
+    }
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.schedulingConnection.update({
+        where: { id: data.conn.id },
+        data: { lastSyncAt: new Date(), status: ok ? "active" : "error", lastError: ok ? null : detail },
+      });
+      await tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "dentalink", type: ok ? "agenda.test_ok" : "agenda.test_error", status: ok ? "ok" : "error", message: detail },
+      });
+    });
+    return { ok, detail };
+  }
+
+  @Delete("dentalink")
+  disconnectDentalink() {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.schedulingConnection.deleteMany({ where: { provider: "DENTALINK" } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.dentalink_disconnect", entityType: "scheduling_connection" },
       });
       return { ok: true };
     });

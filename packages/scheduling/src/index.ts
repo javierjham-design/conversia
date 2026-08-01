@@ -367,11 +367,23 @@ export class CustomSchedulingProvider implements SchedulingProvider {
 
 // ------------------------------------------------------------------
 
+export {
+  DentalinkSchedulingProvider,
+  computeDentalinkSlots,
+  mapDentalinkCita,
+  mapDentalinkEstado,
+  parseOffsetMs,
+  type DentalinkCita,
+  type DentalinkClientOptions,
+} from "./dentalink";
+import { DentalinkSchedulingProvider, type DentalinkClientOptions } from "./dentalink";
+
 export interface ProviderSelection {
-  provider: "mock" | "clariva" | "custom";
+  provider: "mock" | "clariva" | "custom" | "dentalink";
   mockData?: MockSchedulingData;
   clariva?: ClarivaClientOptions;
   custom?: CustomClientOptions;
+  dentalink?: DentalinkClientOptions;
 }
 
 export function createSchedulingProvider(sel: ProviderSelection): SchedulingProvider {
@@ -380,6 +392,9 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
   }
   if (sel.provider === "custom" && sel.custom) {
     return new CustomSchedulingProvider(sel.custom);
+  }
+  if (sel.provider === "dentalink" && sel.dentalink) {
+    return new DentalinkSchedulingProvider(sel.dentalink);
   }
   return new MockSchedulingProvider(
     sel.mockData ?? {

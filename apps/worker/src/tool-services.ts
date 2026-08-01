@@ -5,7 +5,7 @@ import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
@@ -48,6 +48,31 @@ async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvid
       }
     }
     return new CustomSchedulingProvider({ baseUrl: cfg.baseUrl ?? "", secret });
+  }
+
+  // Dentalink (Healthatom): token por tenant cifrado + ventana laboral configurable.
+  if (kind === "DENTALINK" && connection) {
+    const cfg = (connection.config ?? {}) as Record<string, unknown>;
+    let token = "";
+    if (connection.credentialId) {
+      const cred = await withTenant(orgId, (tx) =>
+        tx.integrationCredential.findUnique({ where: { id: connection.credentialId! } }),
+      );
+      if (cred) {
+        try {
+          token = decryptCredential(cred.ciphertext);
+        } catch {
+          /* token ilegible → las llamadas fallarán con 401 */
+        }
+      }
+    }
+    return new DentalinkSchedulingProvider({
+      token,
+      workStartHour: cfg.workStartHour ? Number(cfg.workStartHour) : undefined,
+      workEndHour: cfg.workEndHour ? Number(cfg.workEndHour) : undefined,
+      slotMinutes: cfg.slotMinutes ? Number(cfg.slotMinutes) : undefined,
+      utcOffset: typeof cfg.utcOffset === "string" ? cfg.utcOffset : undefined,
+    });
   }
 
   let mock = mockProviders.get(orgId);
@@ -166,7 +191,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             clinicId: t.clinicId ?? null,
             contactId: t.contactId,
             serviceId: null,
-            provider: scheduling.kind === "clariva" ? "CLARIVA" : "MOCK",
+            provider:
+              scheduling.kind === "clariva" ? "CLARIVA" : scheduling.kind === "custom" ? "CUSTOM" : scheduling.kind === "dentalink" ? "DENTALINK" : "MOCK",
             externalId: appt.id,
             status: "PENDING",
             startsAt: new Date(appt.start),

@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type GoogleState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -56,6 +56,7 @@ interface Overview {
   apiPresets: { count: number; status: string | null };
   ga4: Ga4State | null;
   customScheduling: CustomSchedState | null;
+  dentalink: DentalinkState | null;
   google: GoogleState | null;
   platformGoogleReady: boolean;
   capiConfigured: boolean;
@@ -95,6 +96,7 @@ export default function IntegrationsPage() {
   const [emOpen, setEmOpen] = useState(false);
   const [customSchedOpen, setCustomSchedOpen] = useState(false);
   const [googleOpen, setGoogleOpen] = useState(false);
+  const [dentalinkOpen, setDentalinkOpen] = useState(false);
   const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
@@ -231,6 +233,18 @@ export default function IntegrationsPage() {
         onManage: () => setCustomSchedOpen(true),
       });
     }
+    if (data.dentalink) {
+      rows.push({
+        key: "dentalink",
+        name: "Dentalink",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.dentalink.status === "error" ? "attention" : "connected",
+        detail: `Ventana ${data.dentalink.workStartHour}:00–${data.dentalink.workEndHour}:00 · bloques de ${data.dentalink.slotMinutes} min`,
+        health: data.dentalink.status === "error" ? "warn" : "ok",
+        onManage: () => setDentalinkOpen(true),
+      });
+    }
     if (data.google) {
       rows.push({
         key: "google",
@@ -320,6 +334,8 @@ export default function IntegrationsPage() {
       case "google_calendar":
       case "sheets":
         return setGoogleOpen(true);
+      case "dentalink":
+        return setDentalinkOpen(true);
       case "zapier":
       case "make":
         return setAutomationOpen(item.key);
@@ -568,6 +584,7 @@ export default function IntegrationsPage() {
       <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
       <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
       <GoogleDrawer open={googleOpen} onClose={() => setGoogleOpen(false)} state={data?.google ?? null} platformReady={data?.platformGoogleReady ?? false} onChanged={() => void load()} />
+      <DentalinkDrawer open={dentalinkOpen} onClose={() => setDentalinkOpen(false)} state={data?.dentalink ?? null} onChanged={() => void load()} />
       {(["zapier", "make"] as const).map((kind) => (
         <AutomationDrawer
           key={kind}

@@ -1603,3 +1603,157 @@ export function GoogleDrawer({
     </Drawer>
   );
 }
+
+// ------------------------------ Dentalink (Healthatom) ------------------------------
+
+export interface DentalinkState {
+  status: string;
+  workStartHour: number;
+  workEndHour: number;
+  slotMinutes: number;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function DentalinkDrawer({
+  open,
+  onClose,
+  state,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: DentalinkState | null;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [token, setToken] = useState("");
+  const [workStartHour, setWorkStartHour] = useState(9);
+  const [workEndHour, setWorkEndHour] = useState(19);
+  const [slotMinutes, setSlotMinutes] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setToken("");
+    setTestResult(null);
+    setWorkStartHour(state?.workStartHour ?? 9);
+    setWorkEndHour(state?.workEndHour ?? 19);
+    setSlotMinutes(state?.slotMinutes ?? 30);
+  }, [open, state?.workStartHour, state?.workEndHour, state?.slotMinutes]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/dentalink", {
+        method: "POST",
+        body: JSON.stringify({
+          ...(token.trim() ? { token: token.trim() } : {}),
+          workStartHour,
+          workEndHour,
+          slotMinutes,
+        }),
+      });
+      toast.push("Dentalink guardado ✔ — prueba la conexión", "ok");
+      setToken("");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/dentalink/test", { method: "POST" });
+      setTestResult(r.detail);
+      onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/dentalink", { method: "DELETE" });
+    toast.push("Dentalink desconectado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Dentalink — agenda dental">
+      <p className="mb-3 text-xs text-slate-500">
+        Conecta tu Dentalink (Healthatom) con el token de <b>Configuración → API</b> de tu cuenta. Los agentes IA
+        ofrecerán horas reales (tu ventana laboral menos las citas ya agendadas en Dentalink), crearán pacientes y
+        agendarán directo en tu agenda. El token queda cifrado.
+      </p>
+
+      <label className="block text-sm">
+        <span className="text-xs text-slate-500">Token de la API {connected ? "(deja vacío para mantener el actual)" : ""}</span>
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Token generado en Dentalink → Configuración API"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Desde (hora)</span>
+          <input type="number" min={0} max={23} value={workStartHour} onChange={(e) => setWorkStartHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Hasta (hora)</span>
+          <input type="number" min={1} max={24} value={workEndHour} onChange={(e) => setWorkEndHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Bloques (min)</span>
+          <input type="number" min={10} max={120} step={5} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+      </div>
+      <p className="mt-1 text-[10px] text-slate-400">
+        La ventana laboral define qué huecos se ofrecen; las citas existentes en Dentalink se descuentan automáticamente.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button onClick={() => void save()} disabled={busy || (!connected && !token.trim())}>
+          {connected ? "Guardar cambios" : "Conectar"}
+        </Button>
+        {connected && (
+          <>
+            <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+            <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+          </>
+        )}
+      </div>
+
+      {testResult && (
+        <p className={`mt-2 text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+      )}
+      {state?.lastError && !testResult && <p className="mt-2 text-xs text-red-600">{state.lastError}</p>}
+      {state?.lastSyncAt && (
+        <p className="mt-2 text-[11px] text-slate-400">Última verificación: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Dentalink?"
+        description="Los agentes dejarán de ver la disponibilidad de Dentalink y volverán a la agenda interna."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
