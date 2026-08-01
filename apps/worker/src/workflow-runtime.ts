@@ -226,6 +226,8 @@ function makeDeps(): EngineDeps {
       }
       if (Object.keys(data).length === 0) return;
       await withTenant(ctx.organizationId, (tx) => tx.contact.update({ where: { id: ctx.contactId! }, data }));
+      const { enqueueHubspotContact } = await import("./hubspot.js");
+      await enqueueHubspotContact(ctx.organizationId, ctx.contactId);
     },
 
     async assignUser(ctx, userId) {

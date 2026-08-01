@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, HubspotDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type HubspotState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -59,6 +59,8 @@ interface Overview {
   dentalink: DentalinkState | null;
   google: GoogleState | null;
   platformGoogleReady: boolean;
+  hubspot: HubspotState | null;
+  platformHubspotReady: boolean;
   capiConfigured: boolean;
   automations: { zapier: AutomationState | null; make: AutomationState | null };
   webhooks: WebhookRow[];
@@ -97,6 +99,7 @@ export default function IntegrationsPage() {
   const [customSchedOpen, setCustomSchedOpen] = useState(false);
   const [googleOpen, setGoogleOpen] = useState(false);
   const [dentalinkOpen, setDentalinkOpen] = useState(false);
+  const [hubspotOpen, setHubspotOpen] = useState(false);
   const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
@@ -124,6 +127,7 @@ export default function IntegrationsPage() {
       if (result === "connected") {
         toast.push(`${label} conectado ✔ — ya puedes configurarlo`, "ok");
         if (provider === "google") setGoogleOpen(true);
+        if (provider === "hubspot") setHubspotOpen(true);
       } else if (result === "denied") {
         toast.push(`Conexión con ${label} cancelada`, "info");
       } else {
@@ -260,6 +264,19 @@ export default function IntegrationsPage() {
         onManage: () => setGoogleOpen(true),
       });
     }
+    if (data.hubspot) {
+      rows.push({
+        key: "hubspot",
+        name: "HubSpot",
+        category: "CRM y analítica",
+        icon: <Plug size={22} />,
+        status: data.hubspot.status === "reauthorize" ? "error" : data.hubspot.lastError ? "attention" : "connected",
+        statusLabel: data.hubspot.status === "reauthorize" ? "Reconectar" : undefined,
+        detail: `${data.hubspot.syncAuto ? "Sync automático activo" : "Sync manual"}${data.hubspot.lastSyncAt ? ` · última ${new Date(data.hubspot.lastSyncAt).toLocaleString("es-CL")}` : ""}`,
+        health: data.hubspot.status === "reauthorize" ? "error" : data.hubspot.lastError ? "warn" : "ok",
+        onManage: () => setHubspotOpen(true),
+      });
+    }
     if (data.ga4) {
       rows.push({
         key: "ga4",
@@ -336,6 +353,8 @@ export default function IntegrationsPage() {
         return setGoogleOpen(true);
       case "dentalink":
         return setDentalinkOpen(true);
+      case "hubspot":
+        return setHubspotOpen(true);
       case "zapier":
       case "make":
         return setAutomationOpen(item.key);
@@ -585,6 +604,7 @@ export default function IntegrationsPage() {
       <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
       <GoogleDrawer open={googleOpen} onClose={() => setGoogleOpen(false)} state={data?.google ?? null} platformReady={data?.platformGoogleReady ?? false} onChanged={() => void load()} />
       <DentalinkDrawer open={dentalinkOpen} onClose={() => setDentalinkOpen(false)} state={data?.dentalink ?? null} onChanged={() => void load()} />
+      <HubspotDrawer open={hubspotOpen} onClose={() => setHubspotOpen(false)} state={data?.hubspot ?? null} platformReady={data?.platformHubspotReady ?? false} onChanged={() => void load()} />
       {(["zapier", "make"] as const).map((kind) => (
         <AutomationDrawer
           key={kind}

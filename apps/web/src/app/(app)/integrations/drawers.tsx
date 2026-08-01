@@ -1757,3 +1757,248 @@ export function DentalinkDrawer({
     </Drawer>
   );
 }
+
+// ------------------------------ HubSpot ------------------------------
+
+export interface HubspotState {
+  status: string;
+  syncAuto: boolean;
+  fieldMapping: Record<string, string> | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+const HUBSPOT_FIELD_OPTIONS: { value: string; label: string }[] = [
+  { value: "firstName", label: "Nombre" },
+  { value: "lastName", label: "Apellido" },
+  { value: "email", label: "Email" },
+  { value: "phone", label: "Teléfono" },
+  { value: "country", label: "País" },
+  { value: "source", label: "Origen (canal)" },
+];
+
+const HUBSPOT_DEFAULT_MAPPING: Record<string, string> = {
+  firstname: "firstName",
+  lastname: "lastName",
+  email: "email",
+  phone: "phone",
+};
+
+export function HubspotDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: HubspotState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const needsReauth = state?.status === "reauthorize";
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [syncAuto, setSyncAuto] = useState(true);
+  const [mapping, setMapping] = useState<Record<string, string>>(HUBSPOT_DEFAULT_MAPPING);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setTestResult(null);
+    setSyncAuto(state?.syncAuto ?? true);
+    setMapping(state?.fieldMapping && Object.keys(state.fieldMapping).length ? state.fieldMapping : HUBSPOT_DEFAULT_MAPPING);
+  }, [open, state?.syncAuto, state?.fieldMapping]);
+
+  async function startOAuth() {
+    setBusy(true);
+    try {
+      const { url } = await api<{ url: string }>("/integrations/oauth/hubspot/authorize");
+      window.location.href = url; // vuelve a /integrations?hubspot=connected
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+      setBusy(false);
+    }
+  }
+
+  async function saveConfig() {
+    setBusy(true);
+    try {
+      await api("/integrations/hubspot/config", {
+        method: "PUT",
+        body: JSON.stringify({ syncAuto, fieldMapping: mapping }),
+      });
+      toast.push("Configuración guardada ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/hubspot/test", { method: "POST" });
+      setTestResult(r.detail);
+      if (r.ok) onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncAll() {
+    setBusy(true);
+    try {
+      const r = await api<{ queued: number }>("/integrations/hubspot/sync-all", { method: "POST" });
+      toast.push(`Backfill iniciado: ${r.queued} contacto(s) en cola (escalonados)`, "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/hubspot", { method: "DELETE" });
+    toast.push("HubSpot desconectado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="HubSpot — sincronización de contactos">
+      {!platformReady ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Configuración de plataforma pendiente</p>
+          <p className="mt-1 text-xs">
+            Falta registrar la app OAuth de HubSpot a nivel plataforma (variables HUBSPOT_CLIENT_ID y
+            HUBSPOT_CLIENT_SECRET). Sigue la guía <code>docs/GUIA_OAUTH_HUBSPOT.md</code> del repositorio y vuelve
+            aquí.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Sincronización <b>unidireccional</b> Conversia → HubSpot: cada contacto nuevo o editado se refleja en tu
+            CRM. Antes de crear se busca por teléfono/email — <b>sin duplicados</b>. Los tokens quedan cifrados.
+          </p>
+
+          {needsReauth && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
+            </div>
+          )}
+
+          {!connected || needsReauth ? (
+            <Button onClick={() => void startOAuth()} disabled={busy}>
+              {needsReauth ? "Volver a conectar con HubSpot" : "Conectar con HubSpot"}
+            </Button>
+          ) : (
+            <div className="space-y-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={syncAuto} onChange={(e) => setSyncAuto(e.target.checked)} />
+                Sincronizar automáticamente contactos nuevos y editados
+              </label>
+
+              <div className="rounded-xl border border-slate-200 p-3">
+                <p className="text-sm font-medium">Mapeo de campos (HubSpot ← Conversia)</p>
+                <div className="mt-2 space-y-1.5">
+                  {Object.entries(mapping).map(([prop, field]) => (
+                    <div key={prop} className="flex items-center gap-2 text-xs">
+                      <code className="w-28 shrink-0 rounded bg-slate-100 px-1.5 py-1">{prop}</code>
+                      <span className="text-slate-400">←</span>
+                      <select
+                        value={field}
+                        onChange={(e) => setMapping({ ...mapping, [prop]: e.target.value })}
+                        className="flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      >
+                        {HUBSPOT_FIELD_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...mapping };
+                          delete next[prop];
+                          setMapping(next);
+                        }}
+                        className="text-slate-400 hover:text-red-500"
+                        title="Quitar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <AddHubspotProperty existing={mapping} onAdd={(prop) => setMapping({ ...mapping, [prop]: "source" })} />
+                <p className="mt-2 text-[10px] text-slate-400">
+                  La clave es el nombre interno de la propiedad en HubSpot (p. ej. <code>firstname</code>,{" "}
+                  <code>lead_source</code> si la creaste como personalizada).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void saveConfig()} disabled={busy || Object.keys(mapping).length === 0}>Guardar</Button>
+                <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+                <Button variant="secondary" onClick={() => void syncAll()} disabled={busy}>Sincronizar contactos existentes</Button>
+                <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+              </div>
+              {testResult && (
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+              )}
+              {state?.lastSyncAt && (
+                <p className="text-[11px] text-slate-400">Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+              )}
+              {state?.lastError && <p className="text-[11px] text-red-600">{state.lastError}</p>}
+            </div>
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar HubSpot?"
+        description="Se dejará de sincronizar contactos hacia tu CRM. Los contactos ya creados en HubSpot no se tocan."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+function AddHubspotProperty({ existing, onAdd }: { existing: Record<string, string>; onAdd: (prop: string) => void }) {
+  const [prop, setProp] = useState("");
+  const normalized = prop.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        value={prop}
+        onChange={(e) => setProp(e.target.value)}
+        placeholder="agregar propiedad de HubSpot…"
+        className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+      />
+      <Button
+        variant="ghost"
+        onClick={() => {
+          if (normalized && !existing[normalized]) onAdd(normalized);
+          setProp("");
+        }}
+        disabled={!normalized || Boolean(existing[normalized])}
+      >
+        <Plus size={13} /> Añadir
+      </Button>
+    </div>
+  );
+}

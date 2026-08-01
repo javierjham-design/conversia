@@ -209,6 +209,10 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
 
   if (!result) return; // duplicado
 
+  // Sincronización unidireccional a HubSpot (si el tenant la activó)
+  const { enqueueHubspotContact } = await import("./hubspot.js");
+  await enqueueHubspotContact(organizationId, result.contactId);
+
   await dispatchEvent({
     organizationId,
     type: "lead_created",

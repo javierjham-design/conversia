@@ -4,6 +4,7 @@ import type { Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -53,7 +54,10 @@ export interface OAuthTokens {
 
 @Controller()
 export class OAuthController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private queues: QueueService,
+  ) {}
 
   // ------------------------------- Google -------------------------------
 
@@ -231,6 +235,83 @@ export class OAuthController {
     } catch {
       return back("error");
     }
+  }
+
+  /** Prueba real: introspección del token → portal (hub) conectado. */
+  @Post("integrations/hubspot/test")
+  async hubspotTest() {
+    const ctx = requirePermission("integrations:write");
+    try {
+      const token = await this.freshToken(ctx.organizationId, "hubspot");
+      const res = await fetch(`https://api.hubapi.com/oauth/v1/access-tokens/${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new BadRequestException(`HubSpot respondió ${res.status}`);
+      const info: any = await res.json();
+      const detail = `✔ Conectado al portal ${info.hub_domain ?? "?"} (hub #${info.hub_id ?? "?"}) como ${info.user ?? "?"}`;
+      await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        await tx.integrationConnection.updateMany({ where: { provider: "hubspot" }, data: { lastSyncAt: new Date(), lastError: null, status: "active" } });
+        await tx.integrationEvent.create({
+          data: { organizationId: ctx.organizationId, provider: "hubspot", type: "hubspot.test", status: "ok", message: detail },
+        });
+      });
+      return { ok: true, detail, portal: { domain: info.hub_domain ?? null, hubId: info.hub_id ?? null } };
+    } catch (err) {
+      const message = (err as Error).message;
+      await this.prisma.withTenant(ctx.organizationId, (tx) =>
+        tx.integrationEvent.create({
+          data: { organizationId: ctx.organizationId, provider: "hubspot", type: "hubspot.test", status: "error", message },
+        }),
+      ).catch(() => undefined);
+      return { ok: false, detail: message };
+    }
+  }
+
+  /** Config de la sincronización: mapeo de campos + sync automático on/off. */
+  @Put("integrations/hubspot/config")
+  async hubspotConfig(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const parsed = z
+      .object({
+        syncAuto: z.boolean().optional(),
+        fieldMapping: z.record(z.enum(["firstName", "lastName", "email", "phone", "country", "source"])).optional(),
+      })
+      .parse(body ?? {});
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+      if (!conn) throw new BadRequestException("Conecta tu cuenta de HubSpot primero");
+      const config = { ...((conn.config as object) ?? {}), ...parsed } as object;
+      await tx.integrationConnection.update({ where: { id: conn.id }, data: { config } });
+      return { ok: true };
+    });
+  }
+
+  /** Backfill: encola la sincronización de TODOS los contactos existentes (lotes con backoff). */
+  @Post("integrations/hubspot/sync-all")
+  async hubspotSyncAll() {
+    const ctx = requirePermission("integrations:write");
+    const contacts = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+      if (!conn) throw new BadRequestException("Conecta tu cuenta de HubSpot primero");
+      return tx.contact.findMany({
+        where: { deletedAt: null, OR: [{ phone: { not: null } }, { email: { not: null } }] },
+        select: { id: true },
+        take: 5000,
+        orderBy: { createdAt: "asc" },
+      });
+    });
+    // Escalonado (200 ms entre jobs) para respetar los límites de tasa de HubSpot.
+    await this.queues.sync.addBulk(
+      contacts.map((c, i) => ({
+        name: "hubspot",
+        data: { organizationId: ctx.organizationId, kind: "hubspot_contact" as const, payload: { contactId: c.id } },
+        opts: { delay: i * 200, attempts: 5, backoff: { type: "exponential" as const, delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      })),
+    );
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "hubspot", type: "hubspot.backfill", status: "ok", message: `Backfill encolado: ${contacts.length} contacto(s)` },
+      }),
+    ).catch(() => undefined);
+    return { ok: true, queued: contacts.length };
   }
 
   @Delete("integrations/hubspot")

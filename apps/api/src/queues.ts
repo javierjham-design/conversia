@@ -9,6 +9,7 @@ import {
   type EventJob,
   type InboundJob,
   type OutboundJob,
+  type SyncJob,
   type WebhookDeliveryJob,
 } from "@conversia/types";
 
@@ -21,6 +22,7 @@ export class QueueService implements OnModuleDestroy {
   readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection });
   readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });
   readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
+  readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
 
   async onModuleDestroy() {
     await Promise.all([
@@ -30,6 +32,7 @@ export class QueueService implements OnModuleDestroy {
       this.webhooks.close(),
       this.capi.close(),
       this.imports.close(),
+      this.sync.close(),
     ]);
     this.connection.disconnect();
   }

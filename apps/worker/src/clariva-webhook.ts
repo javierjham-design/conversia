@@ -128,6 +128,8 @@ export async function processClarivaWebhook(
   // Espejo a Google Calendar (si el tenant lo activó); cancelación borra el evento.
   const { enqueueCalendarSync } = await import("./google-calendar.js");
   await enqueueCalendarSync(organizationId, result.appointmentId, mapped.status === "CANCELLED" ? "cancel" : "upsert");
+  const { enqueueHubspotContact } = await import("./hubspot.js");
+  await enqueueHubspotContact(organizationId, result.contactId);
   const eventData = { appointmentId: result.appointmentId, externalId: result.externalId, contactId: result.contactId, source: "clariva" };
   if (mapped.publicEvent) await emitPlatformEvent(organizationId, mapped.publicEvent, eventData);
   if (mapped.trigger) {

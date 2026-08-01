@@ -103,14 +103,17 @@ export class IntegrationsController {
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
       const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
       const platformGoogleReady = Boolean(getEnv().GOOGLE_OAUTH_CLIENT_ID && getEnv().GOOGLE_OAUTH_CLIENT_SECRET);
+      const hubspotConn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+      const platformHubspotReady = Boolean(getEnv().HUBSPOT_CLIENT_ID && getEnv().HUBSPOT_CLIENT_SECRET);
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
       await this.notifyInterested(
         tx,
         ctx.organizationId,
-        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", "dentalink", ...(platformGoogleReady ? ["google_calendar", "sheets"] : [])],
+        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", "dentalink", ...(platformGoogleReady ? ["google_calendar", "sheets"] : []), ...(platformHubspotReady ? ["hubspot"] : [])],
         {
           dentalink: "Dentalink",
+          hubspot: "HubSpot",
           email: "Correo electrónico",
           custom_api: "API personalizada",
           ga4: "Google Analytics",
@@ -188,6 +191,16 @@ export class IntegrationsController {
           : null,
         capiConfigured: Boolean((await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }))?.datasetId),
         platformGoogleReady,
+        platformHubspotReady,
+        hubspot: hubspotConn
+          ? {
+              status: hubspotConn.status,
+              syncAuto: (hubspotConn.config as any)?.syncAuto !== false,
+              fieldMapping: (hubspotConn.config as any)?.fieldMapping ?? null,
+              lastSyncAt: hubspotConn.lastSyncAt,
+              lastError: hubspotConn.lastError,
+            }
+          : null,
         google: googleConn
           ? {
               status: googleConn.status,
@@ -243,7 +256,7 @@ export class IntegrationsController {
           { key: "custom_api", name: "API personalizada", category: "datos", status: "disponible", description: "Presets de tus APIs (URL + auth cifrada) para usarlos en el paso «Petición HTTP» sin pegar tokens en cada nodo.", capabilities: ["Presets", "Auth cifrada", "Allowlist", "Workflows"] },
           { key: "zapier", name: "Zapier", category: "datos", status: "disponible", description: "Asistente guiado: trigger con nuestros webhooks + acciones con la API de Conversia (sin app nativa).", capabilities: ["Asistente", "Webhook + API key", "Plantillas"] },
           { key: "make", name: "Make", category: "datos", status: "disponible", description: "Asistente guiado: escenarios de Make con nuestros webhooks y API (sin app nativa).", capabilities: ["Asistente", "Webhook + API key", "Plantillas"] },
-          { key: "hubspot", name: "HubSpot", category: "crm", status: "proximamente", description: "Sincroniza contactos y negocios.", capabilities: ["CRM"] },
+          { key: "hubspot", name: "HubSpot", category: "crm", status: platformHubspotReady ? "disponible" : "config_pendiente", description: "Sincroniza tus contactos de Conversia a HubSpot (unidireccional, sin duplicados, con mapeo de campos).", capabilities: ["OAuth", "Contactos", "Backfill", "Sin duplicados"] },
           { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "disponible", description: "Métricas de los eventos CAPI: envíos por día y por tipo, tasa de éxito y últimos rechazos de Meta.", capabilities: ["Métricas", "Errores", "Link directo"] },
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
         ],

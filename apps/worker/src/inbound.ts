@@ -241,6 +241,10 @@ export async function processInbound(job: InboundJob): Promise<void> {
 
     if (!result) continue; // duplicado
 
+    // Sincronización unidireccional a HubSpot (si el tenant la activó)
+    const { enqueueHubspotContact } = await import("./hubspot.js");
+    await enqueueHubspotContact(organizationId, result.contactId);
+
     // El contacto respondió → cancelar seguimientos pendientes
     await cancelTimersOnReply(organizationId, result.conversationId);
 

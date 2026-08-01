@@ -421,6 +421,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       const updated = Object.keys(data);
       if (updated.length) {
         await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        const { enqueueHubspotContact } = await import("./hubspot.js");
+        await enqueueHubspotContact(orgId, t.contactId);
       }
       return { updated };
     },
