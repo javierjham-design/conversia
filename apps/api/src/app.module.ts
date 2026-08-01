@@ -11,6 +11,7 @@ import { DevelopersController } from "./integrations/developers.controller";
 import { InboundHookController } from "./integrations/inbound-hook.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
 import { MetaController } from "./integrations/meta.controller";
+import { OAuthController } from "./integrations/oauth.controller";
 import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { PrismaService } from "./prisma.service";
@@ -42,6 +43,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     UsersController,
     IntegrationsController,
     MetaController,
+    OAuthController, // OAuth por tenant (Google/HubSpot); callback en /public/oauth
     DevelopersController,
     InboundHookController,
     PublicApiController, // API pública v1 (auth por API key del tenant)

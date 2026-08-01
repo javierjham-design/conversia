@@ -444,6 +444,19 @@ function makeDeps(): EngineDeps {
       );
     },
 
+    async appendGoogleSheetRow(ctx, config) {
+      if (!config.spreadsheetId || !config.values.length) return;
+      await getSyncQueue().add(
+        "sheets",
+        {
+          organizationId: ctx.organizationId,
+          kind: "sheets_append",
+          payload: { spreadsheetId: config.spreadsheetId, sheetName: config.sheetName, values: config.values },
+        },
+        { attempts: 5, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
     async runAgentWithObjective(ctx, nodeId, cfg) {
       const agentSlug = String(cfg.agentSlug ?? "");
       const objective = String(cfg.objective ?? "");

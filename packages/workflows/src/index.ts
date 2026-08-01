@@ -44,6 +44,8 @@ export interface EngineDeps {
   sendInternalEmail(ctx: RunCtx, config: { to: string[]; subject: string; body: string }): Promise<void>;
   /** Evento GA4 vía Measurement Protocol; params ya renderizados. */
   sendGa4Event(ctx: RunCtx, config: { eventName: string; params: Record<string, string> }): Promise<void>;
+  /** Agrega una fila a Google Sheets (valores ya renderizados). */
+  appendGoogleSheetRow(ctx: RunCtx, config: { spreadsheetId: string; sheetName: string; values: string[] }): Promise<void>;
   /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
    *  ramifican de inmediato; "pending" (multi-turno) deja al agente
    *  conversando y el run espera: respuestas del contacto lo reanudan con la
@@ -265,8 +267,16 @@ async function executeNode(
       await deps.sendGa4Event(ctx, { eventName: String(cfg.eventName ?? ""), params });
       return {};
     }
+    case "google_sheets_append": {
+      const values = (Array.isArray(cfg.values) ? cfg.values : []).map((v) => renderVars(String(v ?? ""), ctx.variables));
+      await deps.appendGoogleSheetRow(ctx, {
+        spreadsheetId: String(cfg.spreadsheetId ?? ""),
+        sheetName: String(cfg.sheetName ?? ""),
+        values,
+      });
+      return {};
+    }
     case "send_tiktok_event":
-    case "google_sheets_append":
       // "Próximamente": sin integración aún. No-op registrado (no se finge).
       return {};
     case "wait":

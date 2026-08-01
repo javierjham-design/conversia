@@ -154,8 +154,11 @@ export function simulateWorkflow(
         label = "Evento GA4";
         detail = `enviaría «${String(cfg.eventName ?? "")}» a Google Analytics (no se envía en la prueba)`;
         break;
-      case "send_tiktok_event":
       case "google_sheets_append":
+        label = "Google Sheets";
+        detail = `agregaría una fila con ${(Array.isArray(cfg.values) ? (cfg.values as string[]) : []).length} columna(s) a la planilla (no se envía en la prueba)`;
+        break;
+      case "send_tiktok_event":
         label = "Integración";
         detail = "(Próximamente — este paso aún no envía nada)";
         break;

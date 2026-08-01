@@ -124,6 +124,7 @@ export class WorkflowsController {
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
+      const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
       return {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
@@ -135,6 +136,7 @@ export class WorkflowsController {
         templates,
         apiPresets,
         ga4Connected: Boolean(ga4Conn && ga4Conn.status !== "error"),
+        googleConnected: Boolean(googleConn && googleConn.status !== "reauthorize"),
       };
     });
   }
@@ -477,6 +479,20 @@ export class WorkflowsController {
         if (!ga4 || ga4.status === "error") {
           throw new BadRequestException(
             "El paso «Enviar evento GA4» requiere conectar Google Analytics en Integraciones antes de publicar.",
+          );
+        }
+      }
+      for (const n of nodes.filter((x) => x.type === "google_sheets_append")) {
+        const cfg = (n.config ?? {}) as Record<string, unknown>;
+        if (!cfg.spreadsheetId || !(Array.isArray(cfg.values) && (cfg.values as unknown[]).length)) {
+          throw new BadRequestException("El paso «Agregar fila a Google Sheets» necesita el ID de la planilla y al menos una columna.");
+        }
+        const google = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "google" } },
+        });
+        if (!google || google.status === "reauthorize") {
+          throw new BadRequestException(
+            "El paso «Agregar fila a Google Sheets» requiere conectar Google en Integraciones antes de publicar.",
           );
         }
       }

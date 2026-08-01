@@ -100,17 +100,26 @@ export class IntegrationsController {
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
+      const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
+      const platformGoogleReady = Boolean(getEnv().GOOGLE_OAUTH_CLIENT_ID && getEnv().GOOGLE_OAUTH_CLIENT_SECRET);
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make"], {
-        email: "Correo electrónico",
-        custom_api: "API personalizada",
-        ga4: "Google Analytics",
-        events_manager: "Meta Events Manager",
-        custom_scheduling: "Agenda personalizada",
-        zapier: "Zapier",
-        make: "Make",
-      }).catch(() => undefined);
+      await this.notifyInterested(
+        tx,
+        ctx.organizationId,
+        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", ...(platformGoogleReady ? ["google_calendar", "sheets"] : [])],
+        {
+          email: "Correo electrónico",
+          custom_api: "API personalizada",
+          ga4: "Google Analytics",
+          events_manager: "Meta Events Manager",
+          custom_scheduling: "Agenda personalizada",
+          zapier: "Zapier",
+          make: "Make",
+          google_calendar: "Google Calendar",
+          sheets: "Google Sheets",
+        },
+      ).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
       const failing = deliveries.filter((d) => d.status === "FAILED" || d.status === "DEAD");
@@ -166,6 +175,16 @@ export class IntegrationsController {
           ? { status: customSched.status, baseUrl: (customSched.config as any)?.baseUrl ?? null, lastSyncAt: customSched.lastSyncAt, lastError: customSched.lastError }
           : null,
         capiConfigured: Boolean((await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }))?.datasetId),
+        platformGoogleReady,
+        google: googleConn
+          ? {
+              status: googleConn.status,
+              calendarId: (googleConn.config as any)?.calendarId ?? null,
+              calendarSync: Boolean((googleConn.config as any)?.calendarSync),
+              lastSyncAt: googleConn.lastSyncAt,
+              lastError: googleConn.lastError,
+            }
+          : null,
         automations: {
           zapier: await tx.integrationConnection
             .findUnique({ where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "zapier" } } })
@@ -204,10 +223,10 @@ export class IntegrationsController {
           { key: "messenger", name: "Facebook Messenger", category: "meta", status: "proximamente", description: "Conversaciones de tu página de Facebook en la misma bandeja.", capabilities: ["Mensajes"] },
           { key: "clariva", name: "Cláriva", category: "agenda", status: "disponible", description: "Agenda clínica: disponibilidad y citas reales de tus sedes.", capabilities: ["Disponibilidad", "Citas", "Sincronización"] },
           { key: "dentalink", name: "Dentalink", category: "agenda", status: "proximamente", description: "Proveedor de agenda dental.", capabilities: ["Disponibilidad", "Citas"] },
-          { key: "google_calendar", name: "Google Calendar", category: "agenda", status: "proximamente", description: "Agenda simple para profesionales independientes.", capabilities: ["Eventos"] },
+          { key: "google_calendar", name: "Google Calendar", category: "agenda", status: platformGoogleReady ? "disponible" : "config_pendiente", description: "Espejo de tus citas de Conversia en el calendario que elijas (OAuth de Google).", capabilities: ["OAuth", "Espejo de citas", "Cancelaciones"] },
           { key: "custom_scheduling", name: "Agenda personalizada", category: "agenda", status: "disponible", description: "Conecta tu propio software clínico implementando el contrato estándar de agenda (HMAC). Los agentes IA lo usan igual que cualquier proveedor.", capabilities: ["Contrato estándar", "HMAC", "Disponibilidad", "Citas"] },
           { key: "webhooks", name: "Webhooks salientes", category: "datos", status: "disponible", description: "Recibe los eventos de Conversia en tus sistemas, firmados HMAC.", capabilities: ["14 eventos", "Reintentos", "Firma HMAC"] },
-          { key: "sheets", name: "Google Sheets", category: "datos", status: "proximamente", description: "Exporta leads y citas a planillas.", capabilities: ["Export"] },
+          { key: "sheets", name: "Google Sheets", category: "datos", status: platformGoogleReady ? "disponible" : "config_pendiente", description: "Agrega filas a tus planillas desde los flujos (paso «Agregar fila a Google Sheets»).", capabilities: ["OAuth", "Paso de workflow", "Variables"] },
           { key: "email", name: "Correo electrónico", category: "datos", status: "disponible", description: "Escalamientos, resúmenes diarios y alertas al equipo (remitente de plataforma o SMTP propio).", capabilities: ["Escalamientos", "Resumen diario", "Alertas", "Paso de workflow"] },
           { key: "custom_api", name: "API personalizada", category: "datos", status: "disponible", description: "Presets de tus APIs (URL + auth cifrada) para usarlos en el paso «Petición HTTP» sin pegar tokens en cada nodo.", capabilities: ["Presets", "Auth cifrada", "Allowlist", "Workflows"] },
           { key: "zapier", name: "Zapier", category: "datos", status: "disponible", description: "Asistente guiado: trigger con nuestros webhooks + acciones con la API de Conversia (sin app nativa).", capabilities: ["Asistente", "Webhook + API key", "Plantillas"] },

@@ -49,6 +49,12 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
+  // OAuth por tenant para Google Calendar/Sheets (app de plataforma; ver docs/GUIA_OAUTH_GOOGLE.md)
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional().default(""),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional().default(""),
+  // OAuth por tenant para HubSpot (ver docs/GUIA_OAUTH_HUBSPOT.md)
+  HUBSPOT_CLIENT_ID: z.string().optional().default(""),
+  HUBSPOT_CLIENT_SECRET: z.string().optional().default(""),
 
   // Flow (Chile / CLP) — Stripe ya está definido más abajo. Vacías = mock en dev.
   FLOW_API_KEY: z.string().optional().default(""),

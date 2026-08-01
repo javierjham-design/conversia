@@ -1,6 +1,7 @@
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { enqueueEscalationEmail } from "./mailer";
+import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
@@ -158,8 +159,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async recordAppointment(appt: SchedAppointment) {
-      await withTenant(orgId, async (tx) => {
-        await tx.appointment.create({
+      const created = await withTenant(orgId, async (tx) => {
+        const row = await tx.appointment.create({
           data: {
             organizationId: orgId,
             clinicId: t.clinicId ?? null,
@@ -184,7 +185,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             after: appt as object,
           },
         });
+        return row;
       });
+      await enqueueCalendarSync(orgId, created.id, "upsert");
       await emitPlatformEvent(orgId, "appointment.created", {
         externalId: appt.id,
         start: appt.start,

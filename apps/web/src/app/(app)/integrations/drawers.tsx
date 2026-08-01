@@ -1406,3 +1406,200 @@ export function AutomationDrawer({
     </Drawer>
   );
 }
+
+// ------------------------------ Google (Calendar + Sheets) ------------------------------
+
+export interface GoogleState {
+  status: string;
+  calendarId: string | null;
+  calendarSync: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function GoogleDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: GoogleState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const needsReauth = state?.status === "reauthorize";
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<{ id: string; name: string; primary: boolean }[] | null>(null);
+  const [calendarId, setCalendarId] = useState("");
+  const [calendarSync, setCalendarSync] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setTestResult(null);
+    setCalendarId(state?.calendarId ?? "");
+    setCalendarSync(Boolean(state?.calendarSync));
+    if (connected && !needsReauth) {
+      setCalendars(null);
+      void api<{ calendars: { id: string; name: string; primary: boolean }[] }>("/integrations/google/calendars")
+        .then((r) => setCalendars(r.calendars))
+        .catch(() => setCalendars([]));
+    }
+  }, [open, connected, needsReauth, state?.calendarId, state?.calendarSync]);
+
+  async function startOAuth() {
+    setBusy(true);
+    try {
+      const { url } = await api<{ url: string }>("/integrations/oauth/google/authorize");
+      window.location.href = url; // vuelve a /integrations?google=connected
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+      setBusy(false);
+    }
+  }
+
+  async function saveConfig() {
+    setBusy(true);
+    try {
+      await api("/integrations/google/config", {
+        method: "PUT",
+        body: JSON.stringify({ calendarId, calendarSync }),
+      });
+      toast.push("Configuración guardada ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/google/test", { method: "POST" });
+      setTestResult(r.detail);
+      if (r.ok) onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/google", { method: "DELETE" });
+    toast.push("Cuenta de Google desconectada — el token fue revocado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Google Calendar y Sheets">
+      {!platformReady ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Configuración de plataforma pendiente</p>
+          <p className="mt-1 text-xs">
+            Falta registrar la app OAuth de Google a nivel plataforma (variables GOOGLE_OAUTH_CLIENT_ID y
+            GOOGLE_OAUTH_CLIENT_SECRET). Sigue la guía <code>docs/GUIA_OAUTH_GOOGLE.md</code> del repositorio y
+            vuelve aquí: no necesitas cambiar nada más.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Una sola conexión habilita <b>Google Calendar</b> (espejo de tus citas de Conversia) y{" "}
+            <b>Google Sheets</b> (paso «Añadir fila a Google Sheets» en los flujos). Los tokens quedan cifrados por
+            organización.
+          </p>
+
+          {needsReauth && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
+            </div>
+          )}
+
+          {!connected || needsReauth ? (
+            <Button onClick={() => void startOAuth()} disabled={busy}>
+              {needsReauth ? "Volver a conectar con Google" : "Conectar con Google"}
+            </Button>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Espejo de citas en Google Calendar</p>
+                  <StatusBadge kind={state?.lastError ? "attention" : "connected"} label={state?.lastError ? "Atención" : "Activa"} />
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={calendarSync} onChange={(e) => setCalendarSync(e.target.checked)} />
+                  Reflejar cada cita creada, actualizada o cancelada
+                </label>
+                <label className="mt-2 block text-sm">
+                  <span className="text-xs text-slate-500">Calendario destino</span>
+                  {calendars === null ? (
+                    <Skeleton className="mt-1 h-9" />
+                  ) : (
+                    <select
+                      value={calendarId}
+                      onChange={(e) => setCalendarId(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="">— elegir calendario —</option>
+                      {calendars.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.primary ? " (principal)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+                {state?.lastSyncAt && (
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}
+                  </p>
+                )}
+                {state?.lastError && <p className="mt-1 text-[11px] text-red-600">{state.lastError}</p>}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600">
+                <p className="text-sm font-medium text-slate-800">Google Sheets</p>
+                <p className="mt-1">
+                  Ya quedó habilitado: agrega el paso <b>«Añadir fila a Google Sheets»</b> en{" "}
+                  <a href="/workflows" className="underline">Workflows</a> con el ID de la planilla y las columnas
+                  (admiten variables del contacto).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void saveConfig()} disabled={busy || (calendarSync && !calendarId)}>Guardar</Button>
+                <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+                <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+              </div>
+              {testResult && (
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Google?"
+        description="Se revocará el token y se detendrá el espejo de citas y el paso de Google Sheets en los flujos publicados."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}

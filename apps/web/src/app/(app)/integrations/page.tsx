@@ -29,13 +29,13 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type GoogleState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
   name: string;
   category: "meta" | "agenda" | "datos" | "crm";
-  status: "disponible" | "beta" | "proximamente";
+  status: "disponible" | "beta" | "proximamente" | "config_pendiente";
   description: string;
   capabilities: string[];
 }
@@ -56,6 +56,8 @@ interface Overview {
   apiPresets: { count: number; status: string | null };
   ga4: Ga4State | null;
   customScheduling: CustomSchedState | null;
+  google: GoogleState | null;
+  platformGoogleReady: boolean;
   capiConfigured: boolean;
   automations: { zapier: AutomationState | null; make: AutomationState | null };
   webhooks: WebhookRow[];
@@ -92,6 +94,7 @@ export default function IntegrationsPage() {
   const [ga4Open, setGa4Open] = useState(false);
   const [emOpen, setEmOpen] = useState(false);
   const [customSchedOpen, setCustomSchedOpen] = useState(false);
+  const [googleOpen, setGoogleOpen] = useState(false);
   const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
@@ -108,6 +111,26 @@ export default function IntegrationsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Resultado del retorno OAuth (Google/HubSpot redirigen a /integrations?provider=estado)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    for (const provider of ["google", "hubspot"] as const) {
+      const result = params.get(provider);
+      if (!result) continue;
+      const label = provider === "google" ? "Google" : "HubSpot";
+      if (result === "connected") {
+        toast.push(`${label} conectado ✔ — ya puedes configurarlo`, "ok");
+        if (provider === "google") setGoogleOpen(true);
+      } else if (result === "denied") {
+        toast.push(`Conexión con ${label} cancelada`, "info");
+      } else {
+        toast.push(`No se pudo conectar ${label} — intenta de nuevo`, "error");
+      }
+      window.history.replaceState(null, "", "/integrations");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (activityOpen) {
@@ -208,6 +231,21 @@ export default function IntegrationsPage() {
         onManage: () => setCustomSchedOpen(true),
       });
     }
+    if (data.google) {
+      rows.push({
+        key: "google",
+        name: "Google Calendar y Sheets",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.google.status === "reauthorize" ? "error" : data.google.lastError ? "attention" : "connected",
+        statusLabel: data.google.status === "reauthorize" ? "Reconectar" : undefined,
+        detail: data.google.calendarSync
+          ? `Espejo de citas activo${data.google.lastSyncAt ? ` · sync ${new Date(data.google.lastSyncAt).toLocaleString("es-CL")}` : ""}`
+          : "Cuenta conectada (espejo de citas apagado)",
+        health: data.google.status === "reauthorize" ? "error" : data.google.lastError ? "warn" : "ok",
+        onManage: () => setGoogleOpen(true),
+      });
+    }
     if (data.ga4) {
       rows.push({
         key: "ga4",
@@ -244,7 +282,7 @@ export default function IntegrationsPage() {
     if (!data) return [];
     return data.catalog.filter((c) => {
       if (categoryFilter !== "todas" && c.category !== categoryFilter) return false;
-      if (statusFilter === "disponibles" && c.status === "proximamente") return false;
+      if (statusFilter === "disponibles" && (c.status === "proximamente" || c.status === "config_pendiente")) return false;
       if (statusFilter === "proximamente" && c.status !== "proximamente") return false;
       if (statusFilter === "conectadas") return false; // conectadas viven en su propia sección
       if (search && !`${c.name} ${c.description}`.toLowerCase().includes(search.toLowerCase())) return false;
@@ -279,6 +317,9 @@ export default function IntegrationsPage() {
         return setEmOpen(true);
       case "custom_scheduling":
         return setCustomSchedOpen(true);
+      case "google_calendar":
+      case "sheets":
+        return setGoogleOpen(true);
       case "zapier":
       case "make":
         return setAutomationOpen(item.key);
@@ -480,8 +521,8 @@ export default function IntegrationsPage() {
                             {CATALOG_ICONS[item.key] ?? <Plug size={20} />}
                           </div>
                           <StatusBadge
-                            kind={item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : "soon"}
-                            label={item.status === "disponible" ? "Disponible" : undefined}
+                            kind={item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
+                            label={item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
                           />
                         </div>
                         <p className="mt-2.5 font-semibold">{item.name}</p>
@@ -526,6 +567,7 @@ export default function IntegrationsPage() {
       <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
       <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
       <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
+      <GoogleDrawer open={googleOpen} onClose={() => setGoogleOpen(false)} state={data?.google ?? null} platformReady={data?.platformGoogleReady ?? false} onChanged={() => void load()} />
       {(["zapier", "make"] as const).map((kind) => (
         <AutomationDrawer
           key={kind}
