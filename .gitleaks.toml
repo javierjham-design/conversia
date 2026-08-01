@@ -18,4 +18,5 @@ regexes = [
   '''conversia-verify-token-dev''',
   '''0000000000000000000000000000000000000000000000000000000000000000''',
   '''conversia_app_dev_password''',
+  '''secreto-de-prueba''',
 ]
