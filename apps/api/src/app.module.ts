@@ -6,6 +6,8 @@ import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
 import { ContactsController } from "./contacts/contacts.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
+import { InboxController } from "./conversations/inbox.controller";
+import { RealtimeService } from "./common/realtime.service";
 import { HealthController } from "./health.controller";
 import { DevelopersController } from "./integrations/developers.controller";
 import { InboundHookController } from "./integrations/inbound-hook.controller";
@@ -38,6 +40,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     OrganizationsController,
     AgentsController,
     ConversationsController,
+    InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA
     ContactsController,
     ChannelsController,
     UsersController,
@@ -57,7 +60,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     PlatformAuthController,
     PlatformController,
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

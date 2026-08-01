@@ -124,6 +124,30 @@ export interface OutboundMessage {
   templateLanguage?: string;
   templateParams?: string[];
   mediaUrl?: string;
+  /** id de media ya subido a Meta (POST /{phone_number_id}/media) */
+  mediaId?: string;
+  /** nombre de archivo (documentos) */
+  filename?: string;
+}
+
+// ============================================================
+// Tiempo real (pub/sub Redis → SSE de la Bandeja)
+// ============================================================
+
+/** Canal Redis por tenant. TODO evento va aislado por organización. */
+export function realtimeChannel(organizationId: string): string {
+  return `rt:${organizationId}`;
+}
+
+export interface RealtimeEvent {
+  type:
+    | "message.created" // nuevo mensaje (cualquier dirección) en una conversación
+    | "message.updated" // cambio de estado (sent/delivered/read/failed)
+    | "conversation.updated" // asignación, etapa, cierre, agente, control IA…
+    | "counters.dirty"; // los conteos del clasificador deben refrescarse
+  conversationId?: string;
+  data?: Record<string, unknown>;
+  at: string; // ISO
 }
 
 export interface ChannelSendResult {

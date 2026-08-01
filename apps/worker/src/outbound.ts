@@ -53,10 +53,21 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       templateLanguage: template.language,
       templateParams: params,
     };
+  } else if ((data.message.type === "IMAGE" || data.message.type === "DOCUMENT") && (data.message.payload as any)?.mediaId) {
+    // Adjunto subido desde el panel (media id de Meta; caption opcional).
+    const payload = data.message.payload as Record<string, any>;
+    outbound = {
+      to: data.phone,
+      type: data.message.type === "IMAGE" ? "image" : "document",
+      mediaId: String(payload.mediaId),
+      text: payload.caption ?? undefined,
+      filename: payload.filename ?? undefined,
+    };
   } else {
     outbound = { to: data.phone, type: "text", text: data.message.body ?? "" };
   }
 
+  const { publishRealtime } = await import("./realtime.js");
   try {
     const sent = await getChannelProvider().send(auth.phoneNumberId, outbound, { accessToken: auth.accessToken });
     await withTenant(organizationId, (tx) =>
@@ -65,6 +76,7 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
         data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
       }),
     );
+    await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
   } catch (err) {
     await withTenant(organizationId, (tx) =>
       tx.message.update({
@@ -72,6 +84,7 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
         data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
       }),
     );
+    await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
     // Error de auth: marcar el canal (banner Reautorizar) y NO reintentar en
     // bucle — el token no se arregla solo. Otros errores sí reintentan.
     if (err instanceof ChannelAuthError) {

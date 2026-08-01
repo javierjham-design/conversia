@@ -788,7 +788,58 @@ model Conversation {
 
   @@index([organizationId, status, lastMessageAt])
   @@index([organizationId, contactId])
+  // Conteos del clasificador de la Bandeja (por agente IA / por equipo)
+  @@index([organizationId, activeAgentId])
+  @@index([organizationId, assignedTeamId])
   @@map("conversations")
+}
+
+// Bandejas personalizadas: filtros guardados sobre conversaciones (patrón contact_segments)
+model InboxView {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  // { channelId?, statusCode?, tags?, assigned?, hasAd?, status? }
+  definition     Json     @default("{}")
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("inbox_views")
+}
+
+// Respuestas rápidas del compositor (atajo "/")
+model Snippet {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  shortcut       String
+  body           String
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, shortcut])
+  @@index([organizationId])
+  @@map("snippets")
+}
+
+// Indicaciones del equipo para la IA en UNA conversación. El orquestador las
+// inyecta en cada turno de esa conversación (prioridad sobre el prompt base,
+// nunca sobre las reglas de seguridad del sistema). Historial quién/cuándo.
+model ConversationAiNote {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  conversationId String    @map("conversation_id")
+  body           String
+  active         Boolean   @default(true)
+  createdById    String?   @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  deactivatedAt  DateTime? @map("deactivated_at")
+
+  @@index([organizationId, conversationId, active])
+  @@map("conversation_ai_notes")
 }
 
 // internal_notes fusionado: type=NOTE + visibility=INTERNAL
