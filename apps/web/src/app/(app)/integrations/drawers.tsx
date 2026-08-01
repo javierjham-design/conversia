@@ -1411,6 +1411,7 @@ export function AutomationDrawer({
 
 export interface GoogleState {
   status: string;
+  accountEmail: string | null;
   calendarId: string | null;
   calendarSync: boolean;
   lastSyncAt: string | null;
@@ -1457,7 +1458,10 @@ export function GoogleDrawer({
     setBusy(true);
     try {
       const { url } = await api<{ url: string }>("/integrations/oauth/google/authorize");
-      window.location.href = url; // vuelve a /integrations?google=connected
+      // Ventana aparte: al terminar avisa por postMessage y se cierra sola.
+      const popup = window.open(url, "tubot-oauth-google", "popup=yes,width=560,height=720");
+      if (!popup) window.location.href = url; // popup bloqueado → misma pestaña
+      setBusy(false);
     } catch (err) {
       toast.push((err as Error).message, "error");
       setBusy(false);
@@ -1532,6 +1536,15 @@ export function GoogleDrawer({
             </Button>
           ) : (
             <div className="space-y-4">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                <span className="text-base">✅</span>
+                <div>
+                  <p className="font-medium">Cuenta de Google conectada</p>
+                  <p className="text-xs">
+                    {state?.accountEmail ?? calendars?.find((c) => c.primary)?.id ?? "cuenta autorizada"}
+                  </p>
+                </div>
+              </div>
               <div className="rounded-xl border border-slate-200 p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">Espejo de citas en Google Calendar</p>
@@ -1762,6 +1775,8 @@ export function DentalinkDrawer({
 
 export interface HubspotState {
   status: string;
+  accountEmail: string | null;
+  hubDomain: string | null;
   syncAuto: boolean;
   fieldMapping: Record<string, string> | null;
   lastSyncAt: string | null;
@@ -1817,7 +1832,10 @@ export function HubspotDrawer({
     setBusy(true);
     try {
       const { url } = await api<{ url: string }>("/integrations/oauth/hubspot/authorize");
-      window.location.href = url; // vuelve a /integrations?hubspot=connected
+      // Ventana aparte: al terminar avisa por postMessage y se cierra sola.
+      const popup = window.open(url, "tubot-oauth-hubspot", "popup=yes,width=560,height=720");
+      if (!popup) window.location.href = url; // popup bloqueado → misma pestaña
+      setBusy(false);
     } catch (err) {
       toast.push((err as Error).message, "error");
       setBusy(false);
@@ -1904,6 +1922,16 @@ export function HubspotDrawer({
             </Button>
           ) : (
             <div className="space-y-4">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                <span className="text-base">✅</span>
+                <div>
+                  <p className="font-medium">Cuenta de HubSpot conectada</p>
+                  <p className="text-xs">
+                    {state?.accountEmail ?? "cuenta autorizada"}
+                    {state?.hubDomain ? ` · portal ${state.hubDomain}` : ""}
+                  </p>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={syncAuto} onChange={(e) => setSyncAuto(e.target.checked)} />
                 Sincronizar automáticamente contactos nuevos y editados

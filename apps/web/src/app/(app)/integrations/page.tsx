@@ -138,6 +138,29 @@ export default function IntegrationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Aviso del popup OAuth (la ventanita hace postMessage y se cierra sola)
+  useEffect(() => {
+    function onOAuthMessage(e: MessageEvent) {
+      const d = e.data as { source?: string; provider?: string; result?: string } | null;
+      if (!d || d.source !== "conversia-oauth") return;
+      if (d.provider !== "google" && d.provider !== "hubspot") return;
+      const label = d.provider === "google" ? "Google" : "HubSpot";
+      if (d.result === "connected") {
+        toast.push(`${label} conectado ✔`, "ok");
+        void load();
+        if (d.provider === "google") setGoogleOpen(true);
+        else setHubspotOpen(true);
+      } else if (d.result === "denied") {
+        toast.push(`Conexión con ${label} cancelada`, "info");
+      } else {
+        toast.push(`No se pudo conectar ${label} — intenta de nuevo`, "error");
+      }
+    }
+    window.addEventListener("message", onOAuthMessage);
+    return () => window.removeEventListener("message", onOAuthMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
+
   useEffect(() => {
     if (activityOpen) {
       setActivity(null);
@@ -308,6 +331,32 @@ export default function IntegrationsPage() {
     }
     return rows;
   }, [data, router]);
+
+  // Claves del catálogo que ya tienen conexión: la tarjeta pasa a «Conectada / Administrar».
+  const connectedKeys = useMemo(() => {
+    const s = new Set<string>();
+    if (!data) return s;
+    if (data.meta && data.meta.status !== "DISCONNECTED") {
+      s.add("meta");
+      s.add("whatsapp");
+    }
+    if (data.capiConfigured) s.add("meta_capi");
+    if (data.clariva?.status === "active") s.add("clariva");
+    if (data.webhooks.length > 0) s.add("webhooks");
+    if (data.email) s.add("email");
+    if (data.apiPresets.count > 0) s.add("custom_api");
+    if (data.ga4) s.add("ga4");
+    if (data.customScheduling) s.add("custom_scheduling");
+    if (data.dentalink) s.add("dentalink");
+    if (data.google) {
+      s.add("google_calendar");
+      s.add("sheets");
+    }
+    if (data.hubspot) s.add("hubspot");
+    if (data.automations?.zapier) s.add("zapier");
+    if (data.automations?.make) s.add("make");
+    return s;
+  }, [data]);
 
   const filteredCatalog = useMemo(() => {
     if (!data) return [];
@@ -556,8 +605,8 @@ export default function IntegrationsPage() {
                             {CATALOG_ICONS[item.key] ?? <Plug size={20} />}
                           </div>
                           <StatusBadge
-                            kind={item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
-                            label={item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
+                            kind={connectedKeys.has(item.key) ? "connected" : item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
+                            label={connectedKeys.has(item.key) ? "✓ Conectada" : item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
                           />
                         </div>
                         <p className="mt-2.5 font-semibold">{item.name}</p>
@@ -574,7 +623,7 @@ export default function IntegrationsPage() {
                             </Button>
                           ) : (
                             <Button variant="secondary" className="w-full" onClick={() => catalogAction(item)}>
-                              {["meta", "clariva", "webhooks", "whatsapp"].includes(item.key) && connected.some((c) => item.key.startsWith(c.key)) ? "Administrar" : "Conectar"}
+                              {connectedKeys.has(item.key) ? "Administrar" : "Conectar"}
                               <ArrowRight size={14} />
                             </Button>
                           )}
