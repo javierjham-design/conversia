@@ -3,6 +3,7 @@
  * Cada tenant (o sede) elige su proveedor vía scheduling_connections.
  * La IA solo ve la interfaz SchedulingProvider; nunca el proveedor real.
  */
+import { createHmac } from "node:crypto";
 import type {
   AvailabilityQuery,
   CreateAppointmentInput,
@@ -268,16 +269,117 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
 }
 
 // ------------------------------------------------------------------
+// Agenda PERSONALIZADA: el sistema del tenant implementa el contrato estándar
+// (los mismos endpoints del contrato Cláriva) y firma cada petición con HMAC.
+// ------------------------------------------------------------------
+
+export interface CustomClientOptions {
+  baseUrl: string; // raíz del contrato (SIN /api/v1; se puede incluir si su server lo exige)
+  secret: string; // HMAC compartido
+  timeoutMs?: number;
+}
+
+/** Firma del contrato estándar: sha256=HMAC(secret, `${ts}.${method}.${path}.${body}`). */
+export function buildCustomSignature(secret: string, timestamp: string, method: string, path: string, body: string): string {
+  return "sha256=" + createHmac("sha256", secret).update(`${timestamp}.${method.toUpperCase()}.${path}.${body}`).digest("hex");
+}
+
+export class CustomSchedulingProvider implements SchedulingProvider {
+  readonly kind = "custom";
+
+  constructor(private opts: CustomClientOptions) {}
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 8000);
+    const payload = body === undefined ? "" : JSON.stringify(body);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    try {
+      const res = await fetch(`${this.opts.baseUrl.replace(/\/$/, "")}${path}`, {
+        method,
+        headers: {
+          "content-type": "application/json",
+          "x-conversia-timestamp": timestamp,
+          "x-conversia-signature": buildCustomSignature(this.opts.secret, timestamp, method, path, payload),
+        },
+        body: payload || undefined,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Agenda personalizada ${method} ${path} → ${res.status}: ${text.slice(0, 300)}`);
+      }
+      return (await res.json()) as T;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  getClinics() {
+    return this.request<SchedClinic[]>("GET", "/clinics");
+  }
+  getProfessionals(clinicId?: string) {
+    return this.request<SchedProfessional[]>("GET", `/professionals${clinicId ? `?clinicId=${clinicId}` : ""}`);
+  }
+  getServices(clinicId?: string) {
+    return this.request<SchedService[]>("GET", `/services${clinicId ? `?clinicId=${clinicId}` : ""}`);
+  }
+  getProfessionalServices(professionalId: string) {
+    return this.request<SchedService[]>("GET", `/professionals/${professionalId}/services`);
+  }
+  getAvailableSlots(q: AvailabilityQuery) {
+    const params = new URLSearchParams();
+    if (q.clinicId) params.set("clinicId", q.clinicId);
+    if (q.professionalId) params.set("professionalId", q.professionalId);
+    if (q.serviceId) params.set("serviceId", q.serviceId);
+    params.set("from", q.from);
+    params.set("to", q.to);
+    return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`);
+  }
+  createAppointment(input: CreateAppointmentInput) {
+    return this.request<SchedAppointment>("POST", "/appointments", input);
+  }
+  updateAppointment(id: string, changes: Partial<CreateAppointmentInput>) {
+    return this.request<SchedAppointment>("PATCH", `/appointments/${id}`, changes);
+  }
+  cancelAppointment(id: string, reason?: string) {
+    return this.request<SchedAppointment>("POST", `/appointments/${id}/cancel`, { reason });
+  }
+  confirmAppointment(id: string) {
+    return this.request<SchedAppointment>("POST", `/appointments/${id}/confirm`);
+  }
+  getAppointment(id: string) {
+    return this.request<SchedAppointment | null>("GET", `/appointments/${id}`);
+  }
+  getPatientAppointments(phone: string) {
+    return this.request<SchedAppointment[]>("GET", `/patients/${encodeURIComponent(phone)}/appointments`);
+  }
+  createOrUpdatePatient(patient: SchedPatient) {
+    return this.request<SchedPatient>("PUT", "/patients", patient);
+  }
+  async markAttendance(id: string) {
+    await this.request("POST", `/appointments/${id}/attendance`, { attended: true });
+  }
+  async markNoShow(id: string) {
+    await this.request("POST", `/appointments/${id}/attendance`, { attended: false });
+  }
+}
+
+// ------------------------------------------------------------------
 
 export interface ProviderSelection {
-  provider: "mock" | "clariva";
+  provider: "mock" | "clariva" | "custom";
   mockData?: MockSchedulingData;
   clariva?: ClarivaClientOptions;
+  custom?: CustomClientOptions;
 }
 
 export function createSchedulingProvider(sel: ProviderSelection): SchedulingProvider {
   if (sel.provider === "clariva" && sel.clariva) {
     return new ClarivaSchedulingProvider(sel.clariva);
+  }
+  if (sel.provider === "custom" && sel.custom) {
+    return new CustomSchedulingProvider(sel.custom);
   }
   return new MockSchedulingProvider(
     sel.mockData ?? {

@@ -257,6 +257,61 @@ POST /public/v1/contacts                   (contacts:write)
           peticiones HACIA afuera usan el paso «Petición HTTP» — esto es la dirección contraria.
         </p>
       </section>
+
+      {/* ---------------- Contrato estándar de agenda ---------------- */}
+      <section id="agenda" className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+        <h2 className="font-medium">Contrato estándar de agenda (Agenda personalizada)</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Implementa estos endpoints en tu sistema y conéctalo en Integraciones → <b>Agenda personalizada</b>: los agentes
+          IA y los workflows agendarán contra tu software sin código adicional. Todas las peticiones van firmadas; verifica
+          la firma antes de responder. Timeout: 8 segundos.
+        </p>
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <div>
+            <h3 className="text-sm font-medium text-slate-700">Endpoints requeridos</h3>
+            <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`GET    /professionals                → [{id, name, specialty?}]
+GET    /services                     → [{id, name, durationMin, price?}]
+GET    /availability?professionalId=&serviceId=&from=YYYY-MM-DD&to=
+       → [{start, end, professionalId, clinicId}]  (ISO 8601 con zona)
+POST   /appointments                 {clinicId, professionalId, serviceId?,
+       patient:{firstName, phone}, start, end, notes?} → {id, status, ...}
+PATCH  /appointments/:id             {start?, end?} → cita reprogramada
+POST   /appointments/:id/cancel      {reason?}
+POST   /appointments/:id/confirm
+GET    /appointments/:id
+GET    /patients/:phone/appointments → citas del paciente
+PUT    /patients                     {firstName, phone, ...} → alta/actualización
+POST   /appointments/:id/attendance  {attended: true|false}
+
+Opcional: GET /clinics → [{id, name, timezone}] (si tienes varias sedes)`}</pre>
+          </div>
+          <div>
+            <h3 className="text-sm font-medium text-slate-700">Firma HMAC (verifícala en cada petición)</h3>
+            <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`Headers que enviamos:
+  X-Conversia-Timestamp: 1785600000        (unix, rechaza si |ahora-ts| > 300s)
+  X-Conversia-Signature: sha256=HEX
+
+Cálculo:
+  base = timestamp + "." + METODO + "." + ruta_con_query + "." + cuerpo_json
+  firma = HMAC_SHA256(secreto_compartido, base) en hexadecimal
+
+Ejemplo (verificación en Node):
+  const base = ts + "." + req.method + "." + req.originalUrl + "." + rawBody;
+  const esperado = "sha256=" + crypto.createHmac("sha256", SECRETO)
+      .update(base).digest("hex");
+  if (esperado !== req.headers["x-conversia-signature"]) return res.status(401).end();
+
+Prueba con curl (GET, cuerpo vacío):
+  TS=$(date +%s)
+  SIG=$(printf "%s.GET./professionals." "$TS" | openssl dgst -sha256 -hmac "TU_SECRETO" -hex | sed "s/^.*= /sha256=/")
+  curl -H "X-Conversia-Timestamp: $TS" -H "X-Conversia-Signature: $SIG" https://agenda.tuclinica.cl/conversia/professionals`}</pre>
+          </div>
+        </div>
+        <p className="mt-2 text-[10px] text-slate-400">
+          «Probar conexión» valida profesionales + disponibilidad de ejemplo. Los estados de cita esperados:
+          pending · confirmed · cancelled · rescheduled · completed · no_show.
+        </p>
+      </section>
     </div>
   );
 }

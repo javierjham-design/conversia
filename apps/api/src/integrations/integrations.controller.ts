@@ -12,7 +12,7 @@ import {
 } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { ClarivaSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider } from "@conversia/scheduling";
 import { PLATFORM_PUBLIC_EVENTS } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -81,8 +81,9 @@ export class IntegrationsController {
     const ctx = requireContext();
     const since24h = new Date(Date.now() - 24 * 3600 * 1000);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [scheduling, webhooks, credentials, meta, channels, events24h, deliveries, lastEvent, emailConn] = await Promise.all([
+      const [scheduling, customSched, webhooks, credentials, meta, channels, events24h, deliveries, lastEvent, emailConn] = await Promise.all([
         tx.schedulingConnection.findFirst({ where: { provider: "CLARIVA" } }),
+        tx.schedulingConnection.findFirst({ where: { provider: "CUSTOM" } }),
         tx.webhookEndpoint.findMany({ orderBy: { createdAt: "asc" } }),
         tx.integrationCredential.findMany({ where: { provider: "clariva" } }),
         tx.metaBusinessConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
@@ -100,11 +101,12 @@ export class IntegrationsController {
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
 
       // Avisar en la campana a quienes pidieron "Avisarme" de tarjetas ya disponibles.
-      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager"], {
+      await this.notifyInterested(tx, ctx.organizationId, ["email", "custom_api", "ga4", "events_manager", "custom_scheduling"], {
         email: "Correo electrónico",
         custom_api: "API personalizada",
         ga4: "Google Analytics",
         events_manager: "Meta Events Manager",
+        custom_scheduling: "Agenda personalizada",
       }).catch(() => undefined);
 
       const cred = scheduling?.credentialId ? credentials.find((c) => c.id === scheduling.credentialId) : null;
@@ -157,6 +159,10 @@ export class IntegrationsController {
         ga4: ga4Conn
           ? { status: ga4Conn.status, measurementId: (ga4Conn.config as any)?.measurementId ?? null, mirrorCapi: Boolean((ga4Conn.config as any)?.mirrorCapi), lastError: ga4Conn.lastError }
           : null,
+        customScheduling: customSched
+          ? { status: customSched.status, baseUrl: (customSched.config as any)?.baseUrl ?? null, lastSyncAt: customSched.lastSyncAt, lastError: customSched.lastError }
+          : null,
+        capiConfigured: Boolean((await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }))?.datasetId),
         webhooks: webhooks.map((w) => {
           const mine = deliveries.filter((d) => d.endpointId === w.id);
           const okCount = mine.filter((d) => d.status === "DELIVERED").length;
@@ -188,7 +194,7 @@ export class IntegrationsController {
           { key: "clariva", name: "Cláriva", category: "agenda", status: "disponible", description: "Agenda clínica: disponibilidad y citas reales de tus sedes.", capabilities: ["Disponibilidad", "Citas", "Sincronización"] },
           { key: "dentalink", name: "Dentalink", category: "agenda", status: "proximamente", description: "Proveedor de agenda dental.", capabilities: ["Disponibilidad", "Citas"] },
           { key: "google_calendar", name: "Google Calendar", category: "agenda", status: "proximamente", description: "Agenda simple para profesionales independientes.", capabilities: ["Eventos"] },
-          { key: "custom_scheduling", name: "Agenda personalizada", category: "agenda", status: "proximamente", description: "Conecta tu propio sistema vía el contrato estándar de agenda.", capabilities: ["API"] },
+          { key: "custom_scheduling", name: "Agenda personalizada", category: "agenda", status: "disponible", description: "Conecta tu propio software clínico implementando el contrato estándar de agenda (HMAC). Los agentes IA lo usan igual que cualquier proveedor.", capabilities: ["Contrato estándar", "HMAC", "Disponibilidad", "Citas"] },
           { key: "webhooks", name: "Webhooks salientes", category: "datos", status: "disponible", description: "Recibe los eventos de Conversia en tus sistemas, firmados HMAC.", capabilities: ["14 eventos", "Reintentos", "Firma HMAC"] },
           { key: "sheets", name: "Google Sheets", category: "datos", status: "proximamente", description: "Exporta leads y citas a planillas.", capabilities: ["Export"] },
           { key: "email", name: "Correo electrónico", category: "datos", status: "disponible", description: "Escalamientos, resúmenes diarios y alertas al equipo (remitente de plataforma o SMTP propio).", capabilities: ["Escalamientos", "Resumen diario", "Alertas", "Paso de workflow"] },
@@ -388,6 +394,92 @@ export class IntegrationsController {
       await tx.integrationConnection.deleteMany({ where: { provider: "email" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ Agenda personalizada (contrato estándar) ------------------------
+
+  /** Conecta el sistema de agenda propio del tenant (contrato estándar + HMAC). */
+  @Post("custom-scheduling")
+  saveCustomScheduling(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ baseUrl: z.string().url(), secret: z.string().min(12).max(200).optional() }), body);
+    assertUrlAllowed(input.baseUrl);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const existing = await tx.schedulingConnection.findFirst({ where: { provider: "CUSTOM" } });
+      const other = await tx.schedulingConnection.findFirst({ where: { provider: { not: "CUSTOM" }, status: "active" } });
+      if (other) {
+        throw new BadRequestException("Ya hay otra agenda activa (Cláriva/otro proveedor). Desconéctala antes de usar la personalizada.");
+      }
+      let credentialId = existing?.credentialId ?? null;
+      if (input.secret) {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: ctx.organizationId, provider: "custom_scheduling", label: "Secreto HMAC agenda", ciphertext: encryptSecret(input.secret) },
+        });
+        credentialId = credential.id;
+      }
+      if (!credentialId) throw new BadRequestException("Falta el secreto HMAC");
+      if (existing) {
+        await tx.schedulingConnection.update({
+          where: { id: existing.id },
+          data: { config: { baseUrl: input.baseUrl } as object, credentialId, status: "active", lastError: null },
+        });
+      } else {
+        await tx.schedulingConnection.create({
+          data: { organizationId: ctx.organizationId, provider: "CUSTOM", config: { baseUrl: input.baseUrl } as object, credentialId },
+        });
+      }
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.custom_scheduling_save", entityType: "scheduling_connection", after: { baseUrl: input.baseUrl } },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Prueba real: pide profesionales y disponibilidad de ejemplo al sistema del tenant. */
+  @Post("custom-scheduling/test")
+  async testCustomScheduling() {
+    const ctx = requirePermission("integrations:write");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.schedulingConnection.findFirst({ where: { provider: "CUSTOM" } });
+      if (!conn) throw new BadRequestException("La agenda personalizada no está conectada");
+      const cred = conn.credentialId ? await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } }) : null;
+      return { conn, baseUrl: (conn.config as any)?.baseUrl as string, secret: cred ? decryptSecret(cred.ciphertext) : "" };
+    });
+    const provider = new CustomSchedulingProvider({ baseUrl: data.baseUrl, secret: data.secret });
+    let ok = false;
+    let detail = "";
+    try {
+      const professionals = await provider.getProfessionals();
+      const from = new Date().toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const slots = await provider.getAvailableSlots({ from, to, professionalId: professionals[0]?.id });
+      ok = true;
+      detail = `✔ ${professionals.length} profesional(es) · ${slots.length} horario(s) disponibles esta semana`;
+    } catch (err) {
+      detail = (err as Error).message.slice(0, 300);
+    }
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.schedulingConnection.update({
+        where: { id: data.conn.id },
+        data: { lastSyncAt: new Date(), status: ok ? "active" : "error", lastError: ok ? null : detail },
+      });
+      await tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "custom_scheduling", type: ok ? "agenda.test_ok" : "agenda.test_error", status: ok ? "ok" : "error", message: detail },
+      });
+    });
+    return { ok, detail };
+  }
+
+  @Delete("custom-scheduling")
+  disconnectCustomScheduling() {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.schedulingConnection.deleteMany({ where: { provider: "CUSTOM" } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.custom_scheduling_disconnect", entityType: "scheduling_connection" },
       });
       return { ok: true };
     });

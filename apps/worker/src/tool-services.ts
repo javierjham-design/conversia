@@ -4,7 +4,8 @@ import { enqueueEscalationEmail } from "./mailer";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
 /**
@@ -26,6 +27,26 @@ async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvid
       baseUrl: cfg.baseUrl ?? env.CLARIVA_BASE_URL,
       apiKey: cfg.apiKey ?? env.CLARIVA_API_KEY,
     });
+  }
+
+  // Agenda PERSONALIZADA: el sistema del tenant implementa el contrato estándar
+  // (mismos endpoints que Cláriva) firmado con HMAC. Secreto cifrado.
+  if (kind === "CUSTOM" && connection) {
+    const cfg = (connection.config ?? {}) as Record<string, string>;
+    let secret = "";
+    if (connection.credentialId) {
+      const cred = await withTenant(orgId, (tx) =>
+        tx.integrationCredential.findUnique({ where: { id: connection.credentialId! } }),
+      );
+      if (cred) {
+        try {
+          secret = decryptCredential(cred.ciphertext);
+        } catch {
+          /* secreto ilegible → las llamadas fallarán con firma inválida */
+        }
+      }
+    }
+    return new CustomSchedulingProvider({ baseUrl: cfg.baseUrl ?? "", secret });
   }
 
   let mock = mockProviders.get(orgId);

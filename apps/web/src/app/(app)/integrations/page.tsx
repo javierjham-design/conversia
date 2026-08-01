@@ -29,7 +29,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, ClarivaDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, ClarivaDrawer, CustomSchedulingDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, WebhooksDrawer, type ClarivaState, type CustomSchedState, type EmailState, type Ga4State, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
@@ -55,6 +55,8 @@ interface Overview {
   platformEmailReady: boolean;
   apiPresets: { count: number; status: string | null };
   ga4: Ga4State | null;
+  customScheduling: CustomSchedState | null;
+  capiConfigured: boolean;
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -88,6 +90,7 @@ export default function IntegrationsPage() {
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [ga4Open, setGa4Open] = useState(false);
   const [emOpen, setEmOpen] = useState(false);
+  const [customSchedOpen, setCustomSchedOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -173,6 +176,18 @@ export default function IntegrationsPage() {
         onManage: () => setPresetsOpen(true),
       });
     }
+    if (data.customScheduling) {
+      rows.push({
+        key: "custom_scheduling",
+        name: "Agenda personalizada",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.customScheduling.status === "error" ? "attention" : "connected",
+        detail: data.customScheduling.baseUrl ?? "",
+        health: data.customScheduling.status === "error" ? "warn" : "ok",
+        onManage: () => setCustomSchedOpen(true),
+      });
+    }
     if (data.ga4) {
       rows.push({
         key: "ga4",
@@ -242,6 +257,8 @@ export default function IntegrationsPage() {
         return setGa4Open(true);
       case "events_manager":
         return setEmOpen(true);
+      case "custom_scheduling":
+        return setCustomSchedOpen(true);
       default:
         return void notifyInterest(item.key);
     }
@@ -485,6 +502,7 @@ export default function IntegrationsPage() {
       <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
       <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
       <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
+      <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

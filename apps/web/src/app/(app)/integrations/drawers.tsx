@@ -1134,3 +1134,102 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
     </Drawer>
   );
 }
+
+// --------------------------- Agenda personalizada ---------------------------
+
+export interface CustomSchedState {
+  status: string;
+  baseUrl: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { open: boolean; onClose: () => void; state: CustomSchedState | null; onChanged: () => void }) {
+  const toast = useToast();
+  const connected = state?.status === "active" || state?.status === "error";
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [form, setForm] = useState({ baseUrl: "", secret: "" });
+
+  useEffect(() => {
+    if (open) {
+      setTestDetail(null);
+      setForm({ baseUrl: state?.baseUrl ?? "", secret: "" });
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/custom-scheduling", {
+        method: "POST",
+        body: JSON.stringify({ baseUrl: form.baseUrl.trim(), secret: form.secret || undefined }),
+      });
+      toast.push("Agenda conectada — prueba la conexión", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestDetail("Probando contra tu sistema…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/custom-scheduling/test", { method: "POST" });
+      setTestDetail(`${r.ok ? "" : "✖ "}${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/custom-scheduling", { method: "DELETE" });
+    toast.push("Agenda personalizada desconectada — los agentes vuelven a la agenda interna", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Agenda personalizada — contrato estándar">
+      <p className="mb-3 text-xs text-slate-500">
+        Tu software clínico implementa el <b>contrato estándar de agenda</b> (disponibilidad, citas, profesionales,
+        servicios) con firma HMAC, y los agentes IA y workflows lo usan igual que cualquier proveedor. La documentación
+        completa con ejemplos curl está en{" "}
+        <a href="/integrations/developers#agenda" className="underline">Desarrolladores → Contrato de agenda</a>.
+      </p>
+      <div className="space-y-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">URL base de tu API de agenda</span>
+          <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://agenda.tuclinica.cl/conversia" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Secreto HMAC compartido {connected ? "(vacío = conservar)" : "(mínimo 12 caracteres)"}</span>
+          <input type="password" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button onClick={() => void save()} disabled={busy || !form.baseUrl}>{connected ? "Guardar" : "Conectar"}</Button>
+        {connected && <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>}
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar la agenda personalizada?"
+        description="Los agentes IA dejarán de consultar tu sistema y volverán a la agenda interna de Conversia."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
