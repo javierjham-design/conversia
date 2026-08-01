@@ -11,6 +11,7 @@ import {
   Put,
 } from "@nestjs/common";
 import { z } from "zod";
+import { getEnv } from "@conversia/config";
 import { workflowDefinitionSchema } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -120,6 +121,10 @@ export class WorkflowsController {
         tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
         tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, select: { id: true, name: true, language: true }, orderBy: { name: "asc" } }),
       ]);
+      const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
+      const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
+      const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
+      const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
       return {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
@@ -129,6 +134,9 @@ export class WorkflowsController {
         teams,
         workflows: workflows.map((w) => ({ name: w.name })),
         templates,
+        apiPresets,
+        ga4Connected: Boolean(ga4Conn && ga4Conn.status !== "error"),
+        googleConnected: Boolean(googleConn && googleConn.status !== "reauthorize"),
       };
     });
   }
@@ -461,6 +469,45 @@ export class WorkflowsController {
         if (!mapping?.datasetId || !mapping.active) {
           throw new BadRequestException(
             "El paso «Enviar evento CAPI» requiere conectar Conversions API (dataset) en Integraciones → Centro Meta antes de publicar.",
+          );
+        }
+      }
+      if (nodes.some((n) => n.type === "send_ga4_event")) {
+        const ga4 = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "ga4" } },
+        });
+        if (!ga4 || ga4.status === "error") {
+          throw new BadRequestException(
+            "El paso «Enviar evento GA4» requiere conectar Google Analytics en Integraciones antes de publicar.",
+          );
+        }
+      }
+      for (const n of nodes.filter((x) => x.type === "google_sheets_append")) {
+        const cfg = (n.config ?? {}) as Record<string, unknown>;
+        if (!cfg.spreadsheetId || !(Array.isArray(cfg.values) && (cfg.values as unknown[]).length)) {
+          throw new BadRequestException("El paso «Agregar fila a Google Sheets» necesita el ID de la planilla y al menos una columna.");
+        }
+        const google = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "google" } },
+        });
+        if (!google || google.status === "reauthorize") {
+          throw new BadRequestException(
+            "El paso «Agregar fila a Google Sheets» requiere conectar Google en Integraciones antes de publicar.",
+          );
+        }
+      }
+      for (const n of nodes.filter((x) => x.type === "send_internal_email")) {
+        const cfg = (n.config ?? {}) as Record<string, unknown>;
+        const to = Array.isArray(cfg.to) ? (cfg.to as string[]) : [];
+        if (!to.length || !cfg.subject) {
+          throw new BadRequestException("El paso «Enviar correo interno» necesita destinatarios y asunto.");
+        }
+        const emailConn = await tx.integrationConnection.findUnique({
+          where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "email" } },
+        });
+        if (!emailConn && !getEnv().RESEND_API_KEY) {
+          throw new BadRequestException(
+            "El paso «Enviar correo interno» requiere conectar Correo electrónico en Integraciones antes de publicar.",
           );
         }
       }

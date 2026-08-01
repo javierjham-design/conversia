@@ -82,6 +82,7 @@ const NODE_DEFS: NodeDef[] = [
   { type: "stop", label: "Terminar flujo", description: "Finaliza la ejecución", category: "Control de flujo", icon: <Square size={15} />, defaultConfig: {}, terminal: true },
   // Marketing
   { type: "send_capi", label: "Enviar evento CAPI (Meta)", description: "Envía un evento de conversión a Meta (Lead, Schedule, Purchase…)", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "Lead", value: "", currency: "CLP" } },
+  { type: "send_ga4_event", label: "Enviar evento GA4", description: "Envía un evento a Google Analytics con parámetros y variables", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "", params: {} } },
   { type: "send_tiktok_event", label: "Enviar evento TikTok", description: "Evento a TikTok Events API", category: "Marketing", icon: <Megaphone size={15} />, defaultConfig: {}, soon: true },
   // IA
   { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
@@ -93,7 +94,8 @@ const NODE_DEFS: NodeDef[] = [
   },
   // Integraciones
   { type: "call_api", label: "Petición HTTP", description: "Llama a un endpoint externo y mapea la respuesta a variables", category: "Integraciones", icon: <Webhook size={15} />, premium: true, defaultConfig: { method: "GET", url: "", headers: {}, body: "", responseMapping: {} } },
-  { type: "google_sheets_append", label: "Añadir fila a Google Sheets", description: "Agrega una fila a una hoja de cálculo", category: "Integraciones", icon: <Sheet size={15} />, defaultConfig: {}, soon: true },
+  { type: "send_internal_email", label: "Enviar correo interno", description: "Aviso por correo al equipo (nunca a contactos), con variables", category: "Integraciones", icon: <FileText size={15} />, defaultConfig: { to: [], subject: "", body: "" } },
+  { type: "google_sheets_append", label: "Añadir fila a Google Sheets", description: "Agrega una fila a una hoja de cálculo (requiere conectar Google en Integraciones)", category: "Integraciones", icon: <Sheet size={15} />, defaultConfig: { spreadsheetId: "", sheetName: "", values: [] } },
   // Agenda
   { type: "send_template", label: "Enviar plantilla WhatsApp", description: "Mensaje con plantilla HSM aprobada (funciona fuera de la ventana de 24h)", category: "Agenda", icon: <FileText size={15} />, defaultConfig: {} },
 ];
@@ -108,6 +110,9 @@ interface Catalog {
   teams: { id: string; name: string }[];
   workflows: { name: string }[];
   templates: { id: string; name: string; language: string }[];
+  apiPresets?: { id: string; name: string; baseUrl: string }[];
+  ga4Connected?: boolean;
+  googleConnected?: boolean;
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -246,8 +251,10 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "send_tiktok_event": return "(Próximamente)";
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
     case "send_template": return config.templateName ? `📄 ${config.templateName}` : "(elige la plantilla)";
+    case "send_internal_email": return config.subject ? `✉ ${String(config.subject).slice(0, 40)}` : "(configura el correo)";
+    case "send_ga4_event": return config.eventName ? `📊 ${config.eventName}` : "(configura el evento)";
     case "call_api": return config.url ? `${config.method ?? "GET"} ${String(config.url).slice(0, 30)}` : "(configura la petición)";
-    case "google_sheets_append": return "(Próximamente)";
+    case "google_sheets_append": return config.spreadsheetId ? `📋 ${config.sheetName || "Hoja 1"} · ${(Array.isArray(config.values) ? config.values.length : 0)} col.` : "(configura la planilla)";
     default: return "";
   }
 }
@@ -1001,10 +1008,123 @@ function NodePanel({
         </div>
       )}
 
-      {type === "call_api" && <HttpForm config={config} onChange={onChange} />}
+      {type === "call_api" && <HttpForm config={config} onChange={onChange} presets={catalog.apiPresets ?? []} />}
+
+      {type === "send_ga4_event" && (
+        <div className="space-y-2">
+          {!catalog.ga4Connected && (
+            <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-700">
+              Requiere conectar <a href="/integrations" className="underline">Google Analytics</a> — la publicación se bloquea
+              hasta conectarlo.
+            </p>
+          )}
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Nombre del evento (snake_case)</span>
+            <input
+              value={config.eventName ?? ""}
+              onChange={(e) => onChange({ eventName: e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, "_") })}
+              placeholder="lead_calificado"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Parámetros (JSON, admite variables en los valores)</span>
+            <textarea
+              defaultValue={JSON.stringify(config.params ?? {}, null, 0)}
+              onChange={(e) => {
+                try {
+                  const obj = JSON.parse(e.target.value || "{}");
+                  if (obj && typeof obj === "object") onChange({ params: obj });
+                } catch {
+                  /* JSON incompleto mientras escribe */
+                }
+              }}
+              rows={2}
+              placeholder='{"origen": "whatsapp", "nombre": "{{contact.firstName}}"}'
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+            />
+          </label>
+        </div>
+      )}
+
+      {type === "send_internal_email" && (
+        <div className="space-y-2">
+          <p className="rounded-lg bg-slate-50 p-2 text-[10px] text-slate-500">
+            Correo <b>interno al equipo</b> — no es correo masivo a contactos/pacientes (para eso están las plantillas de
+            WhatsApp con consentimiento).
+          </p>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Destinatarios (emails del equipo, separados por coma)</span>
+            <input
+              value={(Array.isArray(config.to) ? config.to : []).join(", ")}
+              onChange={(e) => onChange({ to: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
+              placeholder="recepcion@tuclinica.cl, dueno@tuclinica.cl"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Asunto</span>
+            <input
+              value={config.subject ?? ""}
+              onChange={(e) => onChange({ subject: e.target.value })}
+              placeholder="Nuevo lead: {{contact.firstName}}"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Cuerpo (admite variables {"{{contact.firstName}}"}…)</span>
+            <textarea
+              value={config.body ?? ""}
+              onChange={(e) => onChange({ body: e.target.value })}
+              rows={3}
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <p className="text-[10px] text-slate-400">
+            Usa el remitente configurado en <a href="/integrations" className="underline">Integraciones → Correo electrónico</a>
+            {" "}(o el de la plataforma por defecto).
+          </p>
+        </div>
+      )}
 
       {type === "google_sheets_append" && (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">Próximamente: requiere conectar Google (OAuth por tenant). Te propongo el diseño de la conexión aparte antes de implementarlo.</p>
+        <div className="space-y-2">
+          {!catalog.googleConnected && (
+            <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
+              Para publicar este flujo primero conecta tu cuenta de Google en{" "}
+              <a href="/integrations" className="underline">Integraciones → Google Calendar / Sheets</a>.
+            </p>
+          )}
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">ID de la planilla (de la URL: docs.google.com/spreadsheets/d/<b>ID</b>/…)</span>
+            <input
+              value={config.spreadsheetId ?? ""}
+              onChange={(e) => onChange({ spreadsheetId: e.target.value.trim() })}
+              placeholder="1AbC…xyz"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Nombre de la hoja (pestaña)</span>
+            <input
+              value={config.sheetName ?? ""}
+              onChange={(e) => onChange({ sheetName: e.target.value })}
+              placeholder="Hoja 1"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Columnas de la fila (una por línea; admiten {"{{variables}}"})</span>
+            <textarea
+              value={(Array.isArray(config.values) ? config.values : []).join("\n")}
+              onChange={(e) => onChange({ values: e.target.value.split("\n") })}
+              rows={4}
+              placeholder={"{{contact.firstName}}\n{{contact.phone}}\nNuevo lead"}
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+            />
+          </label>
+          <p className="text-[10px] text-slate-400">Cada línea es una columna (A, B, C…). La fila se agrega al final de la hoja.</p>
+        </div>
       )}
 
       {type === "update_lead_status" && (
@@ -1124,7 +1244,7 @@ function CapiForm({ config, onChange }: { config: Record<string, any>; onChange:
   );
 }
 
-function HttpForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+function HttpForm({ config, onChange, presets = [] }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void; presets?: { id: string; name: string; baseUrl: string }[] }) {
   const [headersText, setHeadersText] = useState(JSON.stringify(config.headers ?? {}));
   const [mapText, setMapText] = useState(JSON.stringify(config.responseMapping ?? {}));
   const method = config.method ?? "GET";
@@ -1141,6 +1261,19 @@ function HttpForm({ config, onChange }: { config: Record<string, any>; onChange:
       <p className="rounded bg-brand-50 px-2 py-1 text-[10px] text-brand-700">
         Paso <b>Premium</b>. Con guard SSRF (bloquea IPs internas). Luego tendrás <span className="font-mono">{"{{__http_ok}} {{__http_status}}"}</span> + lo que mapees.
       </p>
+      {presets.length > 0 && (
+        <label className="block">
+          <span className="text-xs text-slate-500">Preset de API (Integraciones → API personalizada)</span>
+          <select
+            value={config.presetId ?? ""}
+            onChange={(e) => onChange({ presetId: e.target.value || undefined })}
+            className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">— sin preset (URL completa manual) —</option>
+            {presets.map((p) => (<option key={p.id} value={p.id}>{p.name} · {p.baseUrl}</option>))}
+          </select>
+        </label>
+      )}
       <div className="flex gap-2">
         <label className="w-28">
           <span className="text-xs text-slate-500">Método</span>
@@ -1149,10 +1282,18 @@ function HttpForm({ config, onChange }: { config: Record<string, any>; onChange:
           </select>
         </label>
         <label className="flex-1">
-          <span className="text-xs text-slate-500">URL</span>
-          <input value={config.url ?? ""} onChange={(e) => onChange({ url: e.target.value })} placeholder="https://api.tuservicio.com/…" className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          <span className="text-xs text-slate-500">{config.presetId ? "Ruta (relativa al preset)" : "URL"}</span>
+          <input
+            value={(config.presetId ? config.path : config.url) ?? ""}
+            onChange={(e) => onChange(config.presetId ? { path: e.target.value } : { url: e.target.value })}
+            placeholder={config.presetId ? "/leads" : "https://api.tuservicio.com/…"}
+            className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          />
         </label>
       </div>
+      {config.presetId && (
+        <p className="text-[10px] text-slate-400">La auth y el dominio permitido vienen del preset — sin tokens en el nodo.</p>
+      )}
       <label className="block">
         <span className="text-xs text-slate-500">Headers (JSON)</span>
         <textarea value={headersText} onChange={(e) => { setHeadersText(e.target.value); tryJson(e.target.value, "headers"); }} rows={2} placeholder='{"Authorization":"Bearer …"}' className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />

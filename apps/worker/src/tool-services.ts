@@ -1,9 +1,12 @@
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
+import { enqueueEscalationEmail } from "./mailer";
+import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import type { ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
 /**
@@ -24,6 +27,51 @@ async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvid
     return new ClarivaSchedulingProvider({
       baseUrl: cfg.baseUrl ?? env.CLARIVA_BASE_URL,
       apiKey: cfg.apiKey ?? env.CLARIVA_API_KEY,
+    });
+  }
+
+  // Agenda PERSONALIZADA: el sistema del tenant implementa el contrato estándar
+  // (mismos endpoints que Cláriva) firmado con HMAC. Secreto cifrado.
+  if (kind === "CUSTOM" && connection) {
+    const cfg = (connection.config ?? {}) as Record<string, string>;
+    let secret = "";
+    if (connection.credentialId) {
+      const cred = await withTenant(orgId, (tx) =>
+        tx.integrationCredential.findUnique({ where: { id: connection.credentialId! } }),
+      );
+      if (cred) {
+        try {
+          secret = decryptCredential(cred.ciphertext);
+        } catch {
+          /* secreto ilegible → las llamadas fallarán con firma inválida */
+        }
+      }
+    }
+    return new CustomSchedulingProvider({ baseUrl: cfg.baseUrl ?? "", secret });
+  }
+
+  // Dentalink (Healthatom): token por tenant cifrado + ventana laboral configurable.
+  if (kind === "DENTALINK" && connection) {
+    const cfg = (connection.config ?? {}) as Record<string, unknown>;
+    let token = "";
+    if (connection.credentialId) {
+      const cred = await withTenant(orgId, (tx) =>
+        tx.integrationCredential.findUnique({ where: { id: connection.credentialId! } }),
+      );
+      if (cred) {
+        try {
+          token = decryptCredential(cred.ciphertext);
+        } catch {
+          /* token ilegible → las llamadas fallarán con 401 */
+        }
+      }
+    }
+    return new DentalinkSchedulingProvider({
+      token,
+      workStartHour: cfg.workStartHour ? Number(cfg.workStartHour) : undefined,
+      workEndHour: cfg.workEndHour ? Number(cfg.workEndHour) : undefined,
+      slotMinutes: cfg.slotMinutes ? Number(cfg.slotMinutes) : undefined,
+      utcOffset: typeof cfg.utcOffset === "string" ? cfg.utcOffset : undefined,
     });
   }
 
@@ -136,14 +184,15 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async recordAppointment(appt: SchedAppointment) {
-      await withTenant(orgId, async (tx) => {
-        await tx.appointment.create({
+      const created = await withTenant(orgId, async (tx) => {
+        const row = await tx.appointment.create({
           data: {
             organizationId: orgId,
             clinicId: t.clinicId ?? null,
             contactId: t.contactId,
             serviceId: null,
-            provider: scheduling.kind === "clariva" ? "CLARIVA" : "MOCK",
+            provider:
+              scheduling.kind === "clariva" ? "CLARIVA" : scheduling.kind === "custom" ? "CUSTOM" : scheduling.kind === "dentalink" ? "DENTALINK" : "MOCK",
             externalId: appt.id,
             status: "PENDING",
             startsAt: new Date(appt.start),
@@ -162,7 +211,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             after: appt as object,
           },
         });
+        return row;
       });
+      await enqueueCalendarSync(orgId, created.id, "upsert");
       await emitPlatformEvent(orgId, "appointment.created", {
         externalId: appt.id,
         start: appt.start,
@@ -298,9 +349,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async requestHumanHandoff(reason: string) {
-      await withTenant(orgId, async (tx) => {
+      const handoff = await withTenant(orgId, async (tx) => {
         await tx.conversation.update({ where: { id: t.conversationId }, data: { aiEnabled: false } });
-        await tx.humanHandoff.create({
+        const h = await tx.humanHandoff.create({
           data: {
             organizationId: orgId,
             conversationId: t.conversationId,
@@ -319,11 +370,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             after: { reason },
           },
         });
+        return h;
       });
       await emitPlatformEvent(orgId, "human_handoff.requested", {
         conversationId: t.conversationId,
         reason,
       });
+      // Aviso por correo si nadie la toma en X min (config de correo del tenant).
+      await enqueueEscalationEmail(orgId, handoff.id, t.conversationId);
     },
 
     async closeConversation() {
@@ -367,6 +421,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       const updated = Object.keys(data);
       if (updated.length) {
         await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        const { enqueueHubspotContact } = await import("./hubspot.js");
+        await enqueueHubspotContact(orgId, t.contactId);
       }
       return { updated };
     },

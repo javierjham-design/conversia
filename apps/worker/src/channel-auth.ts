@@ -81,8 +81,12 @@ export async function markChannelAuthError(
   detail: string,
 ): Promise<void> {
   try {
+    // Alerta por correo SOLO en la transición activo→error (no por cada fallo).
+    let wasActive = false;
     await withTenant(organizationId, async (tx) => {
       if (channelConnectionId) {
+        const prev = await tx.channelConnection.findUnique({ where: { id: channelConnectionId }, select: { status: true } });
+        wasActive = prev?.status === "active";
         await tx.channelConnection.update({ where: { id: channelConnectionId }, data: { status: "error" } });
       }
       await tx.integrationEvent.create({
@@ -95,6 +99,15 @@ export async function markChannelAuthError(
         },
       });
     });
+    if (wasActive) {
+      // import diferido: evita ciclo mailer ↔ channel-auth
+      const { enqueueIntegrationAlert } = await import("./mailer.js");
+      await enqueueIntegrationAlert(
+        organizationId,
+        "⚠ WhatsApp requiere reautorización — TuBot",
+        "<p>El token del canal de WhatsApp está vencido o fue revocado: los mensajes salientes están fallando.</p><p>Entra a <b>Canales</b> y pulsa <b>Reautorizar con Meta</b>.</p>",
+      );
+    }
   } catch {
     /* best-effort */
   }

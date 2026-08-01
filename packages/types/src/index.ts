@@ -317,8 +317,10 @@ export const NODE_TYPES = [
   "call_api",
   "send_webhook",
   "notify_team",
+  "send_internal_email",
   // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
   "send_capi",
+  "send_ga4_event",
   "send_tiktok_event",
   "google_sheets_append",
   "ai_objective",
@@ -378,7 +380,27 @@ export const QUEUE_NAMES = {
   webhooks: "webhook-deliveries",
   capi: "capi-events",
   imports: "contact-imports",
+  emails: "tenant-emails",
+  sync: "integration-sync",
 } as const;
+
+/** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
+export interface SyncJob {
+  organizationId: string;
+  kind: "ga4_event" | "calendar_sync" | "sheets_append" | "hubspot_contact";
+  payload: Record<string, unknown>;
+}
+
+/** Correo interno del tenant (equipo — nunca masivo a pacientes). */
+export interface EmailJob {
+  organizationId: string;
+  kind: "workflow" | "escalation" | "daily_summary" | "alert" | "test";
+  to: string[];
+  subject: string;
+  html: string;
+  /** Escalamiento: solo se envía si el handoff sigue pendiente al vencer el plazo. */
+  handoffId?: string;
+}
 
 /**
  * Campos de la plataforma disponibles como variables de plantillas de WhatsApp.

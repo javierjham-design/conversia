@@ -15,6 +15,9 @@ import { runAgentTurn } from "./agent-turn";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
+import { resolveApiPreset } from "./api-presets";
+import { ga4ClientId, getSyncQueue } from "./ga4";
+import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 
@@ -170,9 +173,9 @@ function makeDeps(): EngineDeps {
 
     async transferHuman(ctx, reason) {
       if (!ctx.conversationId) return;
-      await withTenant(ctx.organizationId, async (tx) => {
+      const handoff = await withTenant(ctx.organizationId, async (tx) => {
         await tx.conversation.update({ where: { id: ctx.conversationId! }, data: { aiEnabled: false } });
-        await tx.humanHandoff.create({
+        return tx.humanHandoff.create({
           data: {
             organizationId: ctx.organizationId,
             conversationId: ctx.conversationId!,
@@ -182,6 +185,8 @@ function makeDeps(): EngineDeps {
           },
         });
       });
+      // Aviso por correo si nadie toma la conversación en X min (config del tenant).
+      await enqueueEscalationEmail(ctx.organizationId, handoff.id, ctx.conversationId);
     },
 
     async setAiEnabled(ctx, enabled) {
@@ -221,6 +226,8 @@ function makeDeps(): EngineDeps {
       }
       if (Object.keys(data).length === 0) return;
       await withTenant(ctx.organizationId, (tx) => tx.contact.update({ where: { id: ctx.contactId! }, data }));
+      const { enqueueHubspotContact } = await import("./hubspot.js");
+      await enqueueHubspotContact(ctx.organizationId, ctx.contactId);
     },
 
     async assignUser(ctx, userId) {
@@ -402,6 +409,56 @@ function makeDeps(): EngineDeps {
       }
     },
 
+    async sendInternalEmail(ctx, config) {
+      // Correo interno al EQUIPO — nunca a contactos. Cola con reintentos.
+      const to = config.to.filter((e) => /.+@.+\..+/.test(e)).slice(0, 10);
+      if (!to.length || !config.subject) return;
+      await getEmailQueue().add(
+        "workflow",
+        {
+          organizationId: ctx.organizationId,
+          kind: "workflow",
+          to,
+          subject: config.subject,
+          html: `<p>${config.body.replace(/\n/g, "<br/>")}</p><p style="color:#94a3b8;font-size:12px">Enviado por un flujo de TuBot</p>`,
+        },
+        { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
+    async sendGa4Event(ctx, config) {
+      if (!config.eventName) return;
+      const contact = ctx.contactId
+        ? await withTenant(ctx.organizationId, (tx) => tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true } }))
+        : null;
+      await getSyncQueue().add(
+        "ga4",
+        {
+          organizationId: ctx.organizationId,
+          kind: "ga4_event",
+          payload: {
+            name: config.eventName,
+            params: { ...config.params, source: "workflow" },
+            clientId: ga4ClientId(ctx.organizationId, contact?.phone ?? ctx.contactId ?? null),
+          },
+        },
+        { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
+    async appendGoogleSheetRow(ctx, config) {
+      if (!config.spreadsheetId || !config.values.length) return;
+      await getSyncQueue().add(
+        "sheets",
+        {
+          organizationId: ctx.organizationId,
+          kind: "sheets_append",
+          payload: { spreadsheetId: config.spreadsheetId, sheetName: config.sheetName, values: config.values },
+        },
+        { attempts: 5, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
     async runAgentWithObjective(ctx, nodeId, cfg) {
       const agentSlug = String(cfg.agentSlug ?? "");
       const objective = String(cfg.objective ?? "");
@@ -433,9 +490,24 @@ function makeDeps(): EngineDeps {
     },
 
     async callApi(ctx, config) {
+      // Preset de API del tenant (tarjeta "API personalizada"): base URL + auth
+      // con secreto cifrado + allowlist — el nodo solo aporta la ruta relativa.
+      let effective = { ...(config as HttpNodeConfig) };
+      const presetId = String((config as any).presetId ?? "");
+      if (presetId) {
+        const resolved = await resolveApiPreset(ctx.organizationId, presetId);
+        if (!resolved) throw new Error("El preset de API del paso ya no existe — revísalo en Integraciones → API personalizada");
+        const path = String((config as any).path ?? (config as any).url ?? "");
+        effective = {
+          ...effective,
+          url: resolved.baseUrl.replace(/\/$/, "") + (path.startsWith("/") ? path : `/${path}`),
+          headers: { ...(resolved.headers ?? {}), ...(effective.headers ?? {}) },
+          allowlist: resolved.allowlist,
+        };
+      }
       // Guard SSRF + timeout dentro de callHttp; el resultado (incluye
       // __http_ok/__http_status y el mapeo JSON) queda disponible para los pasos.
-      const result = await callHttp(config as HttpNodeConfig, ctx.variables);
+      const result = await callHttp(effective, ctx.variables);
       Object.assign(ctx.variables, result);
     },
 

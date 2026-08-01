@@ -485,3 +485,1520 @@ export function WebhooksDrawer({
     </Drawer>
   );
 }
+
+// --------------------------- Correo electrónico ---------------------------
+
+export interface EmailState {
+  status: string;
+  mode?: "platform" | "smtp";
+  from?: string | null;
+  smtp?: { host: string; port: number; secure: boolean; user: string; hasPass?: boolean } | null;
+  escalation?: { enabled: boolean; minutes: number; recipients: string[] };
+  dailySummary?: { enabled: boolean; hour: number; recipients: string[] };
+  alerts?: { enabled: boolean; recipients: string[] };
+  lastError?: string | null;
+}
+
+function RecipientsInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  return (
+    <input
+      value={value.join(", ")}
+      onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+      placeholder={placeholder ?? "correo@equipo.cl, otro@equipo.cl"}
+      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+    />
+  );
+}
+
+export function EmailDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: EmailState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [busy, setBusy] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [testTo, setTestTo] = useState("");
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    mode: "platform" as "platform" | "smtp",
+    from: "",
+    smtpHost: "",
+    smtpPort: 587,
+    smtpSecure: false,
+    smtpUser: "",
+    smtpPass: "",
+    escalationEnabled: false,
+    escalationMinutes: 10,
+    escalationRecipients: [] as string[],
+    dailyEnabled: false,
+    dailyHour: 8,
+    dailyRecipients: [] as string[],
+    alertsEnabled: true,
+    alertsRecipients: [] as string[],
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    setTestDetail(null);
+    if (state) {
+      setForm((f) => ({
+        ...f,
+        mode: state.mode ?? "platform",
+        from: state.from ?? "",
+        smtpHost: state.smtp?.host ?? "",
+        smtpPort: state.smtp?.port ?? 587,
+        smtpSecure: Boolean(state.smtp?.secure),
+        smtpUser: state.smtp?.user ?? "",
+        smtpPass: "",
+        escalationEnabled: Boolean(state.escalation?.enabled),
+        escalationMinutes: state.escalation?.minutes ?? 10,
+        escalationRecipients: state.escalation?.recipients ?? [],
+        dailyEnabled: Boolean(state.dailySummary?.enabled),
+        dailyHour: state.dailySummary?.hour ?? 8,
+        dailyRecipients: state.dailySummary?.recipients ?? [],
+        alertsEnabled: state.alerts?.enabled ?? true,
+        alertsRecipients: state.alerts?.recipients ?? [],
+      }));
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/email", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: form.mode,
+          from: form.from || undefined,
+          smtp:
+            form.mode === "smtp"
+              ? { host: form.smtpHost, port: form.smtpPort, secure: form.smtpSecure, user: form.smtpUser, ...(form.smtpPass ? { pass: form.smtpPass } : {}) }
+              : undefined,
+          escalation: { enabled: form.escalationEnabled, minutes: form.escalationMinutes, recipients: form.escalationRecipients },
+          dailySummary: { enabled: form.dailyEnabled, hour: form.dailyHour, recipients: form.dailyRecipients },
+          alerts: { enabled: form.alertsEnabled, recipients: form.alertsRecipients },
+        }),
+      });
+      toast.push("Correo configurado ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    if (!testTo) return;
+    setBusy(true);
+    setTestDetail("Enviando correo de prueba…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/email/test", {
+        method: "POST",
+        body: JSON.stringify({ to: testTo }),
+      });
+      setTestDetail(`${r.ok ? "✔" : "✖"} ${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/email", { method: "DELETE" });
+    toast.push("Correo desconectado — escalamientos, resúmenes y alertas dejarán de enviarse", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Correo electrónico — avisos al equipo">
+      <p className="mb-3 text-xs text-slate-500">
+        Correo <b>interno para tu equipo</b> (escalamientos, resúmenes, alertas y el paso de workflow «Enviar correo
+        interno»). No es correo masivo a pacientes.
+      </p>
+
+      {/* Modo */}
+      <div className="mb-3 flex gap-2">
+        {(["platform", "smtp"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setForm({ ...form, mode: m })}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-cyan-700 text-white" : "border border-slate-300 text-slate-600"}`}
+          >
+            {m === "platform" ? "Remitente de plataforma" : "SMTP propio"}
+          </button>
+        ))}
+      </div>
+      {form.mode === "platform" && !platformReady && (
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          El remitente de plataforma aún no está configurado a nivel de sistema — usa SMTP propio o avísanos.
+        </p>
+      )}
+      {form.mode === "smtp" && (
+        <div className="mb-3 grid gap-2 md:grid-cols-2">
+          <label className="text-sm md:col-span-2">
+            <span className="text-xs text-slate-500">Remitente (From)</span>
+            <input value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} placeholder="Clínica <avisos@tuclinica.cl>" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Servidor (host)</span>
+            <input value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} placeholder="smtp.tuclinica.cl" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Puerto</span>
+            <input type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Usuario</span>
+            <input value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-slate-500">Contraseña {state?.smtp?.hasPass ? "(dejar vacío para conservar)" : ""}</span>
+            <input type="password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={form.smtpSecure} onChange={(e) => setForm({ ...form, smtpSecure: e.target.checked })} />
+            Conexión segura (TLS/465)
+          </label>
+        </div>
+      )}
+
+      {/* Usos */}
+      <div className="mb-3 space-y-3 rounded-xl border border-slate-200 p-3">
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.escalationEnabled} onChange={(e) => setForm({ ...form, escalationEnabled: e.target.checked })} />
+            Escalamiento sin atender
+          </label>
+          <p className="text-[11px] text-slate-400">Si un agente deriva a humano y nadie toma la conversación en X minutos.</p>
+          {form.escalationEnabled && (
+            <div className="mt-1 flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Minutos
+                <input type="number" min={2} max={240} value={form.escalationMinutes} onChange={(e) => setForm({ ...form, escalationMinutes: Number(e.target.value) || 10 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              </label>
+              <div className="min-w-64 flex-1">
+                <span className="text-xs text-slate-500">Destinatarios</span>
+                <RecipientsInput value={form.escalationRecipients} onChange={(v) => setForm({ ...form, escalationRecipients: v })} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.dailyEnabled} onChange={(e) => setForm({ ...form, dailyEnabled: e.target.checked })} />
+            Resumen diario
+          </label>
+          <p className="text-[11px] text-slate-400">Conversaciones, contactos, leads y citas de las últimas 24 h.</p>
+          {form.dailyEnabled && (
+            <div className="mt-1 flex flex-wrap items-end gap-2">
+              <label className="text-xs text-slate-500">
+                Hora
+                <input type="number" min={0} max={23} value={form.dailyHour} onChange={(e) => setForm({ ...form, dailyHour: Number(e.target.value) || 8 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              </label>
+              <div className="min-w-64 flex-1">
+                <span className="text-xs text-slate-500">Destinatarios</span>
+                <RecipientsInput value={form.dailyRecipients} onChange={(v) => setForm({ ...form, dailyRecipients: v })} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} />
+            Alertas de integraciones
+          </label>
+          <p className="text-[11px] text-slate-400">P. ej. el token de WhatsApp venció y hay que reautorizar.</p>
+          {form.alertsEnabled && (
+            <div className="mt-1">
+              <span className="text-xs text-slate-500">Destinatarios</span>
+              <RecipientsInput value={form.alertsRecipients} onChange={(v) => setForm({ ...form, alertsRecipients: v })} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <Button onClick={() => void save()} disabled={busy}>
+          {connected ? "Guardar cambios" : "Conectar"}
+        </Button>
+        <div className="flex items-end gap-1">
+          <label className="text-xs text-slate-500">
+            Probar con
+            <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="tu@correo.cl" className="mt-1 block w-48 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          </label>
+          <Button variant="secondary" onClick={() => void test()} disabled={busy || !testTo}>
+            Probar conexión
+          </Button>
+        </div>
+        {connected && (
+          <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>
+            Desconectar
+          </Button>
+        )}
+      </div>
+      {testDetail && <p className="mb-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar el correo?"
+        description="Dejarán de enviarse los escalamientos, resúmenes diarios, alertas y el paso de workflow «Enviar correo interno»."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// --------------------------- API personalizada ---------------------------
+
+interface ApiPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  authType: "none" | "bearer" | "header";
+  headerName: string | null;
+  hasSecret: boolean;
+  usedBy: string[];
+}
+
+export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const [presets, setPresets] = useState<ApiPreset[] | null>(null);
+  const [editing, setEditing] = useState<(Partial<ApiPreset> & { secret?: string }) | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<Record<string, string>>({});
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api<{ presets: ApiPreset[] }>("/integrations/api-presets");
+      setPresets(r.presets);
+    } catch {
+      setPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  async function save() {
+    if (!editing?.name || !editing.baseUrl) return;
+    setBusy(true);
+    try {
+      await api("/integrations/api-presets", {
+        method: "POST",
+        body: JSON.stringify({
+          id: editing.id,
+          name: editing.name,
+          baseUrl: editing.baseUrl,
+          authType: editing.authType ?? "none",
+          headerName: editing.headerName || undefined,
+          secret: editing.secret || undefined,
+        }),
+      });
+      toast.push("Preset guardado ✔", "ok");
+      setEditing(null);
+      await load();
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test(id: string) {
+    setTestDetail((p) => ({ ...p, [id]: "probando…" }));
+    try {
+      const r = await api<{ ok: boolean; detail: string }>(`/integrations/api-presets/${id}/test`, { method: "POST" });
+      setTestDetail((p) => ({ ...p, [id]: `${r.ok ? "✔" : "✖"} ${r.detail}` }));
+    } catch (err) {
+      setTestDetail((p) => ({ ...p, [id]: `✖ ${(err as Error).message}` }));
+    }
+  }
+
+  async function remove(preset: ApiPreset) {
+    if (preset.usedBy.length && !window.confirm(`Este preset lo usan: ${preset.usedBy.join(", ")}. ¿Eliminar igual? Esos pasos fallarán.`)) return;
+    if (!preset.usedBy.length && !window.confirm("¿Eliminar este preset?")) return;
+    await api(`/integrations/api-presets/${preset.id}`, { method: "DELETE" });
+    await load();
+    onChanged();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="API personalizada — presets del paso HTTP">
+      <p className="mb-3 text-xs text-slate-500">
+        Define tus APIs una vez (URL base + autenticación con secreto <b>cifrado</b>) y en el canvas el paso «Petición
+        HTTP» solo elige el preset y la ruta — sin pegar tokens en cada nodo. El dominio del preset queda como allowlist.
+      </p>
+
+      {editing ? (
+        <div className="mb-3 space-y-2 rounded-xl border border-slate-200 p-3">
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">Nombre</span>
+            <input value={editing.name ?? ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="CRM interno" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs text-slate-500">URL base</span>
+            <input value={editing.baseUrl ?? ""} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} placeholder="https://api.miempresa.cl/v1" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <label className="text-sm">
+              <span className="text-xs text-slate-500">Autenticación</span>
+              <select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+                <option value="none">Sin auth</option>
+                <option value="bearer">Bearer token</option>
+                <option value="header">Header personalizado</option>
+              </select>
+            </label>
+            {editing.authType === "header" && (
+              <label className="flex-1 text-sm">
+                <span className="text-xs text-slate-500">Nombre del header</span>
+                <input value={editing.headerName ?? ""} onChange={(e) => setEditing({ ...editing, headerName: e.target.value })} placeholder="X-Api-Key" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+            )}
+            {editing.authType !== "none" && (
+              <label className="flex-1 text-sm">
+                <span className="text-xs text-slate-500">Secreto {editing.id && editing.hasSecret ? "(vacío = conservar)" : ""}</span>
+                <input type="password" value={editing.secret ?? ""} onChange={(e) => setEditing({ ...editing, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </label>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={() => void save()} disabled={busy || !editing.name || !editing.baseUrl}>Guardar preset</Button>
+            <Button variant="secondary" onClick={() => setEditing(null)}>Cancelar</Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3">
+          <Button onClick={() => setEditing({ authType: "none" })}>
+            <Plus size={14} /> Nuevo preset
+          </Button>
+        </div>
+      )}
+
+      {presets === null ? (
+        <Skeleton className="h-24" />
+      ) : presets.length === 0 ? (
+        <EmptyState icon={<Activity size={28} />} title="Sin presets aún" description="Crea el primero para usarlo en el paso «Petición HTTP» de tus flujos." />
+      ) : (
+        <ul className="space-y-2">
+          {presets.map((p) => (
+            <li key={p.id} className="rounded-lg border border-slate-100 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">{p.name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    <code>{p.baseUrl}</code> · {p.authType === "none" ? "sin auth" : p.authType === "bearer" ? "Bearer" : `header ${p.headerName}`}
+                  </p>
+                  {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700">Usado por: {p.usedBy.join(", ")}</p>}
+                </div>
+                <div className="flex shrink-0 gap-2 text-xs">
+                  <button onClick={() => void test(p.id)} className="text-slate-500 hover:underline">Probar</button>
+                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline">Editar</button>
+                  <button onClick={() => void remove(p)} className="text-red-400 hover:underline">Eliminar</button>
+                </div>
+              </div>
+              {testDetail[p.id] && <p className="mt-1 text-[11px] text-slate-600">{testDetail[p.id]}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Drawer>
+  );
+}
+
+// --------------------------- Google Analytics (GA4) ---------------------------
+
+export interface Ga4State {
+  status: string;
+  measurementId: string | null;
+  mirrorCapi: boolean;
+  lastError: string | null;
+}
+
+export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; onClose: () => void; state: Ga4State | null; onChanged: () => void }) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [form, setForm] = useState({ measurementId: "", apiSecret: "", mirrorCapi: false });
+
+  useEffect(() => {
+    if (open) {
+      setTestDetail(null);
+      setForm({ measurementId: state?.measurementId ?? "", apiSecret: "", mirrorCapi: Boolean(state?.mirrorCapi) });
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/ga4", {
+        method: "POST",
+        body: JSON.stringify({
+          measurementId: form.measurementId.trim(),
+          apiSecret: form.apiSecret || undefined,
+          mirrorCapi: form.mirrorCapi,
+        }),
+      });
+      toast.push("GA4 conectado — prueba la conexión", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestDetail("Validando con Google…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/ga4/test", { method: "POST" });
+      setTestDetail(`${r.ok ? "✔" : "✖"} ${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/ga4", { method: "DELETE" });
+    toast.push("GA4 desconectado — el paso de workflow y el espejo CAPI dejarán de enviar", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Google Analytics (GA4)">
+      <p className="mb-3 text-xs text-slate-500">
+        Measurement Protocol — sin OAuth. En Analytics: <b>Administrar → Flujos de datos → tu flujo → Secretos de la API
+        de Measurement Protocol</b> para crear el <code>api_secret</code>; el <code>measurement_id</code> (G-XXXX) está en
+        los detalles del flujo.
+      </p>
+      <div className="space-y-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Measurement ID</span>
+          <input value={form.measurementId} onChange={(e) => setForm({ ...form, measurementId: e.target.value.toUpperCase() })} placeholder="G-ABC123XYZ" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">API secret {connected ? "(vacío = conservar)" : ""}</span>
+          <input type="password" value={form.apiSecret} onChange={(e) => setForm({ ...form, apiSecret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.mirrorCapi} onChange={(e) => setForm({ ...form, mirrorCapi: e.target.checked })} />
+          Enviar también a Analytics los eventos CAPI (lead, agenda, compra)
+        </label>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button onClick={() => void save()} disabled={busy || !form.measurementId}>{connected ? "Guardar" : "Conectar"}</Button>
+        {connected && (
+          <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+        )}
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Google Analytics?"
+        description="El paso «Enviar evento GA4» de los flujos y el espejo de eventos CAPI dejarán de funcionar."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// --------------------------- Meta Events Manager ---------------------------
+
+interface EmStats {
+  configured: boolean;
+  datasetId?: string;
+  eventsManagerUrl?: string;
+  totals?: { total: number; ok: number; error: number; successRate: number | null };
+  byDay?: { day: string; ok: number; error: number }[];
+  byEvent?: { event: string; ok: number; error: number }[];
+  recentErrors?: { message: string; at: string }[];
+}
+
+export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [stats, setStats] = useState<EmStats | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setStats(null);
+      void api<EmStats>("/integrations/events-manager/stats").then(setStats).catch(() => setStats({ configured: false }));
+    }
+  }, [open]);
+
+  const maxDay = Math.max(1, ...(stats?.byDay ?? []).map((d) => d.ok + d.error));
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Meta Events Manager — métricas CAPI">
+      {stats === null ? (
+        <Skeleton className="h-40" />
+      ) : !stats.configured ? (
+        <EmptyState
+          icon={<Activity size={28} />}
+          title="Conecta Meta CAPI primero"
+          description="Este panel muestra las métricas de los eventos de conversión que tu cuenta envía a Meta. Configura el dataset en Integraciones → Centro Meta → Conversions API."
+          action={<Button onClick={() => (window.location.href = "/integrations/meta")}>Ir al Centro Meta</Button>}
+        />
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold">{stats.totals?.total ?? 0}</p>
+              <p className="text-[10px] text-slate-400">eventos (30 d)</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold text-emerald-600">{stats.totals?.successRate ?? "—"}%</p>
+              <p className="text-[10px] text-slate-400">tasa de éxito</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-2">
+              <p className="text-lg font-semibold text-red-500">{stats.totals?.error ?? 0}</p>
+              <p className="text-[10px] text-slate-400">errores</p>
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Últimos 14 días</p>
+            <div className="flex items-end gap-1" style={{ height: 60 }}>
+              {(stats.byDay ?? []).map((d) => (
+                <div key={d.day} className="flex-1" title={`${d.day}: ${d.ok} ok · ${d.error} error`}>
+                  <div className="w-full rounded-t bg-red-300" style={{ height: (d.error / maxDay) * 56 }} />
+                  <div className="w-full rounded-b bg-emerald-400" style={{ height: (d.ok / maxDay) * 56 }} />
+                </div>
+              ))}
+              {(stats.byDay ?? []).length === 0 && <p className="text-xs text-slate-400">Sin eventos aún.</p>}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs font-medium text-slate-600">Por tipo de evento</p>
+            <ul className="space-y-1">
+              {(stats.byEvent ?? []).map((e) => (
+                <li key={e.event} className="flex items-center justify-between text-xs">
+                  <span className="font-mono">{e.event}</span>
+                  <span>
+                    <span className="text-emerald-600">{e.ok} ok</span>
+                    {e.error > 0 && <span className="ml-2 text-red-500">{e.error} error</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {(stats.recentErrors ?? []).length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-red-600">Últimos rechazos de Meta</p>
+              <ul className="space-y-1">
+                {stats.recentErrors!.map((e, i) => (
+                  <li key={i} className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                    {e.message} <span className="text-red-400">· {new Date(e.at).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-cyan-700 underline">
+            Abrir el Events Manager de Meta (dataset {stats.datasetId}) →
+          </a>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+// --------------------------- Agenda personalizada ---------------------------
+
+export interface CustomSchedState {
+  status: string;
+  baseUrl: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { open: boolean; onClose: () => void; state: CustomSchedState | null; onChanged: () => void }) {
+  const toast = useToast();
+  const connected = state?.status === "active" || state?.status === "error";
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [form, setForm] = useState({ baseUrl: "", secret: "" });
+
+  useEffect(() => {
+    if (open) {
+      setTestDetail(null);
+      setForm({ baseUrl: state?.baseUrl ?? "", secret: "" });
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/custom-scheduling", {
+        method: "POST",
+        body: JSON.stringify({ baseUrl: form.baseUrl.trim(), secret: form.secret || undefined }),
+      });
+      toast.push("Agenda conectada — prueba la conexión", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestDetail("Probando contra tu sistema…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/custom-scheduling/test", { method: "POST" });
+      setTestDetail(`${r.ok ? "" : "✖ "}${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/custom-scheduling", { method: "DELETE" });
+    toast.push("Agenda personalizada desconectada — los agentes vuelven a la agenda interna", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Agenda personalizada — contrato estándar">
+      <p className="mb-3 text-xs text-slate-500">
+        Tu software clínico implementa el <b>contrato estándar de agenda</b> (disponibilidad, citas, profesionales,
+        servicios) con firma HMAC, y los agentes IA y workflows lo usan igual que cualquier proveedor. La documentación
+        completa con ejemplos curl está en{" "}
+        <a href="/integrations/developers#agenda" className="underline">Desarrolladores → Contrato de agenda</a>.
+      </p>
+      <div className="space-y-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">URL base de tu API de agenda</span>
+          <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://agenda.tuclinica.cl/conversia" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Secreto HMAC compartido {connected ? "(vacío = conservar)" : "(mínimo 12 caracteres)"}</span>
+          <input type="password" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button onClick={() => void save()} disabled={busy || !form.baseUrl}>{connected ? "Guardar" : "Conectar"}</Button>
+        {connected && <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>}
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar la agenda personalizada?"
+        description="Los agentes IA dejarán de consultar tu sistema y volverán a la agenda interna de Conversia."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// --------------------------- Zapier / Make ---------------------------
+
+export interface AutomationState {
+  status: string;
+  webhookEndpointId: string | null;
+}
+
+const AUTOMATION_TEMPLATES: Record<"zapier" | "make", { title: string; steps: string[] }[]> = {
+  make: [
+    {
+      title: "Nuevo lead → Google Sheets",
+      steps: [
+        "En Make crea un escenario con el módulo «Webhooks → Custom webhook» y pega su URL aquí al conectar.",
+        "Suscribe el evento lead.created (ya viene marcado).",
+        "Agrega el módulo «Google Sheets → Add a Row» y mapea data.contactId, data.source y la fecha.",
+      ],
+    },
+    {
+      title: "Cita creada → aviso (Slack/Telegram/correo)",
+      steps: [
+        "Mismo webhook; el evento appointment.created llega con los datos de la cita.",
+        "Agrega el módulo de aviso que uses (Slack, Telegram, Email) y arma el mensaje con los campos del payload.",
+      ],
+    },
+    {
+      title: "Lead calificado → tu CRM",
+      steps: [
+        "El evento lead.status_changed incluye statusCode (p. ej. calificado).",
+        "Filtra por statusCode y usa «HTTP → Make a request» hacia tu CRM, o consulta más datos del contacto con nuestra API (Authorization: Bearer tu API key).",
+      ],
+    },
+  ],
+  zapier: [
+    {
+      title: "Nuevo lead → Google Sheets",
+      steps: [
+        "En Zapier crea un Zap con trigger «Webhooks by Zapier → Catch Hook» y pega su URL aquí al conectar.",
+        "El evento lead.created llegará con el payload del lead.",
+        "Acción: «Google Sheets → Create Spreadsheet Row» mapeando los campos.",
+      ],
+    },
+    {
+      title: "Cita creada → aviso",
+      steps: [
+        "Mismo Catch Hook; filtra por event = appointment.created (paso Filter).",
+        "Acción: Gmail/Slack/SMS con los datos de la cita.",
+      ],
+    },
+    {
+      title: "Lead calificado → CRM",
+      steps: [
+        "Filtra event = lead.status_changed y data.statusCode = calificado.",
+        "Acción: «Webhooks by Zapier → POST» a tu CRM, o enriquece con nuestra API (GET /public/v1/contacts).",
+      ],
+    },
+  ],
+};
+
+export function AutomationDrawer({
+  open,
+  onClose,
+  kind,
+  state,
+  webhooks,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  kind: "zapier" | "make";
+  state: AutomationState | null;
+  webhooks: WebhookRow[];
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const label = kind === "zapier" ? "Zapier" : "Make";
+  const connected = Boolean(state);
+  const endpoint = webhooks.find((w) => w.id === state?.webhookEndpointId) ?? null;
+  const [busy, setBusy] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [secrets, setSecrets] = useState<{ webhookSecret: string | null; apiKeySecret: string | null } | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setSecrets(null);
+      setWebhookUrl(endpoint?.url ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const r = await api<{ webhookSecret: string | null; apiKeySecret: string | null }>("/integrations/automation", {
+        method: "POST",
+        body: JSON.stringify({ kind, webhookUrl: webhookUrl.trim() }),
+      });
+      setSecrets(r);
+      toast.push(`${label} conectado ✔`, "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api(`/integrations/automation/${kind}`, { method: "DELETE" });
+    toast.push(`${label} desconectado — el webhook quedó pausado y la API key revocada`, "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title={`${label} — automatizaciones`}>
+      <p className="mb-3 text-xs text-slate-500">
+        Sin app nativa (queda como mejora futura): el asistente conecta {label} con lo que ya tienes — un <b>webhook
+        saliente</b> como trigger y una <b>API key</b> para las acciones.
+      </p>
+
+      <label className="block text-sm">
+        <span className="text-xs text-slate-500">URL del webhook de {label} ({kind === "zapier" ? "Catch Hook" : "Custom webhook"})</span>
+        <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder={kind === "zapier" ? "https://hooks.zapier.com/hooks/catch/…" : "https://hook.us1.make.com/…"} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+      </label>
+      <div className="mt-2 flex gap-2">
+        <Button onClick={() => void connect()} disabled={busy || !webhookUrl.trim()}>{connected ? "Actualizar" : "Conectar"}</Button>
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+
+      {secrets && (secrets.apiKeySecret || secrets.webhookSecret) && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <p className="font-medium">Guarda estos secretos — se muestran una sola vez:</p>
+          {secrets.apiKeySecret && <p className="mt-1">API key (acciones): <code className="rounded bg-white px-1.5 py-0.5">{secrets.apiKeySecret}</code></p>}
+          {secrets.webhookSecret && <p className="mt-1">Secreto del webhook (firma sha256): <code className="rounded bg-white px-1.5 py-0.5">{secrets.webhookSecret}</code></p>}
+        </div>
+      )}
+
+      {connected && endpoint && (
+        <p className="mt-3 text-xs text-slate-600">
+          Estado: {endpoint.deliveries7d} entrega(s) en 7 días
+          {endpoint.successRate !== null ? ` · ${endpoint.successRate}% OK` : ""} · última:{" "}
+          {endpoint.lastDeliveryAt ? new Date(endpoint.lastDeliveryAt).toLocaleString("es-CL") : "sin entregas aún"}
+        </p>
+      )}
+
+      <div className="mt-4">
+        <h3 className="text-sm font-medium">Plantillas de casos comunes</h3>
+        <div className="mt-2 space-y-3">
+          {AUTOMATION_TEMPLATES[kind].map((t) => (
+            <div key={t.title} className="rounded-lg border border-slate-200 p-3">
+              <p className="text-sm font-medium">{t.title}</p>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-slate-600">
+                {t.steps.map((s, i) => (<li key={i}>{s}</li>))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title={`¿Desconectar ${label}?`}
+        description="El webhook saliente quedará pausado y la API key revocada: tus escenarios dejarán de recibir eventos y de poder llamar a la API."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// ------------------------------ Google (Calendar + Sheets) ------------------------------
+
+export interface GoogleState {
+  status: string;
+  calendarId: string | null;
+  calendarSync: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function GoogleDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: GoogleState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const needsReauth = state?.status === "reauthorize";
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<{ id: string; name: string; primary: boolean }[] | null>(null);
+  const [calendarId, setCalendarId] = useState("");
+  const [calendarSync, setCalendarSync] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setTestResult(null);
+    setCalendarId(state?.calendarId ?? "");
+    setCalendarSync(Boolean(state?.calendarSync));
+    if (connected && !needsReauth) {
+      setCalendars(null);
+      void api<{ calendars: { id: string; name: string; primary: boolean }[] }>("/integrations/google/calendars")
+        .then((r) => setCalendars(r.calendars))
+        .catch(() => setCalendars([]));
+    }
+  }, [open, connected, needsReauth, state?.calendarId, state?.calendarSync]);
+
+  async function startOAuth() {
+    setBusy(true);
+    try {
+      const { url } = await api<{ url: string }>("/integrations/oauth/google/authorize");
+      window.location.href = url; // vuelve a /integrations?google=connected
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+      setBusy(false);
+    }
+  }
+
+  async function saveConfig() {
+    setBusy(true);
+    try {
+      await api("/integrations/google/config", {
+        method: "PUT",
+        body: JSON.stringify({ calendarId, calendarSync }),
+      });
+      toast.push("Configuración guardada ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/google/test", { method: "POST" });
+      setTestResult(r.detail);
+      if (r.ok) onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/google", { method: "DELETE" });
+    toast.push("Cuenta de Google desconectada — el token fue revocado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Google Calendar y Sheets">
+      {!platformReady ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Configuración de plataforma pendiente</p>
+          <p className="mt-1 text-xs">
+            Falta registrar la app OAuth de Google a nivel plataforma (variables GOOGLE_OAUTH_CLIENT_ID y
+            GOOGLE_OAUTH_CLIENT_SECRET). Sigue la guía <code>docs/GUIA_OAUTH_GOOGLE.md</code> del repositorio y
+            vuelve aquí: no necesitas cambiar nada más.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Una sola conexión habilita <b>Google Calendar</b> (espejo de tus citas de Conversia) y{" "}
+            <b>Google Sheets</b> (paso «Añadir fila a Google Sheets» en los flujos). Los tokens quedan cifrados por
+            organización.
+          </p>
+
+          {needsReauth && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
+            </div>
+          )}
+
+          {!connected || needsReauth ? (
+            <Button onClick={() => void startOAuth()} disabled={busy}>
+              {needsReauth ? "Volver a conectar con Google" : "Conectar con Google"}
+            </Button>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Espejo de citas en Google Calendar</p>
+                  <StatusBadge kind={state?.lastError ? "attention" : "connected"} label={state?.lastError ? "Atención" : "Activa"} />
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={calendarSync} onChange={(e) => setCalendarSync(e.target.checked)} />
+                  Reflejar cada cita creada, actualizada o cancelada
+                </label>
+                <label className="mt-2 block text-sm">
+                  <span className="text-xs text-slate-500">Calendario destino</span>
+                  {calendars === null ? (
+                    <Skeleton className="mt-1 h-9" />
+                  ) : (
+                    <select
+                      value={calendarId}
+                      onChange={(e) => setCalendarId(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="">— elegir calendario —</option>
+                      {calendars.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.primary ? " (principal)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+                {state?.lastSyncAt && (
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}
+                  </p>
+                )}
+                {state?.lastError && <p className="mt-1 text-[11px] text-red-600">{state.lastError}</p>}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600">
+                <p className="text-sm font-medium text-slate-800">Google Sheets</p>
+                <p className="mt-1">
+                  Ya quedó habilitado: agrega el paso <b>«Añadir fila a Google Sheets»</b> en{" "}
+                  <a href="/workflows" className="underline">Workflows</a> con el ID de la planilla y las columnas
+                  (admiten variables del contacto).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void saveConfig()} disabled={busy || (calendarSync && !calendarId)}>Guardar</Button>
+                <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+                <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+              </div>
+              {testResult && (
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Google?"
+        description="Se revocará el token y se detendrá el espejo de citas y el paso de Google Sheets en los flujos publicados."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// ------------------------------ Dentalink (Healthatom) ------------------------------
+
+export interface DentalinkState {
+  status: string;
+  workStartHour: number;
+  workEndHour: number;
+  slotMinutes: number;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+export function DentalinkDrawer({
+  open,
+  onClose,
+  state,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: DentalinkState | null;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [token, setToken] = useState("");
+  const [workStartHour, setWorkStartHour] = useState(9);
+  const [workEndHour, setWorkEndHour] = useState(19);
+  const [slotMinutes, setSlotMinutes] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setToken("");
+    setTestResult(null);
+    setWorkStartHour(state?.workStartHour ?? 9);
+    setWorkEndHour(state?.workEndHour ?? 19);
+    setSlotMinutes(state?.slotMinutes ?? 30);
+  }, [open, state?.workStartHour, state?.workEndHour, state?.slotMinutes]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/dentalink", {
+        method: "POST",
+        body: JSON.stringify({
+          ...(token.trim() ? { token: token.trim() } : {}),
+          workStartHour,
+          workEndHour,
+          slotMinutes,
+        }),
+      });
+      toast.push("Dentalink guardado ✔ — prueba la conexión", "ok");
+      setToken("");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/dentalink/test", { method: "POST" });
+      setTestResult(r.detail);
+      onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/dentalink", { method: "DELETE" });
+    toast.push("Dentalink desconectado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="Dentalink — agenda dental">
+      <p className="mb-3 text-xs text-slate-500">
+        Conecta tu Dentalink (Healthatom) con el token de <b>Configuración → API</b> de tu cuenta. Los agentes IA
+        ofrecerán horas reales (tu ventana laboral menos las citas ya agendadas en Dentalink), crearán pacientes y
+        agendarán directo en tu agenda. El token queda cifrado.
+      </p>
+
+      <label className="block text-sm">
+        <span className="text-xs text-slate-500">Token de la API {connected ? "(deja vacío para mantener el actual)" : ""}</span>
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Token generado en Dentalink → Configuración API"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Desde (hora)</span>
+          <input type="number" min={0} max={23} value={workStartHour} onChange={(e) => setWorkStartHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Hasta (hora)</span>
+          <input type="number" min={1} max={24} value={workEndHour} onChange={(e) => setWorkEndHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Bloques (min)</span>
+          <input type="number" min={10} max={120} step={5} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+      </div>
+      <p className="mt-1 text-[10px] text-slate-400">
+        La ventana laboral define qué huecos se ofrecen; las citas existentes en Dentalink se descuentan automáticamente.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button onClick={() => void save()} disabled={busy || (!connected && !token.trim())}>
+          {connected ? "Guardar cambios" : "Conectar"}
+        </Button>
+        {connected && (
+          <>
+            <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+            <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+          </>
+        )}
+      </div>
+
+      {testResult && (
+        <p className={`mt-2 text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+      )}
+      {state?.lastError && !testResult && <p className="mt-2 text-xs text-red-600">{state.lastError}</p>}
+      {state?.lastSyncAt && (
+        <p className="mt-2 text-[11px] text-slate-400">Última verificación: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar Dentalink?"
+        description="Los agentes dejarán de ver la disponibilidad de Dentalink y volverán a la agenda interna."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+// ------------------------------ HubSpot ------------------------------
+
+export interface HubspotState {
+  status: string;
+  syncAuto: boolean;
+  fieldMapping: Record<string, string> | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+const HUBSPOT_FIELD_OPTIONS: { value: string; label: string }[] = [
+  { value: "firstName", label: "Nombre" },
+  { value: "lastName", label: "Apellido" },
+  { value: "email", label: "Email" },
+  { value: "phone", label: "Teléfono" },
+  { value: "country", label: "País" },
+  { value: "source", label: "Origen (canal)" },
+];
+
+const HUBSPOT_DEFAULT_MAPPING: Record<string, string> = {
+  firstname: "firstName",
+  lastname: "lastName",
+  email: "email",
+  phone: "phone",
+};
+
+export function HubspotDrawer({
+  open,
+  onClose,
+  state,
+  platformReady,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  state: HubspotState | null;
+  platformReady: boolean;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const needsReauth = state?.status === "reauthorize";
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [syncAuto, setSyncAuto] = useState(true);
+  const [mapping, setMapping] = useState<Record<string, string>>(HUBSPOT_DEFAULT_MAPPING);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setTestResult(null);
+    setSyncAuto(state?.syncAuto ?? true);
+    setMapping(state?.fieldMapping && Object.keys(state.fieldMapping).length ? state.fieldMapping : HUBSPOT_DEFAULT_MAPPING);
+  }, [open, state?.syncAuto, state?.fieldMapping]);
+
+  async function startOAuth() {
+    setBusy(true);
+    try {
+      const { url } = await api<{ url: string }>("/integrations/oauth/hubspot/authorize");
+      window.location.href = url; // vuelve a /integrations?hubspot=connected
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+      setBusy(false);
+    }
+  }
+
+  async function saveConfig() {
+    setBusy(true);
+    try {
+      await api("/integrations/hubspot/config", {
+        method: "PUT",
+        body: JSON.stringify({ syncAuto, fieldMapping: mapping }),
+      });
+      toast.push("Configuración guardada ✔", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/hubspot/test", { method: "POST" });
+      setTestResult(r.detail);
+      if (r.ok) onChanged();
+    } catch (err) {
+      setTestResult((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncAll() {
+    setBusy(true);
+    try {
+      const r = await api<{ queued: number }>("/integrations/hubspot/sync-all", { method: "POST" });
+      toast.push(`Backfill iniciado: ${r.queued} contacto(s) en cola (escalonados)`, "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/hubspot", { method: "DELETE" });
+    toast.push("HubSpot desconectado", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="HubSpot — sincronización de contactos">
+      {!platformReady ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <p className="font-medium">Configuración de plataforma pendiente</p>
+          <p className="mt-1 text-xs">
+            Falta registrar la app OAuth de HubSpot a nivel plataforma (variables HUBSPOT_CLIENT_ID y
+            HUBSPOT_CLIENT_SECRET). Sigue la guía <code>docs/GUIA_OAUTH_HUBSPOT.md</code> del repositorio y vuelve
+            aquí.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-slate-500">
+            Sincronización <b>unidireccional</b> Conversia → HubSpot: cada contacto nuevo o editado se refleja en tu
+            CRM. Antes de crear se busca por teléfono/email — <b>sin duplicados</b>. Los tokens quedan cifrados.
+          </p>
+
+          {needsReauth && (
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
+            </div>
+          )}
+
+          {!connected || needsReauth ? (
+            <Button onClick={() => void startOAuth()} disabled={busy}>
+              {needsReauth ? "Volver a conectar con HubSpot" : "Conectar con HubSpot"}
+            </Button>
+          ) : (
+            <div className="space-y-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={syncAuto} onChange={(e) => setSyncAuto(e.target.checked)} />
+                Sincronizar automáticamente contactos nuevos y editados
+              </label>
+
+              <div className="rounded-xl border border-slate-200 p-3">
+                <p className="text-sm font-medium">Mapeo de campos (HubSpot ← Conversia)</p>
+                <div className="mt-2 space-y-1.5">
+                  {Object.entries(mapping).map(([prop, field]) => (
+                    <div key={prop} className="flex items-center gap-2 text-xs">
+                      <code className="w-28 shrink-0 rounded bg-slate-100 px-1.5 py-1">{prop}</code>
+                      <span className="text-slate-400">←</span>
+                      <select
+                        value={field}
+                        onChange={(e) => setMapping({ ...mapping, [prop]: e.target.value })}
+                        className="flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                      >
+                        {HUBSPOT_FIELD_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = { ...mapping };
+                          delete next[prop];
+                          setMapping(next);
+                        }}
+                        className="text-slate-400 hover:text-red-500"
+                        title="Quitar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <AddHubspotProperty existing={mapping} onAdd={(prop) => setMapping({ ...mapping, [prop]: "source" })} />
+                <p className="mt-2 text-[10px] text-slate-400">
+                  La clave es el nombre interno de la propiedad en HubSpot (p. ej. <code>firstname</code>,{" "}
+                  <code>lead_source</code> si la creaste como personalizada).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void saveConfig()} disabled={busy || Object.keys(mapping).length === 0}>Guardar</Button>
+                <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>
+                <Button variant="secondary" onClick={() => void syncAll()} disabled={busy}>Sincronizar contactos existentes</Button>
+                <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
+              </div>
+              {testResult && (
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+              )}
+              {state?.lastSyncAt && (
+                <p className="text-[11px] text-slate-400">Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+              )}
+              {state?.lastError && <p className="text-[11px] text-red-600">{state.lastError}</p>}
+            </div>
+          )}
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar HubSpot?"
+        description="Se dejará de sincronizar contactos hacia tu CRM. Los contactos ya creados en HubSpot no se tocan."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
+function AddHubspotProperty({ existing, onAdd }: { existing: Record<string, string>; onAdd: (prop: string) => void }) {
+  const [prop, setProp] = useState("");
+  const normalized = prop.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        value={prop}
+        onChange={(e) => setProp(e.target.value)}
+        placeholder="agregar propiedad de HubSpot…"
+        className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+      />
+      <Button
+        variant="ghost"
+        onClick={() => {
+          if (normalized && !existing[normalized]) onAdd(normalized);
+          setProp("");
+        }}
+        disabled={!normalized || Boolean(existing[normalized])}
+      >
+        <Plus size={13} /> Añadir
+      </Button>
+    </div>
+  );
+}

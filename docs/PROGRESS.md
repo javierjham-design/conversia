@@ -1,5 +1,21 @@
 # Registro de progreso
 
+## 2026-07-31 (2) — TODAS las tarjetas del hub habilitadas (rama `feature/integrations-enable`)
+
+Las 11 tarjetas "Próximamente" pasaron a "Disponible" con conexión real, "Probar conexión" y cableado a Workflows/Agentes/Bandeja. Migración `20260731170000_integration_connections` (unique (org, provider) + enum CUSTOM) — **pendiente aplicar a prod**. Un commit por tarjeta (9 commits):
+
+- **Correo electrónico**: remitente de plataforma (Resend) o SMTP propio (nodemailer, credencial cifrada); escalamientos con retardo (verifica que el handoff siga PENDING), resumen diario por zona horaria (tick 15 min idempotente), alertas de integraciones; paso de workflow `send_internal_email` (interno al equipo, nunca masivo) con validación al publicar; cola `tenant-emails` con reintentos.
+- **API personalizada**: presets (baseUrl + auth bearer/header cifrada + allowlist de host) CRUD + prueba; el paso «Petición HTTP» acepta `presetId` (URL relativa, headers del preset); detección de uso en flujos antes de borrar.
+- **Google Analytics (GA4)**: Measurement Protocol (measurement_id + api_secret cifrado); prueba con `debug/mp/collect` antes del envío real; paso `send_ga4_event` (params con variables, client_id anónimo estable por contacto) + espejo opcional de eventos CAPI; cola `integration-sync`.
+- **Meta Events Manager**: panel de métricas reales de CAPI (30 días: por día, por evento, tasa de éxito, últimos rechazos) + link directo al dataset.
+- **Agenda personalizada**: `CustomSchedulingProvider` (contrato estándar = endpoints Cláriva) firmado HMAC (`sha256=HMAC(secret, ts.método.path.body)`, tests); conexión con secreto cifrado, prueba real (profesionales + slots), bloqueo si hay otra agenda activa; sección de contrato en /integrations/developers.
+- **Zapier / Make**: asistente guiado sin app nativa — crea webhook saliente + API key (secretos mostrados una vez), plantillas de casos comunes, estado de entregas; desconectar pausa el webhook y revoca la key.
+- **Google Calendar + Sheets (OAuth por tenant)**: framework OAuth de plataforma (state HMAC 10 min, callback público `/public/oauth/google/callback`, tokens cifrados AES-256-GCM, refresh auto con margen 60 s, `reauthorize` + correo si se revoca, revocación al desconectar). Calendar v1: espejo Conversia→Google de cada cita (cola sync, `googleEventId` en `appointment.meta` anti-duplicados, recrea si lo borran a mano); enganchado en recordAppointment + webhook Cláriva. Sheets: paso `google_sheets_append` real (planilla/hoja/columnas con variables, backoff en 429, validación al publicar). Drawer con selector de calendarios reales y estado «Configuración de plataforma pendiente» si faltan `GOOGLE_OAUTH_CLIENT_ID/SECRET` → guía `docs/GUIA_OAUTH_GOOGLE.md`.
+- **Dentalink**: `DentalinkSchedulingProvider` contra la API real de Healthatom (`Authorization: Token`, sobre `{data}`): sucursales/dentistas/citas/pacientes + estados vía `/citas/estados`. Disponibilidad v1 = ventana laboral configurable − citas reales (`computeDentalinkSlots`, puro, 9 tests con fixtures — estados en español con negaciones, solapamientos, domingos). Bloqueo de doble agenda; prueba lista sucursales y dentistas.
+- **HubSpot**: OAuth por tenant (`HUBSPOT_CLIENT_ID/SECRET`, guía `docs/GUIA_OAUTH_HUBSPOT.md`); sync **unidireccional** de contactos (inbound WhatsApp, Lead Ads, Cláriva, workflows, tools) vía cola con 5 reintentos; **sin duplicados** (búsqueda por teléfono/email, id en `contact.meta.hubspotContactId`, 409 reutiliza Existing ID); mapeo de campos configurable + backfill escalonado (200 ms, tope 5000); prueba muestra el portal conectado; 4 tests.
+
+Seguridad transversal: secretos solo cifrados (nunca completos al navegador), state OAuth firmado con vencimiento (4 tests), permisos `integrations:write`, RLS intacto (organizationId solo del JWT). Typecheck 16/16 y 60+ tests en verde.
+
 ## 2026-07-31 — Centro de Integraciones del tenant (rama `feature/integrations`)
 
 Cableado de punta a punta de las integraciones POR TENANT (el hub UI base ya existía). 5 checkpoints:

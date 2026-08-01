@@ -29,13 +29,13 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ClarivaDrawer, WebhooksDrawer, type ClarivaState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, HubspotDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type HubspotState, type WebhookRow } from "./drawers";
 
 interface CatalogItem {
   key: string;
   name: string;
   category: "meta" | "agenda" | "datos" | "crm";
-  status: "disponible" | "beta" | "proximamente";
+  status: "disponible" | "beta" | "proximamente" | "config_pendiente";
   description: string;
   capabilities: string[];
 }
@@ -51,6 +51,18 @@ interface Overview {
   };
   meta: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
   clariva: ClarivaState | null;
+  email: EmailState | null;
+  platformEmailReady: boolean;
+  apiPresets: { count: number; status: string | null };
+  ga4: Ga4State | null;
+  customScheduling: CustomSchedState | null;
+  dentalink: DentalinkState | null;
+  google: GoogleState | null;
+  platformGoogleReady: boolean;
+  hubspot: HubspotState | null;
+  platformHubspotReady: boolean;
+  capiConfigured: boolean;
+  automations: { zapier: AutomationState | null; make: AutomationState | null };
   webhooks: WebhookRow[];
   availableEvents: string[];
   catalog: CatalogItem[];
@@ -80,6 +92,15 @@ export default function IntegrationsPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("todas");
   const [clarivaOpen, setClarivaOpen] = useState(false);
   const [webhooksOpen, setWebhooksOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const [ga4Open, setGa4Open] = useState(false);
+  const [emOpen, setEmOpen] = useState(false);
+  const [customSchedOpen, setCustomSchedOpen] = useState(false);
+  const [googleOpen, setGoogleOpen] = useState(false);
+  const [dentalinkOpen, setDentalinkOpen] = useState(false);
+  const [hubspotOpen, setHubspotOpen] = useState(false);
+  const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
 
@@ -95,6 +116,27 @@ export default function IntegrationsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Resultado del retorno OAuth (Google/HubSpot redirigen a /integrations?provider=estado)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    for (const provider of ["google", "hubspot"] as const) {
+      const result = params.get(provider);
+      if (!result) continue;
+      const label = provider === "google" ? "Google" : "HubSpot";
+      if (result === "connected") {
+        toast.push(`${label} conectado ✔ — ya puedes configurarlo`, "ok");
+        if (provider === "google") setGoogleOpen(true);
+        if (provider === "hubspot") setHubspotOpen(true);
+      } else if (result === "denied") {
+        toast.push(`Conexión con ${label} cancelada`, "info");
+      } else {
+        toast.push(`No se pudo conectar ${label} — intenta de nuevo`, "error");
+      }
+      window.history.replaceState(null, "", "/integrations");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (activityOpen) {
@@ -153,6 +195,117 @@ export default function IntegrationsPage() {
         onManage: () => setWebhooksOpen(true),
       });
     }
+    if (data.apiPresets.count > 0) {
+      rows.push({
+        key: "custom_api",
+        name: `API personalizada (${data.apiPresets.count} preset${data.apiPresets.count > 1 ? "s" : ""})`,
+        category: "Productividad y datos",
+        icon: <Webhook size={22} />,
+        status: "connected",
+        detail: "Presets del paso «Petición HTTP» con auth cifrada",
+        health: "ok",
+        onManage: () => setPresetsOpen(true),
+      });
+    }
+    for (const kind of ["zapier", "make"] as const) {
+      const auto = data.automations?.[kind];
+      if (!auto) continue;
+      const ep = data.webhooks.find((w) => w.id === auto.webhookEndpointId);
+      const failing = ep?.successRate !== null && ep !== undefined && (ep.successRate as number) < 80 && (ep.deliveries7d ?? 0) > 0;
+      rows.push({
+        key: kind,
+        name: kind === "zapier" ? "Zapier" : "Make",
+        category: "Productividad y datos",
+        icon: <Webhook size={22} />,
+        status: failing ? "attention" : "connected",
+        detail: ep
+          ? `${ep.deliveries7d} entrega(s) 7d${ep.successRate !== null ? ` · ${ep.successRate}% OK` : ""}`
+          : "sin entregas aún",
+        health: failing ? "warn" : "ok",
+        onManage: () => setAutomationOpen(kind),
+      });
+    }
+    if (data.customScheduling) {
+      rows.push({
+        key: "custom_scheduling",
+        name: "Agenda personalizada",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.customScheduling.status === "error" ? "attention" : "connected",
+        detail: data.customScheduling.baseUrl ?? "",
+        health: data.customScheduling.status === "error" ? "warn" : "ok",
+        onManage: () => setCustomSchedOpen(true),
+      });
+    }
+    if (data.dentalink) {
+      rows.push({
+        key: "dentalink",
+        name: "Dentalink",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.dentalink.status === "error" ? "attention" : "connected",
+        detail: `Ventana ${data.dentalink.workStartHour}:00–${data.dentalink.workEndHour}:00 · bloques de ${data.dentalink.slotMinutes} min`,
+        health: data.dentalink.status === "error" ? "warn" : "ok",
+        onManage: () => setDentalinkOpen(true),
+      });
+    }
+    if (data.google) {
+      rows.push({
+        key: "google",
+        name: "Google Calendar y Sheets",
+        category: "Agenda y gestión clínica",
+        icon: <CalendarCheck size={22} />,
+        status: data.google.status === "reauthorize" ? "error" : data.google.lastError ? "attention" : "connected",
+        statusLabel: data.google.status === "reauthorize" ? "Reconectar" : undefined,
+        detail: data.google.calendarSync
+          ? `Espejo de citas activo${data.google.lastSyncAt ? ` · sync ${new Date(data.google.lastSyncAt).toLocaleString("es-CL")}` : ""}`
+          : "Cuenta conectada (espejo de citas apagado)",
+        health: data.google.status === "reauthorize" ? "error" : data.google.lastError ? "warn" : "ok",
+        onManage: () => setGoogleOpen(true),
+      });
+    }
+    if (data.hubspot) {
+      rows.push({
+        key: "hubspot",
+        name: "HubSpot",
+        category: "CRM y analítica",
+        icon: <Plug size={22} />,
+        status: data.hubspot.status === "reauthorize" ? "error" : data.hubspot.lastError ? "attention" : "connected",
+        statusLabel: data.hubspot.status === "reauthorize" ? "Reconectar" : undefined,
+        detail: `${data.hubspot.syncAuto ? "Sync automático activo" : "Sync manual"}${data.hubspot.lastSyncAt ? ` · última ${new Date(data.hubspot.lastSyncAt).toLocaleString("es-CL")}` : ""}`,
+        health: data.hubspot.status === "reauthorize" ? "error" : data.hubspot.lastError ? "warn" : "ok",
+        onManage: () => setHubspotOpen(true),
+      });
+    }
+    if (data.ga4) {
+      rows.push({
+        key: "ga4",
+        name: "Google Analytics",
+        category: "CRM y analítica",
+        icon: <Webhook size={22} />,
+        status: data.ga4.status === "error" ? "attention" : "connected",
+        detail: `${data.ga4.measurementId ?? ""}${data.ga4.mirrorCapi ? " · espejo CAPI activo" : ""}`,
+        health: data.ga4.status === "error" ? "warn" : "ok",
+        onManage: () => setGa4Open(true),
+      });
+    }
+    if (data.email) {
+      const uses = [
+        data.email.escalation?.enabled ? "escalamientos" : null,
+        data.email.dailySummary?.enabled ? "resumen diario" : null,
+        data.email.alerts?.enabled ? "alertas" : null,
+      ].filter(Boolean);
+      rows.push({
+        key: "email",
+        name: "Correo electrónico",
+        category: "Productividad y datos",
+        icon: <MessageCircle size={22} />,
+        status: data.email.status === "error" ? "attention" : "connected",
+        detail: `${data.email.mode === "smtp" ? "SMTP propio" : "remitente de plataforma"}${uses.length ? ` · ${uses.join(", ")}` : ""}`,
+        health: data.email.status === "error" ? "warn" : "ok",
+        onManage: () => setEmailOpen(true),
+      });
+    }
     return rows;
   }, [data, router]);
 
@@ -160,7 +313,7 @@ export default function IntegrationsPage() {
     if (!data) return [];
     return data.catalog.filter((c) => {
       if (categoryFilter !== "todas" && c.category !== categoryFilter) return false;
-      if (statusFilter === "disponibles" && c.status === "proximamente") return false;
+      if (statusFilter === "disponibles" && (c.status === "proximamente" || c.status === "config_pendiente")) return false;
       if (statusFilter === "proximamente" && c.status !== "proximamente") return false;
       if (statusFilter === "conectadas") return false; // conectadas viven en su propia sección
       if (search && !`${c.name} ${c.description}`.toLowerCase().includes(search.toLowerCase())) return false;
@@ -185,6 +338,26 @@ export default function IntegrationsPage() {
         return setClarivaOpen(true);
       case "webhooks":
         return setWebhooksOpen(true);
+      case "email":
+        return setEmailOpen(true);
+      case "custom_api":
+        return setPresetsOpen(true);
+      case "ga4":
+        return setGa4Open(true);
+      case "events_manager":
+        return setEmOpen(true);
+      case "custom_scheduling":
+        return setCustomSchedOpen(true);
+      case "google_calendar":
+      case "sheets":
+        return setGoogleOpen(true);
+      case "dentalink":
+        return setDentalinkOpen(true);
+      case "hubspot":
+        return setHubspotOpen(true);
+      case "zapier":
+      case "make":
+        return setAutomationOpen(item.key);
       default:
         return void notifyInterest(item.key);
     }
@@ -383,8 +556,8 @@ export default function IntegrationsPage() {
                             {CATALOG_ICONS[item.key] ?? <Plug size={20} />}
                           </div>
                           <StatusBadge
-                            kind={item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : "soon"}
-                            label={item.status === "disponible" ? "Disponible" : undefined}
+                            kind={item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
+                            label={item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
                           />
                         </div>
                         <p className="mt-2.5 font-semibold">{item.name}</p>
@@ -418,6 +591,31 @@ export default function IntegrationsPage() {
 
       {/* Drawers */}
       <ClarivaDrawer open={clarivaOpen} onClose={() => setClarivaOpen(false)} state={data?.clariva ?? null} onChanged={() => void load()} />
+      <EmailDrawer
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        state={data?.email ?? null}
+        platformReady={data?.platformEmailReady ?? false}
+        onChanged={() => void load()}
+      />
+      <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
+      <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
+      <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
+      <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
+      <GoogleDrawer open={googleOpen} onClose={() => setGoogleOpen(false)} state={data?.google ?? null} platformReady={data?.platformGoogleReady ?? false} onChanged={() => void load()} />
+      <DentalinkDrawer open={dentalinkOpen} onClose={() => setDentalinkOpen(false)} state={data?.dentalink ?? null} onChanged={() => void load()} />
+      <HubspotDrawer open={hubspotOpen} onClose={() => setHubspotOpen(false)} state={data?.hubspot ?? null} platformReady={data?.platformHubspotReady ?? false} onChanged={() => void load()} />
+      {(["zapier", "make"] as const).map((kind) => (
+        <AutomationDrawer
+          key={kind}
+          open={automationOpen === kind}
+          onClose={() => setAutomationOpen(null)}
+          kind={kind}
+          state={data?.automations?.[kind] ?? null}
+          webhooks={data?.webhooks ?? []}
+          onChanged={() => void load()}
+        />
+      ))}
       <WebhooksDrawer
         open={webhooksOpen}
         onClose={() => setWebhooksOpen(false)}

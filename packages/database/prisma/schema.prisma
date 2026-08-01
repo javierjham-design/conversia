@@ -139,6 +139,7 @@ enum SchedulingProviderKind {
   CLARIVA
   DENTALINK
   GOOGLE_CALENDAR
+  CUSTOM
 }
 
 enum HandoffStatus {
@@ -1213,12 +1214,15 @@ model ScheduledJob {
 
 // ------------------------- Integraciones -------------------------
 
+// Conexión genérica de integración por tenant (una fila por org+provider).
+// providers en uso: email | api_presets | ga4 | zapier | make | google | hubspot
+// (la agenda va en scheduling_connections y Meta/WhatsApp en sus modelos).
 model IntegrationConnection {
   id             String    @id @default(cuid())
   organizationId String    @map("organization_id")
   clinicId       String?   @map("clinic_id")
-  provider       String // whatsapp | clariva | dentalink | google_calendar | meta_leads | sheets | webhook | custom_api
-  status         String    @default("active")
+  provider       String
+  status         String    @default("active") // active | error | reauthorize
   config         Json      @default("{}")
   credentialId   String?   @map("credential_id")
   lastSyncAt     DateTime? @map("last_sync_at")
@@ -1226,6 +1230,7 @@ model IntegrationConnection {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
+  @@unique([organizationId, provider])
   @@index([organizationId])
   @@map("integration_connections")
 }
