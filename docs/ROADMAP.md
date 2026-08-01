@@ -38,7 +38,8 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ **Catálogo ampliado** (rama feature/workflow-catalog): menú categorizado + buscador
   - Triggers: click_to_chat (CTWA + referral guardado), lead_status_changed (origen→destino), appointment_created, appointment_upcoming (recordatorio programado)
   - Pasos: open_conversation, add_note, goto (anti-bucle), business_hours, send_capi (CAPI directo con ctwa_clid + reintentos), ai_objective (agente con objetivo + ramas), call_api (Petición HTTP con guard SSRF + gating por plan)
-- 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok · pasos send_tiktok_event, google_sheets_append (OAuth por diseñar), send_template (HSM)
+- ✅ Pasos google_sheets_append (real, con OAuth Google por tenant), send_template (HSM), send_internal_email, send_ga4_event
+- 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok · paso send_tiktok_event
 - ✅ Disparador etiqueta agregada (`tag_added`): panel (bulk), tool IA, nodo de flujo y Lead Ads (el import CSV NO dispara, a propósito)
 - ✅ ai_objective multi-turno (maxTurns + timeoutHours; respuestas del contacto re-evalúan y reanudan el run por rama; timeout → «unmet»)
 - ⬜ pregunta→variable, condición multi-campo · ⬜ Métricas por nodo
@@ -47,7 +48,10 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ Contrato SchedulingProvider completo + MockSchedulingProvider (doble reserva) + ClarivaSchedulingProvider + mock server del contrato
 - ✅ Selección de proveedor por tenant (scheduling_connections)
 - ✅ Receptor de webhooks Cláriva (`POST /webhooks/clariva/:connectionId`, firma HMAC por conexión; proyección local de citas + triggers appointment_*/no_show)
-- ⬜ Google Calendar / Dentalink · ⬜ Meta Lead Ads + Conversions API · ⬜ Recordatorios/confirmaciones programados (workflow plantilla existe; falta trigger appointment_upcoming automático)
+- ✅ **Dentalink** (rama feature/integrations-enable): DentalinkSchedulingProvider contra la API real de Healthatom (token por tenant cifrado; disponibilidad = ventana laboral − citas reales; tests con fixtures)
+- ✅ **Agenda personalizada** (contrato estándar + HMAC) y **Google Calendar** (espejo de citas Conversia→Google vía OAuth por tenant; googleEventId anti-duplicados)
+- ✅ **Google Sheets** (paso de workflow real) · ✅ **HubSpot** (sync unidireccional de contactos sin duplicados + backfill) · ✅ **Correo/GA4/Events Manager/API personalizada/Zapier/Make** (ver PROGRESS 2026-07-31)
+- ⬜ Meta Lead Ads + Conversions API (beta operativa) · ⬜ Recordatorios/confirmaciones programados (workflow plantilla existe; falta trigger appointment_upcoming automático) · ⬜ Google Calendar bidireccional (flag diseñado, sin implementación)
 
 ## Fase 6 — Piloto Digital Dent
 - ✅ Tenant por seed JSON (org, sede Temuco, equipos, 17 estados de lead, 7 servicios, 3 profesionales placeholder, 3 agentes, 2 workflows, canal mock)

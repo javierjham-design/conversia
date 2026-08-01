@@ -19,8 +19,7 @@ import { requirePermission } from "../tenancy/permissions";
 export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/spreadsheets"];
 export const HUBSPOT_SCOPES = ["crm.objects.contacts.read", "crm.objects.contacts.write"];
 
-function signState(orgId: string): string {
-  const ts = String(Math.floor(Date.now() / 1000));
+export function signState(orgId: string, ts = String(Math.floor(Date.now() / 1000))): string {
   const sig = createHmac("sha256", getEnv().JWT_SECRET).update(`${orgId}.${ts}`).digest("hex");
   return Buffer.from(`${orgId}.${ts}.${sig}`).toString("base64url");
 }
