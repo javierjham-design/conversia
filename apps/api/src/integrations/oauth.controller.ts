@@ -51,6 +51,41 @@ export interface OAuthTokens {
   expiry: number; // epoch ms
 }
 
+/**
+ * Página final del popup OAuth: avisa al panel (postMessage al opener) y se
+ * cierra sola. Si no hay opener (flujo en la misma pestaña o popup bloqueado),
+ * cae al redirect clásico a /integrations?provider=resultado.
+ */
+function oauthResultPage(provider: "google" | "hubspot", result: "connected" | "denied" | "invalid" | "error"): string {
+  const env = getEnv();
+  const target = `${env.WEB_URL}/integrations?${provider}=${result}`;
+  const label = provider === "google" ? "Google" : "HubSpot";
+  const message =
+    result === "connected"
+      ? `✅ Cuenta de ${label} conectada. Esta ventana se cerrará sola…`
+      : result === "denied"
+        ? `La conexión con ${label} fue cancelada. Puedes cerrar esta ventana.`
+        : `No se pudo completar la conexión con ${label}. Puedes cerrar esta ventana e intentarlo de nuevo.`;
+  // provider/result vienen de valores fijos del servidor (no input del usuario).
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>TuBot</title></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a">
+<p style="max-width:26rem;text-align:center;font-size:15px">${message}</p>
+<script>
+(function () {
+  var payload = { source: "conversia-oauth", provider: "${provider}", result: "${result}" };
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(payload, "${env.WEB_URL}");
+      setTimeout(function () { window.close(); }, 800);
+      return;
+    }
+  } catch (e) { /* opener inaccesible */ }
+  window.location.replace("${target}");
+})();
+</script>
+</body></html>`;
+}
+
 @Controller()
 export class OAuthController {
   constructor(
@@ -84,7 +119,7 @@ export class OAuthController {
   @Get("public/oauth/google/callback")
   async googleCallback(@Query("code") code: string, @Query("state") state: string, @Query("error") error: string, @Res() res: Response) {
     const env = getEnv();
-    const back = (q: string) => res.redirect(302, `${env.WEB_URL}/integrations?google=${q}`);
+    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("google", q));
     if (error) return back("denied");
     const orgId = verifyState(state ?? "");
     if (!orgId || !code) return back("invalid");
@@ -107,6 +142,8 @@ export class OAuthController {
         refresh_token: tokens.refresh_token ?? null,
         expiry: Date.now() + Number(tokens.expires_in ?? 3600) * 1000,
       }, { scopes: GOOGLE_SCOPES });
+      // Con qué cuenta quedó conectado: el id del calendario primario ES el email.
+      await this.captureAccount(orgId, "google", tokens.access_token).catch(() => undefined);
       return back("connected");
     } catch {
       return back("error");
@@ -208,7 +245,7 @@ export class OAuthController {
   @Get("public/oauth/hubspot/callback")
   async hubspotCallback(@Query("code") code: string, @Query("state") state: string, @Res() res: Response) {
     const env = getEnv();
-    const back = (q: string) => res.redirect(302, `${env.WEB_URL}/integrations?hubspot=${q}`);
+    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("hubspot", q));
     const orgId = verifyState(state ?? "");
     if (!orgId || !code) return back("invalid");
     try {
@@ -230,6 +267,7 @@ export class OAuthController {
         refresh_token: tokens.refresh_token ?? null,
         expiry: Date.now() + Number(tokens.expires_in ?? 1800) * 1000,
       }, { scopes: HUBSPOT_SCOPES });
+      await this.captureAccount(orgId, "hubspot", tokens.access_token).catch(() => undefined);
       return back("connected");
     } catch {
       return back("error");
@@ -326,6 +364,35 @@ export class OAuthController {
   }
 
   // ------------------------------- Helpers -------------------------------
+
+  /** Guarda en config con qué cuenta quedó conectada la integración (best-effort). */
+  private async captureAccount(orgId: string, provider: "google" | "hubspot", accessToken: string): Promise<void> {
+    let patch: Record<string, string> | null = null;
+    if (provider === "google") {
+      // El id del calendario primario es el email de la cuenta (scope calendar.readonly ya otorgado).
+      const res = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=owner", {
+        headers: { authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        const primary = ((data.items ?? []) as any[]).find((c) => c.primary);
+        if (primary?.id) patch = { accountEmail: String(primary.id) };
+      }
+    } else {
+      const res = await fetch(`https://api.hubapi.com/oauth/v1/access-tokens/${encodeURIComponent(accessToken)}`, { signal: AbortSignal.timeout(8_000) });
+      if (res.ok) {
+        const info: any = await res.json();
+        patch = { ...(info.user ? { accountEmail: String(info.user) } : {}), ...(info.hub_domain ? { hubDomain: String(info.hub_domain) } : {}) };
+      }
+    }
+    if (!patch || !Object.keys(patch).length) return;
+    await this.prisma.withTenant(orgId, async (tx) => {
+      const conn = await tx.integrationConnection.findFirst({ where: { provider } });
+      if (!conn) return;
+      await tx.integrationConnection.update({ where: { id: conn.id }, data: { config: { ...((conn.config as object) ?? {}), ...patch } as object } });
+    });
+  }
 
   private async storeTokens(orgId: string, provider: "google" | "hubspot", tokens: OAuthTokens, extra: Record<string, unknown>) {
     await this.prisma.withTenant(orgId, async (tx) => {

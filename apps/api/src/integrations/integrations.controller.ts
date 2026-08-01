@@ -195,6 +195,8 @@ export class IntegrationsController {
         hubspot: hubspotConn
           ? {
               status: hubspotConn.status,
+              accountEmail: (hubspotConn.config as any)?.accountEmail ?? null,
+              hubDomain: (hubspotConn.config as any)?.hubDomain ?? null,
               syncAuto: (hubspotConn.config as any)?.syncAuto !== false,
               fieldMapping: (hubspotConn.config as any)?.fieldMapping ?? null,
               lastSyncAt: hubspotConn.lastSyncAt,
@@ -204,6 +206,7 @@ export class IntegrationsController {
         google: googleConn
           ? {
               status: googleConn.status,
+              accountEmail: (googleConn.config as any)?.accountEmail ?? null,
               calendarId: (googleConn.config as any)?.calendarId ?? null,
               calendarSync: Boolean((googleConn.config as any)?.calendarSync),
               lastSyncAt: googleConn.lastSyncAt,
