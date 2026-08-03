@@ -74,36 +74,36 @@ export default function ExportSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h2 className="text-lg font-semibold">Exportar datos</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Los exports se generan en segundo plano y quedan disponibles aquí por <b>7 días</b>. Cada descarga queda
         registrada en el Registro de auditoría (dato sensible).
       </p>
 
-      <div className="mt-4 flex flex-wrap items-end gap-2 rounded-card border border-slate-200 bg-white p-4 shadow-card">
+      <div className="mt-4 flex flex-wrap items-end gap-2 rounded-card border border-line bg-panel p-4 shadow-card">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Qué exportar</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+          <span className="text-xs text-ink-muted">Qué exportar</span>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
             {Object.entries(TYPE_LABELS).map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
           </select>
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Desde (opcional)</span>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          <span className="text-xs text-ink-muted">Desde (opcional)</span>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Hasta (opcional)</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          <span className="text-xs text-ink-muted">Hasta (opcional)</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
         </label>
         <Button onClick={() => void create()} disabled={busy}>Generar export</Button>
       </div>
 
       <ul className="mt-4 space-y-1.5">
-        {jobs.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Sin exports aún.</p>}
+        {jobs.length === 0 && <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin exports aún.</p>}
         {jobs.map((j) => (
-          <li key={j.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs">
+          <li key={j.id} className="flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
             <span className="min-w-0 flex-1">
               <span className="font-medium">{TYPE_LABELS[j.type] ?? j.type}</span>
-              <span className="ml-2 text-slate-400">
+              <span className="ml-2 text-ink-subtle">
                 {new Date(j.createdAt).toLocaleString("es-CL")} · por {j.createdBy ?? "—"}
                 {j.rows !== null ? ` · ${j.rows} fila(s)` : ""}
               </span>

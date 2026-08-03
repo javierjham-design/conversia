@@ -81,36 +81,36 @@ export default function IaSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h2 className="text-lg font-semibold">Ajustes de IA</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Los agentes se crean en{" "}
-        <a href="/agents" className="inline-flex items-center gap-0.5 text-cyan-700 underline">Agentes IA <ExternalLink size={10} /></a>.
+        <a href="/agents" className="inline-flex items-center gap-0.5 text-cyan-700 underline dark:text-cyan-300">Agentes IA <ExternalLink size={10} /></a>.
       </p>
 
-      <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <p className="text-sm font-medium">Modelo y límites</p>
-        <p className="text-xs text-slate-400">Administrado por TuBot según tu plan.</p>
+        <p className="text-xs text-ink-subtle">Administrado por TuBot según tu plan.</p>
         <dl className="mt-2 grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-          <div><dt className="text-[10px] uppercase text-slate-400">Modelo</dt><dd className="font-mono text-xs">{data.managed.model}</dd></div>
-          <div><dt className="text-[10px] uppercase text-slate-400">Máx. tokens/resp.</dt><dd>{data.managed.maxTokens}</dd></div>
-          <div><dt className="text-[10px] uppercase text-slate-400">Rondas de tools</dt><dd>{data.managed.maxToolRounds}</dd></div>
-          <div><dt className="text-[10px] uppercase text-slate-400">Tope diario tokens</dt><dd>{data.managed.dailyTokenBudget.toLocaleString("es-CL")}</dd></div>
+          <div><dt className="text-[10px] uppercase text-ink-subtle">Modelo</dt><dd className="font-mono text-xs">{data.managed.model}</dd></div>
+          <div><dt className="text-[10px] uppercase text-ink-subtle">Máx. tokens/resp.</dt><dd>{data.managed.maxTokens}</dd></div>
+          <div><dt className="text-[10px] uppercase text-ink-subtle">Rondas de tools</dt><dd>{data.managed.maxToolRounds}</dd></div>
+          <div><dt className="text-[10px] uppercase text-ink-subtle">Tope diario tokens</dt><dd>{data.managed.dailyTokenBudget.toLocaleString("es-CL")}</dd></div>
         </dl>
       </div>
 
-      <div className="mt-4 space-y-3 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 space-y-3 rounded-card border border-line bg-panel p-5 shadow-card">
         <label className="flex items-center justify-between text-sm">
           <span>
             <span className="font-medium">Transcripción de notas de voz</span>
-            <span className="block text-xs text-slate-400">Convierte los audios entrantes a texto (Bandeja + agentes).</span>
+            <span className="block text-xs text-ink-subtle">Convierte los audios entrantes a texto (Bandeja + agentes).</span>
           </span>
           <input type="checkbox" checked={data.transcription} disabled={busy} onChange={(e) => void saveToggles({ transcription: e.target.checked })} />
         </label>
-        <label className="flex items-center justify-between border-t border-slate-100 pt-3 text-sm">
+        <label className="flex items-center justify-between border-t border-line pt-3 text-sm">
           <span>
             <span className="font-medium">Idioma del asistente del compositor</span>
-            <span className="block text-xs text-slate-400">Sugerir/mejorar/traducir/resumir responden en este idioma.</span>
+            <span className="block text-xs text-ink-subtle">Sugerir/mejorar/traducir/resumir responden en este idioma.</span>
           </span>
-          <select value={data.assistantLanguage} disabled={busy} onChange={(e) => void saveToggles({ assistantLanguage: e.target.value })} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+          <select value={data.assistantLanguage} disabled={busy} onChange={(e) => void saveToggles({ assistantLanguage: e.target.value })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
             <option value="es">Español</option>
             <option value="en">Inglés</option>
             <option value="pt">Portugués</option>
@@ -119,12 +119,12 @@ export default function IaSettingsPage() {
       </div>
 
       {/* ---------------- Biblioteca de plantillas de prompt ---------------- */}
-      <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Biblioteca de plantillas de prompt</p>
           <Button onClick={() => setCreating({ type: "instructions", agentIds: [] })}><Plus size={14} /> Nueva plantilla</Button>
         </div>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-ink-muted">
           Textos reutilizables que aparecen en el menú «Plantillas de prompt» del editor de agentes, según el agente al
           que las asignes. Buen uso: 🎙 <b>Tono</b> «Trato cercano, de tú, sin tecnicismos dentales»; 📋 <b>Política</b>{" "}
           «Nunca prometas resultados clínicos ni des diagnósticos»; 🎯 <b>Guion</b> «Si preguntan por implantes: valor
@@ -132,11 +132,11 @@ export default function IaSettingsPage() {
         </p>
 
         <div className="mt-3 flex gap-2">
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs">
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs">
             <option value="all">Todos los tipos</option>
             {TYPES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
           </select>
-          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs">
+          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs">
             <option value="all">Todos los agentes</option>
             {agents.map((a) => (<option key={a.id} value={a.id}>{a.name}</option>))}
           </select>
@@ -144,23 +144,23 @@ export default function IaSettingsPage() {
 
         <ul className="mt-3 space-y-1.5">
           {filtered.length === 0 && (
-            <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+            <p className="rounded-lg border border-dashed border-line p-4 text-center text-xs text-ink-subtle">
               {templates.length === 0 ? "Aún no hay plantillas — crea la primera." : "Nada calza con los filtros."}
             </p>
           )}
           {filtered.map((t) => (
-            <li key={t.id} className="rounded-lg border border-slate-100 p-2.5">
+            <li key={t.id} className="rounded-lg border border-line p-2.5">
               <div className="flex items-center gap-2">
-                <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700">{typeLabel(t.type)}</span>
+                <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300">{typeLabel(t.type)}</span>
                 <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
-                <span className="shrink-0 text-[10px] text-slate-400">
+                <span className="shrink-0 text-[10px] text-ink-subtle">
                   {t.agentIds.length === 0 ? "Todos los agentes" : `${t.agentIds.length} agente(s)`}
                 </span>
-                <button onClick={() => setEditing(t)} className="text-slate-400 hover:text-cyan-700" title="Editar"><Pencil size={13} /></button>
-                <button onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })} className="text-slate-400 hover:text-cyan-700" title="Duplicar"><Copy size={13} /></button>
-                <button onClick={() => setDeleting(t)} className="text-slate-300 hover:text-red-500" title="Eliminar"><Trash2 size={13} /></button>
+                <button onClick={() => setEditing(t)} className="text-ink-subtle hover:text-cyan-700" title="Editar"><Pencil size={13} /></button>
+                <button onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })} className="text-ink-subtle hover:text-cyan-700" title="Duplicar"><Copy size={13} /></button>
+                <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={13} /></button>
               </div>
-              <p className="mt-1 line-clamp-2 text-xs text-slate-500">{t.body}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{t.body}</p>
             </li>
           ))}
         </ul>
@@ -237,12 +237,12 @@ function TemplateEditor({
     <Modal open onClose={onClose} title={tpl ? `Editar «${tpl.name}»` : "Nueva plantilla de prompt"} wide>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nombre</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Tono cercano de la clínica" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">Nombre</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Tono cercano de la clínica" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Tipo</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+          <span className="text-xs text-ink-muted">Tipo</span>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2 py-2 text-sm">
             {TYPES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
           </select>
         </label>
@@ -250,23 +250,23 @@ function TemplateEditor({
 
       <label className="mt-3 block text-sm">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">Contenido</span>
-          <span className="text-[10px] text-slate-400">{body.length}/8000</span>
+          <span className="text-xs text-ink-muted">Contenido</span>
+          <span className="text-[10px] text-ink-subtle">{body.length}/8000</span>
         </div>
-        <textarea value={body} onChange={(e) => setBody(e.target.value.slice(0, 8000))} rows={6} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <textarea value={body} onChange={(e) => setBody(e.target.value.slice(0, 8000))} rows={6} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
       </label>
 
       <div className="mt-3">
-        <p className="text-xs text-slate-500">Disponible para</p>
+        <p className="text-xs text-ink-muted">Disponible para</p>
         <div className="mt-1 flex flex-wrap gap-2">
-          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-cyan-400 bg-cyan-50 text-cyan-800" : "border-slate-200 text-slate-500")}>
+          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
             <input type="checkbox" checked={agentIds.length === 0} onChange={() => setAgentIds([])} className="hidden" />
             🤖 Todos los agentes
           </label>
           {agents.map((a) => {
             const on = agentIds.includes(a.id);
             return (
-              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-cyan-400 bg-cyan-50 text-cyan-800" : "border-slate-200 text-slate-500")}>
+              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
                 <input
                   type="checkbox"
                   checked={on}
@@ -281,9 +281,9 @@ function TemplateEditor({
       </div>
 
       {body.trim() && (
-        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-          <p className="text-[10px] font-medium uppercase text-slate-400">Vista previa</p>
-          <p className="mt-1 whitespace-pre-wrap font-mono text-xs text-slate-600">{body.slice(0, 600)}{body.length > 600 ? "…" : ""}</p>
+        <div className="mt-3 rounded-lg border border-line bg-app p-3">
+          <p className="text-[10px] font-medium uppercase text-ink-subtle">Vista previa</p>
+          <p className="mt-1 whitespace-pre-wrap font-mono text-xs text-ink-muted">{body.slice(0, 600)}{body.length > 600 ? "…" : ""}</p>
         </div>
       )}
 

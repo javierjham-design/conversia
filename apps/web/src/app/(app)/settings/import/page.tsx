@@ -55,58 +55,58 @@ export default function ImportSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h2 className="text-lg font-semibold">Importar contactos</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Sube un CSV (hasta 10.000 filas): se procesa en segundo plano con dedupe por teléfono. La misma herramienta está
         disponible en el módulo Contactos.
       </p>
 
-      <div className="mt-4 flex items-center justify-center gap-3 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 flex items-center justify-center gap-3 rounded-card border border-line bg-panel p-5 shadow-card">
         <Button variant="secondary" onClick={downloadTemplate}>⬇ Descargar plantilla CSV</Button>
         <Button onClick={() => setOpen(true)}><Upload size={14} /> Importar CSV</Button>
       </div>
 
-      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Columnas aceptadas</h3>
-      <div className="mt-2 overflow-x-auto rounded-card border border-slate-200 bg-white shadow-card">
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Columnas aceptadas</h3>
+      <div className="mt-2 overflow-x-auto rounded-card border border-line bg-panel shadow-card">
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="border-b border-slate-100 text-[10px] uppercase text-slate-400">
+            <tr className="border-b border-line text-[10px] uppercase text-ink-subtle">
               <th className="p-2.5">Columna</th><th className="p-2.5">Descripción</th><th className="p-2.5">Ejemplo</th>
             </tr>
           </thead>
           <tbody>
             {BASE_COLUMNS.map((c) => (
-              <tr key={c.col} className="border-b border-slate-50">
-                <td className="p-2.5 font-mono text-cyan-800">{c.col}</td>
-                <td className="p-2.5 text-slate-600">{c.desc}</td>
-                <td className="p-2.5 font-mono text-slate-400">{c.ejemplo}</td>
+              <tr key={c.col} className="border-b border-line">
+                <td className="p-2.5 font-mono text-cyan-800 dark:text-cyan-300">{c.col}</td>
+                <td className="p-2.5 text-ink-muted">{c.desc}</td>
+                <td className="p-2.5 font-mono text-ink-subtle">{c.ejemplo}</td>
               </tr>
             ))}
             {fields.map((f) => (
-              <tr key={f.key} className="border-b border-slate-50">
-                <td className="p-2.5 font-mono text-cyan-800">{f.key}</td>
-                <td className="p-2.5 text-slate-600">Campo personalizado «{f.label}» (Configuración → Campos de contacto)</td>
-                <td className="p-2.5 font-mono text-slate-400">—</td>
+              <tr key={f.key} className="border-b border-line">
+                <td className="p-2.5 font-mono text-cyan-800 dark:text-cyan-300">{f.key}</td>
+                <td className="p-2.5 text-ink-muted">Campo personalizado «{f.label}» (Configuración → Campos de contacto)</td>
+                <td className="p-2.5 font-mono text-ink-subtle">—</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500">
+        <p className="border-t border-line px-3 py-2 text-[11px] text-ink-muted">
           <b>Duplicados</b>: se deduplica por teléfono — si el contacto ya existe se omite (o solo rellena campos vacíos si marcas «Actualizar existentes»). Acepta separador coma o punto y coma (Excel Chile) y UTF-8 con BOM (tildes OK).
         </p>
       </div>
 
-      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Historial de imports</h3>
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Historial de imports</h3>
       {!history ? (
         <Skeleton className="mt-2 h-32" />
       ) : history.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Sin imports registrados.</p>
+        <p className="mt-2 rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin imports registrados.</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {history.map((h) => (
-            <li key={h.id} className="rounded-lg border border-slate-100 bg-white px-3 py-1.5 text-xs">
-              <span className="text-slate-600">{new Date(h.createdAt).toLocaleString("es-CL")}</span>
-              <span className="ml-2 text-slate-400">por {h.actorName ?? "—"}</span>
-              {h.after && <span className="ml-2 text-slate-500">{JSON.stringify(h.after).slice(0, 120)}</span>}
+            <li key={h.id} className="rounded-lg border border-line bg-panel px-3 py-1.5 text-xs">
+              <span className="text-ink-muted">{new Date(h.createdAt).toLocaleString("es-CL")}</span>
+              <span className="ml-2 text-ink-subtle">por {h.actorName ?? "—"}</span>
+              {h.after && <span className="ml-2 text-ink-muted">{JSON.stringify(h.after).slice(0, 120)}</span>}
             </li>
           ))}
         </ul>

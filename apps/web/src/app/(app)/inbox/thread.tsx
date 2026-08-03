@@ -2,11 +2,11 @@
 
 /** Zona 3: cabecera con indicadores + hilo de mensajes + compositor. */
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Megaphone, PanelRight } from "lucide-react";
+import { Clock, ExternalLink, Megaphone, PanelRight, Smartphone } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import { Composer } from "./composer";
-import { displayName, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
+import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
 
 function AudioBubble({ conversationId, messageId, transcript, outbound }: { conversationId: string; messageId: string; transcript: string | null; outbound: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -36,7 +36,7 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
         <button
           onClick={() => void load()}
           disabled={loading}
-          className={`mb-1 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs ${outbound ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-700"}`}
+          className={cn("mb-1 flex items-center gap-1.5 rounded-control px-2 py-1 text-xs", outbound ? "bg-white/20 text-white" : "bg-app text-ink-muted")}
         >
           🎤 {loading ? "Cargando…" : err ? "No disponible" : "Escuchar audio"}
         </button>
@@ -47,6 +47,42 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
 }
 
 const STATUS_TICK: Record<string, string> = { PENDING: "🕓", SENT: "✓", DELIVERED: "✓✓", READ: "✓✓", FAILED: "⚠" };
+
+/** Etiqueta de separador de día: "Hoy" / "Ayer" / "5 de agosto". */
+function dayLabel(iso: string): string {
+  const d = new Date(iso);
+  const today = new Date();
+  const yest = new Date();
+  yest.setDate(today.getDate() - 1);
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return "Hoy";
+  if (same(d, yest)) return "Ayer";
+  return d.toLocaleDateString("es-CL", { day: "numeric", month: "long", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+}
+
+/** Comentario interno o Resumen IA como tarjeta de nota (borde izquierdo semántico).
+ *  El resumen IA se muestra plegable para no dominar el hilo. */
+function NoteCard({ body, author, at }: { body: string; author: string; at: string }) {
+  const isSummary = body.startsWith("📋");
+  const [open, setOpen] = useState(!isSummary);
+  const time = new Date(at).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="mx-auto max-w-lg rounded-card border border-amber-200/70 border-l-[3px] border-l-amber-400 bg-amber-50/70 px-3.5 py-2 text-sm text-ink dark:border-amber-500/25 dark:border-l-amber-500/60 dark:bg-amber-500/[0.07]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1 text-2xs font-medium text-amber-700 dark:text-amber-300">
+          {isSummary ? "📋 Resumen IA" : "🔒 Comentario interno"} · solo equipo
+        </span>
+        {isSummary && (
+          <button onClick={() => setOpen(!open)} className="text-2xs text-amber-700 underline dark:text-amber-300">
+            {open ? "Ocultar" : "Ver"}
+          </button>
+        )}
+      </div>
+      {open && <p className="mt-1 whitespace-pre-wrap text-ink">{isSummary ? body.replace(/^📋[^\n]*\n?/, "") : body}</p>}
+      <p className="mt-1 text-2xs text-ink-subtle tnum">{author} · {time}</p>
+    </div>
+  );
+}
 
 export function Thread({
   conversation,
@@ -79,6 +115,8 @@ export function Thread({
 }) {
   const toast = useToast();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showJump, setShowJump] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<{ id: string; name: string; language: string; bodyText: string }[]>([]);
   const [sendingTemplate, setSendingTemplate] = useState(false);
@@ -147,97 +185,133 @@ export function Thread({
     }
   };
 
-  const sel = "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs";
+  // Selects terciarios: compactos, borde sutil, sin competir con la acción primaria.
+  const sel = "rounded-control border border-line bg-app px-2 py-1.5 text-xs text-ink transition-colors hover:border-line-strong max-w-[8.5rem] truncate";
   const closed = conversation.status === "CLOSED";
+  const windowTone =
+    windowLevel === "ok"
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+      : windowLevel === "warn"
+        ? "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+        : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300";
+  const windowShort = windowOpen ? `${Math.floor(msLeft / 3_600_000)} h ${Math.floor((msLeft % 3_600_000) / 60_000)} m` : "cerrada";
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       {/* ---------- Cabecera ---------- */}
-      <header className="border-b border-slate-200 bg-white px-3 py-2">
+      <header className="border-b border-line bg-panel px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onBack} className="text-lg text-slate-500 hover:text-slate-800 lg:hidden" aria-label="Volver">←</button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate font-medium">{displayName(conversation.contact)}</h2>
-              {/* Selector de etapa del ciclo de vida, editable aquí mismo */}
-              <select
-                value={context?.stage?.code ?? ""}
-                onChange={(e) => void setStage(e.target.value)}
-                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium"
-                style={context?.stage?.color ? { borderColor: context.stage.color, color: context.stage.color } : {}}
-                title="Etapa del ciclo de vida"
-              >
-                <option value="">— etapa —</option>
-                {stages.map((s) => (
-                  <option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
-                ))}
-              </select>
+          <button onClick={onBack} className="text-lg text-ink-muted hover:text-ink lg:hidden" aria-label="Volver">←</button>
+          {/* Zona izquierda: identidad */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold", avatarColor(conversation.contact))}>
+              {initials(conversation.contact).toUpperCase()}
             </div>
-            <p className="truncate text-[11px] text-slate-400">
-              {conversation.contact.phone}
-              {channel && (
-                <span title="Número por el que se conversa">
-                  {" "}· 📱 {channel.name}
-                  {channel.displayPhone ? ` (${channel.displayPhone})` : ""}
-                  {channel.status === "error" && <span className="text-red-500"> ⚠ reautorizar</span>}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base font-semibold text-ink">{displayName(conversation.contact)}</h2>
+                {/* Etapa como CHIP con el color de la etapa (select estilizado) */}
+                <div
+                  className="relative inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium"
+                  style={
+                    context?.stage
+                      ? { backgroundColor: `${context.stage.color ?? "#94a3b8"}1f`, color: context.stage.color ?? "#64748b" }
+                      : undefined
+                  }
+                >
+                  <span className={cn("pointer-events-none flex items-center gap-1", !context?.stage && "text-ink-subtle")}>
+                    {context?.stage ? `${context.stage.emoji ? `${context.stage.emoji} ` : ""}${context.stage.name}` : "— etapa —"}
+                    <span className="opacity-60">▾</span>
+                  </span>
+                  <select
+                    value={context?.stage?.code ?? ""}
+                    onChange={(e) => void setStage(e.target.value)}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                    title="Etapa del ciclo de vida"
+                    aria-label="Etapa del ciclo de vida"
+                  >
+                    <option value="">— etapa —</option>
+                    {stages.map((s) => (
+                      <option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Segunda línea de contexto: teléfono · canal · ventana 24h */}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-ink-subtle">
+                <span className="tnum">{conversation.contact.phone}</span>
+                {channel && (
+                  <span className="inline-flex items-center gap-1" title="Número por el que se conversa">
+                    <Smartphone size={11} /> {channel.name}
+                    {channel.displayPhone ? ` · ${channel.displayPhone}` : ""}
+                    {channel.status === "error" && <span className="text-red-500">⚠ reautorizar</span>}
+                  </span>
+                )}
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium tnum", windowTone)} title={windowLabel}>
+                  <Clock size={10} /> {windowShort}
                 </span>
-              )}
-            </p>
+              </div>
+            </div>
           </div>
 
+          {/* Zona derecha: 1 primaria + secundaria + terciarios */}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
-              <option value="">👤 Sin asignar</option>
-              {users.map((u) => (
-                <option key={u.userId} value={u.userId}>👤 {u.name}</option>
-              ))}
-            </select>
-            {teams.length > 0 && (
-              <select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
-                <option value="">👥 Sin equipo</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>👥 {t.name}</option>
+            <div className="flex items-center gap-1 rounded-control bg-app p-0.5">
+              <select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
+                <option value="">👤 Sin asignar</option>
+                {users.map((u) => (
+                  <option key={u.userId} value={u.userId}>👤 {u.name}</option>
                 ))}
               </select>
-            )}
-            <select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
-              <option value="">🤖 Sin agente</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>🤖 {a.name}</option>
-              ))}
-            </select>
-            {workflows.length > 0 && (
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    void act("run-workflow", { workflowId: e.target.value }).then(() => toast.push("Flujo ejecutado", "ok"));
-                  }
-                }}
-                className={sel}
-                title="Ejecutar un flujo"
-              >
-                <option value="">⚡ Flujo…</option>
-                {workflows.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
+              {teams.length > 0 && (
+                <select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
+                  <option value="">👥 Sin equipo</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>👥 {t.name}</option>
+                  ))}
+                </select>
+              )}
+              <select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
+                <option value="">🤖 Sin agente</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>🤖 {a.name}</option>
                 ))}
               </select>
-            )}
+              {workflows.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      void act("run-workflow", { workflowId: e.target.value }).then(() => toast.push("Flujo ejecutado", "ok"));
+                    }
+                  }}
+                  className={sel}
+                  title="Ejecutar un flujo"
+                >
+                  <option value="">⚡ Flujo…</option>
+                  {workflows.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {/* Acción primaria única */}
             <button
               onClick={() => void act(conversation.aiEnabled ? "takeover" : "release")}
               className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-medium",
-                conversation.aiEnabled ? "bg-amber-100 text-amber-800 hover:bg-amber-200" : "bg-cyan-100 text-cyan-800 hover:bg-cyan-200",
+                "rounded-control px-3 py-1.5 text-xs font-semibold shadow-e1 transition-colors",
+                conversation.aiEnabled ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-brand-300 bg-brand-soft text-brand-700 hover:bg-brand-100 dark:border-brand-500/40 dark:text-brand-300",
               )}
             >
               {conversation.aiEnabled ? "Tomar control" : "Devolver a IA"}
             </button>
+            {/* Secundaria */}
             {closed ? (
-              <button onClick={() => void act("reopen")} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50">Reabrir</button>
+              <button onClick={() => void act("reopen")} className="rounded-control border border-line-strong px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-app">Reabrir</button>
             ) : (
-              <button onClick={() => setCloseNote("")} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50">Cerrar</button>
+              <button onClick={() => setCloseNote("")} className="rounded-control border border-line-strong px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-app">Cerrar</button>
             )}
-            <button onClick={onTogglePanel} className={cn("rounded-lg border px-2 py-1.5", panelOpen ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-500 hover:bg-slate-50")} title="Panel del contacto">
+            <button onClick={onTogglePanel} className={cn("rounded-control border p-1.5 transition-colors", panelOpen ? "border-brand-300 bg-brand-soft text-brand-700 dark:border-brand-500/40 dark:text-brand-300" : "border-line-strong text-ink-muted hover:bg-app")} title="Panel del contacto">
               <PanelRight size={14} />
             </button>
           </div>
@@ -245,21 +319,29 @@ export function Thread({
       </header>
 
       {/* ---------- Hilo ---------- */}
-      <div className="flex-1 space-y-2 overflow-y-auto p-4">
+      <div className="relative flex-1 overflow-hidden bg-app">
+        <div
+          ref={scrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight > 240);
+          }}
+          className="h-full space-y-2 overflow-y-auto p-4"
+        >
         {/* Banner de origen por anuncio CTWA */}
         {context?.ad && (
-          <div className="mx-auto max-w-lg rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800">
-            <p className="flex items-center gap-1.5 font-medium"><Megaphone size={13} /> Conversación iniciada desde un anuncio</p>
-            {context.ad.headline && <p className="mt-1">«{context.ad.headline}»</p>}
-            <div className="mt-1 flex items-center gap-3">
+          <div className="mx-auto max-w-lg rounded-card border-l-[3px] border-violet-400 bg-raised p-3 text-xs text-ink shadow-e1 dark:border-violet-500">
+            <p className="flex items-center gap-1.5 font-medium text-violet-700 dark:text-violet-300"><Megaphone size={13} /> Conversación iniciada desde un anuncio</p>
+            {context.ad.headline && <p className="mt-1 text-ink-muted">«{context.ad.headline}»</p>}
+            <div className="mt-1.5 flex items-center gap-3">
               {context.ad.imageUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={context.ad.imageUrl} alt="Anuncio" className="max-h-16 rounded-lg object-cover" />
+                <img src={context.ad.imageUrl} alt="Anuncio" className="max-h-16 rounded-control object-cover" />
               )}
-              <div className="min-w-0 text-[10px] text-violet-500">
+              <div className="min-w-0 text-2xs text-ink-subtle">
                 {context.ad.ctwaClid && <p className="truncate">ctwa_clid: {context.ad.ctwaClid}</p>}
                 {context.ad.sourceUrl && (
-                  <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
+                  <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300 ">
                     Ver anuncio <ExternalLink size={10} />
                   </a>
                 )}
@@ -268,12 +350,12 @@ export function Thread({
           </div>
         )}
         {context?.leadForm && (
-          <div className="mx-auto max-w-lg rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800">
-            <p className="font-medium">📋 Llegó desde un formulario de Meta</p>
-            <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <div className="mx-auto max-w-lg rounded-card border-l-[3px] border-sky-400 bg-raised p-3 text-xs text-ink shadow-e1 dark:border-sky-500">
+            <p className="font-medium text-sky-700 dark:text-sky-300">📋 Llegó desde un formulario de Meta</p>
+            <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-ink-muted">
               {context.leadForm.fields.slice(0, 8).map(([k, v]) => (
                 <div key={k} className="flex gap-1">
-                  <dt className="shrink-0 text-sky-500">{k}:</dt>
+                  <dt className="shrink-0 text-ink-subtle">{k}:</dt>
                   <dd className="truncate">{String(v)}</dd>
                 </div>
               ))}
@@ -281,61 +363,96 @@ export function Thread({
           </div>
         )}
 
-        {messages.map((m) => {
-          // Eventos del sistema: línea centrada con estilo propio
-          if (m.type === "SYSTEM") {
+        {(() => {
+          let lastDay = "";
+          return messages.map((m) => {
+            const dl = dayLabel(m.createdAt);
+            const sep =
+              dl !== lastDay ? (
+                <div key={`sep-${m.id}`} className="my-3 flex items-center gap-3">
+                  <span className="h-px flex-1 bg-line" />
+                  <span className="text-2xs font-medium text-ink-subtle">{dl}</span>
+                  <span className="h-px flex-1 bg-line" />
+                </div>
+              ) : null;
+            lastDay = dl;
+
+            // Eventos del sistema: línea centrada fina con icono
+            if (m.type === "SYSTEM") {
+              return (
+                <div key={m.id}>
+                  {sep}
+                  <div className="flex justify-center py-0.5">
+                    <span className="text-2xs text-ink-subtle">
+                      {m.body} · {new Date(m.createdAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+            // Comentarios internos / Resumen IA: tarjeta de nota (no bloque amarillo)
+            if (m.visibility === "INTERNAL" || m.type === "NOTE") {
+              return (
+                <div key={m.id}>
+                  {sep}
+                  <NoteCard body={m.body ?? ""} author={m.authorName ?? (m.authorType === "AGENT" ? "IA" : "equipo")} at={m.createdAt} />
+                </div>
+              );
+            }
+            const outbound = m.direction === "OUTBOUND";
+            const payload = (m.payload ?? {}) as Record<string, any>;
+            const failed = m.status === "FAILED";
             return (
-              <div key={m.id} className="flex justify-center">
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] text-slate-500">
-                  {m.body} · {new Date(m.createdAt).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            );
-          }
-          // Comentarios internos: burbuja amarilla solo-equipo
-          if (m.visibility === "INTERNAL" || m.type === "NOTE") {
-            return (
-              <div key={m.id} className="flex justify-center">
-                <div className="max-w-md rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-                  <p className="whitespace-pre-wrap">{m.body}</p>
-                  <p className="mt-1 text-[10px] text-amber-600">
-                    🔒 Solo equipo · {m.authorName ?? (m.authorType === "AGENT" ? "IA" : "equipo")} ·{" "}
-                    {new Date(m.createdAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
+              <div key={m.id}>
+                {sep}
+                <div className={cn("flex", outbound ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[62ch] rounded-bubble px-3.5 py-2 text-sm shadow-e1",
+                      outbound
+                        ? cn("rounded-br-md text-white", failed ? "bg-red-500" : "bg-brand-600")
+                        : "rounded-bl-md border border-line bg-raised text-ink",
+                    )}
+                  >
+                    {m.type === "AUDIO" ? (
+                      <AudioBubble conversationId={conversation.id} messageId={m.id} transcript={m.body} outbound={outbound} />
+                    ) : m.type === "IMAGE" ? (
+                      <p className="whitespace-pre-wrap">📷 {payload.caption ?? m.body ?? "Imagen"}</p>
+                    ) : m.type === "DOCUMENT" ? (
+                      <p className="whitespace-pre-wrap">📎 {payload.filename ?? m.body ?? "Documento"}</p>
+                    ) : m.type === "TEMPLATE" ? (
+                      <div>
+                        <p className="mb-0.5 text-2xs opacity-70">📄 Plantilla {payload.templateName ?? ""}</p>
+                        <p className="whitespace-pre-wrap">{m.body}</p>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{m.body}</p>
+                    )}
+                    <p className={cn("mt-1 flex items-center gap-1 text-2xs tnum", outbound ? "text-white/70" : "text-ink-subtle")}>
+                      {outbound ? (m.authorType === "AGENT" ? "🤖 IA" : m.authorName ?? "equipo") : displayName(conversation.contact)} ·{" "}
+                      {new Date(m.createdAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
+                      {outbound && <span title={m.status.toLowerCase()}>{STATUS_TICK[m.status] ?? ""}</span>}
+                      {failed && m.error ? <span className="text-red-100" title={String(m.error)}>· {String(m.error).slice(0, 50)}</span> : null}
+                    </p>
+                  </div>
                 </div>
               </div>
             );
-          }
-          const outbound = m.direction === "OUTBOUND";
-          const payload = (m.payload ?? {}) as Record<string, any>;
-          return (
-            <div key={m.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-md rounded-2xl px-4 py-2 text-sm ${outbound ? "bg-cyan-700 text-white" : "border border-slate-200 bg-white"}`}>
-                {m.type === "AUDIO" ? (
-                  <AudioBubble conversationId={conversation.id} messageId={m.id} transcript={m.body} outbound={outbound} />
-                ) : m.type === "IMAGE" ? (
-                  <p className="whitespace-pre-wrap">📷 {payload.caption ?? m.body ?? "Imagen"}</p>
-                ) : m.type === "DOCUMENT" ? (
-                  <p className="whitespace-pre-wrap">📎 {payload.filename ?? m.body ?? "Documento"}</p>
-                ) : m.type === "TEMPLATE" ? (
-                  <div>
-                    <p className="mb-0.5 text-[10px] opacity-70">📄 Plantilla {payload.templateName ?? ""}</p>
-                    <p className="whitespace-pre-wrap">{m.body}</p>
-                  </div>
-                ) : (
-                  <p className="whitespace-pre-wrap">{m.body}</p>
-                )}
-                <p className={`mt-1 text-[10px] ${outbound ? "text-cyan-200" : "text-slate-400"}`}>
-                  {outbound ? (m.authorType === "AGENT" ? "🤖 IA" : m.authorName ?? "equipo") : displayName(conversation.contact)} ·{" "}
-                  {new Date(m.createdAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
-                  {outbound && <span title={m.status.toLowerCase()}> {STATUS_TICK[m.status] ?? ""}</span>}
-                  {m.status === "FAILED" && m.error ? <span className="text-red-300"> {String(m.error).slice(0, 60)}</span> : null}
-                </p>
-              </div>
-            </div>
-          );
-        })}
+          });
+        })()}
         <div ref={bottomRef} />
+        </div>
+        {/* Botón flotante: ir al último mensaje */}
+        {showJump && (
+          <button
+            onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+            className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-raised text-ink-muted shadow-e2 transition-colors hover:text-ink"
+            title="Ir al último mensaje"
+            aria-label="Ir al último mensaje"
+          >
+            ↓
+          </button>
+        )}
       </div>
 
       {/* ---------- Compositor ---------- */}
@@ -350,11 +467,11 @@ export function Thread({
 
       {/* Modal de plantillas (ventana cerrada) */}
       <Modal open={showTemplates} onClose={() => setShowTemplates(false)} title="Enviar plantilla">
-        <p className="mb-3 text-xs text-slate-500">
+        <p className="mb-3 text-xs text-ink-muted">
           Las variables se completan con los datos del contacto. Las plantillas aprobadas funcionan aunque la ventana de 24 h esté cerrada.
         </p>
         {templates.length === 0 ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <p className="rounded-control bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
             No hay plantillas aprobadas. Créalas o sincronízalas en <a href="/channels" className="underline">Canales → Plantillas</a>.
           </p>
         ) : (
@@ -373,10 +490,10 @@ export function Thread({
                     .catch((err) => toast.push((err as Error).message, "error"))
                     .finally(() => setSendingTemplate(false));
                 }}
-                className="block w-full rounded-lg border border-slate-200 p-3 text-left hover:border-cyan-400 hover:bg-cyan-50 disabled:opacity-50"
+                className="block w-full rounded-control border border-line p-3 text-left transition-colors hover:border-brand-400 hover:bg-brand-soft disabled:opacity-50"
               >
-                <p className="font-mono text-xs font-medium">{t.name} · {t.language}</p>
-                <p className="mt-1 text-xs text-slate-500">{t.bodyText.slice(0, 140)}{t.bodyText.length > 140 ? "…" : ""}</p>
+                <p className="font-mono text-xs font-medium text-ink">{t.name} · {t.language}</p>
+                <p className="mt-1 text-xs text-ink-muted">{t.bodyText.slice(0, 140)}{t.bodyText.length > 140 ? "…" : ""}</p>
               </button>
             ))}
           </div>
@@ -386,8 +503,8 @@ export function Thread({
       {/* Cerrar con nota opcional */}
       <Modal open={closeNote !== null} onClose={() => setCloseNote(null)} title="Cerrar conversación">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nota de cierre (opcional, queda como comentario interno)</span>
-          <textarea value={closeNote ?? ""} onChange={(e) => setCloseNote(e.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="p. ej. Agendó limpieza para el martes; quedó de confirmar la hora" />
+          <span className="text-xs text-ink-muted">Nota de cierre (opcional, queda como comentario interno)</span>
+          <textarea value={closeNote ?? ""} onChange={(e) => setCloseNote(e.target.value)} rows={3} className="mt-1 w-full rounded-control border border-line-strong bg-panel px-3 py-2 text-sm text-ink" placeholder="p. ej. Agendó limpieza para el martes; quedó de confirmar la hora" />
         </label>
         <div className="mt-3 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setCloseNote(null)}>Cancelar</Button>
@@ -404,7 +521,7 @@ export function Thread({
 
       {/* Oferta de envío CAPI al marcar etapa de conversión */}
       <Modal open={capiOffer !== null} onClose={() => setCapiOffer(null)} title="¿Reportar la conversión a Meta?">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-ink-muted">
           Marcaste la etapa <b>{capiOffer?.stageName}</b> (conversión). ¿Quieres enviar el evento <b>Purchase</b> a Meta
           Conversions API para optimizar tus campañas?
         </p>

@@ -2,10 +2,14 @@
 
 /** Panel derecho: datos del contacto, origen, e indicaciones para la IA. */
 import { useState } from "react";
-import { ExternalLink, Lightbulb, Megaphone, User, X } from "lucide-react";
+import { ExternalLink, Megaphone, Sparkles, User, X } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, StatusBadge, useToast } from "@/components/ui";
-import { displayName, type ConvContext } from "./types";
+import { StatusBadge, cn, useToast } from "@/components/ui";
+import { avatarColor, displayName, initials, type ConvContext } from "./types";
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <p className="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-subtle">{children}</p>;
+}
 
 export function ContactPanel({
   conversationId,
@@ -24,8 +28,10 @@ export function ContactPanel({
 
   if (!context) {
     return (
-      <div className="flex h-full w-72 shrink-0 items-center justify-center border-l border-slate-200 bg-white text-xs text-slate-400">
-        Cargando contacto…
+      <div className="flex h-full w-72 shrink-0 flex-col gap-3 border-l border-line bg-panel p-3">
+        <div className="h-12 shimmer rounded-card bg-line" />
+        <div className="h-24 shimmer rounded-card bg-line" />
+        <div className="h-32 shimmer rounded-card bg-line" />
       </div>
     );
   }
@@ -52,58 +58,71 @@ export function ContactPanel({
   }
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-l border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-100 p-3">
-        <h3 className="flex items-center gap-1.5 text-sm font-semibold"><User size={14} /> Contacto</h3>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Cerrar panel">
+    <aside className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-l border-line bg-panel">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-panel px-3 py-2.5">
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink"><User size={14} /> Contacto</h3>
+        <button onClick={onClose} className="rounded-control p-1 text-ink-subtle transition-colors hover:bg-app hover:text-ink" aria-label="Cerrar panel">
           <X size={15} />
         </button>
       </div>
 
-      <div className="space-y-3 p-3">
+      <div className="space-y-4 p-3">
         {/* Datos básicos */}
         <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-100 text-sm font-semibold text-cyan-700">
-              {displayName(c).slice(0, 1).toUpperCase()}
+          <div className="flex items-center gap-2.5">
+            <div className={cn("flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold", avatarColor(c))}>
+              {initials(c).toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{displayName(c)}</p>
-              <p className="truncate text-xs text-slate-400">
+              <p className="truncate text-sm font-semibold text-ink">{displayName(c)}</p>
+              <p className="truncate text-xs text-ink-subtle tnum">
                 {c.phone}
                 {c.country ? ` · ${c.country}` : ""}
               </p>
             </div>
           </div>
-          <div className="mt-2 space-y-0.5 text-xs text-slate-500">
-            {c.email && <p>✉ {c.email}</p>}
-            <p>
-              Desde {new Date(c.createdAt).toLocaleDateString("es-CL")}
-              {c.isReturning ? " · recurrente" : ""}
-              {c.source ? ` · vía ${c.source}` : ""}
-            </p>
-            {c.blocked && <StatusBadge kind="error" label="Bloqueado" />}
-          </div>
-          <a href={`/contacts?open=${c.id}`} className="mt-1.5 inline-flex items-center gap-1 text-xs text-cyan-700 underline">
+          <dl className="mt-2.5 space-y-1 text-xs">
+            {c.email && (
+              <div className="flex gap-2">
+                <dt className="w-14 shrink-0 text-ink-subtle">Email</dt>
+                <dd className="min-w-0 truncate text-ink-muted">{c.email}</dd>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <dt className="w-14 shrink-0 text-ink-subtle">Desde</dt>
+              <dd className="text-ink-muted">
+                {new Date(c.createdAt).toLocaleDateString("es-CL")}
+                {c.isReturning ? " · recurrente" : ""}
+              </dd>
+            </div>
+            {c.source && (
+              <div className="flex gap-2">
+                <dt className="w-14 shrink-0 text-ink-subtle">Origen</dt>
+                <dd className="text-ink-muted">{c.source}</dd>
+              </div>
+            )}
+          </dl>
+          {c.blocked && <div className="mt-1.5"><StatusBadge kind="error" label="Bloqueado" /></div>}
+          <a href={`/contacts?open=${c.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 dark:text-brand-400">
             Ver ficha completa <ExternalLink size={11} />
           </a>
         </div>
 
         {/* Etapa + tags */}
-        <div className="rounded-lg border border-slate-100 p-2">
-          <p className="text-[11px] font-semibold uppercase text-slate-400">Etapa</p>
+        <div>
+          <SectionTitle>Etapa y etiquetas</SectionTitle>
           {context.stage ? (
-            <span className="mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${context.stage.color ?? "#94a3b8"}22`, color: context.stage.color ?? "#475569" }}>
+            <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${context.stage.color ?? "#94a3b8"}1f`, color: context.stage.color ?? "#475569" }}>
               {context.stage.emoji ? <span>{context.stage.emoji}</span> : <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: context.stage.color ?? "#94a3b8" }} />}
               {context.stage.name}
             </span>
           ) : (
-            <p className="text-xs text-slate-400">Sin etapa aún</p>
+            <p className="text-xs text-ink-subtle">Sin etapa aún</p>
           )}
           {context.tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {context.tags.map((t) => (
-                <span key={t} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">{t}</span>
+                <span key={t} className="rounded bg-line px-1.5 py-0.5 text-[10px] text-ink-muted">{t}</span>
               ))}
             </div>
           )}
@@ -111,31 +130,31 @@ export function ContactPanel({
 
         {/* Origen por anuncio / formulario */}
         {context.ad && (
-          <div className="rounded-lg border border-violet-200 bg-violet-50 p-2 text-xs text-violet-800">
-            <p className="flex items-center gap-1 font-medium"><Megaphone size={12} /> Llegó desde un anuncio</p>
-            {context.ad.headline && <p className="mt-1">«{context.ad.headline}»</p>}
+          <div className="rounded-card border border-line border-l-[3px] border-l-violet-400 bg-raised p-2.5 text-xs text-ink dark:border-l-violet-500">
+            <p className="flex items-center gap-1 font-medium text-violet-700 dark:text-violet-300"><Megaphone size={12} /> Llegó desde un anuncio</p>
+            {context.ad.headline && <p className="mt-1 text-ink-muted">«{context.ad.headline}»</p>}
             {context.ad.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={context.ad.imageUrl} alt="Anuncio" className="mt-1.5 max-h-24 rounded-lg object-cover" />
+              <img src={context.ad.imageUrl} alt="Anuncio" className="mt-1.5 max-h-24 rounded-control object-cover" />
             )}
-            <p className="mt-1 break-all text-[10px] text-violet-500">
+            <p className="mt-1 break-all text-[10px] text-ink-subtle">
               {context.ad.adId ? `ad ${context.ad.adId}` : ""}
               {context.ad.ctwaClid ? ` · ctwa ${context.ad.ctwaClid.slice(0, 18)}…` : ""}
             </p>
             {context.ad.sourceUrl && (
-              <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 underline">
+              <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300 ">
                 Ver anuncio <ExternalLink size={10} />
               </a>
             )}
           </div>
         )}
         {context.leadForm && (
-          <div className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-800">
-            <p className="font-medium">📋 Formulario de Meta</p>
-            <dl className="mt-1 space-y-0.5">
+          <div className="rounded-card border border-line border-l-[3px] border-l-sky-400 bg-raised p-2.5 text-xs text-ink dark:border-l-sky-500">
+            <p className="font-medium text-sky-700 dark:text-sky-300">📋 Formulario de Meta</p>
+            <dl className="mt-1 space-y-0.5 text-ink-muted">
               {context.leadForm.fields.slice(0, 8).map(([k, v]) => (
                 <div key={k} className="flex gap-1">
-                  <dt className="shrink-0 text-sky-500">{k}:</dt>
+                  <dt className="shrink-0 text-ink-subtle">{k}:</dt>
                   <dd className="truncate">{String(v)}</dd>
                 </div>
               ))}
@@ -143,35 +162,39 @@ export function ContactPanel({
           </div>
         )}
 
-        {/* Indicaciones para la IA */}
-        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2">
-          <p className="flex items-center gap-1 text-[11px] font-semibold uppercase text-amber-700">
-            <Lightbulb size={12} /> Indicaciones para la IA
-          </p>
-          <p className="mt-0.5 text-[10px] text-amber-600">
-            Solo para ESTA conversación. El bot las sigue en cada respuesta (sin saltarse las reglas de seguridad).
+        {/* Indicaciones para la IA — herramienta, no advertencia */}
+        <div className="rounded-card border border-brand-200 bg-brand-soft p-2.5 dark:border-brand-500/30">
+          <SectionTitle>
+            <span className="flex items-center gap-1 text-brand-700 dark:text-brand-300">
+              <Sparkles size={12} /> Indicaciones para la IA
+            </span>
+          </SectionTitle>
+          <p className="text-[10px] text-ink-muted">
+            Solo para ESTA conversación. El bot las sigue en cada respuesta, sin saltarse las reglas de seguridad.
           </p>
           <textarea
             value={newNote}
             onChange={(e) => setNewNote(e.target.value)}
             rows={2}
             placeholder="p. ej. Ofrécele el plan con 20% dcto; trátalo de usted"
-            className="mt-1.5 w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs"
+            className="mt-1.5 w-full rounded-control border border-line-strong bg-panel px-2 py-1.5 text-xs text-ink placeholder:text-ink-subtle"
           />
-          <Button onClick={() => void addNote()} disabled={busy || newNote.trim().length < 2} className="mt-1 w-full !py-1 text-xs">
+          <button
+            onClick={() => void addNote()}
+            disabled={busy || newNote.trim().length < 2}
+            className="mt-1 w-full rounded-control bg-brand-600 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Agregar indicación
-          </Button>
+          </button>
 
           {context.aiNotes.length > 0 && (
             <ul className="mt-2 space-y-1.5">
               {context.aiNotes.map((n) => (
-                <li key={n.id} className={`rounded-lg border p-1.5 text-xs ${n.active ? "border-amber-300 bg-white" : "border-slate-200 bg-slate-50 opacity-60"}`}>
+                <li key={n.id} className={cn("rounded-control border p-1.5 text-xs", n.active ? "border-line bg-panel text-ink" : "border-line bg-app opacity-60")}>
                   <p className={n.active ? "" : "line-through"}>{n.body}</p>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>
-                      {n.createdBy ?? "equipo"} · {new Date(n.createdAt).toLocaleDateString("es-CL")}
-                    </span>
-                    <button onClick={() => void toggleNote(n.id, !n.active)} className="underline hover:text-slate-600">
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-ink-subtle">
+                    <span>{n.createdBy ?? "equipo"} · {new Date(n.createdAt).toLocaleDateString("es-CL")}</span>
+                    <button onClick={() => void toggleNote(n.id, !n.active)} className="font-medium underline transition-colors hover:text-ink">
                       {n.active ? "Desactivar" : "Reactivar"}
                     </button>
                   </div>

@@ -136,8 +136,8 @@ export default function WorkflowsPage() {
         actions={<Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear workflow</Button>}
       />
 
-      <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 sm:max-w-xs">
-        <Search size={15} className="text-slate-400" />
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 sm:max-w-xs">
+        <Search size={15} className="text-ink-subtle" />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -147,7 +147,7 @@ export default function WorkflowsPage() {
       </div>
 
       {rows === null ? (
-        <p className="text-sm text-slate-400">Cargando…</p>
+        <p className="text-sm text-ink-subtle">Cargando…</p>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<WorkflowIcon size={28} />}
@@ -174,35 +174,35 @@ export default function WorkflowsPage() {
       {/* Crear */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear workflow" wide>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nombre del flujo (opcional si eliges una plantilla)</span>
+          <span className="text-xs text-ink-muted">Nombre del flujo (opcional si eliges una plantilla)</span>
           <input
             autoFocus
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder="p. ej. Seguimiento de leads fríos"
-            className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
           />
         </label>
 
         <div className="mt-4">
-          <p className="mb-2 text-xs font-medium text-slate-600">Empieza desde una plantilla</p>
+          <p className="mb-2 text-xs font-medium text-ink-muted">Empieza desde una plantilla</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {WORKFLOW_TEMPLATES.map((t) => (
               <button
                 key={t.key}
                 onClick={() => void createFromTemplate(t)}
                 disabled={busy}
-                className="flex flex-col rounded-lg border border-slate-200 p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
+                className="flex flex-col rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
               >
-                <span className="text-sm font-medium text-navy-900">{t.name}</span>
-                <span className="mt-0.5 text-xs text-slate-500">{t.description}</span>
+                <span className="text-sm font-medium text-ink">{t.name}</span>
+                <span className="mt-0.5 text-xs text-ink-muted">{t.description}</span>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
-          <span className="text-xs text-slate-400">…o parte desde un lienzo en blanco.</span>
+        <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
+          <span className="text-xs text-ink-subtle">…o parte desde un lienzo en blanco.</span>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancelar</Button>
             <Button onClick={() => void createBlank()} disabled={busy || newName.trim().length < 2}>Crear en blanco</Button>
@@ -245,17 +245,17 @@ function WorkflowCard({
   const badge = STATUS_BADGE[w.status];
   const longDesc = (w.description?.length ?? 0) > 90;
   return (
-    <div className="flex items-start justify-between gap-4 rounded-card border border-slate-200 bg-white p-4 shadow-card">
+    <div className="flex items-start justify-between gap-4 rounded-card border border-line bg-panel p-4 shadow-card">
       <button onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge kind={badge.kind} label={badge.label} />
           {w.hasDraft && w.status !== "draft" && (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">cambios sin publicar</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">cambios sin publicar</span>
           )}
-          <h3 className="truncate font-medium text-navy-900">{w.name}</h3>
+          <h3 className="truncate font-medium text-ink">{w.name}</h3>
         </div>
         {w.description && (
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-muted">
             {longDesc && !expanded ? `${w.description.slice(0, 90)}… ` : w.description}
             {longDesc && (
               <span
@@ -268,11 +268,11 @@ function WorkflowCard({
             )}
           </p>
         )}
-        <p className="mt-1.5 text-xs text-slate-400">
+        <p className="mt-1.5 text-xs text-ink-subtle">
           Disparador: {w.trigger ? TRIGGER_LABELS[w.trigger] ?? w.trigger : "—"} · {w.runsTotal} ejecuciones
           {w.runsWaiting > 0 ? ` (${w.runsWaiting} en espera)` : ""}
         </p>
-        <p className="mt-0.5 text-[11px] text-slate-400">
+        <p className="mt-0.5 text-[11px] text-ink-subtle">
           {w.publishedAt
             ? `Publicado ${fmtDate(w.publishedAt)}${w.publishedBy ? ` por ${w.publishedBy}` : ""}`
             : "Nunca publicado"}
@@ -305,16 +305,16 @@ function RowMenu({ items }: { items: { label: string; onClick: () => void; dange
   }, [open]);
   return (
     <div ref={ref} className="relative shrink-0">
-      <button onClick={() => setOpen((v) => !v)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Acciones">
+      <button onClick={() => setOpen((v) => !v)} className="rounded-lg p-1.5 text-ink-subtle hover:bg-app hover:text-ink-muted" aria-label="Acciones">
         <MoreVertical size={18} />
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-pop">
+        <div className="absolute right-0 z-20 mt-1 w-40 rounded-lg border border-line bg-panel py-1 shadow-pop">
           {items.map((it) => (
             <button
               key={it.label}
               onClick={() => { setOpen(false); it.onClick(); }}
-              className={cn("block w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50", it.danger ? "text-red-600" : "text-slate-700")}
+              className={cn("block w-full px-3 py-1.5 text-left text-sm hover:bg-app", it.danger ? "text-red-600 dark:text-red-400" : "text-ink")}
             >
               {it.label}
             </button>
@@ -345,12 +345,12 @@ function RenameModal({ target, onClose, onSaved }: { target: WorkflowRow | null;
   return (
     <Modal open={!!target} onClose={onClose} title="Renombrar flujo">
       <label className="block text-sm">
-        <span className="text-xs text-slate-500">Nombre</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <span className="text-xs text-ink-muted">Nombre</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
       </label>
       <label className="mt-3 block text-sm">
-        <span className="text-xs text-slate-500">Descripción (opcional)</span>
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <span className="text-xs text-ink-muted">Descripción (opcional)</span>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
       </label>
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>Cancelar</Button>

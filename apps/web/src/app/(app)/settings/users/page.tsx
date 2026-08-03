@@ -197,14 +197,14 @@ export default function UsersPage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <h1 className="text-xl font-semibold">Usuarios y roles</h1>
-      <p className="mb-6 text-sm text-slate-500">
+      <p className="mb-6 text-sm text-ink-muted">
         Quién entra al panel y con qué permisos. Los equipos de atención viven en{" "}
-        <a href="/settings/teams" className="text-cyan-700 underline">Equipos</a>.
+        <a href="/settings/teams" className="text-cyan-700 underline dark:text-cyan-300">Equipos</a>.
       </p>
 
-      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</p>}
+      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{msg}</p>}
       {tempPassword && (
-        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
           <p>Usuario creado. Contraseña temporal (se muestra solo una vez): <b className="font-mono">{tempPassword}</b></p>
           <button
             onClick={() => {
@@ -217,7 +217,7 @@ Clave temporal: ${tempPassword}
               );
               setMsg("Mensaje de invitación copiado — pégalo en WhatsApp o correo ✔");
             }}
-            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100"
+            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100 dark:border-amber-500/40"
           >
             📋 Copiar mensaje de invitación (para WhatsApp)
           </button>
@@ -226,18 +226,18 @@ Clave temporal: ${tempPassword}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <section className="lg:col-span-2">
-          <form onSubmit={submitInvite} className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-white p-4">
+          <form onSubmit={submitInvite} className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-line bg-panel p-4">
             <label className="text-sm">
               Email
-              <input type="email" required value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="mt-1 block w-56 rounded-lg border border-slate-300 px-3 py-2" />
+              <input type="email" required value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="mt-1 block w-56 rounded-lg border border-line-strong px-3 py-2" />
             </label>
             <label className="text-sm">
               Nombre
-              <input required minLength={2} value={invite.name} onChange={(e) => setInvite({ ...invite, name: e.target.value })} className="mt-1 block w-44 rounded-lg border border-slate-300 px-3 py-2" />
+              <input required minLength={2} value={invite.name} onChange={(e) => setInvite({ ...invite, name: e.target.value })} className="mt-1 block w-44 rounded-lg border border-line-strong px-3 py-2" />
             </label>
             <label className="text-sm">
               Rol
-              <select value={invite.roleCode} onChange={(e) => setInvite({ ...invite, roleCode: e.target.value })} className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2">
+              <select value={invite.roleCode} onChange={(e) => setInvite({ ...invite, roleCode: e.target.value })} className="mt-1 block rounded-lg border border-line-strong bg-panel px-3 py-2">
                 {roles.map((r) => (
                   <option key={r.code} value={r.code}>{r.name}</option>
                 ))}
@@ -246,9 +246,9 @@ Clave temporal: ${tempPassword}
             <button type="submit" className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800">Invitar</button>
           </form>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-xl border border-line bg-panel">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+              <thead className="bg-app text-left text-xs text-ink-muted">
                 <tr>
                   <th className="p-3">Usuario</th>
                   <th className="p-3">Rol</th>
@@ -262,26 +262,26 @@ Clave temporal: ${tempPassword}
                   <tr
                     key={m.membershipId}
                     onClick={() => openMember(m)}
-                    className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                    className="cursor-pointer border-t border-line hover:bg-app"
                     title="Editar usuario"
                   >
                     <td className="p-3">
                       <div className="font-medium">{m.name}</div>
-                      <div className="text-xs text-slate-400">{m.email}</div>
+                      <div className="text-xs text-ink-subtle">{m.email}</div>
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                      <select value={m.roleCode} onChange={(e) => void changeRole(m.membershipId, e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs">
+                      <select value={m.roleCode} onChange={(e) => void changeRole(m.membershipId, e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1 text-xs">
                         {roles.map((r) => (
                           <option key={r.code} value={r.code}>{r.name}</option>
                         ))}
                       </select>
                     </td>
-                    <td className="p-3 text-xs text-slate-500">{m.teams.join(", ") || "—"}</td>
-                    <td className="p-3 text-xs text-slate-500" title={m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("es-CL") : "Nunca ha iniciado sesión"}>
+                    <td className="p-3 text-xs text-ink-muted">{m.teams.join(", ") || "—"}</td>
+                    <td className="p-3 text-xs text-ink-muted" title={m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("es-CL") : "Nunca ha iniciado sesión"}>
                       {fmtLastLogin(m.lastLoginAt)}
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => void toggleActive(m)} className={`rounded-lg px-2 py-1 text-xs ${m.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      <button onClick={() => void toggleActive(m)} className={`rounded-lg px-2 py-1 text-xs ${m.active ? "bg-emerald-50 text-emerald-700" : "bg-app text-ink-muted"} dark:bg-emerald-500/10 dark:text-emerald-300`}>
                         {m.active ? "activo" : "inactivo"}
                       </button>
                     </td>
@@ -293,9 +293,9 @@ Clave temporal: ${tempPassword}
         </section>
 
         <aside>
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="rounded-xl border border-line bg-panel p-4">
             <h2 className="mb-1 font-medium">Equipos</h2>
-            <p className="text-xs text-slate-500">Crea equipos (Ventas, Recepción, Sede…) y asigna miembros para las asignaciones de la Bandeja, agentes y flujos.</p>
+            <p className="text-xs text-ink-muted">Crea equipos (Ventas, Recepción, Sede…) y asigna miembros para las asignaciones de la Bandeja, agentes y flujos.</p>
             <a href="/settings/teams" className="mt-2 inline-block rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Gestionar equipos ↗</a>
           </div>
         </aside>
@@ -306,7 +306,7 @@ Clave temporal: ${tempPassword}
         <div className="mb-2 flex items-center justify-between">
           <div>
             <h2 className="font-medium">Roles y permisos</h2>
-            <p className="text-sm text-slate-500">Define qué puede hacer cada tipo de usuario, desde solo responder mensajes hasta configurar todo.</p>
+            <p className="text-sm text-ink-muted">Define qué puede hacer cada tipo de usuario, desde solo responder mensajes hasta configurar todo.</p>
           </div>
           <button onClick={newRole} className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">+ Nuevo rol</button>
         </div>
@@ -316,20 +316,20 @@ Clave temporal: ${tempPassword}
             const count = full ? "Acceso total" : `${expandPerms(r.permissions, catalog).length} permisos`;
             const locked = RESERVED.includes(r.code);
             return (
-              <div key={r.code} className="rounded-xl border border-slate-200 bg-white p-3">
+              <div key={r.code} className="rounded-xl border border-line bg-panel p-3">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="font-medium">{r.name}</p>
-                    <p className="text-xs text-slate-400">{r.code}{r.system ? " · sistema" : ""}</p>
+                    <p className="text-xs text-ink-subtle">{r.code}{r.system ? " · sistema" : ""}</p>
                   </div>
                   {!locked && (
                     <div className="flex gap-2 text-xs">
-                      <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline">Editar</button>
-                      {!r.system && <button onClick={() => void deleteRole(r.code)} className="text-slate-300 hover:text-red-500">✕</button>}
+                      <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
+                      {!r.system && <button onClick={() => void deleteRole(r.code)} className="text-ink-subtle hover:text-red-500">✕</button>}
                     </div>
                   )}
                 </div>
-                <p className="mt-2 text-xs text-slate-500">{count}</p>
+                <p className="mt-2 text-xs text-ink-muted">{count}</p>
               </div>
             );
           })}
@@ -340,9 +340,9 @@ Clave temporal: ${tempPassword}
       {selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog">
           <div className="absolute inset-0 bg-navy-950/50" onClick={() => setSelected(null)} />
-          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+          <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-panel p-6 shadow-xl">
             <h2 className="mb-1 text-lg font-semibold">{selected.name}</h2>
-            <p className="mb-4 text-xs text-slate-400">
+            <p className="mb-4 text-xs text-ink-subtle">
               {selected.roleName} · {selected.teams.join(", ") || "sin equipos"} · última conexión:{" "}
               {fmtLastLogin(selected.lastLoginAt)}
             </p>
@@ -353,7 +353,7 @@ Clave temporal: ${tempPassword}
                 <input
                   value={profile.name}
                   onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2"
                 />
               </label>
               <label className="block text-sm">
@@ -362,9 +362,9 @@ Clave temporal: ${tempPassword}
                   type="email"
                   value={profile.email}
                   onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2"
                 />
-                <span className="mt-1 block text-[10px] text-slate-400">Es el email con el que inicia sesión.</span>
+                <span className="mt-1 block text-[10px] text-ink-subtle">Es el email con el que inicia sesión.</span>
               </label>
               <label className="block text-sm">
                 Teléfono (opcional)
@@ -372,19 +372,19 @@ Clave temporal: ${tempPassword}
                   value={profile.phone}
                   onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
                   placeholder="+56 9 …"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+                  className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2"
                 />
               </label>
             </div>
 
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mt-4 rounded-lg border border-line bg-app p-3">
               <p className="text-sm font-medium">Contraseña</p>
               {resetResult ? (
-                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                   Contraseña temporal (se muestra solo una vez): <b className="font-mono">{resetResult}</b>
                   <button
                     onClick={() => void navigator.clipboard.writeText(resetResult)}
-                    className="ml-2 rounded border border-amber-300 px-1.5 py-0.5 text-[10px] hover:bg-amber-100"
+                    className="ml-2 rounded border border-amber-300 px-1.5 py-0.5 text-[10px] hover:bg-amber-100 dark:border-amber-500/40"
                   >
                     Copiar
                   </button>
@@ -392,12 +392,12 @@ Clave temporal: ${tempPassword}
                 </p>
               ) : (
                 <>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-ink-muted">
                     Genera una contraseña temporal nueva. La actual deja de funcionar de inmediato.
                   </p>
                   <button
                     onClick={() => void resetPassword()}
-                    className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                    className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30"
                   >
                     Restablecer contraseña
                   </button>
@@ -406,7 +406,7 @@ Clave temporal: ${tempPassword}
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setSelected(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">
+              <button onClick={() => setSelected(null)} className="rounded-lg border border-line-strong px-4 py-2 text-sm">
                 Cerrar
               </button>
               <button
@@ -425,28 +425,28 @@ Clave temporal: ${tempPassword}
       {draft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog">
           <div className="absolute inset-0 bg-navy-950/50" onClick={() => setDraft(null)} />
-          <div className="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+          <div className="relative max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-panel p-6 shadow-xl">
             <h2 className="mb-3 text-lg font-semibold">{draft.isNew ? "Nuevo rol" : `Editar rol · ${draft.name}`}</h2>
             <div className="mb-3 flex gap-2">
               <label className="flex-1 text-sm">
                 Nombre
-                <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="p. ej. Operador de bandeja" />
+                <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2" placeholder="p. ej. Operador de bandeja" />
               </label>
               {draft.isNew && (
                 <label className="w-40 text-sm">
                   Código
-                  <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono" placeholder="operador2" />
+                  <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono" placeholder="operador2" />
                 </label>
               )}
             </div>
             <div className="space-y-3">
               {catalog.map((mod) => (
-                <fieldset key={mod.module} className="rounded-lg border border-slate-200 p-3">
+                <fieldset key={mod.module} className="rounded-lg border border-line p-3">
                   <legend className="px-1 text-sm font-medium">{mod.label}</legend>
-                  <p className="mb-1 text-xs text-slate-400">{mod.description}</p>
+                  <p className="mb-1 text-xs text-ink-subtle">{mod.description}</p>
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {mod.actions.map((a) => (
-                      <label key={a.key} className="flex items-center gap-2 text-sm text-slate-700">
+                      <label key={a.key} className="flex items-center gap-2 text-sm text-ink">
                         <input type="checkbox" checked={draft.permissions.includes(a.key)} onChange={() => togglePerm(a.key)} className="h-4 w-4" />
                         {a.label}
                       </label>
@@ -456,7 +456,7 @@ Clave temporal: ${tempPassword}
               ))}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setDraft(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">Cancelar</button>
+              <button onClick={() => setDraft(null)} className="rounded-lg border border-line-strong px-4 py-2 text-sm">Cancelar</button>
               <button onClick={() => void saveRole()} disabled={!draft.name || (draft.isNew && !draft.code)} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-50">
                 Guardar
               </button>

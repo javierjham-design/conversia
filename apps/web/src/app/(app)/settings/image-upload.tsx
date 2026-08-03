@@ -110,9 +110,9 @@ export function ImageUpload({
         }}
         onClick={() => inputRef.current?.click()}
         className={cn(
-          "flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden border-2 border-dashed bg-slate-50 text-slate-300 transition-colors",
+          "flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden border-2 border-dashed bg-app text-ink-subtle transition-colors",
           round ? "rounded-full" : "rounded-xl",
-          dragging ? "border-cyan-400 bg-cyan-50" : "border-slate-200 hover:border-cyan-300",
+          dragging ? "border-cyan-400 bg-cyan-50 dark:bg-cyan-500/10" : "border-line hover:border-cyan-300",
         )}
         title={`Arrastra o haz clic para subir ${label.toLowerCase()}`}
       >
@@ -123,17 +123,17 @@ export function ImageUpload({
           <ImageIcon size={22} />
         )}
       </div>
-      <div className="text-xs text-slate-500">
-        <button onClick={() => inputRef.current?.click()} disabled={busy} className="flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+      <div className="text-xs text-ink-muted">
+        <button onClick={() => inputRef.current?.click()} disabled={busy} className="flex items-center gap-1 rounded-lg border border-line-strong px-2.5 py-1.5 font-medium text-ink-muted hover:bg-app disabled:opacity-50">
           <Upload size={12} /> {busy ? "Subiendo…" : `Subir ${label.toLowerCase()}`}
         </button>
-        <p className="mt-1 text-[10px] text-slate-400">PNG, JPG o WebP · máx 2 MB · se ajusta a 512px</p>
+        <p className="mt-1 text-[10px] text-ink-subtle">PNG, JPG o WebP · máx 2 MB · se ajusta a 512px</p>
         {hasUpload && (
-          <button onClick={() => void remove()} className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400 underline hover:text-red-500">
+          <button onClick={() => void remove()} className="mt-0.5 flex items-center gap-1 text-[10px] text-ink-subtle underline hover:text-red-500">
             <Trash2 size={10} /> Quitar
           </button>
         )}
-        {!hasUpload && fallbackUrl && <p className="mt-0.5 text-[10px] text-amber-600">Usando el logo por URL antiguo — sube un archivo para reemplazarlo.</p>}
+        {!hasUpload && fallbackUrl && <p className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">Usando el logo por URL antiguo — sube un archivo para reemplazarlo.</p>}
       </div>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void handleFile(e.target.files[0])} />
     </div>

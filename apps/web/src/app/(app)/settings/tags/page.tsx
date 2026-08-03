@@ -60,7 +60,7 @@ export default function TagsSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h2 className="text-lg font-semibold">Etiquetas</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Las etiquetas se usan en Contactos, la Bandeja (bandejas personalizadas), workflows (disparador «Etiqueta
         agregada») y las herramientas de los agentes IA. Fusiona duplicadas para mantener el orden.
       </p>
@@ -71,15 +71,15 @@ export default function TagsSettingsPage() {
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void create()}
           placeholder="Nueva etiqueta…"
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm"
         />
         <Button onClick={() => void create()} disabled={newName.trim().length < 1}><Plus size={14} /> Crear</Button>
       </div>
 
       <ul className="mt-3 space-y-1">
-        {tags.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Sin etiquetas aún.</p>}
+        {tags.length === 0 && <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin etiquetas aún.</p>}
         {tags.map((t) => (
-          <li key={t.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-2 py-1.5">
+          <li key={t.id} className="flex items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5">
             <input
               type="color"
               value={t.color ?? "#94a3b8"}
@@ -90,21 +90,21 @@ export default function TagsSettingsPage() {
             <input
               defaultValue={t.name}
               onBlur={(e) => void rename(t, e.target.value)}
-              className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-slate-200 focus:border-cyan-400"
+              className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-line focus:border-cyan-400"
             />
-            <span className="w-24 shrink-0 text-right text-[11px] text-slate-400">{t.usage} uso(s)</span>
+            <span className="w-24 shrink-0 text-right text-[11px] text-ink-subtle">{t.usage} uso(s)</span>
             <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => { setMerging(t); setMergeTarget(""); }}>Fusionar</Button>
-            <button onClick={() => setDeleting(t)} className="text-slate-300 hover:text-red-500" title="Eliminar">✕</button>
+            <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar">✕</button>
           </li>
         ))}
       </ul>
 
       {merging && (
         <Modal open onClose={() => setMerging(null)} title={`Fusionar «${merging.name}»`}>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-ink-muted">
             Todos los usos de <b>{merging.name}</b> ({merging.usage}) pasarán a la etiqueta que elijas, y «{merging.name}» se eliminará.
           </p>
-          <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+          <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="mt-2 w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
             <option value="">— etiqueta destino —</option>
             {tags.filter((t) => t.id !== merging.id).map((t) => (
               <option key={t.id} value={t.id}>{t.name} ({t.usage})</option>

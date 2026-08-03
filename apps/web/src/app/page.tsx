@@ -85,18 +85,18 @@ function mapPlan(p: any): PlanCard {
 export default async function LandingPage() {
   const plans = await getPlans();
   return (
-    <div className="min-h-screen bg-white text-slate-700">
+    <div className="min-h-screen bg-panel text-ink">
       {/* Nav */}
-      <header className="sticky top-0 z-10 border-b border-slate-100 bg-white/80 backdrop-blur">
+      <header className="sticky top-0 z-10 border-b border-line bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="h-8 w-auto" />
-          <nav className="hidden gap-8 text-sm text-slate-600 md:flex">
+          <nav className="hidden gap-8 text-sm text-ink-muted md:flex">
             <a href="#caracteristicas" className="hover:text-brand-600">Características</a>
             <a href="#como-funciona" className="hover:text-brand-600">Cómo funciona</a>
             <a href="#precios" className="hover:text-brand-600">Precios</a>
           </nav>
           <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm font-medium text-navy-900 hover:text-brand-600">
+            <Link href="/login" className="text-sm font-medium text-ink hover:text-brand-600">
               Entrar
             </Link>
             <DemoCta label="Solicitar demo" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700" />
@@ -106,40 +106,40 @@ export default async function LandingPage() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50 to-white" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50 to-white dark:from-brand-500/10 dark:to-transparent" />
         <div className="relative mx-auto max-w-6xl px-6 py-20 text-center">
-          <span className="inline-block rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700">
+          <span className="inline-block rounded-full border border-brand-200 bg-panel px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700">
             Conversa. Automatiza. Crece.
           </span>
-          <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-navy-900 md:text-5xl">
+          <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-ink md:text-5xl">
             Tu propio bot de WhatsApp que atiende, agenda y vende{" "}
             <span className="bg-gradient-to-r from-brand-600 to-accent-400 bg-clip-text text-transparent">24/7</span>
           </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg text-slate-600">
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-ink-muted">
             Plataforma de IA conversacional para WhatsApp y otros canales. Configura agentes con la información real
             de tu negocio y deja que tu equipo se enfoque en lo importante. Sin código.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <DemoCta label="Solicitar una demo" className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-brand-700" />
-            <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-navy-900 hover:border-brand-600 hover:text-brand-600">
+            <Link href="/login" className="rounded-lg border border-line-strong px-6 py-3 font-medium text-ink hover:border-brand-600 hover:text-brand-600">
               Entrar al panel
             </Link>
           </div>
-          <p className="mt-4 text-xs text-slate-400">Sin permanencia · Empieza gratis</p>
+          <p className="mt-4 text-xs text-ink-subtle">Sin permanencia · Empieza gratis</p>
         </div>
       </section>
 
       {/* Features */}
-      <section id="caracteristicas" className="border-t border-slate-100 bg-slate-50 py-20">
+      <section id="caracteristicas" className="border-t border-line bg-app py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-ink">
             Todo lo que necesitas para atender por WhatsApp
           </h2>
           <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
-              <div key={f.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-navy-900">{f.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{f.body}</p>
+              <div key={f.title} className="rounded-2xl border border-line bg-panel p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-ink">{f.title}</h3>
+                <p className="mt-2 text-sm text-ink-muted">{f.body}</p>
               </div>
             ))}
           </div>
@@ -149,15 +149,15 @@ export default async function LandingPage() {
       {/* Cómo funciona */}
       <section id="como-funciona" className="py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">En 3 pasos</h2>
+          <h2 className="text-center text-3xl font-bold tracking-tight text-ink">En 3 pasos</h2>
           <div className="mt-12 grid gap-8 md:grid-cols-3">
             {steps.map((s) => (
               <div key={s.n} className="text-center">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-lg font-bold text-white">
                   {s.n}
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-navy-900">{s.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{s.body}</p>
+                <h3 className="mt-4 text-lg font-semibold text-ink">{s.title}</h3>
+                <p className="mt-2 text-sm text-ink-muted">{s.body}</p>
               </div>
             ))}
           </div>
@@ -165,22 +165,22 @@ export default async function LandingPage() {
       </section>
 
       {/* Precios */}
-      <section id="precios" className="border-t border-slate-100 bg-slate-50 py-20">
+      <section id="precios" className="border-t border-line bg-app py-20">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold tracking-tight text-navy-900">Planes simples</h2>
-          <p className="mt-3 text-center text-sm text-slate-500">Precios en CLP. Cambia o cancela cuando quieras.</p>
+          <h2 className="text-center text-3xl font-bold tracking-tight text-ink">Planes simples</h2>
+          <p className="mt-3 text-center text-sm text-ink-muted">Precios en CLP. Cambia o cancela cuando quieras.</p>
           <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {plans.map((p) => (
               <div
                 key={p.name}
-                className={`rounded-2xl border bg-white p-6 shadow-sm ${p.highlight ? "border-brand-600 ring-1 ring-brand-600" : "border-slate-200"}`}
+                className={`rounded-2xl border bg-panel p-6 shadow-sm ${p.highlight ? "border-brand-600 ring-1 ring-brand-600" : "border-line"}`}
               >
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{p.name}</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">{p.name}</h3>
                 <p className="mt-3">
-                  <span className="text-3xl font-bold text-navy-900">{p.price}</span>
-                  <span className="text-sm text-slate-500"> {p.note}</span>
+                  <span className="text-3xl font-bold text-ink">{p.price}</span>
+                  <span className="text-sm text-ink-muted"> {p.note}</span>
                 </p>
-                <ul className="mt-4 space-y-2 text-sm text-slate-600">
+                <ul className="mt-4 space-y-2 text-sm text-ink-muted">
                   {p.features.map((feat) => (
                     <li key={feat} className="flex items-center gap-2">
                       <span className="text-accent-500">✓</span> {feat}
@@ -190,7 +190,7 @@ export default async function LandingPage() {
                 <DemoCta
                   label="Empezar"
                   planCode={p.code}
-                  className={`mt-6 block w-full rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-slate-300 text-navy-900 hover:border-brand-600 hover:text-brand-600"}`}
+                  className={`mt-6 block w-full rounded-lg px-4 py-2 text-center text-sm font-medium ${p.highlight ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-line-strong text-ink hover:border-brand-600 hover:text-brand-600"}`}
                 />
               </div>
             ))}
@@ -201,8 +201,8 @@ export default async function LandingPage() {
       {/* Contacto / CTA */}
       <section id="contacto" className="py-20">
         <div className="mx-auto max-w-3xl px-6 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-navy-900">¿Listo para automatizar tu WhatsApp?</h2>
-          <p className="mt-4 text-slate-600">
+          <h2 className="text-3xl font-bold tracking-tight text-ink">¿Listo para automatizar tu WhatsApp?</h2>
+          <p className="mt-4 text-ink-muted">
             Escríbenos y te mostramos TuBot funcionando con un caso real de tu negocio.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
@@ -212,7 +212,7 @@ export default async function LandingPage() {
             >
               hola@tubot.cl
             </a>
-            <Link href="/login" className="rounded-lg border border-slate-300 px-6 py-3 font-medium text-navy-900 hover:border-brand-600 hover:text-brand-600">
+            <Link href="/login" className="rounded-lg border border-line-strong px-6 py-3 font-medium text-ink hover:border-brand-600 hover:text-brand-600">
               Ya tengo cuenta
             </Link>
           </div>
@@ -220,7 +220,7 @@ export default async function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-slate-100 bg-navy-900 py-10 text-slate-300">
+      <footer className="border-t border-line bg-navy-900 py-10 text-ink-subtle">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-sm md:flex-row">
           <img src="/brand/tubot-mono.png" alt="TuBot.cl" className="h-7 w-auto brightness-0 invert" />
           <nav className="flex flex-wrap gap-6">
@@ -229,7 +229,7 @@ export default async function LandingPage() {
             <Link href="/legal/eliminacion-datos" className="hover:text-white">Eliminación de datos</Link>
             <a href="mailto:hola@tubot.cl" className="hover:text-white">Contacto</a>
           </nav>
-          <span className="text-xs text-slate-400">© {new Date().getFullYear()} Servicios Digital-Dent SpA</span>
+          <span className="text-xs text-ink-subtle">© {new Date().getFullYear()} Servicios Digital-Dent SpA</span>
         </div>
       </footer>
     </div>

@@ -4,7 +4,7 @@ export default function TerminosPage() {
   return (
     <>
       <h1>Términos del servicio</h1>
-      <p className="text-slate-500">Última actualización: 27 de julio de 2026</p>
+      <p className="text-ink-muted">Última actualización: 27 de julio de 2026</p>
 
       <p>
         Estos términos regulan el uso de <strong>TuBot</strong> (“la Plataforma”), un servicio de atención

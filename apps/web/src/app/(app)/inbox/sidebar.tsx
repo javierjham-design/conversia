@@ -20,15 +20,15 @@ function Group({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-1">
-      <div className="flex items-center justify-between px-3 py-1.5">
-        <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-600">
-          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    <div className="mb-3">
+      <div className="flex items-center justify-between px-3 py-1">
+        <button onClick={() => setOpen(!open)} className="flex items-center gap-1 text-2xs font-semibold uppercase tracking-wide text-ink-subtle transition-colors hover:text-ink-muted">
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           {title}
         </button>
         {action}
       </div>
-      {open && <div>{children}</div>}
+      {open && <div className="mt-0.5 space-y-px">{children}</div>}
     </div>
   );
 }
@@ -51,16 +51,18 @@ function Item({
   onDelete?: () => void;
 }) {
   return (
-    <div className={cn("group flex items-center", active ? "bg-cyan-50" : "hover:bg-slate-50")}>
-      <button onClick={onClick} className={cn("flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-[13px]", active ? "font-medium text-cyan-800" : "text-slate-600")}>
-        {color ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} /> : icon}
+    <div className={cn("group relative flex items-center border-l-2 transition-colors", active ? "border-brand-500 bg-brand-soft" : "border-transparent hover:bg-app")}>
+      <button onClick={onClick} className={cn("flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-13", active ? "font-medium text-brand-700 dark:text-brand-300" : "text-ink-muted")}>
+        <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center", active ? "text-brand-600 dark:text-brand-300" : "text-ink-subtle")}>
+          {color ? <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} /> : icon}
+        </span>
         <span className="truncate">{label}</span>
-        {typeof count === "number" && (
-          <span className={cn("ml-auto shrink-0 rounded-full px-1.5 text-[10px]", active ? "bg-cyan-100 text-cyan-700" : "bg-slate-100 text-slate-500")}>{count}</span>
+        {typeof count === "number" && count > 0 && (
+          <span className={cn("ml-auto shrink-0 rounded-full px-1.5 text-2xs tnum font-medium", active ? "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200" : "bg-line text-ink-subtle")}>{count}</span>
         )}
       </button>
       {onDelete && (
-        <button onClick={onDelete} className="mr-2 hidden text-slate-300 hover:text-red-500 group-hover:block" title="Eliminar bandeja">
+        <button onClick={onDelete} className="mr-2 hidden text-ink-subtle transition-colors hover:text-red-500 group-hover:block" title="Eliminar bandeja">
           <Trash2 size={12} />
         </button>
       )}
@@ -89,7 +91,7 @@ export function InboxSidebar({
     filter.kind === k && (id === undefined || (filter as { id?: string; code?: string }).id === id || (filter as { code?: string }).code === id);
 
   return (
-    <nav className="flex h-full w-52 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white py-2">
+    <nav className="flex h-full w-52 shrink-0 flex-col overflow-y-auto border-r border-line bg-panel py-2">
       <Group title="Bandeja">
         <Item label="Todas" icon={<Inbox size={13} />} count={counters?.fixed.all} active={is("all")} onClick={() => onSelect({ kind: "all" })} />
         <Item label="Mías" icon={<Users size={13} />} count={counters?.fixed.mine} active={is("mine")} onClick={() => onSelect({ kind: "mine" })} />
@@ -108,12 +110,12 @@ export function InboxSidebar({
       <Group
         title="Ciclo de vida"
         action={
-          <button onClick={onManageStages} className="text-slate-400 hover:text-cyan-600" title="Editar etapas del ciclo de vida">
+          <button onClick={onManageStages} className="text-ink-subtle transition-colors hover:text-brand-600" title="Editar etapas del ciclo de vida">
             <Settings2 size={13} />
           </button>
         }
       >
-        {(counters?.stages.length ?? 0) === 0 && <p className="px-3 py-1 text-[11px] text-slate-400">Sin conversaciones con etapa aún</p>}
+        {(counters?.stages.length ?? 0) === 0 && <p className="px-3 py-1 text-2xs text-ink-subtle">Sin conversaciones con etapa aún</p>}
         {counters?.stages.map((s) => (
           <Item
             key={s.code}
@@ -138,13 +140,13 @@ export function InboxSidebar({
       <Group
         title="Personalizadas"
         action={
-          <button onClick={() => setShowNewView(true)} className="text-slate-400 hover:text-cyan-600" title="Nueva bandeja personalizada">
+          <button onClick={() => setShowNewView(true)} className="text-ink-subtle transition-colors hover:text-brand-600" title="Nueva bandeja personalizada">
             <Plus size={13} />
           </button>
         }
       >
         {(counters?.views.length ?? 0) === 0 && (
-          <p className="px-3 py-1 text-[11px] text-slate-400">Guarda filtros con el botón +</p>
+          <p className="px-3 py-1 text-2xs text-ink-subtle">Guarda filtros con el botón +</p>
         )}
         {counters?.views.map((v) => (
           <Item
@@ -165,7 +167,7 @@ export function InboxSidebar({
         ))}
       </Group>
 
-      <div className="mt-auto border-t border-slate-100 pt-1">
+      <div className="mt-auto border-t border-line pt-1">
         <Item label="Contactos bloqueados" icon={<Ban size={13} />} count={counters?.fixed.blocked} active={is("blocked")} onClick={() => onSelect({ kind: "blocked" })} />
       </div>
 
@@ -233,17 +235,17 @@ function NewViewModal({
     }
   }
 
-  const sel = "mt-1 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm";
+  const sel = "mt-1 block w-full rounded-control border border-line-strong bg-panel px-2 py-1.5 text-sm text-ink";
   return (
     <Modal open onClose={onClose} title="Nueva bandeja personalizada">
       <div className="space-y-2.5">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nombre</span>
+          <span className="text-xs text-ink-muted">Nombre</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Calientes de anuncios" className={sel} />
         </label>
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Estado</span>
+            <span className="text-xs text-ink-muted">Estado</span>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className={sel}>
               <option value="open">Abiertas</option>
               <option value="closed">Cerradas</option>
@@ -251,7 +253,7 @@ function NewViewModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Canal</span>
+            <span className="text-xs text-ink-muted">Canal</span>
             <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className={sel}>
               <option value="">Cualquiera</option>
               {channels.map((c) => (
@@ -260,7 +262,7 @@ function NewViewModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Asignado</span>
+            <span className="text-xs text-ink-muted">Asignado</span>
             <select value={assigned} onChange={(e) => setAssigned(e.target.value)} className={sel}>
               <option value="">Cualquiera</option>
               <option value="me">Mías</option>
@@ -268,7 +270,7 @@ function NewViewModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Control</span>
+            <span className="text-xs text-ink-muted">Control</span>
             <select value={ai} onChange={(e) => setAi(e.target.value)} className={sel}>
               <option value="">IA y humano</option>
               <option value="on">Con IA</option>
@@ -276,7 +278,7 @@ function NewViewModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Etapa</span>
+            <span className="text-xs text-ink-muted">Etapa</span>
             <select value={stageCode} onChange={(e) => setStageCode(e.target.value)} className={sel}>
               <option value="">Cualquiera</option>
               {stages.map((s) => (
@@ -285,7 +287,7 @@ function NewViewModal({
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Origen anuncio</span>
+            <span className="text-xs text-ink-muted">Origen anuncio</span>
             <select value={hasAd} onChange={(e) => setHasAd(e.target.value)} className={sel}>
               <option value="">Da igual</option>
               <option value="si">Desde anuncio</option>
@@ -294,7 +296,7 @@ function NewViewModal({
           </label>
         </div>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Etiquetas (separadas por coma)</span>
+          <span className="text-xs text-ink-muted">Etiquetas (separadas por coma)</span>
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="interesado, ortodoncia" className={sel} />
         </label>
         <div className="flex justify-end gap-2 pt-1">

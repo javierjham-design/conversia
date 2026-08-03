@@ -81,15 +81,15 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
-      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-line bg-panel p-8 shadow-sm">
         <div className="text-center">
           <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto" />
-          <p className="mt-2 text-sm text-slate-500">Panel de atención conversacional</p>
+          <p className="mt-2 text-sm text-ink-muted">Panel de atención conversacional</p>
         </div>
         <div id="google-btn" className="flex justify-center" />
         {googleReady && (
-          <div className="flex items-center gap-3 text-xs text-slate-400">
-            <span className="h-px flex-1 bg-slate-200" />o<span className="h-px flex-1 bg-slate-200" />
+          <div className="flex items-center gap-3 text-xs text-ink-subtle">
+            <span className="h-px flex-1 bg-line" />o<span className="h-px flex-1 bg-line" />
           </div>
         )}
         <label className="block text-sm">
@@ -98,7 +98,7 @@ export default function LoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+            className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2"
             required
           />
         </label>
@@ -108,11 +108,11 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+            className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2"
             required
           />
         </label>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button
           type="submit"
           disabled={loading}

@@ -95,10 +95,10 @@ function compileBody(body: string): { bodyText: string; examples: string[]; fiel
 function StatusBadge({ status }: { status: string }) {
   const cls =
     status === "APPROVED"
-      ? "bg-emerald-50 text-emerald-700"
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
       : status === "REJECTED"
-        ? "bg-red-50 text-red-700"
-        : "bg-amber-50 text-amber-700";
+        ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300"
+        : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300";
   const label = status === "APPROVED" ? "Aprobada" : status === "REJECTED" ? "Rechazada" : "En revisión";
   return <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
 }
@@ -234,14 +234,14 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+    <div className="mt-3 rounded-lg border border-line bg-app/60 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-medium text-slate-600">
+        <p className="text-xs font-medium text-ink-muted">
           Plantillas de mensaje{" "}
-          <span className="font-normal text-slate-400">— necesarias para escribir fuera de la ventana de 24 h</span>
+          <span className="font-normal text-ink-subtle">— necesarias para escribir fuera de la ventana de 24 h</span>
         </p>
         <div className="flex items-center gap-2">
-          <button onClick={() => void load()} className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50">
+          <button onClick={() => void load()} className="rounded-lg border border-line-strong bg-panel px-2.5 py-1 text-xs hover:bg-app">
             Actualizar
           </button>
           <button
@@ -253,40 +253,40 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
         </div>
       </div>
 
-      {notice && <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
-      {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      {notice && <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p>}
+      {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
 
       {showForm && (
-        <form onSubmit={create} className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+        <form onSubmit={create} className="mb-3 rounded-lg border border-line bg-panel p-3">
           <div className="grid gap-3 md:grid-cols-3">
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-ink-muted">
               Nombre (snake_case)
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, "_") })}
                 required
                 placeholder="recordatorio_cita"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-mono text-xs"
+                className="mt-1 w-full rounded-lg border border-line-strong px-2.5 py-1.5 font-mono text-xs"
               />
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-ink-muted">
               Categoría
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2.5 py-1.5 text-xs"
               >
                 {Object.entries(CATEGORY_LABEL).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-ink-muted">
               Idioma
               <select
                 value={form.language}
                 onChange={(e) => setForm({ ...form, language: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2.5 py-1.5 text-xs"
               >
                 {LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>{l.label}</option>
@@ -295,18 +295,18 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
             </label>
           </div>
 
-          <label className="mt-2 block text-xs text-slate-600">
+          <label className="mt-2 block text-xs text-ink-muted">
             Encabezado (opcional, texto)
             <input
               value={form.headerText}
               onChange={(e) => setForm({ ...form, headerText: e.target.value })}
               maxLength={60}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+              className="mt-1 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-xs"
             />
           </label>
 
           <div className="mt-2">
-            <p className="text-xs text-slate-600">Cuerpo del mensaje</p>
+            <p className="text-xs text-ink-muted">Cuerpo del mensaje</p>
             <div className="mt-1 flex flex-wrap gap-1">
               {FIELDS.map((f) => (
                 <button
@@ -314,7 +314,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
                   type="button"
                   onClick={() => insertField(f.label)}
                   title={`Ejemplo: ${f.sample}`}
-                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100"
+                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-500/30"
                 >
                   + {f.label}
                 </button>
@@ -328,24 +328,24 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
               rows={3}
               maxLength={1024}
               placeholder="Hola {{Nombre del contacto}}, te recordamos tu cita el {{Fecha de la cita}} a las {{Hora de la cita}}. Responde CONFIRMAR para confirmarla."
-              className="mt-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+              className="mt-1.5 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-xs"
             />
-            <p className="text-[10px] text-slate-400">
+            <p className="text-[10px] text-ink-subtle">
               Pulsa un campo para insertarlo donde esté el cursor. Al crear, la plataforma lo convierte al formato de Meta y
               recuerda qué dato real va en cada posición.
             </p>
           </div>
 
           {form.bodyText.trim() && (
-            <div className="mt-2 rounded-lg bg-slate-50 p-2.5">
-              <p className="text-[10px] font-medium uppercase text-slate-400">Vista previa (con datos de ejemplo)</p>
-              <div className="mt-1.5 max-w-md rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-xs text-slate-700 shadow-sm">
+            <div className="mt-2 rounded-lg bg-app p-2.5">
+              <p className="text-[10px] font-medium uppercase text-ink-subtle">Vista previa (con datos de ejemplo)</p>
+              <div className="mt-1.5 max-w-md rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-xs text-ink shadow-sm dark:bg-emerald-500/10">
                 {form.headerText && <p className="mb-1 font-semibold">{form.headerText}</p>}
                 <p className="whitespace-pre-wrap">{preview}</p>
-                {form.footerText && <p className="mt-1 text-[10px] text-slate-400">{form.footerText}</p>}
+                {form.footerText && <p className="mt-1 text-[10px] text-ink-subtle">{form.footerText}</p>}
               </div>
               {compiled.fields.length > 0 && (
-                <p className="mt-1.5 text-[10px] text-slate-400">
+                <p className="mt-1.5 text-[10px] text-ink-subtle">
                   Campos cableados:{" "}
                   {compiled.fields.map((id) => FIELD_BY_ID.get(id)?.label ?? id).join(" · ")}
                 </p>
@@ -354,22 +354,22 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
           )}
 
           <div className="mt-2 grid gap-3 md:grid-cols-2">
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-ink-muted">
               Pie (opcional)
               <input
                 value={form.footerText}
                 onChange={(e) => setForm({ ...form, footerText: e.target.value })}
                 maxLength={60}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-xs"
               />
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-ink-muted">
               Botones de respuesta rápida (opcional, separados por coma, máx. 3)
               <input
                 value={form.quickReplies}
                 onChange={(e) => setForm({ ...form, quickReplies: e.target.value })}
                 placeholder="Confirmar, Reagendar"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full rounded-lg border border-line-strong px-2.5 py-1.5 text-xs"
               />
             </label>
           </div>
@@ -385,14 +385,14 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
       )}
 
       {templates === null ? (
-        <p className="text-xs text-slate-400">Cargando plantillas…</p>
+        <p className="text-xs text-ink-subtle">Cargando plantillas…</p>
       ) : templates.length === 0 ? (
-        <p className="text-xs text-slate-400">Esta WABA aún no tiene plantillas.</p>
+        <p className="text-xs text-ink-subtle">Esta WABA aún no tiene plantillas.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="text-[10px] uppercase text-slate-400">
+              <tr className="text-[10px] uppercase text-ink-subtle">
                 <th className="py-1 pr-3">Nombre</th>
                 <th className="py-1 pr-3">Estado</th>
                 <th className="py-1 pr-3">Categoría</th>
@@ -405,7 +405,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
               {templates.map((t) => {
                 const body = displayBody(t);
                 return (
-                  <tr key={t.id} className="border-t border-slate-200 align-top">
+                  <tr key={t.id} className="border-t border-line align-top">
                     <td className="py-1.5 pr-3 font-mono">{t.name}</td>
                     <td className="py-1.5 pr-3">
                       <StatusBadge status={t.status} />
@@ -415,7 +415,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
                     </td>
                     <td className="py-1.5 pr-3">{CATEGORY_LABEL[t.category] ?? t.category}</td>
                     <td className="py-1.5 pr-3 font-mono">{t.language}</td>
-                    <td className="max-w-[360px] py-1.5 pr-3 text-slate-500">{body.length > 160 ? `${body.slice(0, 160)}…` : body}</td>
+                    <td className="max-w-[360px] py-1.5 pr-3 text-ink-muted">{body.length > 160 ? `${body.slice(0, 160)}…` : body}</td>
                     <td className="py-1.5 text-right">
                       <button onClick={() => void remove(t.name)} className="text-[10px] text-red-500 hover:underline">
                         Eliminar

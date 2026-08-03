@@ -145,6 +145,26 @@ export function initials(c: { firstName?: string | null; lastName?: string | nul
   return (parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "");
 }
 
+/** Paleta de avatares (fondo suave + texto legible en claro y oscuro). */
+const AVATAR_PALETTE = [
+  "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200",
+  "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200",
+  "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200",
+  "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-200",
+  "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200",
+  "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200",
+  "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200",
+  "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/20 dark:text-fuchsia-200",
+];
+
+/** Color de avatar determinista según el nombre (mismo contacto = mismo color). */
+export function avatarColor(c: { firstName?: string | null; lastName?: string | null; profileName?: string | null; phone?: string | null }): string {
+  const key = displayName(c);
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]!;
+}
+
 /** Resuelve variables {{contact.*}} de snippets con los datos reales. */
 export function renderSnippet(body: string, contact: ContactLite & { email?: string | null }): string {
   const map: Record<string, string> = {

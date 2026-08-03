@@ -64,24 +64,24 @@ export default function SnippetsSettingsPage() {
       </div>
 
       {/* Cómo se usan: mini ejemplo visual */}
-      <div className="mt-3 rounded-card border border-cyan-100 bg-cyan-50/60 p-4">
-        <p className="text-sm text-cyan-900">
-          Escribe <code className="rounded bg-white px-1.5 py-0.5 font-mono text-cyan-700">/</code> en el chat de la
+      <div className="mt-3 rounded-card border border-cyan-100 bg-cyan-50/60 p-4 dark:border-cyan-500/25">
+        <p className="text-sm text-cyan-900 dark:text-cyan-200">
+          Escribe <code className="rounded bg-panel px-1.5 py-0.5 font-mono text-cyan-700 dark:text-cyan-300">/</code> en el chat de la
           Bandeja y elige tu respuesta — se pega con los datos reales del contacto.
         </p>
         <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-slate-500">/saludo</span>
-          <span className="text-slate-400">→</span>
+          <span className="rounded-lg border border-line bg-panel px-2.5 py-1.5 font-mono text-ink-muted">/saludo</span>
+          <span className="text-ink-subtle">→</span>
           <span className="rounded-2xl bg-cyan-700 px-3 py-1.5 text-white">¡Hola María! 👋 Gracias por escribirnos…</span>
         </div>
       </div>
 
       <div className="mt-4 flex gap-2">
         <div className="relative flex-1">
-          <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por atajo o contenido…" className="w-full rounded-lg border border-slate-300 py-1.5 pl-8 pr-3 text-sm" />
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por atajo o contenido…" className="w-full rounded-lg border border-line-strong py-1.5 pl-8 pr-3 text-sm" />
         </div>
-        <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+        <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
           <option value="all">Todos los ámbitos</option>
           <option value="team">Equipo</option>
           <option value="mine">Solo yo</option>
@@ -90,20 +90,20 @@ export default function SnippetsSettingsPage() {
 
       <ul className="mt-3 space-y-1.5">
         {filtered.length === 0 && (
-          <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+          <p className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-ink-subtle">
             {items.length === 0 ? "Crea tu primera respuesta rápida con el botón de arriba." : "Nada calza con la búsqueda."}
           </p>
         )}
         {filtered.map((s) => (
-          <li key={s.id} className="flex items-center gap-3 rounded-card border border-slate-200 bg-white px-3 py-2.5 shadow-card">
-            <span className="w-32 shrink-0 truncate font-mono text-sm text-cyan-700">/{s.shortcut}</span>
-            <p className="min-w-0 flex-1 truncate text-sm text-slate-600" title={s.body}>{s.body}</p>
-            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500")}>
+          <li key={s.id} className="flex items-center gap-3 rounded-card border border-line bg-panel px-3 py-2.5 shadow-card">
+            <span className="w-32 shrink-0 truncate font-mono text-sm text-cyan-700 dark:text-cyan-300">/{s.shortcut}</span>
+            <p className="min-w-0 flex-1 truncate text-sm text-ink-muted" title={s.body}>{s.body}</p>
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" : "bg-app text-ink-muted")}>
               {s.scope === "mine" ? "Solo yo" : "Equipo"}
             </span>
-            <button onClick={() => setEditing(s)} className="text-slate-400 hover:text-cyan-700" title="Editar"><Pencil size={14} /></button>
-            <button onClick={() => setCreating({ shortcut: `${s.shortcut}-copia`, body: s.body, scope: s.scope })} className="text-slate-400 hover:text-cyan-700" title="Duplicar"><Copy size={14} /></button>
-            <button onClick={() => setDeleting(s)} className="text-slate-300 hover:text-red-500" title="Eliminar"><Trash2 size={14} /></button>
+            <button onClick={() => setEditing(s)} className="text-ink-subtle hover:text-cyan-700" title="Editar"><Pencil size={14} /></button>
+            <button onClick={() => setCreating({ shortcut: `${s.shortcut}-copia`, body: s.body, scope: s.scope })} className="text-ink-subtle hover:text-cyan-700" title="Duplicar"><Copy size={14} /></button>
+            <button onClick={() => setDeleting(s)} className="text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={14} /></button>
           </li>
         ))}
       </ul>
@@ -179,9 +179,9 @@ function SnippetEditor({
     <Modal open onClose={onClose} title={snippet ? `Editar /${snippet.shortcut}` : "Nueva respuesta rápida"} wide>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Atajo (minúsculas, sin espacios)</span>
-          <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:border-cyan-400">
-            <span className="pl-2 font-mono text-slate-400">/</span>
+          <span className="text-xs text-ink-muted">Atajo (minúsculas, sin espacios)</span>
+          <div className="mt-1 flex items-center rounded-lg border border-line-strong focus-within:border-cyan-400">
+            <span className="pl-2 font-mono text-ink-subtle">/</span>
             <input
               value={shortcut}
               onChange={(e) => setShortcut(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
@@ -194,8 +194,8 @@ function SnippetEditor({
           )}
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Ámbito</span>
-          <select value={scope} onChange={(e) => setScope(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+          <span className="text-xs text-ink-muted">Ámbito</span>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2 py-2 text-sm">
             <option value="team">Equipo (la ve todo el equipo)</option>
             <option value="mine">Solo yo</option>
           </select>
@@ -204,29 +204,29 @@ function SnippetEditor({
 
       <label className="mt-3 block text-sm">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500">Contenido</span>
-          <span className={cn("text-[10px]", body.length > 1900 ? "text-red-500" : "text-slate-400")}>{body.length}/2000</span>
+          <span className="text-xs text-ink-muted">Contenido</span>
+          <span className={cn("text-[10px]", body.length > 1900 ? "text-red-500" : "text-ink-subtle")}>{body.length}/2000</span>
         </div>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value.slice(0, 2000))}
           rows={4}
           placeholder="Hola {{contact.firstName}}! …"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
         />
       </label>
       <div className="mt-1 flex flex-wrap items-center gap-1">
-        <span className="text-[10px] text-slate-400">Insertar variable:</span>
+        <span className="text-[10px] text-ink-subtle">Insertar variable:</span>
         {VARIABLES.map((v) => (
-          <button key={v.token} onClick={() => setBody((b) => (b + " " + v.token).slice(0, 2000))} className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:border-cyan-300 hover:text-cyan-700">
+          <button key={v.token} onClick={() => setBody((b) => (b + " " + v.token).slice(0, 2000))} className="rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-muted hover:border-cyan-300 hover:text-cyan-700">
             {v.label}
           </button>
         ))}
       </div>
 
       {body.trim() && (
-        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-          <p className="text-[10px] font-medium uppercase text-slate-400">Vista previa (con datos de ejemplo)</p>
+        <div className="mt-3 rounded-lg border border-line bg-app p-3">
+          <p className="text-[10px] font-medium uppercase text-ink-subtle">Vista previa (con datos de ejemplo)</p>
           <p className="mt-1 inline-block max-w-md whitespace-pre-wrap rounded-2xl bg-cyan-700 px-3 py-2 text-sm text-white">{renderSnippet(body, SAMPLE_CONTACT)}</p>
         </div>
       )}

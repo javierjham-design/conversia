@@ -7,11 +7,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Search, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { EmptyState, cn } from "@/components/ui";
+import { EmptyState, Modal, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
-import { displayName, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
+import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
 
 function filterParams(filter: InboxFilter): Record<string, string> {
   switch (filter.kind) {
@@ -247,10 +247,46 @@ export default function InboxPage() {
   const channelError = channels.find((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status === "error");
   const stagesForHeader = allStages;
 
+  // ---------- Atajos de teclado ----------
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const itemsRef = useRef<ConvItem[]>(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable;
+      if (e.key === "Escape") {
+        if (showHelp) setShowHelp(false);
+        else if (el.tagName === "INPUT") (el as HTMLInputElement).blur();
+        return;
+      }
+      if (typing) return;
+      const list = itemsRef.current;
+      const idx = list.findIndex((c) => c.id === selectedRef.current);
+      if (e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === "?") {
+        setShowHelp((v) => !v);
+      } else if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = list[Math.min(list.length - 1, idx < 0 ? 0 : idx + 1)];
+        if (next) openConversation(next.id);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const prev = list[Math.max(0, idx <= 0 ? 0 : idx - 1)];
+        if (prev) openConversation(prev.id);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openConversation, showHelp]);
+
   return (
     <div className="flex h-full flex-col">
       {channelError && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
+        <div className="border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
           ⚠ El canal <b>{channelError.name}</b> necesita reautorización — los mensajes salientes están fallando.{" "}
           <a href="/channels" className="font-medium underline">Ir a Canales</a>
         </div>
@@ -262,28 +298,28 @@ export default function InboxPage() {
         </div>
 
         {/* Zona 2 — lista */}
-        <aside className={cn("w-full flex-col border-r border-slate-200 bg-white md:w-80 lg:w-96", selectedId ? "hidden lg:flex" : "flex")}>
-          <header className="space-y-2 border-b border-slate-200 p-3">
+        <aside className={cn("w-full flex-col border-r border-line bg-panel md:w-80 lg:w-96", selectedId ? "hidden lg:flex" : "flex")}>
+          <header className="space-y-2 border-b border-line p-3">
             <div className="flex items-center justify-between">
-              <h1 className="text-sm font-semibold">
+              <h1 className="text-sm font-semibold text-ink">
                 {filter.kind === "all" ? "Todas" : filter.kind === "mine" ? "Mías" : filter.kind === "unassigned" ? "Sin asignar" : filter.kind === "unanswered" ? "No respondidas" : filter.kind === "blocked" ? "Bloqueados" : (filter as { label: string }).label}
               </h1>
-              <span className={cn("flex items-center gap-1 text-[10px]", live ? "text-emerald-500" : "text-slate-400")} title={live ? "Actualización en tiempo real" : "Actualizando por sondeo"}>
-                <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500" : "bg-slate-300")} />
+              <span className={cn("flex items-center gap-1 text-2xs", live ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle")} title={live ? "Actualización en tiempo real" : "Actualizando por sondeo"}>
+                <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500 live-dot" : "bg-ink-subtle")} />
                 {live ? "en vivo" : "sondeo"}
               </span>
             </div>
             <div className="relative">
-              <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nombre o teléfono…" className="w-full rounded-lg border border-slate-300 py-1.5 pl-8 pr-3 text-sm" />
+              <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
+              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…  ( / )" className="w-full rounded-control border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle" />
             </div>
             <div className="flex items-center gap-1.5 text-xs">
-              <select value={order} onChange={(e) => setOrder(e.target.value)} className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
+              <select value={order} onChange={(e) => setOrder(e.target.value)} className="flex-1 rounded-control border border-line bg-panel px-2 py-1 text-ink">
                 <option value="recent">Más nuevas primero</option>
                 <option value="oldest">Más antiguas primero</option>
                 <option value="unanswered_first">Sin responder primero</option>
               </select>
-              <label className="flex items-center gap-1 whitespace-nowrap text-[11px] text-slate-500">
+              <label className="flex items-center gap-1 whitespace-nowrap text-2xs text-ink-muted">
                 <input type="checkbox" checked={onlyUnanswered} onChange={(e) => setOnlyUnanswered(e.target.checked)} />
                 Solo no respondidas
               </label>
@@ -291,22 +327,26 @@ export default function InboxPage() {
           </header>
 
           <div className="flex-1 overflow-y-auto">
-            {items.length === 0 && <p className="p-4 text-sm text-slate-400">Sin conversaciones con estos filtros.</p>}
+            {items.length === 0 && <p className="p-4 text-sm text-ink-subtle">Sin conversaciones con estos filtros.</p>}
             {items.map((c) => (
               <button
                 key={c.id}
                 onClick={() => openConversation(c.id)}
-                className={cn("block w-full border-b border-slate-100 p-2.5 text-left hover:bg-slate-50", selectedId === c.id && "bg-cyan-50")}
+                className={cn(
+                  "relative block w-full border-b border-line/60 px-3 py-2.5 text-left transition-colors",
+                  selectedId === c.id ? "bg-brand-soft" : "hover:bg-app",
+                )}
               >
+                {selectedId === c.id && <span className="absolute inset-y-0 left-0 w-0.5 bg-brand-500" />}
                 <div className="flex items-center gap-2.5">
                   <div className="relative shrink-0">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600">
+                    <div className={cn("flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold", avatarColor(c.contact))}>
                       {initials(c.contact).toUpperCase()}
                     </div>
                     <span
                       className={cn(
-                        "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-white text-[8px] text-white",
-                        c.aiEnabled ? "bg-cyan-500" : "bg-amber-500",
+                        "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-panel text-[8px] text-white",
+                        c.aiEnabled ? "bg-brand-500" : "bg-amber-500",
                       )}
                       title={c.aiEnabled ? "Atendida por IA" : "Control humano"}
                     >
@@ -314,36 +354,34 @@ export default function InboxPage() {
                     </span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[13px] font-medium">{displayName(c.contact)}</span>
-                      <span className="shrink-0 text-[10px] text-slate-400">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className={cn("truncate text-sm", c.unreadCount > 0 ? "font-semibold text-ink" : "font-medium text-ink")}>{displayName(c.contact)}</span>
+                      <span className="flex shrink-0 items-center gap-1 text-2xs tnum text-ink-subtle">
                         {c.unreadCount > 0 && c.lastMessageAt && Date.now() - new Date(c.lastMessageAt).getTime() > (counters?.firstResponseTargetMinutes ?? 15) * 60_000 && (
-                          <span className="mr-1 text-red-500" title="Supera el tiempo objetivo de primera respuesta">⏱</span>
+                          <span className="text-red-500" title="Supera el tiempo objetivo de primera respuesta">⏱</span>
                         )}
-                        {c.lastMessageAt
-                          ? new Date(c.lastMessageAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })
-                          : ""}
+                        {c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : ""}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-xs text-slate-500">
-                        {c.unreadCount > 0 ? "↙ " : ""}
-                        {c.lastMessagePreview ?? "—"}
-                      </p>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <p className={cn("truncate text-xs", c.unreadCount > 0 ? "text-ink-muted" : "text-ink-subtle")}>{c.lastMessagePreview ?? "—"}</p>
                       {c.unreadCount > 0 && (
-                        <span className="shrink-0 rounded-full bg-cyan-600 px-1.5 text-[10px] font-medium text-white">{c.unreadCount}</span>
+                        <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-2xs tnum font-semibold text-white">{c.unreadCount}</span>
                       )}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1.5">
+                    <div className="mt-1 flex items-center gap-1.5">
                       {c.stage && (
-                        <span className="rounded-full px-1.5 text-[9px] font-medium" style={{ backgroundColor: `${c.stage.color ?? "#94a3b8"}22`, color: c.stage.color ?? "#64748b" }}>
+                        <span
+                          className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                          style={{ backgroundColor: `${c.stage.color ?? "#94a3b8"}1f`, color: c.stage.color ?? "#64748b" }}
+                        >
                           {c.stage.emoji ? `${c.stage.emoji} ` : ""}{c.stage.name}
                         </span>
                       )}
-                      {c.status === "CLOSED" && <span className="text-[9px] text-slate-400">cerrada</span>}
+                      {c.status === "CLOSED" && <span className="rounded-full bg-line px-1.5 py-0.5 text-[10px] text-ink-subtle">cerrada</span>}
                       {(c.assignedUserName || c.assignedTeamName) && (
-                        <span className="ml-auto truncate text-[9px] text-slate-400" title="Asignada a">
-                          {c.assignedUserName ?? c.assignedTeamName}
+                        <span className="ml-auto flex items-center gap-1 truncate text-[10px] text-ink-subtle" title="Asignada a">
+                          <User size={9} /> {c.assignedUserName ?? c.assignedTeamName}
                         </span>
                       )}
                     </div>
@@ -358,7 +396,7 @@ export default function InboxPage() {
                   void loadList(nextCursor).finally(() => setLoadingMore(false));
                 }}
                 disabled={loadingMore}
-                className="block w-full py-2.5 text-center text-xs text-cyan-700 hover:bg-slate-50"
+                className="block w-full py-2.5 text-center text-xs font-medium text-brand-700 transition-colors hover:bg-app dark:text-brand-400"
               >
                 {loadingMore ? "Cargando…" : "Cargar más"}
               </button>
@@ -396,7 +434,7 @@ export default function InboxPage() {
               <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} />
             </div>
             <div className="fixed inset-0 z-40 flex justify-end xl:hidden">
-              <div className="absolute inset-0 bg-navy-950/40" onClick={() => setPanelOpen(false)} />
+              <div className="absolute inset-0 bg-navy-950/50" onClick={() => setPanelOpen(false)} />
               <div className="relative h-full">
                 <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} />
               </div>
@@ -404,6 +442,25 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {/* Hoja de ayuda de atajos (tecla ?) */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Atajos de teclado">
+        <ul className="space-y-2 text-sm text-ink">
+          {[
+            ["/", "Buscar conversaciones"],
+            ["J  ·  ↓", "Siguiente conversación"],
+            ["K  ·  ↑", "Conversación anterior"],
+            ["Enter", "Enviar el mensaje (en el compositor)"],
+            ["Esc", "Salir del buscador / cerrar diálogo"],
+            ["?", "Mostrar u ocultar esta ayuda"],
+          ].map(([k, d]) => (
+            <li key={k} className="flex items-center justify-between gap-4">
+              <span className="text-ink-muted">{d}</span>
+              <kbd className="rounded-control border border-line bg-app px-2 py-0.5 font-mono text-2xs text-ink">{k}</kbd>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 }

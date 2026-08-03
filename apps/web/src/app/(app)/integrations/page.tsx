@@ -448,12 +448,12 @@ export default function IntegrationsPage() {
           {/* Buscador + filtros */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar integración…"
-                className="w-64 rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm"
+                className="w-64 rounded-lg border border-line-strong bg-panel py-2 pl-9 pr-3 text-sm"
                 aria-label="Buscar integración"
               />
             </div>
@@ -474,13 +474,13 @@ export default function IntegrationsPage() {
                     "rounded-full border px-3 py-1.5 text-xs font-medium",
                     statusFilter === value
                       ? "border-brand-300 bg-brand-50 text-brand-700"
-                      : "border-slate-200 bg-white text-slate-500 hover:border-slate-300",
+                      : "border-line bg-panel text-ink-muted hover:border-line-strong",
                   )}
                 >
                   {label}
                 </button>
               ))}
-              <span className="mx-1 w-px bg-slate-200" aria-hidden />
+              <span className="mx-1 w-px bg-line" aria-hidden />
               {(["todas", "meta", "agenda", "datos", "crm"] as const).map((value) => (
                 <button
                   key={value}
@@ -489,7 +489,7 @@ export default function IntegrationsPage() {
                     "rounded-full border px-3 py-1.5 text-xs font-medium",
                     categoryFilter === value
                       ? "border-accent-500/40 bg-accent-500/10 text-accent-600"
-                      : "border-slate-200 bg-white text-slate-500 hover:border-slate-300",
+                      : "border-line bg-panel text-ink-muted hover:border-line-strong",
                   )}
                 >
                   {value === "todas" ? "Todas las categorías" : CATEGORY_LABELS[value]}
@@ -548,13 +548,13 @@ export default function IntegrationsPage() {
                 {connected
                   .filter((c) => statusFilter !== "atencion" || c.status === "attention" || c.status === "error")
                   .map((c) => (
-                    <div key={c.key} className="rounded-card border border-slate-200 bg-white p-5 shadow-card transition-shadow hover:shadow-pop">
+                    <div key={c.key} className="rounded-card border border-line bg-panel p-5 shadow-card transition-shadow hover:shadow-pop">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-navy-900 text-accent-400">{c.icon}</div>
                           <div>
                             <p className="font-semibold">{c.name}</p>
-                            <p className="text-xs text-slate-400">{c.category}</p>
+                            <p className="text-xs text-ink-subtle">{c.category}</p>
                           </div>
                         </div>
                         <HealthDot level={c.health} />
@@ -562,8 +562,8 @@ export default function IntegrationsPage() {
                       <div className="mt-3 flex items-center gap-2">
                         <StatusBadge kind={c.status} label={c.statusLabel} />
                       </div>
-                      <p className="mt-2 truncate text-sm text-slate-500">{c.detail}</p>
-                      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+                      <p className="mt-2 truncate text-sm text-ink-muted">{c.detail}</p>
+                      <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
                         <Button variant="secondary" onClick={c.onManage}>
                           Administrar <ArrowRight size={14} />
                         </Button>
@@ -588,7 +588,7 @@ export default function IntegrationsPage() {
               if (items.length === 0) return null;
               return (
                 <div key={cat} className="mb-8">
-                  <h3 className="mb-2.5 text-[13px] font-semibold uppercase tracking-wide text-slate-400">
+                  <h3 className="mb-2.5 text-[13px] font-semibold uppercase tracking-wide text-ink-subtle">
                     {CATEGORY_LABELS[cat]}
                   </h3>
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -596,12 +596,12 @@ export default function IntegrationsPage() {
                       <div
                         key={item.key}
                         className={cn(
-                          "flex flex-col rounded-card border bg-white p-4 shadow-card transition-shadow",
-                          item.status === "proximamente" ? "border-slate-200 opacity-80" : "border-slate-200 hover:shadow-pop",
+                          "flex flex-col rounded-card border bg-panel p-4 shadow-card transition-shadow",
+                          item.status === "proximamente" ? "border-line opacity-80" : "border-line hover:shadow-pop",
                         )}
                       >
                         <div className="flex items-start justify-between">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-app text-ink-muted">
                             {CATALOG_ICONS[item.key] ?? <Plug size={20} />}
                           </div>
                           <StatusBadge
@@ -610,13 +610,13 @@ export default function IntegrationsPage() {
                           />
                         </div>
                         <p className="mt-2.5 font-semibold">{item.name}</p>
-                        <p className="mt-0.5 flex-1 text-[13px] leading-relaxed text-slate-500">{item.description}</p>
+                        <p className="mt-0.5 flex-1 text-[13px] leading-relaxed text-ink-muted">{item.description}</p>
                         <div className="mt-2.5 flex flex-wrap gap-1">
                           {item.capabilities.map((cap) => (
-                            <span key={cap} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{cap}</span>
+                            <span key={cap} className="rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{cap}</span>
                           ))}
                         </div>
-                        <div className="mt-3 border-t border-slate-100 pt-3">
+                        <div className="mt-3 border-t border-line pt-3">
                           {item.status === "proximamente" ? (
                             <Button variant="ghost" className="w-full" onClick={() => void notifyInterest(item.key)}>
                               <Bell size={14} /> Avisarme cuando esté disponible
@@ -680,12 +680,12 @@ export default function IntegrationsPage() {
         ) : (
           <ul className="space-y-1.5">
             {activity.map((a) => (
-              <li key={a.id} className="rounded-lg border border-slate-100 px-3 py-2 text-xs">
+              <li key={a.id} className="rounded-lg border border-line px-3 py-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[10px] uppercase text-slate-400">{a.provider}</span>
-                  <span className="text-slate-400">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
+                  <span className="font-mono text-[10px] uppercase text-ink-subtle">{a.provider}</span>
+                  <span className="text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
                 </div>
-                <p className={cn("mt-0.5", a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-slate-600")}>
+                <p className={cn("mt-0.5", a.status === "error" ? "text-red-600 dark:text-red-400" : a.status === "warning" ? "text-amber-700 dark:text-amber-300" : "text-ink-muted")}>
                   {a.message ?? a.type}
                 </p>
               </li>
