@@ -378,6 +378,44 @@ export class SettingsController {
     });
   }
 
+  // ------------------- Preferencias de notificaciones (personales) -------------------
+
+  /** Defaults sensatos: todo activado menos el resumen diario. */
+  static NOTIF_DEFAULTS = { assignedToMe: true, aiEscalation: true, integrationError: true, dailySummary: false, dataJobs: true };
+
+  @Get("notifications")
+  notificationPrefs() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const all = (((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>;
+      return { ...SettingsController.NOTIF_DEFAULTS, ...(all[ctx.userId] ?? {}) };
+    });
+  }
+
+  @Put("notifications")
+  updateNotificationPrefs(@Body() body: unknown) {
+    const ctx = requireContext(); // personal: cualquier rol, solo sus propias prefs
+    const parsed = z
+      .object({
+        assignedToMe: z.boolean().optional(),
+        aiEscalation: z.boolean().optional(),
+        integrationError: z.boolean().optional(),
+        dailySummary: z.boolean().optional(),
+        dataJobs: z.boolean().optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Preferencias inválidas");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const all = (settings.notifPrefs ?? {}) as Record<string, any>;
+      all[ctx.userId] = { ...SettingsController.NOTIF_DEFAULTS, ...(all[ctx.userId] ?? {}), ...parsed.data };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifPrefs: all } as object } });
+      return { ok: true };
+    });
+  }
+
   // ------------------------- Helpers -------------------------
 
   private mergeSettings(orgId: string, userId: string, key: string, patch: object, auditAction: string) {

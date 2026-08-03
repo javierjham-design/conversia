@@ -28,7 +28,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     title: "Personal",
     pages: [
       { href: "/settings/profile", label: "Mi perfil", keywords: "perfil nombre contraseña avatar cuenta password", ready: true },
-      { href: "/settings/notifications", label: "Notificaciones", keywords: "notificaciones campana avisos alertas correo" },
+      { href: "/settings/notifications", label: "Notificaciones", keywords: "notificaciones campana avisos alertas correo", ready: true },
     ],
   },
   {

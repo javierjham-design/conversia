@@ -1,4 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
+import { filterRecipientsByPref, getEmailQueue } from "./mailer.js";
 
 /**
  * Exports de datos en background (/settings/export). Genera el CSV, lo guarda
@@ -100,6 +101,30 @@ export async function processExport(organizationId: string, payload: { exportId:
         ]),
       );
       rows = appointments.length;
+    }
+
+    // Aviso al creador cuando queda listo (preferencia personal dataJobs)
+    if (job.createdById) {
+      try {
+        const member = await getAdminPrisma().organizationUser.findUnique({
+          where: { organizationId_userId: { organizationId, userId: job.createdById } },
+          include: { user: { select: { email: true } } },
+        });
+        if (member) {
+          const to = await filterRecipientsByPref(organizationId, [member.user.email], "dataJobs");
+          if (to.length) {
+            await getEmailQueue().add("export-done", {
+              organizationId,
+              kind: "alert",
+              to,
+              subject: "Tu export de datos está listo",
+              html: `<p>El export de <b>${job.type}</b> (${rows} filas) ya está disponible en <a href="https://www.tubot.cl/settings/export">Configuración → Exportar datos</a>. Expira en 7 días.</p>`,
+            });
+          }
+        }
+      } catch {
+        /* el aviso es best-effort */
+      }
     }
 
     await withTenant(organizationId, (tx) =>
