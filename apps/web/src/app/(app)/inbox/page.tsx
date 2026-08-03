@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Search, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { EmptyState, cn } from "@/components/ui";
+import { EmptyState, Modal, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
@@ -247,6 +247,42 @@ export default function InboxPage() {
   const channelError = channels.find((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status === "error");
   const stagesForHeader = allStages;
 
+  // ---------- Atajos de teclado ----------
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const itemsRef = useRef<ConvItem[]>(items);
+  itemsRef.current = items;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable;
+      if (e.key === "Escape") {
+        if (showHelp) setShowHelp(false);
+        else if (el.tagName === "INPUT") (el as HTMLInputElement).blur();
+        return;
+      }
+      if (typing) return;
+      const list = itemsRef.current;
+      const idx = list.findIndex((c) => c.id === selectedRef.current);
+      if (e.key === "/") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      } else if (e.key === "?") {
+        setShowHelp((v) => !v);
+      } else if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = list[Math.min(list.length - 1, idx < 0 ? 0 : idx + 1)];
+        if (next) openConversation(next.id);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const prev = list[Math.max(0, idx <= 0 ? 0 : idx - 1)];
+        if (prev) openConversation(prev.id);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openConversation, showHelp]);
+
   return (
     <div className="flex h-full flex-col">
       {channelError && (
@@ -275,7 +311,7 @@ export default function InboxPage() {
             </div>
             <div className="relative">
               <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar nombre o teléfono…" className="w-full rounded-control border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle" />
+              <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…  ( / )" className="w-full rounded-control border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle" />
             </div>
             <div className="flex items-center gap-1.5 text-xs">
               <select value={order} onChange={(e) => setOrder(e.target.value)} className="flex-1 rounded-control border border-line bg-panel px-2 py-1 text-ink">
@@ -406,6 +442,25 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {/* Hoja de ayuda de atajos (tecla ?) */}
+      <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Atajos de teclado">
+        <ul className="space-y-2 text-sm text-ink">
+          {[
+            ["/", "Buscar conversaciones"],
+            ["J  ·  ↓", "Siguiente conversación"],
+            ["K  ·  ↑", "Conversación anterior"],
+            ["Enter", "Enviar el mensaje (en el compositor)"],
+            ["Esc", "Salir del buscador / cerrar diálogo"],
+            ["?", "Mostrar u ocultar esta ayuda"],
+          ].map(([k, d]) => (
+            <li key={k} className="flex items-center justify-between gap-4">
+              <span className="text-ink-muted">{d}</span>
+              <kbd className="rounded-control border border-line bg-app px-2 py-0.5 font-mono text-2xs text-ink">{k}</kbd>
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 }
