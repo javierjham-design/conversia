@@ -2,6 +2,8 @@
 
 ## 2026-08-03 (3) — Pulido de /settings: 8 ajustes de usabilidad (rama `feature/settings-polish`)
 
+**DESPLEGADO EN PROD 2026-08-03** (PR #19, migración settings_polish aplicada). Backup real DOBLE previo: snapshot manual de Railway (2026-08-03 15:06, 191 MB) + pg_dump 18.4 completo (81 tablas + datos → Downloads/pgdump-prod-pre-settings_polish-20260803-151115.sql). Runbook fijado en docs/DEPLOYMENT.md (pg_dump portable en C:/Users/Javier/pgtools). Smoke post-deploy ✔: 3 columnas nuevas con defaults correctos (agent_ids=[], type=instructions) y conteos idénticos al backup; smoke funcional a nivel de datos de los 3 puntos — logo round-trip byte-idéntico en files.content, aislamiento de plantilla por agente (A ve [A,todos] / B ve [todos]) y catálogo de 4 planes con Enterprise; los 5 endpoints nuevos del API rutean (401) y las páginas de /settings sirven 200.
+
 Migración `20260803160000_settings_polish` (files.content para logo/avatar + prompt_templates.type/agent_ids) — **pendiente aplicar a prod**. Un commit por ajuste:
 
 1. **Logo/avatar por subida** (opción B aprobada): validación server-side por MAGIC BYTES + dimensiones (parser propio, 4 tests — rechaza extensiones mentirosas y gigantes), resize a ≤512px en el navegador, files.content solo se lee en los endpoints que sirven la imagen; compat con logo por URL antiguo. Avatar personal en Mi perfil.

@@ -25,6 +25,35 @@ Claves de la configuración:
 
 Release de cambios: `railway up --service <n> --ci` por servicio tocado. Migraciones: desde local contra `DATABASE_PUBLIC_URL` → `prisma migrate deploy` + `pnpm db:setup` (idempotente) — automatizar como pre-deploy es mejora pendiente.
 
+## Runbook de migración a producción (obligatorio)
+
+Procedimiento fijo antes de aplicar cualquier migración a prod (acordado 2026-08-03). **Doble backup real** — nunca improvisar:
+
+**1) Backup Railway (snapshot del volumen)** — dashboard, permanente:
+- Servicio **Postgres → pestaña Backups → Volume backups**. Deja el schedule **Daily** (`Edit schedule`) — queda activo para todas las migraciones futuras.
+- Antes de migrar: **`New backup`** (snapshot manual) y anota su timestamp.
+- PITR (`Enable PITR`) es opcional (belt-and-braces): **fuerza un redeploy del Postgres**, así que actívalo en un momento tranquilo, no justo antes de una migración.
+
+**2) Backup pg_dump (archivo local)** — `pg_dump` 18.x en `C:\Users\Javier\pgtools\pgsql\bin\` (client tools portables de EDB; la versión debe ser ≥ la del servidor, hoy 18.4). Comando exacto:
+```bash
+export PATH="/c/Users/Javier/pgtools/pgsql/bin:$PATH"
+cd "<repo>/conversia"
+DB=$(railway variables --service Postgres --kv | grep "^DATABASE_PUBLIC_URL=" | cut -d= -f2-)
+TS=$(date +%Y%m%d-%H%M%S)
+pg_dump "$DB" --no-owner --no-privileges -f "/c/Users/Javier/Downloads/pgdump-prod-<migracion>-${TS}.sql"
+```
+Verificar que el dump trae `CREATE TABLE` + `COPY` de todas las tablas (`grep -c "CREATE TABLE" archivo.sql`).
+
+**3) Aplicar** (con ambos backups confirmados):
+```bash
+railway run --service Postgres -- bash -c 'cd packages/database && DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_DATABASE_URL="$DATABASE_PUBLIC_URL" npx prisma migrate deploy'
+# Solo si la migración crea TABLAS nuevas (para el RLS): + setup.sql
+railway run --service Postgres -- bash -c 'cd packages/database && npx prisma db execute --file sql/setup.sql --url "$DATABASE_PUBLIC_URL"'
+```
+(Columnas nuevas en tablas existentes NO necesitan setup.sql — la RLS ya cubre la tabla.)
+
+**4) Smoke test post-deploy**: verificar columnas/tablas nuevas + conteos idénticos al backup, esperar el redeploy de api/web, y probar los flujos afectados. Reportar en `docs/PROGRESS.md`.
+
 ## Costos aproximados MVP (mensual, USD)
 
 | Ítem | Estimado | Nota |
