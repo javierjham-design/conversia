@@ -359,10 +359,17 @@ export class UsersController {
       const teams = await tx.team.findMany({ include: { members: true }, orderBy: { createdAt: "asc" } });
       const users = await tx.organizationUser.findMany({ include: { user: { select: { id: true, name: true } } } });
       const nameByUser = new Map(users.map((u) => [u.user.id, u.user.name]));
+      const openByTeam = await tx.conversation.groupBy({
+        by: ["assignedTeamId"],
+        where: { status: { in: ["OPEN", "PENDING"] }, assignedTeamId: { not: null } },
+        _count: { _all: true },
+      });
+      const openCount = new Map(openByTeam.map((r) => [r.assignedTeamId, r._count._all]));
       return teams.map((t) => ({
         id: t.id,
         name: t.name,
         description: t.description,
+        openConversations: openCount.get(t.id) ?? 0,
         members: t.members.map((m) => ({ userId: m.userId, name: nameByUser.get(m.userId) ?? "?" })),
       }));
     });
@@ -375,6 +382,34 @@ export class UsersController {
     return this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.team.create({ data: { organizationId: ctx.organizationId, name: input.name, description: input.description } }),
     );
+  }
+
+  @Patch("teams/:teamId")
+  updateTeam(@Param("teamId") teamId: string, @Body() body: unknown) {
+    const ctx = requirePermission("users:write");
+    const input = parse(z.object({ name: z.string().min(2).max(50).optional(), description: z.string().max(200).optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const team = await tx.team.findUnique({ where: { id: teamId } });
+      if (!team) throw new NotFoundException("Equipo no encontrado");
+      return tx.team.update({ where: { id: teamId }, data: input });
+    });
+  }
+
+  /** Elimina un equipo: desasigna sus conversaciones (quedan sin equipo) y limpia miembros. */
+  @Delete("teams/:teamId")
+  deleteTeam(@Param("teamId") teamId: string) {
+    const ctx = requirePermission("users:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const team = await tx.team.findUnique({ where: { id: teamId } });
+      if (!team) throw new NotFoundException("Equipo no encontrado");
+      const unassigned = await tx.conversation.updateMany({ where: { assignedTeamId: teamId }, data: { assignedTeamId: null } });
+      await tx.teamMember.deleteMany({ where: { teamId } });
+      await tx.team.delete({ where: { id: teamId } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "team.delete", entityType: "team", entityId: teamId, after: { name: team.name, unassignedConversations: unassigned.count } },
+      });
+      return { ok: true, unassigned: unassigned.count };
+    });
   }
 
   @Post("teams/:teamId/members")

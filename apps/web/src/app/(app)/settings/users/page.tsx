@@ -21,12 +21,6 @@ interface Role {
   permissions: string[];
   system: boolean;
 }
-interface Team {
-  id: string;
-  name: string;
-  description: string | null;
-  members: { userId: string; name: string }[];
-}
 interface CatalogModule {
   module: string;
   label: string;
@@ -71,12 +65,10 @@ function expandPerms(perms: string[], catalog: CatalogModule[]): string[] {
 export default function UsersPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [catalog, setCatalog] = useState<CatalogModule[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [invite, setInvite] = useState({ email: "", name: "", roleCode: "operator" });
   const [tempPassword, setTempPassword] = useState<string | null>(null);
-  const [newTeam, setNewTeam] = useState("");
   const [draft, setDraft] = useState<RoleDraft | null>(null);
   // Panel de edición de un usuario (click en la fila)
   const [selected, setSelected] = useState<Member | null>(null);
@@ -125,15 +117,13 @@ export default function UsersPage() {
   }
 
   const load = useCallback(async () => {
-    const [m, r, t, c] = await Promise.all([
+    const [m, r, c] = await Promise.all([
       api<Member[]>("/users"),
       api<Role[]>("/users/roles"),
-      api<Team[]>("/users/teams"),
       api<CatalogModule[]>("/users/permissions"),
     ]);
     setMembers(m);
     setRoles(r);
-    setTeams(t);
     setCatalog(c);
   }, []);
 
@@ -167,22 +157,6 @@ export default function UsersPage() {
     } catch (err) {
       setMsg((err as Error).message);
     }
-  }
-  async function createTeam(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newTeam.trim()) return;
-    await api("/users/teams", { method: "POST", body: JSON.stringify({ name: newTeam.trim() }) });
-    setNewTeam("");
-    await load();
-  }
-  async function addToTeam(teamId: string, userId: string) {
-    if (!userId) return;
-    await api(`/users/teams/${teamId}/members`, { method: "POST", body: JSON.stringify({ userId }) });
-    await load();
-  }
-  async function removeFromTeam(teamId: string, userId: string) {
-    await api(`/users/teams/${teamId}/members/${userId}`, { method: "DELETE" });
-    await load();
   }
 
   // ---- Roles ----
@@ -222,14 +196,32 @@ export default function UsersPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
-      <h1 className="text-xl font-semibold">Usuarios, roles y equipos</h1>
-      <p className="mb-6 text-sm text-slate-500">Quién entra al panel, con qué permisos, y los equipos de atención.</p>
+      <h1 className="text-xl font-semibold">Usuarios y roles</h1>
+      <p className="mb-6 text-sm text-slate-500">
+        Quién entra al panel y con qué permisos. Los equipos de atención viven en{" "}
+        <a href="/settings/teams" className="text-cyan-700 underline">Equipos</a>.
+      </p>
 
       {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</p>}
       {tempPassword && (
-        <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Usuario creado. Contraseña temporal (se muestra solo una vez): <b className="font-mono">{tempPassword}</b> — compártela por un canal seguro.
-        </p>
+        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p>Usuario creado. Contraseña temporal (se muestra solo una vez): <b className="font-mono">{tempPassword}</b></p>
+          <button
+            onClick={() => {
+              void navigator.clipboard.writeText(
+                `Hola! Te invité al panel de nuestro equipo en TuBot.
+Entra en https://www.tubot.cl/login
+Usuario: ${invite.email}
+Clave temporal: ${tempPassword}
+(cámbiala al entrar en Configuración → Mi perfil)`,
+              );
+              setMsg("Mensaje de invitación copiado — pégalo en WhatsApp o correo ✔");
+            }}
+            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100"
+          >
+            📋 Copiar mensaje de invitación (para WhatsApp)
+          </button>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -302,31 +294,9 @@ export default function UsersPage() {
 
         <aside>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h2 id="equipos" className="mb-2 font-medium">Equipos</h2>
-            <form onSubmit={createTeam} className="mb-3 flex gap-2">
-              <input value={newTeam} onChange={(e) => setNewTeam(e.target.value)} placeholder="Nuevo equipo…" className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
-              <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm text-white">+</button>
-            </form>
-            {teams.map((t) => (
-              <div key={t.id} className="mb-3 rounded-lg border border-slate-100 p-2">
-                <p className="text-sm font-medium">{t.name}</p>
-                <ul className="mt-1 space-y-0.5">
-                  {t.members.map((tm) => (
-                    <li key={tm.userId} className="flex items-center justify-between text-xs text-slate-600">
-                      {tm.name}
-                      <button onClick={() => void removeFromTeam(t.id, tm.userId)} className="text-slate-300 hover:text-red-500">✕</button>
-                    </li>
-                  ))}
-                </ul>
-                <select defaultValue="" onChange={(e) => { void addToTeam(t.id, e.target.value); e.target.value = ""; }} className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1 text-xs">
-                  <option value="">+ agregar miembro…</option>
-                  {members.filter((m) => m.active && !t.members.some((tm) => tm.userId === m.userId)).map((m) => (
-                    <option key={m.userId} value={m.userId}>{m.name}</option>
-                  ))}
-                </select>
-              </div>
-            ))}
-            {teams.length === 0 && <p className="text-xs text-slate-400">Sin equipos aún.</p>}
+            <h2 className="mb-1 font-medium">Equipos</h2>
+            <p className="text-xs text-slate-500">Crea equipos (Ventas, Recepción, Sede…) y asigna miembros para las asignaciones de la Bandeja, agentes y flujos.</p>
+            <a href="/settings/teams" className="mt-2 inline-block rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Gestionar equipos ↗</a>
           </div>
         </aside>
       </div>
