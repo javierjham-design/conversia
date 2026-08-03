@@ -104,7 +104,7 @@ const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 interface Catalog {
   triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean }[];
   nodes: { type: string; label: string; description: string }[];
-  leadStatuses: { code: string; name: string }[];
+  leadStatuses: { code: string; name: string; emoji?: string | null }[];
   agents: { slug: string; name: string }[];
   users: { id: string; name: string }[];
   teams: { id: string; name: string }[];
@@ -773,7 +773,7 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
                 className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               >
                 <option value="">— cualquiera —</option>
-                {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.name}</option>))}
+                {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>))}
               </select>
             </label>
           ))}
@@ -1132,7 +1132,7 @@ function NodePanel({
           <span className="text-xs text-slate-500">Nuevo estado del lead</span>
           <select value={config.statusCode ?? ""} onChange={(e) => onChange({ statusCode: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
             <option value="">— elegir —</option>
-            {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.name}</option>))}
+            {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>))}
           </select>
         </label>
       )}

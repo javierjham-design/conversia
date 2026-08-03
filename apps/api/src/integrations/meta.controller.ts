@@ -315,7 +315,7 @@ export class MetaController {
             { source: "phone_number", target: "phone" },
             { source: "email", target: "email" },
           ],
-          config: { leadStatusCode: "nuevo", tags: ["meta-lead"] },
+          config: { tags: ["meta-lead"] }, // sin leadStatusCode: el worker usa la primera etapa OPEN del tenant
           active: false,
         }
       );
@@ -388,7 +388,7 @@ export class MetaController {
           active: false,
           rules: [
             { source: "lead.created", dest: "Lead", active: true },
-            { source: "lead.status_changed:agenda", dest: "Schedule", active: true },
+            { source: "lead.status_changed:schedule", dest: "Schedule", active: true },
             { source: "appointment.created", dest: "Schedule", active: false },
           ],
         }

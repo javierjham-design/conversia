@@ -156,11 +156,15 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       });
     }
 
-    // Lead con estado inicial configurado
-    const statusCode = config.leadStatusCode ?? "nuevo";
-    const status = await tx.leadStatus.findUnique({
-      where: { organizationId_code: { organizationId, code: statusCode } },
-    });
+    // Lead con estado inicial configurado; si el código no existe (etapas
+    // renombradas por el tenant), cae a la primera etapa OPEN del ciclo.
+    const statusCode = config.leadStatusCode as string | undefined;
+    let status = statusCode
+      ? await tx.leadStatus.findUnique({ where: { organizationId_code: { organizationId, code: statusCode } } })
+      : null;
+    if (!status) {
+      status = await tx.leadStatus.findFirst({ where: { category: "OPEN" }, orderBy: { order: "asc" } });
+    }
     let leadId: string | null = null;
     if (status) {
       const lead = await tx.lead.create({

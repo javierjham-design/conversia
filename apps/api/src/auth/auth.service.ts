@@ -76,6 +76,7 @@ export class AuthService {
           organizationId: org.id,
           code: s.code,
           name: s.name,
+          emoji: s.emoji,
           category: s.category as any,
           order: s.order,
           system: true,
@@ -137,7 +138,7 @@ export class AuthService {
       }
       await tx.organizationUser.create({ data: { organizationId: org.id, userId: user.id, roleId: ownerRole.id } });
       await tx.leadStatus.createMany({
-        data: DEFAULT_LEAD_STATUSES.map((s) => ({ organizationId: org.id, code: s.code, name: s.name, category: s.category as any, order: s.order, system: true })),
+        data: DEFAULT_LEAD_STATUSES.map((s) => ({ organizationId: org.id, code: s.code, name: s.name, emoji: s.emoji, category: s.category as any, order: s.order, system: true })),
       });
       return { organizationId: org.id, email: input.email, tempPassword: revealPassword, validUntil };
     });

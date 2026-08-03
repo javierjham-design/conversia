@@ -1,6 +1,7 @@
 /** Tipos compartidos de la Bandeja Pro. */
 
 export interface Stage {
+  emoji?: string | null;
   code: string;
   name: string;
   color: string | null;
@@ -37,7 +38,7 @@ export interface ConvItem {
 export interface Counters {
   fixed: { all: number; mine: number; unassigned: number; unanswered: number; blocked: number };
   agents: { id: string; name: string; count: number }[];
-  stages: { code: string; name: string; color: string | null; count: number }[];
+  stages: { code: string; name: string; color: string | null; emoji?: string | null; count: number }[];
   teams: { id: string; name: string; count: number }[];
   allTeams: { id: string; name: string }[];
   views: { id: string; name: string; definition: Record<string, unknown>; count: number }[];

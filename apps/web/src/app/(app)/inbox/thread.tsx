@@ -169,7 +169,7 @@ export function Thread({
               >
                 <option value="">— etapa —</option>
                 {stages.map((s) => (
-                  <option key={s.code} value={s.code}>{s.name}</option>
+                  <option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
                 ))}
               </select>
             </div>

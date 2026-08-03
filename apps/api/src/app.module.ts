@@ -5,6 +5,7 @@ import { AuthService } from "./auth/auth.service";
 import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
 import { ContactsController } from "./contacts/contacts.controller";
+import { LifecycleController } from "./contacts/lifecycle.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { InboxController } from "./conversations/inbox.controller";
 import { RealtimeService } from "./common/realtime.service";
@@ -42,6 +43,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ConversationsController,
     InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA
     ContactsController,
+    LifecycleController, // etapas del ciclo de vida editables por tenant
     ChannelsController,
     UsersController,
     IntegrationsController,

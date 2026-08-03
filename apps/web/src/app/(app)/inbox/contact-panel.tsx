@@ -94,7 +94,7 @@ export function ContactPanel({
           <p className="text-[11px] font-semibold uppercase text-slate-400">Etapa</p>
           {context.stage ? (
             <span className="mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${context.stage.color ?? "#94a3b8"}22`, color: context.stage.color ?? "#475569" }}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: context.stage.color ?? "#94a3b8" }} />
+              {context.stage.emoji ? <span>{context.stage.emoji}</span> : <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: context.stage.color ?? "#94a3b8" }} />}
               {context.stage.name}
             </span>
           ) : (
