@@ -26,6 +26,7 @@ import { processSyncJob } from "./sync-worker";
 import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
+import { startInboxRules } from "./inbox-rules";
 
 async function main() {
   const env = getEnv();
@@ -111,6 +112,7 @@ async function main() {
   const stopScheduler = startScheduler();
   const stopTemplateSync = startTemplateSync();
   const stopDailyDigests = startDailyDigests();
+  startInboxRules(); // auto-cierre + retoma del bot + purga de exports
 
   console.log(
     `✔ Worker Conversia activo — colas: ${QUEUE_NAMES.inbound}, ${QUEUE_NAMES.outbound} | IA: ${env.AI_PROVIDER} | WhatsApp: ${env.WHATSAPP_PROVIDER}`,

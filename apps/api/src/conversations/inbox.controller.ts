@@ -21,6 +21,7 @@ const viewSchema = z.object({
 });
 
 const snippetSchema = z.object({
+  scope: z.enum(["team", "mine"]).optional(),
   shortcut: z
     .string()
     .min(2)
@@ -106,7 +107,11 @@ export class InboxController {
         }),
       );
 
+      const orgRow = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const firstResponseTargetMinutes = Number((((orgRow?.settings ?? {}) as Record<string, any>).inbox ?? {}).firstResponseTargetMinutes ?? 15);
+
       return {
+        firstResponseTargetMinutes,
         fixed: { all, mine, unassigned, unanswered, blocked },
         agents: byAgentRaw
           .filter((r) => r.activeAgentId && agentName.has(r.activeAgentId))
@@ -177,7 +182,13 @@ export class InboxController {
   @Get("snippets")
   snippets() {
     const ctx = requireContext();
-    return this.prisma.withTenant(ctx.organizationId, (tx) => tx.snippet.findMany({ orderBy: { shortcut: "asc" } }));
+    // Ámbito: las de equipo + las personales del propio usuario
+    return this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.snippet.findMany({
+        where: { OR: [{ scope: "team" }, { scope: "mine", createdById: ctx.userId }] },
+        orderBy: { shortcut: "asc" },
+      }),
+    );
   }
 
   @Post("snippets")
@@ -191,7 +202,7 @@ export class InboxController {
       });
       if (exists) throw new BadRequestException("Ya existe una respuesta rápida con ese atajo");
       return tx.snippet.create({
-        data: { organizationId: ctx.organizationId, shortcut: parsed.data.shortcut, body: parsed.data.body, createdById: ctx.userId },
+        data: { organizationId: ctx.organizationId, shortcut: parsed.data.shortcut, body: parsed.data.body, scope: parsed.data.scope ?? "team", createdById: ctx.userId },
       });
     });
   }
@@ -262,6 +273,9 @@ export class InboxController {
 
     // Mismos controles de consumo que el resto de la IA
     const orgSettings = (loaded.org?.settings ?? {}) as Record<string, any>;
+    const assistantLang = ({ es: "español chileno neutro", en: "inglés", pt: "portugués" } as Record<string, string>)[
+      String(orgSettings.assistantLanguage ?? (orgSettings.general as any)?.language ?? "es")
+    ] ?? "español chileno neutro";
     if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
       throw new BadRequestException("La IA está pausada (kill switch)");
     }
@@ -273,7 +287,7 @@ export class InboxController {
       .map((m) => `${m.direction === "INBOUND" ? contactName : "Nosotros"}: ${m.body ?? `[${m.type.toLowerCase()}]`}`)
       .join("\n");
 
-    let system = `Eres el asistente del equipo de ${loaded.org?.name ?? "la empresa"} en una bandeja de WhatsApp. Responde SIEMPRE en español chileno neutro, listo para pegar (sin comillas ni preámbulos).`;
+    let system = `Eres el asistente del equipo de ${loaded.org?.name ?? "la empresa"} en una bandeja de WhatsApp. Responde SIEMPRE en ${assistantLang}, listo para pegar (sin comillas ni preámbulos).`;
     let user = "";
     if (mode === "suggest") {
       const kb = (loaded.knowledge as { title: string; content: string | null }[])

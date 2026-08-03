@@ -411,7 +411,7 @@ export const QUEUE_NAMES = {
 /** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
 export interface SyncJob {
   organizationId: string;
-  kind: "ga4_event" | "calendar_sync" | "sheets_append" | "hubspot_contact";
+  kind: "ga4_event" | "calendar_sync" | "sheets_append" | "hubspot_contact" | "export_data";
   payload: Record<string, unknown>;
 }
 

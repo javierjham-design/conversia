@@ -18,6 +18,10 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
       const { appendSheetRow } = await import("./google-sheets.js");
       return appendSheetRow(job.organizationId, job.payload as { spreadsheetId: string; sheetName: string; values: string[] });
     }
+    case "export_data": {
+      const { processExport } = await import("./exports.js");
+      return processExport(job.organizationId, job.payload as { exportId: string });
+    }
     case "hubspot_contact": {
       const { syncContactToHubspot } = await import("./hubspot.js");
       return syncContactToHubspot(job.organizationId, job.payload as { contactId: string });
