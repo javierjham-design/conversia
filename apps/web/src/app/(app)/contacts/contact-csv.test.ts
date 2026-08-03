@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessField, parseCSV } from "./contact-csv";
+import { buildTemplateCsv, guessField, parseCSV, TEMPLATE_BASE_HEADERS } from "./contact-csv";
 
 describe("parseCSV", () => {
   it("parsea cabeceras y filas separadas por coma", () => {
@@ -44,5 +44,39 @@ describe("guessField", () => {
     expect(guessField("País")).toBe("country");
     expect(guessField("Etiquetas")).toBe("tags");
     expect(guessField("columna_rara")).toBe("");
+  });
+});
+
+describe("plantilla CSV de import (round-trip)", () => {
+  const customFields = [{ key: "prevision", label: "Previsión" }];
+
+  it("la plantilla descargada se parsea tal cual (separador ,)", () => {
+    const csv = buildTemplateCsv(customFields);
+    const { headers, rows } = parseCSV(csv);
+    expect(headers).toEqual([...TEMPLATE_BASE_HEADERS, "prevision"]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0][0]).toBe("+56 9 1234 5678");
+    expect(rows[0][5]).toBe("interesado|ortodoncia");
+  });
+
+  it("round-trip con ; (Excel Chile re-exporta con punto y coma)", () => {
+    const csv = buildTemplateCsv(customFields);
+    const excelStyle = parseCSV(csv); // parse original
+    const reexported =
+      "﻿" +
+      [excelStyle.headers, ...excelStyle.rows]
+        .map((r) => r.map((c) => (/[;"]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(";"))
+        .join("\n");
+    const { headers, rows } = parseCSV(reexported);
+    expect(headers).toEqual([...TEMPLATE_BASE_HEADERS, "prevision"]);
+    expect(rows[1][1]).toBe("Pedro");
+  });
+
+  it("empieza con BOM (tildes en Excel) y las cabeceras se mapean solas", () => {
+    const csv = buildTemplateCsv([]);
+    expect(csv.startsWith("﻿")).toBe(true);
+    expect(guessField("telefono")).toBe("phone");
+    expect(guessField("etapa")).toBe("stage");
+    expect(guessField("etiquetas")).toBe("tags");
   });
 });

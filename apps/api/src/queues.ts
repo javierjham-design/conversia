@@ -6,6 +6,7 @@ import {
   QUEUE_NAMES,
   type CapiJob,
   type ContactImportJob,
+  type EmailJob,
   type EventJob,
   type InboundJob,
   type OutboundJob,
@@ -23,6 +24,7 @@ export class QueueService implements OnModuleDestroy {
   readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });
   readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
   readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
+  readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
 
   async onModuleDestroy() {
     await Promise.all([
@@ -33,6 +35,7 @@ export class QueueService implements OnModuleDestroy {
       this.capi.close(),
       this.imports.close(),
       this.sync.close(),
+      this.emails.close(),
     ]);
     this.connection.disconnect();
   }

@@ -141,6 +141,17 @@ export default function InboxPage() {
     void loadCounters();
   }, [loadCounters]);
 
+  // Deep-link desde Configuración → Equipos: /inbox?team=<id>
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const teamId = params.get("team");
+    if (teamId) {
+      setFilter({ kind: "team", id: teamId, label: "Equipo" });
+      window.history.replaceState(null, "", "/inbox");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     void loadList();
   }, [loadList]);

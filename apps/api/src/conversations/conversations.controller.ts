@@ -366,8 +366,12 @@ export class ConversationsController {
       }
       await tx.conversation.update({ where: { id }, data });
       await this.systemMessage(tx, ctx.organizationId, id, `👤 Asignada ${label || "—"} por ${await this.userName(tx, ctx.userId)}`);
-      return { ok: true };
+      return { ok: true, assignedUserId: parsed.data.userId ?? null };
     });
+    // Aviso por correo al asignado (preferencia personal assignedToMe; best-effort)
+    if (r.assignedUserId && r.assignedUserId !== ctx.userId) {
+      await this.notifyAssignment(ctx.organizationId, r.assignedUserId, id).catch(() => undefined);
+    }
     await this.publish(ctx.organizationId, id);
     return r;
   }
@@ -926,6 +930,28 @@ export class ConversationsController {
       include: { user: { select: { id: true, name: true } } },
     });
     return new Map(members.map((m: any) => [m.userId, m.user.name]));
+  }
+
+  /** Correo «te asignaron una conversación» respetando la preferencia personal. */
+  private async notifyAssignment(organizationId: string, userId: string, conversationId: string): Promise<void> {
+    const info = await this.prisma.withTenant(organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true, name: true } });
+      const prefs = ((((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>)[userId] ?? {};
+      if (prefs.assignedToMe === false) return null;
+      const member = await tx.organizationUser.findUnique({
+        where: { organizationId_userId: { organizationId, userId } },
+        include: { user: { select: { email: true, name: true } } },
+      });
+      return member ? { email: member.user.email, name: member.user.name, orgName: org?.name ?? "TuBot" } : null;
+    });
+    if (!info) return;
+    await this.queues.emails.add("assignment", {
+      organizationId,
+      kind: "alert",
+      to: [info.email],
+      subject: `Te asignaron una conversación en ${info.orgName}`,
+      html: `<p>Hola ${info.name}: te asignaron una conversación en la Bandeja.</p><p><a href="https://www.tubot.cl/inbox">Abrir la Bandeja</a> (conversación ${conversationId.slice(0, 8)}…)</p>`,
+    });
   }
 
   private async publish(organizationId: string, conversationId: string): Promise<void> {

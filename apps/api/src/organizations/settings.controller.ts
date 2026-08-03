@@ -6,6 +6,7 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { validateUploadedImage } from "../common/images";
 
 const generalSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -26,6 +27,15 @@ const generalSchema = z.object({
  * nodo «Fecha y hora»; moneda → default de servicios nuevos (no pisa el
  * currency por servicio); idioma → asistente del compositor.
  */
+/** Tipos de plantilla de prompt del tenant. */
+export const PROMPT_TEMPLATE_TYPES = ["instructions", "indications", "tone", "policy", "script"] as const;
+
+/** ¿La plantilla aplica a este agente? ([] = todos los agentes). Puro; testeado. */
+export function templateVisibleForAgent(tpl: { agentIds: unknown }, agentId: string): boolean {
+  const ids = Array.isArray(tpl.agentIds) ? (tpl.agentIds as string[]) : [];
+  return ids.length === 0 || ids.includes(agentId);
+}
+
 @Controller("settings")
 export class SettingsController {
   constructor(
@@ -46,8 +56,9 @@ export class SettingsController {
         timezone: org?.timezone ?? "America/Santiago",
         logoUrl: general.logoUrl ?? "",
         industry: general.industry ?? "",
-        currency: general.currency ?? "CLP",
-        language: general.language ?? "es",
+        // Moneda e idioma viven en columnas reales de la organización (fuente única)
+        currency: org?.currency ?? "CLP",
+        language: org?.locale ?? "es",
         contactEmail: general.contactEmail ?? "",
         contactPhone: general.contactPhone ?? "",
         website: general.website ?? "",
@@ -66,7 +77,7 @@ export class SettingsController {
       if (!org) throw new BadRequestException("Organización no encontrada");
       const settings = (org.settings ?? {}) as Record<string, any>;
       const general = { ...((settings.general ?? {}) as object) } as Record<string, any>;
-      for (const key of ["logoUrl", "industry", "currency", "language", "contactEmail", "contactPhone", "website"] as const) {
+      for (const key of ["logoUrl", "industry", "contactEmail", "contactPhone", "website"] as const) {
         if (input[key] !== undefined) general[key] = input[key];
       }
       await tx.organization.update({
@@ -74,6 +85,8 @@ export class SettingsController {
         data: {
           ...(input.name ? { name: input.name.trim() } : {}),
           ...(input.timezone ? { timezone: input.timezone } : {}),
+          ...(input.currency ? { currency: input.currency } : {}),
+          ...(input.language ? { locale: input.language } : {}),
           settings: { ...settings, general } as object,
         },
       });
@@ -171,7 +184,7 @@ export class SettingsController {
           dailyTokenBudget: limits.aiTokensDaily ?? getEnv().AI_DAILY_TOKEN_BUDGET_PER_ORG,
         },
         transcription: settings.transcription !== false,
-        assistantLanguage: String(settings.assistantLanguage ?? ((settings.general as any)?.language ?? "es")),
+        assistantLanguage: String(settings.assistantLanguage ?? org?.locale ?? "es"),
       };
     });
   }
@@ -205,16 +218,20 @@ export class SettingsController {
 
   // ------------------------- Biblioteca de plantillas de prompt -------------------------
 
+  /** Biblioteca del tenant; ?agentId= filtra las asignadas a ese agente ([]=todos). */
   @Get("prompt-templates")
-  promptTemplates() {
+  promptTemplates(@Query("agentId") agentId?: string) {
     const ctx = requireContext();
-    return this.prisma.withTenant(ctx.organizationId, (tx) => tx.promptTemplate.findMany({ orderBy: { name: "asc" } }));
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const all = await tx.promptTemplate.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] });
+      return agentId ? all.filter((t) => templateVisibleForAgent(t, agentId)) : all;
+    });
   }
 
   @Post("prompt-templates")
   createPromptTemplate(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const parsed = z.object({ name: z.string().min(2).max(60), body: z.string().min(5).max(8000) }).safeParse(body);
+    const parsed = z.object({ name: z.string().min(2).max(60), body: z.string().min(5).max(8000), type: z.enum(PROMPT_TEMPLATE_TYPES).optional(), agentIds: z.array(z.string()).max(50).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Plantilla inválida (nombre 2-60, contenido 5-8000)");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const exists = await tx.promptTemplate.findUnique({
@@ -222,7 +239,14 @@ export class SettingsController {
       });
       if (exists) throw new BadRequestException("Ya existe una plantilla con ese nombre");
       return tx.promptTemplate.create({
-        data: { organizationId: ctx.organizationId, name: parsed.data.name.trim(), body: parsed.data.body, createdById: ctx.userId },
+        data: {
+          organizationId: ctx.organizationId,
+          name: parsed.data.name.trim(),
+          body: parsed.data.body,
+          type: parsed.data.type ?? "instructions",
+          agentIds: (parsed.data.agentIds ?? []) as object,
+          createdById: ctx.userId,
+        },
       });
     });
   }
@@ -230,12 +254,27 @@ export class SettingsController {
   @Patch("prompt-templates/:id")
   updatePromptTemplate(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const parsed = z.object({ name: z.string().min(2).max(60).optional(), body: z.string().min(5).max(8000).optional() }).safeParse(body);
+    const parsed = z
+      .object({
+        name: z.string().min(2).max(60).optional(),
+        body: z.string().min(5).max(8000).optional(),
+        type: z.enum(PROMPT_TEMPLATE_TYPES).optional(),
+        agentIds: z.array(z.string()).max(50).optional(),
+      })
+      .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Plantilla inválida");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const tpl = await tx.promptTemplate.findUnique({ where: { id } });
       if (!tpl) throw new NotFoundException("Plantilla no encontrada");
-      return tx.promptTemplate.update({ where: { id }, data: parsed.data });
+      return tx.promptTemplate.update({
+        where: { id },
+        data: {
+          ...(parsed.data.name ? { name: parsed.data.name } : {}),
+          ...(parsed.data.body ? { body: parsed.data.body } : {}),
+          ...(parsed.data.type ? { type: parsed.data.type } : {}),
+          ...(parsed.data.agentIds ? { agentIds: parsed.data.agentIds as object } : {}),
+        },
+      });
     });
   }
 
@@ -373,6 +412,144 @@ export class SettingsController {
         nextCursor: hasMore ? page[page.length - 1]!.id : null,
       };
     });
+  }
+
+  // ------------------- Preferencias de notificaciones (personales) -------------------
+
+  /** Defaults sensatos: todo activado menos el resumen diario. */
+  static NOTIF_DEFAULTS = { assignedToMe: true, aiEscalation: true, integrationError: true, dailySummary: false, dataJobs: true };
+
+  @Get("notifications")
+  notificationPrefs() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const all = (((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>;
+      return { ...SettingsController.NOTIF_DEFAULTS, ...(all[ctx.userId] ?? {}) };
+    });
+  }
+
+  @Put("notifications")
+  updateNotificationPrefs(@Body() body: unknown) {
+    const ctx = requireContext(); // personal: cualquier rol, solo sus propias prefs
+    const parsed = z
+      .object({
+        assignedToMe: z.boolean().optional(),
+        aiEscalation: z.boolean().optional(),
+        integrationError: z.boolean().optional(),
+        dailySummary: z.boolean().optional(),
+        dataJobs: z.boolean().optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Preferencias inválidas");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const all = (settings.notifPrefs ?? {}) as Record<string, any>;
+      all[ctx.userId] = { ...SettingsController.NOTIF_DEFAULTS, ...(all[ctx.userId] ?? {}), ...parsed.data };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifPrefs: all } as object } });
+      return { ok: true };
+    });
+  }
+
+
+  // ------------------------- Logo y avatar (subida de archivo) -------------------------
+  // Regla: files.content SOLO se lee en los endpoints que sirven la imagen;
+  // ningún listado de File selecciona esa columna.
+
+  /** Sube el logo del negocio (PNG/JPG/WebP ≤2MB; validado por magic bytes). */
+  @Post("logo")
+  async uploadLogo(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    return this.saveImage(ctx.organizationId, ctx.userId, `${ctx.organizationId}/branding/logo`, "logo del negocio", body);
+  }
+
+  /** Sirve el logo (única lectura de files.content junto al avatar). */
+  @Get("logo")
+  async serveLogo(@Res() res: Response) {
+    const ctx = requireContext();
+    await this.serveImage(ctx.organizationId, `${ctx.organizationId}/branding/logo`, res);
+  }
+
+  @Delete("logo")
+  async deleteLogo() {
+    const ctx = requirePermission("settings:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.file.deleteMany({ where: { key: `${ctx.organizationId}/branding/logo` } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "settings.logo_delete", entityType: "file" },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Avatar personal (cualquier rol; mismo pipeline de validación del logo). */
+  @Post("profile/avatar")
+  async uploadAvatar(@Body() body: unknown) {
+    const ctx = requireContext();
+    return this.saveImage(ctx.organizationId, ctx.userId, `${ctx.organizationId}/branding/avatar/${ctx.userId}`, "avatar", body);
+  }
+
+  @Get("avatar/:userId")
+  async serveAvatar(@Param("userId") userId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    await this.serveImage(ctx.organizationId, `${ctx.organizationId}/branding/avatar/${userId}`, res);
+  }
+
+  @Delete("profile/avatar")
+  async deleteAvatar() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.file.deleteMany({ where: { key: `${ctx.organizationId}/branding/avatar/${ctx.userId}` } });
+      return { ok: true };
+    });
+  }
+
+  private async saveImage(orgId: string, userId: string, key: string, label: string, body: unknown) {
+    const parsed = z.object({ dataBase64: z.string().min(1), filename: z.string().max(200).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Imagen requerida");
+    const buf = Buffer.from(parsed.data.dataBase64, "base64");
+    let info: { mime: string; width: number; height: number };
+    try {
+      info = validateUploadedImage(buf);
+    } catch (err) {
+      throw new BadRequestException((err as Error).message);
+    }
+    return this.prisma.withTenant(orgId, async (tx) => {
+      const existing = await tx.file.findFirst({ where: { key }, select: { id: true } });
+      const data = {
+        organizationId: orgId,
+        bucket: "db",
+        key,
+        name: parsed.data.filename ?? label,
+        mime: info.mime,
+        size: buf.length,
+        uploadedById: userId,
+        scope: "branding",
+        content: parsed.data.dataBase64,
+        meta: { width: info.width, height: info.height } as object,
+      };
+      const file = existing
+        ? await tx.file.update({ where: { id: existing.id }, data, select: { id: true } })
+        : await tx.file.create({ data, select: { id: true } });
+      await tx.auditLog.create({
+        data: { organizationId: orgId, actorType: "user", actorId: userId, action: "settings.image_upload", entityType: "file", entityId: file.id, after: { key, mime: info.mime, size: buf.length } },
+      });
+      return { ok: true, fileId: file.id, width: info.width, height: info.height };
+    });
+  }
+
+  private async serveImage(orgId: string, key: string, res: Response) {
+    const file = await this.prisma.withTenant(orgId, (tx) =>
+      tx.file.findFirst({ where: { key }, select: { mime: true, content: true } }),
+    );
+    if (!file?.content) {
+      res.status(404).json({ message: "Sin imagen" });
+      return;
+    }
+    res.setHeader("content-type", file.mime ?? "image/png");
+    res.setHeader("cache-control", "private, max-age=300");
+    res.send(Buffer.from(file.content, "base64"));
   }
 
   // ------------------------- Helpers -------------------------

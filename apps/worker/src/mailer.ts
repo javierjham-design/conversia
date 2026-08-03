@@ -147,6 +147,8 @@ export async function enqueueEscalationEmail(organizationId: string, handoffId: 
   try {
     const integration = await getEmailIntegration(organizationId);
     if (!integration?.escalation.enabled || integration.escalation.recipients.length === 0) return;
+    const escalationTo = await filterRecipientsByPref(organizationId, integration.escalation.recipients, "aiEscalation");
+    if (!escalationTo.length) return;
     const env = getEnv();
     const url = `${env.WEB_URL ?? ""}/inbox`;
     await getEmailQueue().add(
@@ -155,7 +157,7 @@ export async function enqueueEscalationEmail(organizationId: string, handoffId: 
         organizationId,
         kind: "escalation",
         handoffId,
-        to: integration.escalation.recipients,
+        to: escalationTo,
         subject: "⚠ Conversación escalada sin atender — TuBot",
         html: `<p>Una conversación fue escalada a humano hace ${integration.escalation.minutes} minutos y sigue sin respuesta.</p><p><a href="${url}">Abrir la bandeja</a> (conversación ${conversationId.slice(0, 8)}…)</p>`,
       },
@@ -167,6 +169,35 @@ export async function enqueueEscalationEmail(organizationId: string, handoffId: 
 }
 
 /** Alerta de integración en error (p. ej. token de WhatsApp vencido). */
+
+/**
+ * Preferencias personales (/settings/notifications): si un destinatario es un
+ * usuario del panel con la preferencia apagada, se excluye. Correos externos
+ * (sin cuenta) pasan siempre. Defaults: todo ON menos dailySummary.
+ */
+export async function filterRecipientsByPref(
+  organizationId: string,
+  recipients: string[],
+  pref: "aiEscalation" | "dailySummary" | "dataJobs",
+): Promise<string[]> {
+  if (!recipients.length) return recipients;
+  const prisma = getAdminPrisma();
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+  const allPrefs = (((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>;
+  const members = await prisma.organizationUser.findMany({
+    where: { organizationId },
+    include: { user: { select: { id: true, email: true } } },
+  });
+  const byEmail = new Map(members.map((mb) => [mb.user.email.toLowerCase(), mb.user.id]));
+  const defaults: Record<string, boolean> = { aiEscalation: true, dailySummary: false, dataJobs: true };
+  return recipients.filter((email) => {
+    const userId = byEmail.get(email.toLowerCase());
+    if (!userId) return true; // correo externo: siempre
+    const p = allPrefs[userId] ?? {};
+    return (p[pref] ?? defaults[pref]) !== false && (pref !== "dailySummary" || (p[pref] ?? defaults[pref]) === true);
+  });
+}
+
 export async function enqueueIntegrationAlert(organizationId: string, subject: string, html: string): Promise<void> {
   try {
     const integration = await getEmailIntegration(organizationId);
@@ -194,6 +225,8 @@ export function startDailyDigests(): () => void {
         const cfg = (conn.config as Record<string, any>) ?? {};
         const ds = cfg.dailySummary ?? {};
         if (!ds.enabled || !Array.isArray(ds.recipients) || ds.recipients.length === 0) continue;
+        const dsRecipients = await filterRecipientsByPref(conn.organizationId, ds.recipients as string[], "dailySummary");
+        if (!dsRecipients.length) continue;
         const org = await prisma.organization.findUnique({ where: { id: conn.organizationId }, select: { name: true, timezone: true } });
         const tz = org?.timezone ?? "America/Santiago";
         const now = new Date();
@@ -215,7 +248,7 @@ export function startDailyDigests(): () => void {
           {
             organizationId: conn.organizationId,
             kind: "daily_summary",
-            to: ds.recipients,
+            to: dsRecipients,
             subject: `Resumen diario — ${org?.name ?? "TuBot"}`,
             html: `<h3>Últimas 24 horas</h3><ul><li><b>${conversations}</b> conversaciones activas</li><li><b>${contacts}</b> contactos nuevos</li><li><b>${leads}</b> leads nuevos</li><li><b>${appointments}</b> citas creadas</li></ul>`,
           },

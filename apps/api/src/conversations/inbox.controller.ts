@@ -30,6 +30,20 @@ const snippetSchema = z.object({
   body: z.string().min(2).max(2000),
 });
 
+/** Visibilidad de snippets: las de equipo + las personales del propio usuario (puro; testeado). */
+export function snippetVisibilityWhere(userId: string) {
+  return { OR: [{ scope: "team" }, { scope: "mine", createdById: userId }] };
+}
+
+/** Ejemplos genéricos sembrados al primer uso (sin datos de ningún tenant real). */
+export const SNIPPET_SEEDS: { shortcut: string; body: string }[] = [
+  { shortcut: "saludo", body: "¡Hola {{contact.firstName}}! 👋 Gracias por escribirnos. ¿En qué te podemos ayudar hoy? (ejemplo — edítame)" },
+  { shortcut: "precios", body: "Estos son nuestros valores referenciales: [servicio] desde $XX.XXX. ¿Te envío el detalle completo? (ejemplo — edítame)" },
+  { shortcut: "ubicacion", body: "Estamos en [dirección]. 📍 ¿Te comparto la ubicación por el mapa? (ejemplo — edítame)" },
+  { shortcut: "horarios", body: "Atendemos de lunes a viernes de 9:00 a 19:00 y sábados de 9:00 a 14:00. (ejemplo — edítame)" },
+  { shortcut: "despedida", body: "¡Gracias por contactarnos, {{contact.firstName}}! Cualquier duda quedamos atentos. 😊 (ejemplo — edítame)" },
+];
+
 /**
  * Clasificador de la Bandeja: conteos agregados, bandejas personalizadas,
  * respuestas rápidas y asistente IA del compositor.
@@ -182,13 +196,22 @@ export class InboxController {
   @Get("snippets")
   snippets() {
     const ctx = requireContext();
-    // Ámbito: las de equipo + las personales del propio usuario
-    return this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.snippet.findMany({
-        where: { OR: [{ scope: "team" }, { scope: "mine", createdById: ctx.userId }] },
-        orderBy: { shortcut: "asc" },
-      }),
-    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // Semilla al primer uso: 5 ejemplos genéricos marcados «edítame» (una sola vez por org)
+      const total = await tx.snippet.count();
+      if (total === 0) {
+        const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+        const settings = (org?.settings ?? {}) as Record<string, any>;
+        if (!settings.snippetsSeeded) {
+          await tx.snippet.createMany({
+            data: SNIPPET_SEEDS.map((s) => ({ organizationId: ctx.organizationId, shortcut: s.shortcut, body: s.body, scope: "team" })),
+            skipDuplicates: true,
+          });
+          await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, snippetsSeeded: true } as object } });
+        }
+      }
+      return tx.snippet.findMany({ where: snippetVisibilityWhere(ctx.userId), orderBy: { shortcut: "asc" } });
+    });
   }
 
   @Post("snippets")
@@ -215,6 +238,9 @@ export class InboxController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const snip = await tx.snippet.findUnique({ where: { id } });
       if (!snip) throw new NotFoundException("Respuesta rápida no encontrada");
+      if (snip.scope === "mine" && snip.createdById !== ctx.userId) {
+        throw new BadRequestException("Esta respuesta es personal de otro usuario");
+      }
       return tx.snippet.update({ where: { id }, data: parsed.data });
     });
   }
@@ -223,6 +249,10 @@ export class InboxController {
   deleteSnippet(@Param("id") id: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const snip = await tx.snippet.findUnique({ where: { id } });
+      if (snip?.scope === "mine" && snip.createdById !== ctx.userId) {
+        throw new BadRequestException("Esta respuesta es personal de otro usuario");
+      }
       await tx.snippet.deleteMany({ where: { id } });
       return { ok: true };
     });
@@ -274,7 +304,7 @@ export class InboxController {
     // Mismos controles de consumo que el resto de la IA
     const orgSettings = (loaded.org?.settings ?? {}) as Record<string, any>;
     const assistantLang = ({ es: "español chileno neutro", en: "inglés", pt: "portugués" } as Record<string, string>)[
-      String(orgSettings.assistantLanguage ?? (orgSettings.general as any)?.language ?? "es")
+      String(orgSettings.assistantLanguage ?? loaded.org?.locale ?? "es")
     ] ?? "español chileno neutro";
     if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
       throw new BadRequestException("La IA está pausada (kill switch)");

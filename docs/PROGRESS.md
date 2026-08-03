@@ -1,5 +1,20 @@
 # Registro de progreso
 
+## 2026-08-03 (3) — Pulido de /settings: 8 ajustes de usabilidad (rama `feature/settings-polish`)
+
+Migración `20260803160000_settings_polish` (files.content para logo/avatar + prompt_templates.type/agent_ids) — **pendiente aplicar a prod**. Un commit por ajuste:
+
+1. **Logo/avatar por subida** (opción B aprobada): validación server-side por MAGIC BYTES + dimensiones (parser propio, 4 tests — rechaza extensiones mentirosas y gigantes), resize a ≤512px en el navegador, files.content solo se lee en los endpoints que sirven la imagen; compat con logo por URL antiguo. Avatar personal en Mi perfil.
+2. **Plan y facturación rediseñado**: plan actual con límites, uso con barras semáforo, TODOS los planes (Enterprise «A medida»), facturas, «Pagar ahora» → checkout existente (Flow CLP/Lemon Squeezy USD/Mock con banner de prueba) + método/proveedor de pago visibles. Decisión de pasarela confirmada como YA tomada (2026-07-31).
+3. **Usuarios/Equipos separados**: /settings/teams página real (CRUD, miembros con buscador, conteo de conversaciones con deep-link /inbox?team=); invitación con **mensaje copiable para WhatsApp** (brecha anotada: falta invitación por token con expiración).
+4. **Respuestas rápidas completa**: mini ejemplo visual, búsqueda/filtro, editor con picker de variables + preview, semilla de 5 ejemplos «edítame», ámbito Solo yo protegido server-side (test).
+5. **Plantillas de prompt por agente**: tipo (5) + agent_ids ([]=todos); el menú del editor de agentes muestra la biblioteca del tenant filtrada para ese agente agrupada por tipo (test de aislamiento).
+6. **Import con plantilla CSV**: descarga con columnas base+personalizadas y 2 ejemplos, BOM UTF-8, tabla de columnas aceptadas, import ampliado (etapa + campos personalizados + tags con |), round-trip probado con , y ;.
+7. **Mi perfil** (personal): nombre, contraseña con actual obligatoria y requisitos en vivo, avatar; brecha: sin «cerrar sesión en todos los dispositivos» (JWT stateless). Fix de fuente única: moneda/idioma a organization.currency/locale.
+8. **Preferencias de notificaciones** (por usuario, org.settings.notifPrefs): 5 toggles respetados por campana, escalamientos, resumen diario (opt-in), correo al asignarte conversación y export listo (tests de aislamiento entre usuarios).
+
+22/22 typecheck · **131 tests**.
+
 ## 2026-08-03 (2) — Centro de Configuración del tenant (rama `feature/settings-hub`)
 
 **DESPLEGADO EN PROD 2026-08-03** (PR #18, migración + setup.sql aplicados). Procedimiento: backup JSON de tablas afectadas + verificación estática (prisma migrate diff idéntico a la migración) → migración → RLS. Smoke test post-deploy ✔: columnas/tablas/políticas presentes, conteos idénticos al snapshot (33 etapas · 7 leads · 8 conversaciones · 9 contactos), /settings y /settings/lifecycle e /inbox y /users en 200 (redirección viva), y ciclo de expiración de exports probado en prod (registro vencido purgado por el tick del worker en <2 min; registro de prueba eliminado).

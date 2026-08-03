@@ -26,7 +26,7 @@ export class BillingController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
-      const [org, sub, usage, aiToday, invoices] = await Promise.all([
+      const [org, sub, usage, aiToday, invoices, paymentMethod] = await Promise.all([
         tx.organization.findUnique({ where: { id: ctx.organizationId } }),
         tx.subscription.findFirst({ orderBy: { createdAt: "desc" } }),
         Promise.all([
@@ -37,6 +37,7 @@ export class BillingController {
         ]),
         tx.usageEvent.aggregate({ where: { type: "ai_tokens", occurredAt: { gte: startOfDay } }, _sum: { quantity: true } }),
         tx.invoice.findMany({ orderBy: { createdAt: "desc" }, take: 12 }),
+        tx.paymentMethod.findFirst({ orderBy: { createdAt: "desc" } }),
       ]);
       // Los planes son globales; se leen con el cliente admin (catálogo público)
       const plan = sub ? await this.prisma.admin.plan.findUnique({ where: { id: sub.planId } }) : null;
@@ -58,15 +59,24 @@ export class BillingController {
           aiTokensToday: { used: Number(aiToday._sum.quantity ?? 0), limit: aiBudget },
         },
         invoices,
+        paymentMethod: paymentMethod
+          ? { provider: paymentMethod.provider, brand: paymentMethod.brand, last4: paymentMethod.last4 }
+          : null,
+        // Proveedor con el que pagaría hoy (asignado por TuBot o según moneda)
+        paymentProvider: ((org?.settings as any)?.paymentProvider as string | undefined) ?? ((org?.currency ?? "CLP") === "CLP" ? "flow" : "lemonsqueezy"),
       };
     });
   }
 
   /** Catálogo público de planes para elegir/upgradear. */
+  /** Catálogo para el tenant: TODOS los planes activos (Enterprise incluido), por precio. */
   @Get("plans")
-  plans() {
+  async plans() {
     requireContext();
-    return this.prisma.admin.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } });
+    const rows = await this.prisma.admin.plan.findMany({ where: { active: true } });
+    return rows
+      .map((pl) => ({ ...pl, priceClp: Number(pl.priceClp), priceUsd: Number(pl.priceUsd) }))
+      .sort((a, b) => a.priceClp - b.priceClp);
   }
 
   /** Inicia el checkout de cambio de plan (mock en dev, Stripe en prod). */

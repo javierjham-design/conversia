@@ -104,7 +104,9 @@ const importRow = z.object({
   email: z.string().optional(),
   country: z.string().optional(),
   locale: z.string().optional(),
-  tags: z.string().optional(), // separadas por coma
+  tags: z.string().optional(), // separadas por coma o |
+  stage: z.string().optional(), // code o nombre de la etapa
+  custom: z.record(z.string().max(500)).optional(), // campos personalizados por key
 });
 const importBody = z.object({ rows: z.array(importRow).min(1).max(10000), updateExisting: z.boolean().default(false) });
 

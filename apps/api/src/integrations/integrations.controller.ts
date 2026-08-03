@@ -285,8 +285,13 @@ export class IntegrationsController {
   notifications() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // Preferencia personal: si el usuario silenció los errores de integraciones,
+      // la campana solo muestra los avisos informativos (integration.enabled).
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const prefs = ((((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>)[ctx.userId] ?? {};
+      const wantErrors = prefs.integrationError !== false;
       const events = await tx.integrationEvent.findMany({
-        where: { OR: [{ status: { in: ["error", "warning"] } }, { type: "integration.enabled" }] },
+        where: wantErrors ? { OR: [{ status: { in: ["error", "warning"] } }, { type: "integration.enabled" }] } : { type: "integration.enabled" },
         orderBy: { createdAt: "desc" },
         take: 15,
         select: { id: true, provider: true, type: true, status: true, message: true, createdAt: true },

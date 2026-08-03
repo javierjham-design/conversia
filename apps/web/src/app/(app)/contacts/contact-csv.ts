@@ -6,7 +6,8 @@ export interface ParsedCsv {
 }
 
 /** Parser CSV mínimo con soporte de comillas; detecta ; o , como separador. */
-export function parseCSV(text: string): ParsedCsv {
+export function parseCSV(rawText: string): ParsedCsv {
+  const text = rawText.replace(/^﻿/, ""); // BOM de Excel
   const firstLine = text.split(/\r?\n/)[0] ?? "";
   const delim = (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ";" : ",";
   const rows: string[][] = [];
@@ -51,5 +52,21 @@ export function guessField(header: string): string {
   if (/(pa[ií]s|country)/.test(h)) return "country";
   if (/(idioma|locale|lang)/.test(h)) return "locale";
   if (/(etiqueta|tag)/.test(h)) return "tags";
+  if (/(etapa|stage|estado)/.test(h)) return "stage";
   return "";
+}
+
+/** Cabeceras base de la plantilla de import (el orden importa para el round-trip). */
+export const TEMPLATE_BASE_HEADERS = ["telefono", "nombre", "apellido", "email", "etapa", "etiquetas"] as const;
+
+/**
+ * Genera la plantilla CSV modelo: columnas base + campos personalizados del
+ * tenant + 2 filas de ejemplo ficticias. UTF-8 con BOM (tildes OK en Excel).
+ */
+export function buildTemplateCsv(customFields: { key: string; label: string }[]): string {
+  const headers = [...TEMPLATE_BASE_HEADERS, ...customFields.map((f) => f.key)];
+  const example1 = ["+56 9 1234 5678", "María", "Pérez", "maria@ejemplo.cl", "Nuevo lead", "interesado|ortodoncia", ...customFields.map(() => "")];
+  const example2 = ["+56 9 8765 4321", "Pedro", "Soto", "", "Reserva", "limpieza", ...customFields.map(() => "")];
+  const esc = (v: string) => (/[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  return "﻿" + [headers, example1, example2].map((r) => r.map(esc).join(",")).join("\n");
 }

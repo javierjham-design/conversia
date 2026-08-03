@@ -25,6 +25,13 @@ interface PageDef {
 
 const GROUPS: { title: string; pages: PageDef[] }[] = [
   {
+    title: "Personal",
+    pages: [
+      { href: "/settings/profile", label: "Mi perfil", keywords: "perfil nombre contraseña avatar cuenta password", ready: true },
+      { href: "/settings/notifications", label: "Notificaciones", keywords: "notificaciones campana avisos alertas correo", ready: true },
+    ],
+  },
+  {
     title: "Ajustes generales",
     pages: [
       { href: "/settings/general", label: "Información general", keywords: "nombre negocio logo rubro zona horaria moneda idioma empresa", perm: "settings:write", ready: true },
