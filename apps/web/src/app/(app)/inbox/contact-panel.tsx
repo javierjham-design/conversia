@@ -142,7 +142,7 @@ export function ContactPanel({
               {context.ad.ctwaClid ? ` · ctwa ${context.ad.ctwaClid.slice(0, 18)}…` : ""}
             </p>
             {context.ad.sourceUrl && (
-              <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300">
+              <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300 ">
                 Ver anuncio <ExternalLink size={10} />
               </a>
             )}

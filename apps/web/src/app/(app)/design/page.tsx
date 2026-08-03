@@ -61,7 +61,7 @@ export default function DesignPage() {
       <Section title="Semánticos — acotados (ámbar = solo atención requerida)">
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-2xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">Éxito</span>
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-2xs font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">Atención</span>
+          <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-2xs font-medium text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 ">Atención</span>
           <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-2xs font-medium text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">Error</span>
           <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-2xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Info</span>
         </div>

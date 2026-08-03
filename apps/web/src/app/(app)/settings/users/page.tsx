@@ -199,12 +199,12 @@ export default function UsersPage() {
       <h1 className="text-xl font-semibold">Usuarios y roles</h1>
       <p className="mb-6 text-sm text-ink-muted">
         Quién entra al panel y con qué permisos. Los equipos de atención viven en{" "}
-        <a href="/settings/teams" className="text-cyan-700 underline">Equipos</a>.
+        <a href="/settings/teams" className="text-cyan-700 underline dark:text-cyan-300">Equipos</a>.
       </p>
 
-      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</p>}
+      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{msg}</p>}
       {tempPassword && (
-        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
           <p>Usuario creado. Contraseña temporal (se muestra solo una vez): <b className="font-mono">{tempPassword}</b></p>
           <button
             onClick={() => {
@@ -217,7 +217,7 @@ Clave temporal: ${tempPassword}
               );
               setMsg("Mensaje de invitación copiado — pégalo en WhatsApp o correo ✔");
             }}
-            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100"
+            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100 dark:border-amber-500/40"
           >
             📋 Copiar mensaje de invitación (para WhatsApp)
           </button>
@@ -281,7 +281,7 @@ Clave temporal: ${tempPassword}
                       {fmtLastLogin(m.lastLoginAt)}
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => void toggleActive(m)} className={`rounded-lg px-2 py-1 text-xs ${m.active ? "bg-emerald-50 text-emerald-700" : "bg-app text-ink-muted"}`}>
+                      <button onClick={() => void toggleActive(m)} className={`rounded-lg px-2 py-1 text-xs ${m.active ? "bg-emerald-50 text-emerald-700" : "bg-app text-ink-muted"} dark:bg-emerald-500/10 dark:text-emerald-300`}>
                         {m.active ? "activo" : "inactivo"}
                       </button>
                     </td>
@@ -324,7 +324,7 @@ Clave temporal: ${tempPassword}
                   </div>
                   {!locked && (
                     <div className="flex gap-2 text-xs">
-                      <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline">Editar</button>
+                      <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
                       {!r.system && <button onClick={() => void deleteRole(r.code)} className="text-ink-subtle hover:text-red-500">✕</button>}
                     </div>
                   )}
@@ -380,11 +380,11 @@ Clave temporal: ${tempPassword}
             <div className="mt-4 rounded-lg border border-line bg-app p-3">
               <p className="text-sm font-medium">Contraseña</p>
               {resetResult ? (
-                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                   Contraseña temporal (se muestra solo una vez): <b className="font-mono">{resetResult}</b>
                   <button
                     onClick={() => void navigator.clipboard.writeText(resetResult)}
-                    className="ml-2 rounded border border-amber-300 px-1.5 py-0.5 text-[10px] hover:bg-amber-100"
+                    className="ml-2 rounded border border-amber-300 px-1.5 py-0.5 text-[10px] hover:bg-amber-100 dark:border-amber-500/40"
                   >
                     Copiar
                   </button>
@@ -397,7 +397,7 @@ Clave temporal: ${tempPassword}
                   </p>
                   <button
                     onClick={() => void resetPassword()}
-                    className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                    className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30"
                   >
                     Restablecer contraseña
                   </button>

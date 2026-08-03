@@ -112,7 +112,7 @@ export function ImageUpload({
         className={cn(
           "flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden border-2 border-dashed bg-app text-ink-subtle transition-colors",
           round ? "rounded-full" : "rounded-xl",
-          dragging ? "border-cyan-400 bg-cyan-50" : "border-line hover:border-cyan-300",
+          dragging ? "border-cyan-400 bg-cyan-50 dark:bg-cyan-500/10" : "border-line hover:border-cyan-300",
         )}
         title={`Arrastra o haz clic para subir ${label.toLowerCase()}`}
       >
@@ -133,7 +133,7 @@ export function ImageUpload({
             <Trash2 size={10} /> Quitar
           </button>
         )}
-        {!hasUpload && fallbackUrl && <p className="mt-0.5 text-[10px] text-amber-600">Usando el logo por URL antiguo — sube un archivo para reemplazarlo.</p>}
+        {!hasUpload && fallbackUrl && <p className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">Usando el logo por URL antiguo — sube un archivo para reemplazarlo.</p>}
       </div>
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void handleFile(e.target.files[0])} />
     </div>

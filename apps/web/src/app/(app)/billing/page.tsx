@@ -113,7 +113,7 @@ export default function BillingPage() {
       <p className="mb-4 text-sm text-ink-muted">Tu plan, el consumo del período y tus pagos.</p>
 
       {mockBanner && (
-        <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+        <p className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/40">
           🧪 Pago de prueba — entorno sin pasarela real: no se realizó ningún cobro.
         </p>
       )}
@@ -132,7 +132,7 @@ export default function BillingPage() {
           </div>
           {data.plan ? (
             <>
-              <p className="mt-1 text-2xl font-semibold text-cyan-800">{data.plan.name}</p>
+              <p className="mt-1 text-2xl font-semibold text-cyan-800 dark:text-cyan-300">{data.plan.name}</p>
               <p className="text-sm text-ink-muted">
                 {money(priceOf(data.plan), currency)} / {data.plan.interval === "year" ? "año" : "mes"}
                 {data.subscription?.periodEnd && (
@@ -200,7 +200,7 @@ export default function BillingPage() {
             <div key={p.code} className={cn("flex flex-col rounded-card border bg-panel p-4 shadow-card", isCurrent ? "border-cyan-400 ring-1 ring-cyan-200" : "border-line")}>
               <div className="flex items-center justify-between">
                 <p className="font-semibold">{p.name}</p>
-                {isCurrent && <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-medium text-cyan-700">Tu plan actual</span>}
+                {isCurrent && <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">Tu plan actual</span>}
               </div>
               <p className="mt-1 text-lg font-semibold text-ink">
                 {enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}

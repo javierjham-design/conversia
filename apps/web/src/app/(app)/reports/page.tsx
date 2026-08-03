@@ -67,7 +67,7 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url);
   }
 
-  if (error) return <div className="p-6 text-red-600">{error}</div>;
+  if (error) return <div className="p-6 text-red-600 dark:text-red-400">{error}</div>;
   if (!data) return <div className="p-6 text-ink-subtle">Cargando…</div>;
 
   const funnelMax = Math.max(1, ...data.leadFunnel.map((f) => f.count));

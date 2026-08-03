@@ -95,10 +95,10 @@ function compileBody(body: string): { bodyText: string; examples: string[]; fiel
 function StatusBadge({ status }: { status: string }) {
   const cls =
     status === "APPROVED"
-      ? "bg-emerald-50 text-emerald-700"
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
       : status === "REJECTED"
-        ? "bg-red-50 text-red-700"
-        : "bg-amber-50 text-amber-700";
+        ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300"
+        : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300";
   const label = status === "APPROVED" ? "Aprobada" : status === "REJECTED" ? "Rechazada" : "En revisión";
   return <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
 }
@@ -253,8 +253,8 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
         </div>
       </div>
 
-      {notice && <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
-      {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+      {notice && <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p>}
+      {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
 
       {showForm && (
         <form onSubmit={create} className="mb-3 rounded-lg border border-line bg-panel p-3">
@@ -314,7 +314,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
                   type="button"
                   onClick={() => insertField(f.label)}
                   title={`Ejemplo: ${f.sample}`}
-                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100"
+                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-500/30"
                 >
                   + {f.label}
                 </button>
@@ -339,7 +339,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
           {form.bodyText.trim() && (
             <div className="mt-2 rounded-lg bg-app p-2.5">
               <p className="text-[10px] font-medium uppercase text-ink-subtle">Vista previa (con datos de ejemplo)</p>
-              <div className="mt-1.5 max-w-md rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-xs text-ink shadow-sm">
+              <div className="mt-1.5 max-w-md rounded-xl rounded-tl-sm bg-emerald-50 px-3 py-2 text-xs text-ink shadow-sm dark:bg-emerald-500/10">
                 {form.headerText && <p className="mb-1 font-semibold">{form.headerText}</p>}
                 <p className="whitespace-pre-wrap">{preview}</p>
                 {form.footerText && <p className="mt-1 text-[10px] text-ink-subtle">{form.footerText}</p>}

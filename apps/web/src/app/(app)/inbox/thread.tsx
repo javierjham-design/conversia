@@ -341,7 +341,7 @@ export function Thread({
               <div className="min-w-0 text-2xs text-ink-subtle">
                 {context.ad.ctwaClid && <p className="truncate">ctwa_clid: {context.ad.ctwaClid}</p>}
                 {context.ad.sourceUrl && (
-                  <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300">
+                  <a href={context.ad.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-violet-600 underline dark:text-violet-300 ">
                     Ver anuncio <ExternalLink size={10} />
                   </a>
                 )}

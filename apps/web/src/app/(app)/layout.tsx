@@ -66,7 +66,7 @@ function NotificationsBell() {
           localStorage.setItem("notifSeenAt", String(now));
         }}
         aria-label="Notificaciones"
-        className="relative text-ink-muted hover:text-navy-900"
+        className="relative text-ink-muted hover:text-ink"
       >
         <Bell size={17} />
         {unread > 0 && (
@@ -95,7 +95,7 @@ function NotificationsBell() {
                 ))}
               </ul>
             )}
-            <a href="/integrations" className="block px-2 py-1.5 text-[11px] text-cyan-700 hover:underline">
+            <a href="/integrations" className="block px-2 py-1.5 text-[11px] text-cyan-700 hover:underline dark:text-cyan-300">
               Ver integraciones →
             </a>
           </div>
@@ -365,7 +365,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Barra superior */}
             <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-panel px-4 md:px-5">
               <div className="flex items-center gap-2">
-                <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-navy-900 md:hidden">
+                <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-ink md:hidden">
                   <Menu size={22} />
                 </button>
                 <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-ink-subtle">

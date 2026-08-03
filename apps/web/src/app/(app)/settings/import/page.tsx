@@ -76,14 +76,14 @@ export default function ImportSettingsPage() {
           <tbody>
             {BASE_COLUMNS.map((c) => (
               <tr key={c.col} className="border-b border-line">
-                <td className="p-2.5 font-mono text-cyan-800">{c.col}</td>
+                <td className="p-2.5 font-mono text-cyan-800 dark:text-cyan-300">{c.col}</td>
                 <td className="p-2.5 text-ink-muted">{c.desc}</td>
                 <td className="p-2.5 font-mono text-ink-subtle">{c.ejemplo}</td>
               </tr>
             ))}
             {fields.map((f) => (
               <tr key={f.key} className="border-b border-line">
-                <td className="p-2.5 font-mono text-cyan-800">{f.key}</td>
+                <td className="p-2.5 font-mono text-cyan-800 dark:text-cyan-300">{f.key}</td>
                 <td className="p-2.5 text-ink-muted">Campo personalizado «{f.label}» (Configuración → Campos de contacto)</td>
                 <td className="p-2.5 font-mono text-ink-subtle">—</td>
               </tr>

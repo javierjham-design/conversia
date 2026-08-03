@@ -186,7 +186,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <div className="min-w-0">
                   <h2 className="flex items-center gap-2 truncate text-lg font-semibold">
                     {name}
-                    {d.blocked && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600"><Ban size={12} /> Bloqueado</span>}
+                    {d.blocked && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400"><Ban size={12} /> Bloqueado</span>}
                   </h2>
                   <p className="truncate font-mono text-xs text-ink-muted">{d.phone ?? "sin teléfono"}</p>
                 </div>
@@ -343,7 +343,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 </div>
                 <div className="mt-3 space-y-2">
                   {d.notes.map((n) => (
-                    <div key={n.id} className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-sm">
+                    <div key={n.id} className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-sm dark:border-amber-500/30">
                       <p className="text-ink">{n.text}</p>
                       <p className="mt-1 text-xs text-ink-subtle">{n.authorName ?? "—"} · {fmt(n.createdAt)}</p>
                     </div>

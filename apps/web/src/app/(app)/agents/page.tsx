@@ -66,8 +66,8 @@ export default function AgentsPage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       {hasWhatsapp === false && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3">
-          <p className="text-sm text-cyan-900">
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:bg-cyan-500/10 dark:border-cyan-500/30">
+          <p className="text-sm text-cyan-900 dark:text-cyan-200">
             Tus agentes aún no tienen canal: <b>conecta WhatsApp</b> para que respondan conversaciones reales.
           </p>
           <a href="/channels" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">
@@ -91,7 +91,7 @@ export default function AgentsPage() {
       </div>
 
       {showNew && (
-        <form onSubmit={createAgent} className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-4">
+        <form onSubmit={createAgent} className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 dark:border-cyan-500/30">
           <label className="text-sm">
             Nombre
             <input
@@ -122,7 +122,7 @@ export default function AgentsPage() {
           >
             Crear y configurar
           </button>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         </form>
       )}
 
@@ -135,7 +135,7 @@ export default function AgentsPage() {
           >
             <div className="flex items-center justify-between">
               <h2 className="font-medium">{a.name}</h2>
-              <span className={`text-[10px] ${a.active ? "text-emerald-600" : "text-ink-subtle"}`}>
+              <span className={`text-[10px] ${a.active ? "text-emerald-600" : "text-ink-subtle"} dark:text-emerald-400`}>
                 {a.active ? "● activo" : "○ inactivo"}
               </span>
             </div>
@@ -143,11 +143,11 @@ export default function AgentsPage() {
             <p className="mt-2 line-clamp-2 text-sm text-ink-muted">{a.description ?? "Sin descripción"}</p>
             <div className="mt-3 flex gap-2 text-[11px]">
               {a.publishedVersion ? (
-                <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700">v{a.publishedVersion} publicada</span>
+                <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">v{a.publishedVersion} publicada</span>
               ) : (
                 <span className="rounded bg-app px-2 py-0.5 text-ink-muted">sin publicar</span>
               )}
-              {a.hasDraft && <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700">borrador pendiente</span>}
+              {a.hasDraft && <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">borrador pendiente</span>}
             </div>
           </button>
         ))}

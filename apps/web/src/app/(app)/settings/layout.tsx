@@ -124,7 +124,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                       href={p.href}
                       className={cn(
                         "flex items-center gap-1 px-3 py-1.5 text-[13px]",
-                        pathname === p.href ? "bg-cyan-50 font-medium text-cyan-800" : "text-ink-muted hover:bg-app",
+                        pathname === p.href ? "bg-cyan-50 font-medium text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "text-ink-muted hover:bg-app",
                       )}
                     >
                       {p.label}

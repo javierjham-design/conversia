@@ -34,13 +34,13 @@ export default function PlanSettingsPage() {
       <h2 className="text-lg font-semibold">Plan y uso</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Consumo del espacio según lo que registra la plataforma. Para cambiar de plan o ver pagos ve a{" "}
-        <a href="/billing" className="inline-flex items-center gap-0.5 text-cyan-700 underline">Plan y facturación <ExternalLink size={10} /></a>.
+        <a href="/billing" className="inline-flex items-center gap-0.5 text-cyan-700 underline dark:text-cyan-300">Plan y facturación <ExternalLink size={10} /></a>.
       </p>
 
       <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <p className="text-sm font-medium">Plan actual</p>
         {data.plan ? (
-          <p className="mt-1 text-lg font-semibold text-cyan-800">{data.plan.name}</p>
+          <p className="mt-1 text-lg font-semibold text-cyan-800 dark:text-cyan-300">{data.plan.name}</p>
         ) : (
           <p className="mt-1 text-sm text-ink-subtle">Sin plan asignado (contacta a TuBot).</p>
         )}

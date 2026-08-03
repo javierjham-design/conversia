@@ -685,7 +685,7 @@ export default function IntegrationsPage() {
                   <span className="font-mono text-[10px] uppercase text-ink-subtle">{a.provider}</span>
                   <span className="text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
                 </div>
-                <p className={cn("mt-0.5", a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-ink-muted")}>
+                <p className={cn("mt-0.5", a.status === "error" ? "text-red-600 dark:text-red-400" : a.status === "warning" ? "text-amber-700 dark:text-amber-300" : "text-ink-muted")}>
                   {a.message ?? a.type}
                 </p>
               </li>

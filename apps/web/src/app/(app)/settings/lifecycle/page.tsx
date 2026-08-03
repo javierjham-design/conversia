@@ -100,7 +100,7 @@ export default function LifecycleSettingsPage() {
       <span className="min-w-0 flex-1">
         <span className={cn("text-sm font-medium", !s.active && "line-through")} style={s.color ? { color: s.color } : {}}>{s.name}</span>
         <span className="ml-2 font-mono text-[10px] text-ink-subtle">{s.code}</span>
-        {s.category === "WON" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Conversión → CAPI</span>}
+        {s.category === "WON" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Conversión → CAPI</span>}
       </span>
       <span className="shrink-0 rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{CATEGORY_LABELS[s.category]}</span>
       <span className="w-16 shrink-0 text-right text-[10px] text-ink-subtle">{s.leadsCount} lead(s)</span>

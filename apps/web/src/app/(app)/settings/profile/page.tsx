@@ -104,7 +104,7 @@ export default function ProfilePage() {
         </div>
         <ul className="mt-2 flex flex-wrap gap-3 text-[11px]">
           {reqs.map((r) => (
-            <li key={r.label} className={cn("flex items-center gap-1", r.ok ? "text-emerald-600" : "text-ink-subtle")}>
+            <li key={r.label} className={cn("flex items-center gap-1", r.ok ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle")}>
               {r.ok ? "✓" : "○"} {r.label}
             </li>
           ))}

@@ -64,9 +64,9 @@ export default function SnippetsSettingsPage() {
       </div>
 
       {/* Cómo se usan: mini ejemplo visual */}
-      <div className="mt-3 rounded-card border border-cyan-100 bg-cyan-50/60 p-4">
-        <p className="text-sm text-cyan-900">
-          Escribe <code className="rounded bg-panel px-1.5 py-0.5 font-mono text-cyan-700">/</code> en el chat de la
+      <div className="mt-3 rounded-card border border-cyan-100 bg-cyan-50/60 p-4 dark:border-cyan-500/25">
+        <p className="text-sm text-cyan-900 dark:text-cyan-200">
+          Escribe <code className="rounded bg-panel px-1.5 py-0.5 font-mono text-cyan-700 dark:text-cyan-300">/</code> en el chat de la
           Bandeja y elige tu respuesta — se pega con los datos reales del contacto.
         </p>
         <div className="mt-2 flex items-center gap-2 text-xs">
@@ -96,9 +96,9 @@ export default function SnippetsSettingsPage() {
         )}
         {filtered.map((s) => (
           <li key={s.id} className="flex items-center gap-3 rounded-card border border-line bg-panel px-3 py-2.5 shadow-card">
-            <span className="w-32 shrink-0 truncate font-mono text-sm text-cyan-700">/{s.shortcut}</span>
+            <span className="w-32 shrink-0 truncate font-mono text-sm text-cyan-700 dark:text-cyan-300">/{s.shortcut}</span>
             <p className="min-w-0 flex-1 truncate text-sm text-ink-muted" title={s.body}>{s.body}</p>
-            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700" : "bg-app text-ink-muted")}>
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" : "bg-app text-ink-muted")}>
               {s.scope === "mine" ? "Solo yo" : "Equipo"}
             </span>
             <button onClick={() => setEditing(s)} className="text-ink-subtle hover:text-cyan-700" title="Editar"><Pencil size={14} /></button>

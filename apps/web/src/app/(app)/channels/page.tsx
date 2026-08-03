@@ -250,7 +250,7 @@ export default function ChannelsPage() {
       </p>
 
       {showNew && (
-        <form onSubmit={create} className="mb-6 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4">
+        <form onSubmit={create} className="mb-6 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4 dark:border-cyan-500/30">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-sm">
               Tipo
@@ -310,7 +310,7 @@ export default function ChannelsPage() {
                   <span
                     className={`text-[10px] ${
                       c.status === "active" ? "text-emerald-600" : c.status === "error" ? "text-red-600" : "text-ink-subtle"
-                    }`}
+                    } dark:text-emerald-400 dark:text-red-400`}
                   >
                     {c.status === "active" ? "● activo" : c.status === "error" ? "⚠ requiere reautorización" : "○ inactivo"}
                   </span>
@@ -346,11 +346,11 @@ export default function ChannelsPage() {
               </div>
             </div>
             {c.status === "error" && (
-              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
-                <p className="text-xs font-medium text-red-700">
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-500/10 dark:border-red-500/30">
+                <p className="text-xs font-medium text-red-700 dark:text-red-300">
                   El token de este canal está vencido o fue revocado — los mensajes salientes están fallando.
                 </p>
-                <p className="mt-0.5 text-[11px] text-red-600">
+                <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400">
                   Reautoriza con <b>Conectar con Meta</b> (renueva el token automáticamente) o carga un token nuevo con el
                   formulario <b>Manual</b>. Al pasar la prueba de conexión, el canal vuelve a activo.
                 </p>
@@ -363,7 +363,7 @@ export default function ChannelsPage() {
                   </button>
                   <button
                     onClick={() => void test(c.id)}
-                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100"
+                    className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:text-red-300 dark:border-red-500/30"
                   >
                     Volver a probar
                   </button>

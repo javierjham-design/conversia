@@ -117,10 +117,10 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
             <Stat label="Omitidos" value={result.skipped} tone="muted" />
           </div>
           {result.errors.length > 0 && (
-            <div className="max-h-40 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm">
-              <p className="mb-1 font-medium text-amber-700">{result.errors.length} fila(s) con problemas</p>
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm dark:border-amber-500/30">
+              <p className="mb-1 font-medium text-amber-700 dark:text-amber-300">{result.errors.length} fila(s) con problemas</p>
               {result.errors.slice(0, 30).map((e) => (
-                <p key={e.row} className="text-amber-700">Fila {e.row}: {e.reason}</p>
+                <p key={e.row} className="text-amber-700 dark:text-amber-300">Fila {e.row}: {e.reason}</p>
               ))}
             </div>
           )}
@@ -165,7 +165,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
             <input type="checkbox" checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} />
             Actualizar contactos existentes (mismo teléfono) rellenando campos vacíos
           </label>
-          {!canImport && <p className="text-xs text-amber-600">Mapea al menos Teléfono, Email o Nombre para poder importar.</p>}
+          {!canImport && <p className="text-xs text-amber-600 dark:text-amber-400">Mapea al menos Teléfono, Email o Nombre para poder importar.</p>}
           {progress && (
             <div>
               <div className="h-2 overflow-hidden rounded-full bg-app">
@@ -185,7 +185,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone: "ok" | "brand" | "muted" }) {
-  const c = tone === "ok" ? "text-emerald-600" : tone === "brand" ? "text-brand-600" : "text-ink-muted";
+  const c = tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : tone === "brand" ? "text-brand-600" : "text-ink-muted";
   return (
     <div className="rounded-lg border border-line p-3 text-center">
       <p className={cn("text-2xl font-semibold", c)}>{value}</p>

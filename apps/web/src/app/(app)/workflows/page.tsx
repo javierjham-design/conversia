@@ -194,7 +194,7 @@ export default function WorkflowsPage() {
                 disabled={busy}
                 className="flex flex-col rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
               >
-                <span className="text-sm font-medium text-navy-900">{t.name}</span>
+                <span className="text-sm font-medium text-ink">{t.name}</span>
                 <span className="mt-0.5 text-xs text-ink-muted">{t.description}</span>
               </button>
             ))}
@@ -250,9 +250,9 @@ function WorkflowCard({
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge kind={badge.kind} label={badge.label} />
           {w.hasDraft && w.status !== "draft" && (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">cambios sin publicar</span>
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">cambios sin publicar</span>
           )}
-          <h3 className="truncate font-medium text-navy-900">{w.name}</h3>
+          <h3 className="truncate font-medium text-ink">{w.name}</h3>
         </div>
         {w.description && (
           <p className="mt-1 text-sm text-ink-muted">
@@ -314,7 +314,7 @@ function RowMenu({ items }: { items: { label: string; onClick: () => void; dange
             <button
               key={it.label}
               onClick={() => { setOpen(false); it.onClick(); }}
-              className={cn("block w-full px-3 py-1.5 text-left text-sm hover:bg-app", it.danger ? "text-red-600" : "text-ink")}
+              className={cn("block w-full px-3 py-1.5 text-left text-sm hover:bg-app", it.danger ? "text-red-600 dark:text-red-400" : "text-ink")}
             >
               {it.label}
             </button>

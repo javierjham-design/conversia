@@ -75,7 +75,7 @@ export default function AuditSettingsPage() {
           {items.map((r) => (
             <li key={r.id} className="rounded-lg border border-line bg-panel px-3 py-1.5 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-cyan-800">{r.action}</span>
+                <span className="font-mono text-[11px] text-cyan-800 dark:text-cyan-300">{r.action}</span>
                 <span className="shrink-0 text-ink-subtle">{new Date(r.createdAt).toLocaleString("es-CL")}</span>
               </div>
               <p className="text-ink-muted">
@@ -86,7 +86,7 @@ export default function AuditSettingsPage() {
             </li>
           ))}
           {nextCursor && (
-            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-cyan-700 hover:underline">
+            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-cyan-700 hover:underline dark:text-cyan-300">
               Cargar más
             </button>
           )}

@@ -136,7 +136,7 @@ export function ClarivaDrawer({
                 API key: <span className="font-mono">{state?.apiKeyMasked ?? "—"}</span> · Última sincronización:{" "}
                 {state?.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString("es-CL") : "nunca"}
               </p>
-              {state?.lastError && <p className="mt-1 text-xs text-red-600">Último error: {state.lastError}</p>}
+              {state?.lastError && <p className="mt-1 text-xs text-red-600 dark:text-red-400">Último error: {state.lastError}</p>}
             </div>
             <CalendarCheck className="text-emerald-500" />
           </div>
@@ -159,7 +159,7 @@ export function ClarivaDrawer({
               <ul className="space-y-1.5">
                 {activity.map((a) => (
                   <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2 text-xs">
-                    <span className={a.status === "error" ? "text-red-600" : "text-ink-muted"}>{a.message ?? a.type}</span>
+                    <span className={a.status === "error" ? "text-red-600 dark:text-red-400" : "text-ink-muted"}>{a.message ?? a.type}</span>
                     <span className="shrink-0 text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
                   </li>
                 ))}
@@ -313,8 +313,8 @@ export function WebhooksDrawer({
   return (
     <Drawer open={open} onClose={onClose} title="Webhooks salientes">
       {newSecret && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="mb-2 text-xs font-medium text-amber-800">
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:bg-amber-500/10 dark:border-amber-500/30">
+          <p className="mb-2 text-xs font-medium text-amber-800 dark:text-amber-300">
             Secreto de firma — se muestra UNA sola vez. Verifica la cabecera <code>X-Conversia-Signature</code> (HMAC SHA-256).
           </p>
           <SecretField value={newSecret} />
@@ -446,7 +446,7 @@ export function WebhooksDrawer({
                       <tr key={d.id} className="border-t border-line">
                         <td className="px-3 py-2 font-mono">{d.event}</td>
                         <td className="px-3 py-2">
-                          <span className={d.status === "DELIVERED" ? "text-emerald-600" : d.status === "PENDING" ? "text-ink-muted" : "text-red-600"}>
+                          <span className={d.status === "DELIVERED" ? "text-emerald-600 dark:text-emerald-400" : d.status === "PENDING" ? "text-ink-muted" : "text-red-600 dark:text-red-400"}>
                             {d.status.toLowerCase()}
                           </span>
                         </td>
@@ -467,7 +467,7 @@ export function WebhooksDrawer({
               </div>
             )}
             {deliveries?.some((d) => d.lastError) && (
-              <p className="mt-2 text-xs text-red-600">Último error: {deliveries.find((d) => d.lastError)?.lastError}</p>
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">Último error: {deliveries.find((d) => d.lastError)?.lastError}</p>
             )}
           </div>
         </div>
@@ -643,7 +643,7 @@ export function EmailDrawer({
         ))}
       </div>
       {form.mode === "platform" && !platformReady && (
-        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
           El remitente de plataforma aún no está configurado a nivel de sistema — usa SMTP propio o avísanos.
         </p>
       )}
@@ -751,7 +751,7 @@ export function EmailDrawer({
         )}
       </div>
       {testDetail && <p className="mb-2 text-xs text-ink-muted">{testDetail}</p>}
-      {state?.lastError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      {state?.lastError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">Último error: {state.lastError}</p>}
 
       <ConfirmDialog
         open={confirmDisconnect}
@@ -908,11 +908,11 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
                   <p className="text-[11px] text-ink-subtle">
                     <code>{p.baseUrl}</code> · {p.authType === "none" ? "sin auth" : p.authType === "bearer" ? "Bearer" : `header ${p.headerName}`}
                   </p>
-                  {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700">Usado por: {p.usedBy.join(", ")}</p>}
+                  {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700 dark:text-cyan-300">Usado por: {p.usedBy.join(", ")}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2 text-xs">
                   <button onClick={() => void test(p.id)} className="text-ink-muted hover:underline">Probar</button>
-                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline">Editar</button>
+                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
                   <button onClick={() => void remove(p)} className="text-red-400 hover:underline">Eliminar</button>
                 </div>
               </div>
@@ -1019,7 +1019,7 @@ export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; 
         {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
       </div>
       {testDetail && <p className="mt-2 text-xs text-ink-muted">{testDetail}</p>}
-      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">Último error: {state.lastError}</p>}
       <ConfirmDialog
         open={confirmDisconnect}
         onClose={() => setConfirmDisconnect(false)}
@@ -1076,7 +1076,7 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
               <p className="text-[10px] text-ink-subtle">eventos (30 d)</p>
             </div>
             <div className="rounded-lg border border-line p-2">
-              <p className="text-lg font-semibold text-emerald-600">{stats.totals?.successRate ?? "—"}%</p>
+              <p className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{stats.totals?.successRate ?? "—"}%</p>
               <p className="text-[10px] text-ink-subtle">tasa de éxito</p>
             </div>
             <div className="rounded-lg border border-line p-2">
@@ -1105,7 +1105,7 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
                 <li key={e.event} className="flex items-center justify-between text-xs">
                   <span className="font-mono">{e.event}</span>
                   <span>
-                    <span className="text-emerald-600">{e.ok} ok</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{e.ok} ok</span>
                     {e.error > 0 && <span className="ml-2 text-red-500">{e.error} error</span>}
                   </span>
                 </li>
@@ -1115,10 +1115,10 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
 
           {(stats.recentErrors ?? []).length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-medium text-red-600">Últimos rechazos de Meta</p>
+              <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">Últimos rechazos de Meta</p>
               <ul className="space-y-1">
                 {stats.recentErrors!.map((e, i) => (
-                  <li key={i} className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">
+                  <li key={i} className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700 dark:bg-red-500/10 dark:text-red-300">
                     {e.message} <span className="text-red-400">· {new Date(e.at).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
                   </li>
                 ))}
@@ -1126,7 +1126,7 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
             </div>
           )}
 
-          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-cyan-700 underline">
+          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-cyan-700 underline dark:text-cyan-300">
             Abrir el Events Manager de Meta (dataset {stats.datasetId}) →
           </a>
         </div>
@@ -1220,7 +1220,7 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
         {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
       </div>
       {testDetail && <p className="mt-2 text-xs text-ink-muted">{testDetail}</p>}
-      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">Último error: {state.lastError}</p>}
       <ConfirmDialog
         open={confirmDisconnect}
         onClose={() => setConfirmDisconnect(false)}
@@ -1365,7 +1365,7 @@ export function AutomationDrawer({
       </div>
 
       {secrets && (secrets.apiKeySecret || secrets.webhookSecret) && (
-        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30">
           <p className="font-medium">Guarda estos secretos — se muestran una sola vez:</p>
           {secrets.apiKeySecret && <p className="mt-1">API key (acciones): <code className="rounded bg-panel px-1.5 py-0.5">{secrets.apiKeySecret}</code></p>}
           {secrets.webhookSecret && <p className="mt-1">Secreto del webhook (firma sha256): <code className="rounded bg-panel px-1.5 py-0.5">{secrets.webhookSecret}</code></p>}
@@ -1508,7 +1508,7 @@ export function GoogleDrawer({
   return (
     <Drawer open={open} onClose={onClose} title="Google Calendar y Sheets">
       {!platformReady ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30">
           <p className="font-medium">Configuración de plataforma pendiente</p>
           <p className="mt-1 text-xs">
             Falta registrar la app OAuth de Google a nivel plataforma (variables GOOGLE_OAUTH_CLIENT_ID y
@@ -1525,7 +1525,7 @@ export function GoogleDrawer({
           </p>
 
           {needsReauth && (
-            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30">
               El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
             </div>
           )}
@@ -1536,7 +1536,7 @@ export function GoogleDrawer({
             </Button>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30">
                 <span className="text-base">✅</span>
                 <div>
                   <p className="font-medium">Cuenta de Google conectada</p>
@@ -1579,7 +1579,7 @@ export function GoogleDrawer({
                     Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}
                   </p>
                 )}
-                {state?.lastError && <p className="mt-1 text-[11px] text-red-600">{state.lastError}</p>}
+                {state?.lastError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{state.lastError}</p>}
               </div>
 
               <div className="rounded-xl border border-line p-3 text-xs text-ink-muted">
@@ -1597,7 +1597,7 @@ export function GoogleDrawer({
                 <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
               </div>
               {testResult && (
-                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"} dark:text-emerald-400 dark:text-red-400`}>{testResult}</p>
               )}
             </div>
           )}
@@ -1751,9 +1751,9 @@ export function DentalinkDrawer({
       </div>
 
       {testResult && (
-        <p className={`mt-2 text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+        <p className={`mt-2 text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"} dark:text-emerald-400 dark:text-red-400`}>{testResult}</p>
       )}
-      {state?.lastError && !testResult && <p className="mt-2 text-xs text-red-600">{state.lastError}</p>}
+      {state?.lastError && !testResult && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{state.lastError}</p>}
       {state?.lastSyncAt && (
         <p className="mt-2 text-[11px] text-ink-subtle">Última verificación: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
       )}
@@ -1895,7 +1895,7 @@ export function HubspotDrawer({
   return (
     <Drawer open={open} onClose={onClose} title="HubSpot — sincronización de contactos">
       {!platformReady ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30">
           <p className="font-medium">Configuración de plataforma pendiente</p>
           <p className="mt-1 text-xs">
             Falta registrar la app OAuth de HubSpot a nivel plataforma (variables HUBSPOT_CLIENT_ID y
@@ -1911,7 +1911,7 @@ export function HubspotDrawer({
           </p>
 
           {needsReauth && (
-            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30">
               El acceso fue revocado o expiró: vuelve a conectar la cuenta para reanudar la sincronización.
             </div>
           )}
@@ -1922,7 +1922,7 @@ export function HubspotDrawer({
             </Button>
           ) : (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30">
                 <span className="text-base">✅</span>
                 <div>
                   <p className="font-medium">Cuenta de HubSpot conectada</p>
@@ -1982,12 +1982,12 @@ export function HubspotDrawer({
                 <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
               </div>
               {testResult && (
-                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
+                <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"} dark:text-emerald-400 dark:text-red-400`}>{testResult}</p>
               )}
               {state?.lastSyncAt && (
                 <p className="text-[11px] text-ink-subtle">Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
               )}
-              {state?.lastError && <p className="text-[11px] text-red-600">{state.lastError}</p>}
+              {state?.lastError && <p className="text-[11px] text-red-600 dark:text-red-400">{state.lastError}</p>}
             </div>
           )}
         </>

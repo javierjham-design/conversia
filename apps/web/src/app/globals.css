@@ -116,6 +116,20 @@ body {
   line-height: 1.55;
 }
 
+/* Base de controles de formulario: heredan los tokens salvo que una utilidad
+   `bg-*`/`text-*` explícita los sobreescriba (gana la clase por especificidad).
+   Evita cajas blancas de inputs/selects/textarea en modo oscuro. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+textarea,
+select {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-subtle);
+}
+
 /* Números tabulares: contadores y horas no "bailan" */
 .tnum {
   font-variant-numeric: tabular-nums;
@@ -170,4 +184,29 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---- ReactFlow (canvas de Flujos): controles y minimapa en oscuro ---- */
+.dark .react-flow__controls-button {
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+.dark .react-flow__controls-button:hover {
+  background: var(--panel);
+}
+.dark .react-flow__controls-button svg {
+  fill: var(--ink-muted);
+}
+.dark .react-flow__controls {
+  box-shadow: var(--shadow-e2);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+.dark .react-flow__minimap {
+  background: var(--panel);
+}
+.dark .react-flow__attribution {
+  background: transparent;
+  color: var(--ink-subtle);
 }

@@ -95,7 +95,7 @@ export default function HoursSettingsPage() {
                 <span className="text-xs text-ink-subtle">Cerrado</span>
               )}
               {open && intervals.length < 3 && (
-                <button onClick={() => setDay(key, [...intervals, { from: "15:00", to: "19:00" }])} className="text-[11px] text-cyan-700 underline">
+                <button onClick={() => setDay(key, [...intervals, { from: "15:00", to: "19:00" }])} className="text-[11px] text-cyan-700 underline dark:text-cyan-300">
                   + tramo
                 </button>
               )}

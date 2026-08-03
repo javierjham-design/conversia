@@ -123,9 +123,9 @@ export function MetaWizard({
             </p>
           </div>
 
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-sm font-medium text-amber-800">Embedded Signup oficial: pendiente de aprobación de la app</p>
-            <p className="mt-1 text-xs text-amber-700">{data.embeddedSignup.pendingReason}</p>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10 dark:border-amber-500/30">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Embedded Signup oficial: pendiente de aprobación de la app</p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{data.embeddedSignup.pendingReason}</p>
           </div>
 
           <label className="block text-sm">
@@ -190,7 +190,7 @@ export function MetaWizard({
         <div className="space-y-4">
           <p className="text-sm text-ink-muted">
             Activa los activos que TuBot puede usar. {data.connection?.mode === "MOCK" && (
-              <span className="font-medium text-violet-700">Estás viendo activos DEMO de la simulación de desarrollo.</span>
+              <span className="font-medium text-violet-700 dark:text-violet-300">Estás viendo activos DEMO de la simulación de desarrollo.</span>
             )}
           </p>
           {!connected ? (
@@ -296,7 +296,7 @@ export function MetaWizard({
           {testLog.length > 0 && (
             <ul className="space-y-1 rounded-xl bg-app p-3 text-xs">
               {testLog.map((l, i) => (
-                <li key={i} className={l.startsWith("✖") ? "text-red-600" : "text-ink-muted"}>{l}</li>
+                <li key={i} className={l.startsWith("✖") ? "text-red-600 dark:text-red-400" : "text-ink-muted"}>{l}</li>
               ))}
             </ul>
           )}

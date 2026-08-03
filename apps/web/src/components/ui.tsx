@@ -37,7 +37,7 @@ export function Button({
     primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-e1",
     secondary: "border border-line-strong bg-panel text-ink hover:bg-app",
     ghost: "text-ink-muted hover:bg-app",
-    danger: "border border-red-300 bg-panel text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10",
+    danger: "border border-red-300 bg-panel text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10 ",
   };
   return <button className={cn(base, variants[variant], className)} {...props} />;
 }
@@ -86,9 +86,9 @@ export function MetricCard({
 }) {
   const tones = {
     default: "text-ink",
-    ok: "text-emerald-600",
-    warn: "text-amber-600",
-    danger: "text-red-600",
+    ok: "text-emerald-600 dark:text-emerald-400",
+    warn: "text-amber-600 dark:text-amber-400",
+    danger: "text-red-600 dark:text-red-400",
   };
   return (
     <div className="rounded-card border border-line bg-panel p-4 shadow-e1">
@@ -119,7 +119,7 @@ const STATUS_META: Record<StatusKind, { label: string; className: string; Icon: 
   connected: { label: "Conectada", className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30", Icon: CheckCircle2 },
   syncing: { label: "Sincronizando", className: "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/30", Icon: Loader2 },
   incomplete: { label: "Configuración incompleta", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30", Icon: AlertTriangle },
-  attention: { label: "Requiere atención", className: "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30", Icon: AlertTriangle },
+  attention: { label: "Requiere atención", className: "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30 ", Icon: AlertTriangle },
   error: { label: "Error", className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30", Icon: XCircle },
   disconnected: { label: "Desconectada", className: "bg-app text-ink-muted border-line", Icon: PauseCircle },
   soon: { label: "Próximamente", className: "bg-app text-ink-muted border-line", Icon: Clock },

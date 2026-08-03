@@ -83,7 +83,7 @@ export default function IaSettingsPage() {
       <h2 className="text-lg font-semibold">Ajustes de IA</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Los agentes se crean en{" "}
-        <a href="/agents" className="inline-flex items-center gap-0.5 text-cyan-700 underline">Agentes IA <ExternalLink size={10} /></a>.
+        <a href="/agents" className="inline-flex items-center gap-0.5 text-cyan-700 underline dark:text-cyan-300">Agentes IA <ExternalLink size={10} /></a>.
       </p>
 
       <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
@@ -151,7 +151,7 @@ export default function IaSettingsPage() {
           {filtered.map((t) => (
             <li key={t.id} className="rounded-lg border border-line p-2.5">
               <div className="flex items-center gap-2">
-                <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700">{typeLabel(t.type)}</span>
+                <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300">{typeLabel(t.type)}</span>
                 <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
                 <span className="shrink-0 text-[10px] text-ink-subtle">
                   {t.agentIds.length === 0 ? "Todos los agentes" : `${t.agentIds.length} agente(s)`}
@@ -259,14 +259,14 @@ function TemplateEditor({
       <div className="mt-3">
         <p className="text-xs text-ink-muted">Disponible para</p>
         <div className="mt-1 flex flex-wrap gap-2">
-          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-cyan-400 bg-cyan-50 text-cyan-800" : "border-line text-ink-muted")}>
+          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
             <input type="checkbox" checked={agentIds.length === 0} onChange={() => setAgentIds([])} className="hidden" />
             🤖 Todos los agentes
           </label>
           {agents.map((a) => {
             const on = agentIds.includes(a.id);
             return (
-              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-cyan-400 bg-cyan-50 text-cyan-800" : "border-line text-ink-muted")}>
+              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
                 <input
                   type="checkbox"
                   checked={on}

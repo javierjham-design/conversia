@@ -77,11 +77,11 @@ const CHANNEL_LABEL: Record<string, string> = {
   WEBCHAT: "Webchat",
 };
 const CONV_STATUS: Record<string, { label: string; className: string }> = {
-  OPEN: { label: "Abierta", className: "bg-emerald-50 text-emerald-700" },
-  PENDING: { label: "Pendiente", className: "bg-amber-50 text-amber-700" },
+  OPEN: { label: "Abierta", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" },
+  PENDING: { label: "Pendiente", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300" },
   RESOLVED: { label: "Resuelta", className: "bg-app text-ink-muted" },
   CLOSED: { label: "Cerrada", className: "bg-app text-ink-muted" },
-  SNOOZED: { label: "Pospuesta", className: "bg-violet-50 text-violet-700" },
+  SNOOZED: { label: "Pospuesta", className: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300" },
 };
 
 /** Código ISO-2 → emoji de bandera (indicadores regionales). */

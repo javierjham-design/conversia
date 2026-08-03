@@ -125,22 +125,22 @@ export default function DevelopersPage() {
         <a href="/integrations" className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-ink-muted hover:bg-app">← Integraciones</a>
       </div>
 
-      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</p>}
+      {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{msg}</p>}
 
       {createdSecret && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-800">
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:bg-amber-500/10 dark:border-amber-500/30">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
             {createdSecret.kind === "hook" ? "Webhook creado" : "API key creada"}: {createdSecret.label} — el secreto se muestra <b>una sola vez</b>
           </p>
           {createdSecret.url && (
-            <p className="mt-1 flex items-center gap-2 text-xs text-amber-700">
+            <p className="mt-1 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
               URL: <code className="rounded bg-panel px-1.5 py-0.5">{createdSecret.url}</code> <CopyButton text={createdSecret.url} />
             </p>
           )}
-          <p className="mt-1 flex items-center gap-2 text-xs text-amber-700">
+          <p className="mt-1 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
             Secreto: <code className="rounded bg-panel px-1.5 py-0.5">{createdSecret.secret}</code> <CopyButton text={createdSecret.secret} />
           </p>
-          <button onClick={() => setCreatedSecret(null)} className="mt-2 text-xs text-amber-700 underline">Entendido, lo guardé</button>
+          <button onClick={() => setCreatedSecret(null)} className="mt-2 text-xs text-amber-700 underline dark:text-amber-300">Entendido, lo guardé</button>
         </div>
       )}
 
@@ -161,7 +161,7 @@ export default function DevelopersPage() {
               <li key={h.id} className="rounded-lg border border-line p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">{h.name}{" "}
-                    <span className={`text-[10px] ${h.active ? "text-emerald-600" : "text-ink-subtle"}`}>{h.active ? "● activo" : "○ pausado"}</span>
+                    <span className={`text-[10px] ${h.active ? "text-emerald-600" : "text-ink-subtle"} dark:text-emerald-400`}>{h.active ? "● activo" : "○ pausado"}</span>
                   </p>
                   <div className="flex gap-2 text-xs">
                     <button onClick={() => void toggleHook(h)} className="text-ink-muted hover:underline">{h.active ? "Pausar" : "Activar"}</button>

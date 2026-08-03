@@ -180,11 +180,11 @@ export default function MetaCenterPage() {
                       ? `Modo: ${connection.mode === "MOCK" ? "simulación de desarrollo (no toca Meta)" : connection.mode === "MANUAL" ? "manual (ids + token)" : "Embedded Signup"}`
                       : "Conecta tu Business Portfolio para habilitar los módulos"}
                   </p>
-                  {connection?.lastError && <p className="mt-0.5 text-xs text-red-600">{connection.lastError}</p>}
+                  {connection?.lastError && <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{connection.lastError}</p>}
                 </div>
               </div>
               {data.connection?.mode === "MOCK" && (
-                <p className="max-w-xs rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-700">
+                <p className="max-w-xs rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
                   Conexión simulada para desarrollo: los envíos hacia Meta se registran pero <b>no</b> salen de la plataforma.
                 </p>
               )}
@@ -309,7 +309,7 @@ export default function MetaCenterPage() {
                         <li key={a.id} className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-[13px]">
                           <div>
                             <span className="mr-2 rounded bg-app px-1.5 py-0.5 font-mono text-[10px] uppercase text-ink-muted">{a.provider}</span>
-                            <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-ink"}>
+                            <span className={a.status === "error" ? "text-red-600 dark:text-red-400" : a.status === "warning" ? "text-amber-700 dark:text-amber-300" : "text-ink"}>
                               {a.message ?? a.type}
                             </span>
                           </div>
@@ -350,7 +350,7 @@ function RecentEvents({ provider }: { provider: string }) {
     <ul className="space-y-1.5">
       {rows.map((a) => (
         <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2 text-xs">
-          <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-ink-muted"}>
+          <span className={a.status === "error" ? "text-red-600 dark:text-red-400" : a.status === "warning" ? "text-amber-700 dark:text-amber-300" : "text-ink-muted"}>
             {a.message ?? a.type}
           </span>
           <span className="shrink-0 text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>

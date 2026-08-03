@@ -60,7 +60,7 @@ function Section({ title, subtitle, helpKey, onHelp, children }: { title: string
     <div className="mb-4 rounded-xl border border-line bg-panel p-4">
       <div className="mb-1 flex items-start justify-between gap-3">
         <div>
-          <h2 className="font-semibold text-navy-900">{title}</h2>
+          <h2 className="font-semibold text-ink">{title}</h2>
           {subtitle && <p className="text-xs text-ink-subtle">{subtitle}</p>}
         </div>
         {helpKey && onHelp && (
@@ -88,7 +88,7 @@ function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: A
     <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40" : "border-line")}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-navy-900">{def.label}</p>
+          <p className="text-sm font-medium text-ink">{def.label}</p>
           <p className="text-xs text-ink-muted">{def.description}</p>
         </div>
         <Toggle checked={enabled} onChange={onToggle} />
@@ -337,9 +337,9 @@ export default function AgentEditorPage() {
           <span className="text-2xl">{emoji}</span>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-navy-900">{name || "Agente"}</h1>
+              <h1 className="text-lg font-semibold text-ink">{name || "Agente"}</h1>
               <StatusBadge kind={published && agent.active ? "connected" : "beta"} label={published ? (agent.active ? "activo" : "inactivo") : "borrador"} />
-              {dirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">cambios sin guardar</span>}
+              {dirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">cambios sin guardar</span>}
             </div>
             <p className="text-[11px] text-ink-subtle">
               {published ? `v${agent.publishedVersion} en producción` : "nunca publicado"}
@@ -361,7 +361,7 @@ export default function AgentEditorPage() {
           <div className="mx-auto max-w-2xl">
             {/* Punto de partida: plantillas */}
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3">
-              <p className="text-sm text-navy-900">
+              <p className="text-sm text-ink">
                 ¿Quieres un punto de partida? Aplica una <span className="font-medium">plantilla</span> y ajústala a tu negocio.
               </p>
               <button
@@ -427,7 +427,7 @@ export default function AgentEditorPage() {
                 ))}
               </div>
               {unknownVars.length > 0 && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700">
+                <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
                   Variables no reconocidas: {unknownVars.map((v) => `{{${v}}}`).join(", ")}. Se reemplazarán por vacío. Usa solo las de la lista.
                 </p>
               )}
@@ -460,7 +460,7 @@ export default function AgentEditorPage() {
                     return (
                       <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40" : "border-line")}>
                         <div>
-                          <p className="text-sm font-medium text-navy-900">{kb.name}</p>
+                          <p className="text-sm font-medium text-ink">{kb.name}</p>
                           <p className="text-xs text-ink-muted">
                             {kb.description || "Sin descripción"} · {kb.publishedDocs} doc{kb.publishedDocs === 1 ? "" : "s"} publicado{kb.publishedDocs === 1 ? "" : "s"}
                           </p>
@@ -470,7 +470,7 @@ export default function AgentEditorPage() {
                     );
                   })}
                   {knowledgeSources.length === 0 && (
-                    <p className="text-[11px] text-amber-600">Ninguna fuente activa: el agente no consultará la base de conocimiento.</p>
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">Ninguna fuente activa: el agente no consultará la base de conocimiento.</p>
                   )}
                 </div>
               )}
@@ -479,7 +479,7 @@ export default function AgentEditorPage() {
             {/* Avanzado */}
             <div className="rounded-xl border border-line bg-panel">
               <button onClick={() => setShowAdvanced((v) => !v)} className="flex w-full items-center justify-between p-4 text-left">
-                <span className="font-semibold text-navy-900">Configuración avanzada</span>
+                <span className="font-semibold text-ink">Configuración avanzada</span>
                 <span className="text-ink-subtle">{showAdvanced ? "−" : "+"}</span>
               </button>
               {showAdvanced && (
@@ -499,7 +499,7 @@ export default function AgentEditorPage() {
                   </div>
                   <div className="flex items-center justify-between border-t border-line pt-3">
                     <button onClick={() => void toggleActive()} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app">{agent.active ? "Desactivar agente" : "Activar agente"}</button>
-                    <button onClick={() => void removeAgent()} className="text-sm text-red-600 hover:underline">Eliminar agente</button>
+                    <button onClick={() => void removeAgent()} className="text-sm text-red-600 hover:underline dark:text-red-400">Eliminar agente</button>
                   </div>
                 </div>
               )}
@@ -535,7 +535,7 @@ export default function AgentEditorPage() {
             <div key={t.key} className="flex flex-col rounded-xl border border-line p-4">
               <div className="flex items-center gap-2">
                 <span className="text-2xl">{t.emoji}</span>
-                <p className="font-semibold text-navy-900">{t.name}</p>
+                <p className="font-semibold text-ink">{t.name}</p>
               </div>
               <p className="mt-1 flex-1 text-sm text-ink-muted">{t.description}</p>
               <div className="mt-2 flex flex-wrap gap-1">
@@ -667,7 +667,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
     <aside className="hidden w-96 shrink-0 flex-col border-l border-line bg-panel lg:flex">
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div>
-          <h2 className="font-semibold text-navy-900">Probar Agente IA</h2>
+          <h2 className="font-semibold text-ink">Probar Agente IA</h2>
           <p className="text-[11px] text-ink-subtle">Lee datos reales · simula acciones · no envía nada.</p>
         </div>
         {messages.length > 0 && (
@@ -681,7 +681,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
             onClick={() => setTab(t)}
             className={cn(
               "rounded-t-lg px-3 py-1.5 text-sm",
-              tab === t ? "bg-app font-medium text-navy-900" : "text-ink-muted hover:text-ink",
+              tab === t ? "bg-app font-medium text-ink" : "text-ink-muted hover:text-ink",
             )}
           >
             {t === "chat" ? "Chat" : "Campos del contacto"}
@@ -738,14 +738,14 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
 
 function TesterBubble({ m }: { m: TestMsg }) {
   if (m.role === "system") {
-    return <div className="mx-auto max-w-[90%] rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs text-amber-700">{m.content}</div>;
+    return <div className="mx-auto max-w-[90%] rounded-lg bg-amber-50 px-3 py-1.5 text-center text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">{m.content}</div>;
   }
   const isUser = m.role === "user";
   const tools = m.meta?.toolEvents?.filter((t) => !["transferToAgent", "transferToHuman"].includes(t.name)) ?? [];
   const hasFooter = tools.length > 0 || (m.meta?.simulated?.length ?? 0) > 0 || !!m.meta?.usage;
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-      <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-app text-navy-900")}>
+      <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-app text-ink")}>
         <p className="whitespace-pre-wrap">{m.content}</p>
         {!isUser && hasFooter && (
           <div className="mt-2 space-y-1 border-t border-line pt-1.5 text-[11px] text-ink-muted">
@@ -805,7 +805,7 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
           <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-line bg-panel p-1 shadow-pop">
             {Object.entries(byType).map(([type, tpls]) => (
               <div key={type}>
-                <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-cyan-600">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
+                <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-cyan-600 dark:text-cyan-400">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
                 {tpls.map((t) => (
                   <button key={t.id} onClick={() => { onPick(t.body); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-cyan-50" title={t.body.slice(0, 200)}>
                     {t.name}
@@ -820,7 +820,7 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
                 {sn.label}
               </button>
             ))}
-            <a href="/settings/ia" className="mt-1 block border-t border-line px-2 py-1.5 text-[11px] text-cyan-700 underline">
+            <a href="/settings/ia" className="mt-1 block border-t border-line px-2 py-1.5 text-[11px] text-cyan-700 underline dark:text-cyan-300">
               Administrar mi biblioteca ↗
             </a>
           </div>
@@ -839,13 +839,13 @@ function HelpContent({ help }: { help: SectionHelp }) {
       </ul>
       {help.examples && (
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-            <p className="mb-1 text-xs font-semibold text-emerald-800">✓ Buen ejemplo</p>
-            <p className="text-xs text-emerald-900">{help.examples.good}</p>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:bg-emerald-500/10 dark:border-emerald-500/30">
+            <p className="mb-1 text-xs font-semibold text-emerald-800 dark:text-emerald-300">✓ Buen ejemplo</p>
+            <p className="text-xs text-emerald-900 dark:text-emerald-200">{help.examples.good}</p>
           </div>
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-            <p className="mb-1 text-xs font-semibold text-red-800">✗ Evita esto</p>
-            <p className="text-xs text-red-900">{help.examples.bad}</p>
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-500/10 dark:border-red-500/30">
+            <p className="mb-1 text-xs font-semibold text-red-800 dark:text-red-300">✗ Evita esto</p>
+            <p className="text-xs text-red-900 dark:text-red-200">{help.examples.bad}</p>
           </div>
         </div>
       )}
