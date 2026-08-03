@@ -5,11 +5,13 @@ import {
   Get,
   HttpException,
   HttpStatus,
+  Patch,
   Post,
   Req,
   UnauthorizedException,
 } from "@nestjs/common";
 import type { Request } from "express";
+import * as bcrypt from "bcryptjs";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
@@ -113,5 +115,50 @@ export class AuthController {
       ),
     ]);
     return { user, organization: org, role: ctx.roleCode, permissions: ctx.permissions };
+  }
+
+  /** Mi perfil: actualizar el nombre propio (cualquier rol). */
+  @Patch("me")
+  async updateMe(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ name: z.string().min(2).max(80) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Nombre inválido (2-80)");
+    await this.prisma.admin.user.update({ where: { id: ctx.userId }, data: { name: parsed.data.name.trim() } });
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "profile.name_update", entityType: "user", entityId: ctx.userId },
+      }),
+    );
+    return { ok: true };
+  }
+
+  /**
+   * Cambio de contraseña propio: exige la contraseña ACTUAL. Requisitos de la
+   * nueva: mínimo 8 caracteres con al menos una letra y un número.
+   */
+  @Post("change-password")
+  async changePassword(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z
+      .object({
+        current: z.string().min(1),
+        next: z.string().min(8).max(100).regex(/[a-zA-Z]/, "Debe incluir letras").regex(/[0-9]/, "Debe incluir un número"),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? "Contraseña inválida (mín. 8, letras y números)");
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId } });
+    if (!user?.passwordHash || !bcrypt.compareSync(parsed.data.current, user.passwordHash)) {
+      throw new BadRequestException("La contraseña actual no es correcta");
+    }
+    await this.prisma.admin.user.update({
+      where: { id: ctx.userId },
+      data: { passwordHash: bcrypt.hashSync(parsed.data.next, 12) },
+    });
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "profile.password_change", entityType: "user", entityId: ctx.userId },
+      }),
+    );
+    return { ok: true };
   }
 }

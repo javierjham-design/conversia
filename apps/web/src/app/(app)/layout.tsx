@@ -164,6 +164,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/integrations/meta": ["Configuración", "Integraciones", "Meta Business Suite"],
   "/users": ["Configuración", "Usuarios"],
   "/settings": ["Configuración"],
+  "/settings/profile": ["Configuración", "Mi perfil"],
   "/billing": ["Configuración", "Plan y facturación"],
 };
 
@@ -329,24 +330,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                 {!collapsed && "Colapsar"}
               </button>
-              <button
-                onClick={() => {
-                  clearToken();
-                  window.location.href = "/login";
-                }}
-                title={collapsed ? "Cerrar sesión" : undefined}
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white",
-                  collapsed && "justify-center",
-                )}
-              >
-                <LogOut size={16} />
+              <div className={cn("flex w-full items-center gap-1", collapsed && "justify-center")}>
+                {/* Nombre/avatar → Mi perfil (configuración personal) */}
                 {!collapsed && (
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {me?.user?.name ?? "Cerrar sesión"}
-                  </span>
+                  <a
+                    href="/settings/profile"
+                    title="Mi perfil"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-navy-700 text-[10px] font-semibold text-white">
+                      {(me?.user?.name ?? "?").slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-left">{me?.user?.name ?? "Mi perfil"}</span>
+                  </a>
                 )}
-              </button>
+                <button
+                  onClick={() => {
+                    clearToken();
+                    window.location.href = "/login";
+                  }}
+                  title="Cerrar sesión"
+                  className="rounded-lg px-2.5 py-2 text-navy-300 hover:bg-navy-800 hover:text-white"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
             </div>
           </nav>
 

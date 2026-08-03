@@ -304,7 +304,7 @@ export class InboxController {
     // Mismos controles de consumo que el resto de la IA
     const orgSettings = (loaded.org?.settings ?? {}) as Record<string, any>;
     const assistantLang = ({ es: "español chileno neutro", en: "inglés", pt: "portugués" } as Record<string, string>)[
-      String(orgSettings.assistantLanguage ?? (orgSettings.general as any)?.language ?? "es")
+      String(orgSettings.assistantLanguage ?? loaded.org?.locale ?? "es")
     ] ?? "español chileno neutro";
     if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
       throw new BadRequestException("La IA está pausada (kill switch)");

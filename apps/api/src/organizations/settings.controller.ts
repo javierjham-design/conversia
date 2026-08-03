@@ -46,8 +46,9 @@ export class SettingsController {
         timezone: org?.timezone ?? "America/Santiago",
         logoUrl: general.logoUrl ?? "",
         industry: general.industry ?? "",
-        currency: general.currency ?? "CLP",
-        language: general.language ?? "es",
+        // Moneda e idioma viven en columnas reales de la organización (fuente única)
+        currency: org?.currency ?? "CLP",
+        language: org?.locale ?? "es",
         contactEmail: general.contactEmail ?? "",
         contactPhone: general.contactPhone ?? "",
         website: general.website ?? "",
@@ -66,7 +67,7 @@ export class SettingsController {
       if (!org) throw new BadRequestException("Organización no encontrada");
       const settings = (org.settings ?? {}) as Record<string, any>;
       const general = { ...((settings.general ?? {}) as object) } as Record<string, any>;
-      for (const key of ["logoUrl", "industry", "currency", "language", "contactEmail", "contactPhone", "website"] as const) {
+      for (const key of ["logoUrl", "industry", "contactEmail", "contactPhone", "website"] as const) {
         if (input[key] !== undefined) general[key] = input[key];
       }
       await tx.organization.update({
@@ -74,6 +75,8 @@ export class SettingsController {
         data: {
           ...(input.name ? { name: input.name.trim() } : {}),
           ...(input.timezone ? { timezone: input.timezone } : {}),
+          ...(input.currency ? { currency: input.currency } : {}),
+          ...(input.language ? { locale: input.language } : {}),
           settings: { ...settings, general } as object,
         },
       });
@@ -171,7 +174,7 @@ export class SettingsController {
           dailyTokenBudget: limits.aiTokensDaily ?? getEnv().AI_DAILY_TOKEN_BUDGET_PER_ORG,
         },
         transcription: settings.transcription !== false,
-        assistantLanguage: String(settings.assistantLanguage ?? ((settings.general as any)?.language ?? "es")),
+        assistantLanguage: String(settings.assistantLanguage ?? org?.locale ?? "es"),
       };
     });
   }
