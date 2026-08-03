@@ -67,13 +67,6 @@ function expandPerms(perms: string[], catalog: CatalogModule[]): string[] {
 }
 
 
-const ROLE_MATRIX: { code: string; name: string; permissions: string[] }[] = [
-  { code: "owner", name: "Propietario", permissions: ["Todo el espacio"] },
-  { code: "admin", name: "Administrador", permissions: ["Todo el espacio"] },
-  { code: "supervisor", name: "Supervisor", permissions: ["Bandeja completa", "Contactos", "Leads y etapas", "Reportes (ver)", "Agentes (ver)", "Flujos (ver)"] },
-  { code: "agente", name: "Agente", permissions: ["Bandeja (atender y responder)", "Contactos (ver y editar)"] },
-  { code: "marketing", name: "Marketing", permissions: ["Contactos (ver)", "Reportes (ver)", "Flujos", "Integraciones (ver)"] },
-];
 
 export default function UsersPage() {
   const [members, setMembers] = useState<Member[]>([]);
@@ -501,29 +494,6 @@ export default function UsersPage() {
           </div>
         </div>
       )}
-      {/* Matriz de roles y permisos (solo lectura, v1) */}
-      <div className="mt-8 rounded-card border border-slate-200 bg-white p-5 shadow-card">
-        <h2 className="font-medium">Roles y permisos</h2>
-        <p className="mb-3 text-xs text-slate-400">Qué puede hacer cada rol. Los permisos los define la plataforma (v1 solo lectura).</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400">
-                <th className="p-2">Rol</th>
-                <th className="p-2">Permisos</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ROLE_MATRIX.map((r) => (
-                <tr key={r.code} className="border-b border-slate-50">
-                  <td className="p-2 font-medium">{r.name}</td>
-                  <td className="p-2 text-slate-500">{r.permissions.join(" · ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 }
