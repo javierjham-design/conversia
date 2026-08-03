@@ -34,3 +34,11 @@ accesos directos ("Gestionar ↗").
 - Visibilidad del sidebar por rol vía `can()` del layout (JWT perms); **el servidor valida además el permiso en cada endpoint** (zod + withTenant + audit_logs en toda mutación).
 - Búsqueda del sidebar: filtra por nombre + sinónimos (keywords por página).
 - Migración `20260803120000_settings_hub`: lead_statuses.active, snippets.scope, custom_field_definitions.order/show_in_list, tablas export_jobs y prompt_templates (RLS vía setup.sql: ambas tienen organization_id).
+
+## Pulido 2026-08-03 (feature/settings-polish)
+
+- Grupo **Personal** en el sidebar: Mi perfil (nombre/contraseña/avatar) y Notificaciones (5 toggles por usuario en settings.notifPrefs[userId]).
+- Logo/avatar: subida real con files.content (la columna SOLO la leen los endpoints que sirven imagen) + validación por magic bytes (apps/api/src/common/images.ts).
+- Plantillas de prompt: type + agentIds ([]=todos) consumidas por el menú del editor de agentes vía GET /settings/prompt-templates?agentId=.
+- Import: plantilla CSV descargable (buildTemplateCsv) + etapa/campos personalizados/tags con |.
+- /settings/teams es página real (CRUD + miembros + deep-link a la Bandeja); /billing rediseñado usa el checkout existente (Flow/LS/Mock).
