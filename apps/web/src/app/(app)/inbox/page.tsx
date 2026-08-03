@@ -9,6 +9,7 @@ import { Bot, Search, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { EmptyState, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
+import { LifecycleModal } from "./lifecycle-modal";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
 import { displayName, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
@@ -51,6 +52,7 @@ export default function InboxPage() {
   const [context, setContext] = useState<ConvContext | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
+  const [manageStages, setManageStages] = useState(false);
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [users, setUsers] = useState<{ userId: string; name: string }[]>([]);
@@ -58,6 +60,15 @@ export default function InboxPage() {
   const [agents, setAgents] = useState<{ id: string; name: string; slug: string }[]>([]);
   const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
   const [allStages, setAllStages] = useState<Stage[]>([]);
+
+  const loadStages = useCallback(async () => {
+    try {
+      const rows = await api<{ code: string; name: string; emoji: string | null; color: string | null; category: string }[]>("/lifecycle-stages");
+      setAllStages(rows.map((s) => ({ code: s.code, name: s.name, emoji: s.emoji, color: s.color, category: s.category })));
+    } catch {
+      setAllStages([]);
+    }
+  }, []);
 
   const loadCounters = useCallback(async () => {
     try {
@@ -125,9 +136,7 @@ export default function InboxPage() {
       .then((r) => setWorkflows(r.filter((w) => w.status === "published").map((w) => ({ id: w.id, name: w.name }))))
       .catch(() => setWorkflows([]));
     void api<ChannelInfo[]>("/channels").then(setChannels).catch(() => setChannels([]));
-    void api<{ leadStatuses: { code: string; name: string }[] }>("/workflows/meta/catalog")
-      .then((r) => setAllStages(r.leadStatuses.map((s) => ({ ...s, color: null }))))
-      .catch(() => setAllStages([]));
+    void loadStages();
   }, []);
 
   useEffect(() => {
@@ -227,10 +236,7 @@ export default function InboxPage() {
 
   const channelOf = (c: { channelConnectionId: string | null } | null) => channels.find((ch) => ch.id === c?.channelConnectionId) ?? null;
   const channelError = channels.find((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status === "error");
-  const stagesForHeader = useMemo<Stage[]>(() => {
-    const withColor = new Map((counters?.stages ?? []).map((s) => [s.code, s]));
-    return allStages.map((s) => withColor.get(s.code) ?? s);
-  }, [allStages, counters?.stages]);
+  const stagesForHeader = allStages;
 
   return (
     <div className="flex h-full flex-col">
@@ -243,7 +249,7 @@ export default function InboxPage() {
       <div className="flex min-h-0 flex-1">
         {/* Zona 1 — clasificador */}
         <div className={cn(selectedId ? "hidden xl:block" : "hidden md:block")}>
-          <InboxSidebar counters={counters} filter={filter} onSelect={(f) => { setFilter(f); setSelectedId(null); }} channels={channels} onViewsChanged={() => void loadCounters()} />
+          <InboxSidebar counters={counters} filter={filter} onSelect={(f) => { setFilter(f); setSelectedId(null); }} channels={channels} onViewsChanged={() => void loadCounters()} onManageStages={() => setManageStages(true)} />
         </div>
 
         {/* Zona 2 — lista */}
@@ -319,7 +325,7 @@ export default function InboxPage() {
                     <div className="mt-0.5 flex items-center gap-1.5">
                       {c.stage && (
                         <span className="rounded-full px-1.5 text-[9px] font-medium" style={{ backgroundColor: `${c.stage.color ?? "#94a3b8"}22`, color: c.stage.color ?? "#64748b" }}>
-                          {c.stage.name}
+                          {c.stage.emoji ? `${c.stage.emoji} ` : ""}{c.stage.name}
                         </span>
                       )}
                       {c.status === "CLOSED" && <span className="text-[9px] text-slate-400">cerrada</span>}
@@ -386,6 +392,17 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {manageStages && (
+        <LifecycleModal
+          onClose={() => setManageStages(false)}
+          onChanged={() => {
+            void loadStages();
+            void loadCounters();
+            if (selectedId) void loadContext(selectedId);
+          }}
+        />
+      )}
     </div>
   );
 }

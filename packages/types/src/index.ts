@@ -739,12 +739,17 @@ export function isAssignablePermission(p: string): boolean {
   return false;
 }
 
-/** Estados de lead mínimos para organizaciones creadas por registro self-service. */
+/**
+ * Etapas estándar del ciclo de vida para organizaciones NUEVAS (estilo
+ * Respond.io). Cada tenant puede renombrarlas, cambiar emoji/categoría y
+ * agregar las suyas desde la Bandeja; los códigos quedan estables para los
+ * workflows. "schedule" (Reserva) es el estándar de la etapa de agenda.
+ */
 export const DEFAULT_LEAD_STATUSES = [
-  { code: "nuevo", name: "Nuevo", category: "OPEN", order: 0 },
-  { code: "en_conversacion", name: "En conversación", category: "OPEN", order: 1 },
-  { code: "agenda", name: "Agendó", category: "OPEN", order: 2 },
-  { code: "ganado", name: "Ganado", category: "WON", order: 3 },
-  { code: "perdido", name: "Perdido", category: "LOST", order: 4 },
-  { code: "no_contactar", name: "No contactar", category: "FROZEN", order: 5 },
+  { code: "new_lead", name: "Nuevo lead", emoji: "🆕", category: "OPEN", order: 0 },
+  { code: "hot_lead", name: "Lead caliente", emoji: "🔥", category: "OPEN", order: 1 },
+  { code: "schedule", name: "Reserva", emoji: "📅", category: "OPEN", order: 2 },
+  { code: "customer", name: "Cliente", emoji: "🤩", category: "WON", order: 3 },
+  { code: "cold_lead", name: "Lead frío", emoji: "🧊", category: "LOST", order: 4 },
+  { code: "no_contactar", name: "No contactar", emoji: "🚫", category: "FROZEN", order: 5 },
 ] as const;

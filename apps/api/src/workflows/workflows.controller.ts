@@ -114,7 +114,7 @@ export class WorkflowsController {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const [statuses, agents, members, teams, workflows, templates] = await Promise.all([
-        tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true } }),
+        tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true, emoji: true } }),
         tx.agent.findMany({ where: { deletedAt: null, active: true }, select: { slug: true, name: true } }),
         tx.organizationUser.findMany({ where: { active: true }, include: { user: { select: { id: true, name: true } } } }),
         tx.team.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),

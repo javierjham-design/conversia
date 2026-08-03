@@ -611,6 +611,7 @@ model LeadStatus {
   name           String
   category       LeadStatusCategory @default(OPEN)
   color          String?
+  emoji          String? // icono visible en bandeja/selectores (estilo Respond.io)
   order          Int                @default(0)
   system         Boolean            @default(false)
   leads          Lead[]

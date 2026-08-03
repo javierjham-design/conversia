@@ -1,5 +1,14 @@
 # Registro de progreso
 
+## 2026-08-03 — Etapas del ciclo de vida editables (rama `feature/lifecycle-stages`)
+
+Migración `20260803100000_lead_status_emoji` (columna emoji en lead_statuses) — **pendiente aplicar a prod**.
+
+- **CRUD por tenant** (`/lifecycle-stages`, permiso leads:write): renombrar, cambiar emoji/color/categoría, reordenar (flechas), crear y eliminar (bloqueado si la etapa tiene leads). El `code` es estable → los workflows, reglas CAPI y bandejas guardadas siguen funcionando al renombrar.
+- **UI**: engranaje en el grupo «Ciclo de vida» del clasificador → modal de gestión (estilo Respond.io) con sugerencias de emojis; emoji visible en sidebar, selector de la cabecera, badge de la lista, panel de contacto y selects del editor de workflows.
+- **Estándar para organizaciones nuevas**: 🆕 Nuevo lead · 🔥 Lead caliente · 📅 **Reserva (code `schedule`)** · 🤩 Cliente (WON) · 🧊 Lead frío · 🚫 No contactar. La regla CAPI por defecto ahora apunta a `lead.status_changed:schedule` y Lead Ads cae a la primera etapa OPEN si el código configurado no existe (robusto ante renombres).
+- Tenants existentes conservan sus etapas; ahora pueden editarlas desde la Bandeja.
+
 ## 2026-08-01 — Bandeja Pro nivel Respond.io (rama `feature/inbox-pro`)
 
 Reescritura de la Bandeja en 4 zonas + backend nuevo. Migración `20260801120000_inbox_pro` (inbox_views, snippets, conversation_ai_notes + índices por agente/equipo) — **pendiente aplicar a prod**. Nada de la bandeja anterior se rompió (plantillas/ventana 24 h, audio+transcripción, tomar control, ejecutar flujo, checklist verificados).

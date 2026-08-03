@@ -2,7 +2,7 @@
 
 /** Sidebar clasificador de la Bandeja (grupos colapsables con conteos en vivo). */
 import { useState } from "react";
-import { Ban, Bot, ChevronDown, ChevronRight, Inbox, Plus, Tags, Trash2, Users } from "lucide-react";
+import { Ban, Bot, ChevronDown, ChevronRight, Inbox, Plus, Settings2, Tags, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import type { ChannelInfo, Counters, InboxFilter } from "./types";
@@ -74,12 +74,14 @@ export function InboxSidebar({
   onSelect,
   channels,
   onViewsChanged,
+  onManageStages,
 }: {
   counters: Counters | null;
   filter: InboxFilter;
   onSelect: (f: InboxFilter) => void;
   channels: ChannelInfo[];
   onViewsChanged: () => void;
+  onManageStages: () => void;
 }) {
   const toast = useToast();
   const [showNewView, setShowNewView] = useState(false);
@@ -103,13 +105,27 @@ export function InboxSidebar({
         </Group>
       )}
 
-      {(counters?.stages.length ?? 0) > 0 && (
-        <Group title="Ciclo de vida">
-          {counters!.stages.map((s) => (
-            <Item key={s.code} label={s.name} color={s.color ?? "#94a3b8"} count={s.count} active={is("stage", s.code)} onClick={() => onSelect({ kind: "stage", code: s.code, label: s.name })} />
-          ))}
-        </Group>
-      )}
+      <Group
+        title="Ciclo de vida"
+        action={
+          <button onClick={onManageStages} className="text-slate-400 hover:text-cyan-600" title="Editar etapas del ciclo de vida">
+            <Settings2 size={13} />
+          </button>
+        }
+      >
+        {(counters?.stages.length ?? 0) === 0 && <p className="px-3 py-1 text-[11px] text-slate-400">Sin conversaciones con etapa aún</p>}
+        {counters?.stages.map((s) => (
+          <Item
+            key={s.code}
+            label={s.name}
+            icon={s.emoji ? <span className="text-[13px] leading-none">{s.emoji}</span> : undefined}
+            color={s.emoji ? undefined : (s.color ?? "#94a3b8")}
+            count={s.count}
+            active={is("stage", s.code)}
+            onClick={() => onSelect({ kind: "stage", code: s.code, label: s.name })}
+          />
+        ))}
+      </Group>
 
       {(counters?.teams.length ?? 0) > 0 && (
         <Group title="Bandejas de equipo">

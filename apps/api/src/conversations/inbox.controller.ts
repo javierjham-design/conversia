@@ -69,8 +69,8 @@ export class InboxController {
       ]);
 
       // Etapa ACTUAL (lead más reciente por contacto) de conversaciones abiertas.
-      const byStage = await tx.$queryRaw<{ code: string; name: string; color: string | null; count: number }[]>`
-        SELECT ls.code, ls.name, ls.color, COUNT(*)::int AS count
+      const byStage = await tx.$queryRaw<{ code: string; name: string; color: string | null; emoji: string | null; count: number }[]>`
+        SELECT ls.code, ls.name, ls.color, ls.emoji, COUNT(*)::int AS count
         FROM conversations c
         JOIN LATERAL (
           SELECT l.status_id FROM leads l
@@ -79,7 +79,7 @@ export class InboxController {
         ) latest ON true
         JOIN lead_statuses ls ON ls.id = latest.status_id
         WHERE c.status IN ('OPEN', 'PENDING')
-        GROUP BY ls.code, ls.name, ls.color, ls."order"
+        GROUP BY ls.code, ls.name, ls.color, ls.emoji, ls."order"
         ORDER BY ls."order"`;
 
       const agentName = new Map(agents.map((a) => [a.id, a.name]));

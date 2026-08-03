@@ -165,13 +165,13 @@ export class ConversationsController {
       // Enriquecimiento en lote (sin N+1): etapa actual + nombres de asignados.
       const contactIds = [...new Set(page.map((c) => c.contactId))];
       const stages = contactIds.length
-        ? await tx.$queryRaw<{ contact_id: string; code: string; name: string; color: string | null }[]>`
-            SELECT DISTINCT ON (l.contact_id) l.contact_id, ls.code, ls.name, ls.color
+        ? await tx.$queryRaw<{ contact_id: string; code: string; name: string; color: string | null; emoji: string | null }[]>`
+            SELECT DISTINCT ON (l.contact_id) l.contact_id, ls.code, ls.name, ls.color, ls.emoji
             FROM leads l JOIN lead_statuses ls ON ls.id = l.status_id
             WHERE l.contact_id = ANY(${contactIds})
             ORDER BY l.contact_id, l.created_at DESC`
         : [];
-      const stageByContact = new Map(stages.map((s) => [s.contact_id, { code: s.code, name: s.name, color: s.color }]));
+      const stageByContact = new Map(stages.map((s) => [s.contact_id, { code: s.code, name: s.name, color: s.color, emoji: s.emoji }]));
 
       const userIds = [...new Set(page.map((c) => c.assignedUserId).filter(Boolean))] as string[];
       const members = userIds.length
@@ -239,7 +239,7 @@ export class ConversationsController {
           createdAt: contact.createdAt,
           isReturning: contact.isReturning,
         },
-        stage: lead ? { code: lead.status.code, name: lead.status.name, color: lead.status.color, category: lead.status.category } : null,
+        stage: lead ? { code: lead.status.code, name: lead.status.name, color: lead.status.color, emoji: lead.status.emoji, category: lead.status.category } : null,
         tags: tagRows.map((t) => t.name),
         // Origen por anuncio Click-to-WhatsApp (banner en el hilo + panel)
         ad:
