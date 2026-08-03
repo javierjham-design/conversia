@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button, Skeleton, cn, useToast } from "@/components/ui";
 import { useMe } from "../../layout";
+import { ImageUpload } from "../image-upload";
 
 export default function ProfilePage() {
   const toast = useToast();
@@ -63,14 +64,17 @@ export default function ProfilePage() {
       <p className="mt-1 text-xs text-slate-500">Configuración personal — solo te afecta a ti, no a la organización.</p>
 
       <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
-        <div className="flex items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-cyan-100 text-lg font-semibold text-cyan-700">
-            {(me.user?.name ?? "?").slice(0, 1).toUpperCase()}
-          </div>
+        <div className="flex items-center gap-4">
+          <ImageUpload
+            uploadPath="/settings/profile/avatar"
+            servePath={`/settings/avatar/${me.user?.id ?? ""}`}
+            deletePath="/settings/profile/avatar"
+            label="Foto"
+            round
+          />
           <div className="min-w-0">
             <p className="text-sm font-medium">{me.user?.name}</p>
             <p className="text-xs text-slate-400">{me.user?.email} · rol: {me.role}</p>
-            <p className="text-[10px] text-slate-400">Foto de perfil: disponible pronto (junto con la subida de logo).</p>
           </div>
         </div>
         <label className="mt-3 block text-sm">

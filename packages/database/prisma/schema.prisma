@@ -1554,6 +1554,8 @@ model File {
   size           Int?
   uploadedById   String?  @map("uploaded_by_id")
   scope          String? // message | knowledge | branding | export
+  // Binario base64 (SOLO lo lee el endpoint que sirve la imagen; jamás en listados)
+  content        String?
   meta           Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
 
@@ -1602,6 +1604,8 @@ model PromptTemplate {
   organizationId String   @map("organization_id")
   name           String
   body           String
+  type           String   @default("instructions") // instructions | indications | tone | policy | script
+  agentIds       Json     @default("[]") @map("agent_ids") // [] = todos los agentes
   createdById    String?  @map("created_by_id")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")

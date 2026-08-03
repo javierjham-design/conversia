@@ -6,6 +6,7 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { validateUploadedImage } from "../common/images";
 
 const generalSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -414,6 +415,106 @@ export class SettingsController {
       await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifPrefs: all } as object } });
       return { ok: true };
     });
+  }
+
+
+  // ------------------------- Logo y avatar (subida de archivo) -------------------------
+  // Regla: files.content SOLO se lee en los endpoints que sirven la imagen;
+  // ningún listado de File selecciona esa columna.
+
+  /** Sube el logo del negocio (PNG/JPG/WebP ≤2MB; validado por magic bytes). */
+  @Post("logo")
+  async uploadLogo(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    return this.saveImage(ctx.organizationId, ctx.userId, `${ctx.organizationId}/branding/logo`, "logo del negocio", body);
+  }
+
+  /** Sirve el logo (única lectura de files.content junto al avatar). */
+  @Get("logo")
+  async serveLogo(@Res() res: Response) {
+    const ctx = requireContext();
+    await this.serveImage(ctx.organizationId, `${ctx.organizationId}/branding/logo`, res);
+  }
+
+  @Delete("logo")
+  async deleteLogo() {
+    const ctx = requirePermission("settings:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.file.deleteMany({ where: { key: `${ctx.organizationId}/branding/logo` } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "settings.logo_delete", entityType: "file" },
+      });
+      return { ok: true };
+    });
+  }
+
+  /** Avatar personal (cualquier rol; mismo pipeline de validación del logo). */
+  @Post("profile/avatar")
+  async uploadAvatar(@Body() body: unknown) {
+    const ctx = requireContext();
+    return this.saveImage(ctx.organizationId, ctx.userId, `${ctx.organizationId}/branding/avatar/${ctx.userId}`, "avatar", body);
+  }
+
+  @Get("avatar/:userId")
+  async serveAvatar(@Param("userId") userId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    await this.serveImage(ctx.organizationId, `${ctx.organizationId}/branding/avatar/${userId}`, res);
+  }
+
+  @Delete("profile/avatar")
+  async deleteAvatar() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.file.deleteMany({ where: { key: `${ctx.organizationId}/branding/avatar/${ctx.userId}` } });
+      return { ok: true };
+    });
+  }
+
+  private async saveImage(orgId: string, userId: string, key: string, label: string, body: unknown) {
+    const parsed = z.object({ dataBase64: z.string().min(1), filename: z.string().max(200).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Imagen requerida");
+    const buf = Buffer.from(parsed.data.dataBase64, "base64");
+    let info: { mime: string; width: number; height: number };
+    try {
+      info = validateUploadedImage(buf);
+    } catch (err) {
+      throw new BadRequestException((err as Error).message);
+    }
+    return this.prisma.withTenant(orgId, async (tx) => {
+      const existing = await tx.file.findFirst({ where: { key }, select: { id: true } });
+      const data = {
+        organizationId: orgId,
+        bucket: "db",
+        key,
+        name: parsed.data.filename ?? label,
+        mime: info.mime,
+        size: buf.length,
+        uploadedById: userId,
+        scope: "branding",
+        content: parsed.data.dataBase64,
+        meta: { width: info.width, height: info.height } as object,
+      };
+      const file = existing
+        ? await tx.file.update({ where: { id: existing.id }, data, select: { id: true } })
+        : await tx.file.create({ data, select: { id: true } });
+      await tx.auditLog.create({
+        data: { organizationId: orgId, actorType: "user", actorId: userId, action: "settings.image_upload", entityType: "file", entityId: file.id, after: { key, mime: info.mime, size: buf.length } },
+      });
+      return { ok: true, fileId: file.id, width: info.width, height: info.height };
+    });
+  }
+
+  private async serveImage(orgId: string, key: string, res: Response) {
+    const file = await this.prisma.withTenant(orgId, (tx) =>
+      tx.file.findFirst({ where: { key }, select: { mime: true, content: true } }),
+    );
+    if (!file?.content) {
+      res.status(404).json({ message: "Sin imagen" });
+      return;
+    }
+    res.setHeader("content-type", file.mime ?? "image/png");
+    res.setHeader("cache-control", "private, max-age=300");
+    res.send(Buffer.from(file.content, "base64"));
   }
 
   // ------------------------- Helpers -------------------------

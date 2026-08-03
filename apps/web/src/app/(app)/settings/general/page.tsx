@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button, Skeleton, useToast } from "@/components/ui";
+import { ImageUpload } from "../image-upload";
 
 interface GeneralSettings {
   name: string;
@@ -138,10 +139,18 @@ export default function GeneralSettingsPage() {
               <option value="pt">Portugués</option>
             </select>
           </label>
-          <label className="block text-sm">
-            <span className="text-xs text-slate-500">Logo (URL de imagen)</span>
-            <input value={data.logoUrl} onChange={(e) => set({ logoUrl: e.target.value })} placeholder="https://…/logo.png" className={input} />
-          </label>
+          <div className="block text-sm">
+            <span className="text-xs text-slate-500">Logo del negocio</span>
+            <div className="mt-1">
+              <ImageUpload
+                uploadPath="/settings/logo"
+                servePath="/settings/logo"
+                deletePath="/settings/logo"
+                label="Logo"
+                fallbackUrl={data.logoUrl || undefined}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="border-t border-slate-100 pt-3">
