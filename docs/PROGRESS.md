@@ -1,5 +1,15 @@
 # Registro de progreso
 
+## 2026-08-03 (5) — Modo oscuro pulido en TODO el panel + merge/deploy (PR #20)
+
+**DESPLEGADO EN PROD 2026-08-03** (PR #20 mergeado a main y auto-deploy de Railway verificado en `www.tubot.cl`). Solo UI, sin migraciones ni backup. 39 archivos `.tsx`/`.css`; **ningún `.ts` de lógica**; typecheck 22/22, build limpio, **131 tests verdes**.
+
+Cierre del pendiente de dark en páginas interiores con tres mecanismos **aditivos** (cero efecto en claro y en lógica): (1) barrido que añade la variante `dark:*` a 220 fondos/textos/bordes semánticos claros en 36 archivos; (2) base global de controles de formulario (`input/select/textarea` → `bg-panel`/`text-ink` salvo utilidad explícita), que elimina cajas blancas en oscuro en todos los formularios; (3) `navy-900` de contenido → `text-ink` (Agentes, Flujos, barra superior, landing, demo; el sidebar conserva su navy fijo a propósito). Overrides `.dark` para el canvas de Flujos (ReactFlow Controls/minimapa). Detalle en docs/DESIGN.md.
+
+**Verificación Playwright (claro/oscuro)**: públicas contra prod (landing, login, demo) sin bloques blancos; panel contra build de producción local con sesión + API mockeada — Reportes, Plan y facturación, editor de Agentes, lista y canvas de Flujos, Horarios y lista de Agentes coherentes en oscuro. Método: `next start` (la CSP de prod prohíbe `unsafe-eval`, por lo que `next dev` no hidrata). Las pantallas restantes del harness (Bandeja, Contactos, Integraciones, Configuración, Usuarios) no se capturaron porque las fixtures sintéticas no completan todos los campos y disparan la error page de Next (no es un fallo de dark; comparten los mismos primitivos ya validados). Aceptación final real = alternar dark en la sesión viva.
+
+**Pendiente reportado**: bloques de código de `/integrations/developers` como terminal oscuro intencional; sidebar colapsable a solo-íconos; envío optimista omitido (SSE ya instantáneo).
+
 ## 2026-08-03 (4) — Rediseño visual de la Bandeja + modo oscuro (rama `feature/inbox-redesign`)
 
 Trabajo **exclusivamente visual**: ninguna funcionalidad de la Bandeja se agrega, quita ni cambia; todo lo que funcionaba sigue idéntico. Sin migraciones. No se tocó `apps/api/src/platform` ni `apps/web/src/app/admin`. Toda la UI en español. **CERO regresiones**: los tests de lógica (workflows/agents/scheduling/worker) siguen verdes y no hay tests de DOM que el remarcado pueda romper.
