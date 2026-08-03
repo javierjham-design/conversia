@@ -17,6 +17,7 @@ import {
   Menu,
   MessageSquare,
   Plug,
+  Settings,
   Smartphone,
   Users,
   Workflow,
@@ -143,6 +144,7 @@ const NAV_GROUPS: Array<{
   {
     label: "Configuración",
     items: [
+      { href: "/settings", label: "Configuración", icon: Settings, perm: undefined },
       { href: "/channels", label: "Canales", icon: Smartphone, perm: "channels:read" },
       { href: "/integrations", label: "Integraciones", icon: Plug, perm: "integrations:read" },
       { href: "/users", label: "Usuarios", icon: Users, perm: "users:read" },
@@ -161,6 +163,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/integrations": ["Configuración", "Integraciones"],
   "/integrations/meta": ["Configuración", "Integraciones", "Meta Business Suite"],
   "/users": ["Configuración", "Usuarios"],
+  "/settings": ["Configuración"],
   "/billing": ["Configuración", "Plan y facturación"],
 };
 
