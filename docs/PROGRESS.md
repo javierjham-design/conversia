@@ -1,5 +1,14 @@
 # Registro de progreso
 
+## 2026-08-03 (2) — Centro de Configuración del tenant (rama `feature/settings-hub`)
+
+/settings estilo Workspace Settings de Respond.io: sidebar propio de dos niveles (6 grupos) con búsqueda por sinónimos y visibilidad por rol (server-side en cada endpoint). Migración `20260803120000_settings_hub` — **pendiente aplicar a prod (+ setup.sql por export_jobs y prompt_templates)**. Mapa completo en docs/SETTINGS.md.
+
+- **Reubicación (una sola fuente de verdad)**: etapas del ciclo de vida → /settings/lifecycle (el engranaje de la Bandeja enlaza); snippets → /settings/snippets (el compositor enlaza); usuarios+equipos → /settings/users (con matriz de roles solo lectura; /users redirige); transcripción → /settings/ia (Canales enlaza); import CSV → /settings/import (modal compartido con Contactos).
+- **Etapas PRO**: drag & drop, activar/desactivar sin borrar, separación activas vs perdidas/congeladas, categoría WON = conversión (badge «Conversión → CAPI»), borrar exige migrar los leads a otra etapa (auditado). Catálogo de workflows y Lead Ads consumen solo etapas activas.
+- **Nuevo**: Información general (nombre/logo/rubro/zona horaria/moneda/idioma/contacto en settings.general); Horario de atención org con feriados de Chile 2026 precargables — DEFAULT del nodo «Fecha y hora» (deps.getBusinessHoursDefault; el nodo puede sobreescribir con horario propio); Campos de contacto (CRUD + orden + columnas); Etiquetas (CRUD + fusión + borrado con conteo); Conversaciones (auto-cierre por inactividad, bot retoma tras intervención a los N min, objetivo de 1.ª respuesta con ⏱ en la Bandeja) aplicadas por tick del worker cada 10 min; Ajustes de IA (modelo/tope/rondas SOLO lectura por decisión de julio + transcripción + idioma del asistente + biblioteca prompt_templates); Plan y uso (lectura de /billing/me); Exports en background (BullMQ → CSV en export_jobs, expira a 7 días con purga automática, descarga auditada y con permiso de Datos); Registro de auditoría (filtros + cursor, solo Owner/Admin).
+- Tests nuevos: slugifyStageCode (codes estables al renombrar) y CSV de exports (escapado Excel). 22/22 typecheck · 112 tests.
+
 ## 2026-08-03 — Etapas del ciclo de vida editables (rama `feature/lifecycle-stages`)
 
 Migración `20260803100000_lead_status_emoji` (columna emoji en lead_statuses) — **pendiente aplicar a prod**.

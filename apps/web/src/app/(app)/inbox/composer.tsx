@@ -44,7 +44,6 @@ export function Composer({
   const [showSnippets, setShowSnippets] = useState(false);
   const [showVars, setShowVars] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
-  const [manageSnippets, setManageSnippets] = useState(false);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -52,7 +51,7 @@ export function Composer({
 
   useEffect(() => {
     void api<Snippet[]>("/inbox/snippets").then(setSnippets).catch(() => setSnippets([]));
-  }, [manageSnippets]);
+  }, []);
 
   const canWrite = tab === "note" || windowOpen;
   const snippetFilter = draft.startsWith("/") ? draft.slice(1).toLowerCase() : null;
@@ -213,9 +212,9 @@ export function Composer({
                 </button>
               ))}
             {snippets.length === 0 && <p className="px-2 py-1.5 text-xs text-slate-400">Aún no hay respuestas rápidas.</p>}
-            <button onClick={() => setManageSnippets(true)} className="mt-1 block w-full border-t border-slate-100 px-2 py-1.5 text-left text-[11px] text-cyan-700 underline">
-              Administrar respuestas rápidas…
-            </button>
+            <a href="/settings/snippets" className="mt-1 block w-full border-t border-slate-100 px-2 py-1.5 text-left text-[11px] text-cyan-700 underline">
+              Administrar respuestas rápidas ↗
+            </a>
           </div>
         )}
         {/* Popup de variables con "$" */}
@@ -313,63 +312,6 @@ export function Composer({
         </div>
       </div>
 
-      {manageSnippets && <SnippetsModal onClose={() => setManageSnippets(false)} />}
     </footer>
-  );
-}
-
-function SnippetsModal({ onClose }: { onClose: () => void }) {
-  const toast = useToast();
-  const [items, setItems] = useState<Snippet[]>([]);
-  const [shortcut, setShortcut] = useState("");
-  const [body, setBody] = useState("");
-
-  async function load() {
-    setItems(await api<Snippet[]>("/inbox/snippets").catch(() => []));
-  }
-  useEffect(() => {
-    void load();
-  }, []);
-
-  async function add() {
-    try {
-      await api("/inbox/snippets", { method: "POST", body: JSON.stringify({ shortcut: shortcut.trim().toLowerCase(), body: body.trim() }) });
-      setShortcut("");
-      setBody("");
-      await load();
-      toast.push("Respuesta rápida creada", "ok");
-    } catch (err) {
-      toast.push((err as Error).message, "error");
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title="Respuestas rápidas">
-      <p className="mb-2 text-xs text-slate-500">
-        Escríbelas una vez y úsalas con <code className="rounded bg-slate-100 px-1">/atajo</code> en el compositor. Admiten
-        variables como <code className="rounded bg-slate-100 px-1">{"{{contact.firstName}}"}</code>.
-      </p>
-      <div className="flex gap-2">
-        <input value={shortcut} onChange={(e) => setShortcut(e.target.value)} placeholder="atajo (ej: saludo)" className="w-36 rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
-        <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Hola {{contact.firstName}}! ¿En qué te ayudo?" className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
-        <Button onClick={() => void add()} disabled={shortcut.trim().length < 2 || body.trim().length < 2}>Crear</Button>
-      </div>
-      <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto">
-        {items.map((s) => (
-          <li key={s.id} className="flex items-center gap-2 rounded-lg border border-slate-100 px-2 py-1.5 text-xs">
-            <span className="w-28 shrink-0 font-mono text-cyan-700">/{s.shortcut}</span>
-            <span className="min-w-0 flex-1 truncate text-slate-600">{s.body}</span>
-            <button
-              onClick={() => void api(`/inbox/snippets/${s.id}`, { method: "DELETE" }).then(load)}
-              className="text-slate-300 hover:text-red-500"
-              title="Eliminar"
-            >
-              ✕
-            </button>
-          </li>
-        ))}
-        {items.length === 0 && <p className="py-2 text-center text-xs text-slate-400">Sin respuestas rápidas aún.</p>}
-      </ul>
-    </Modal>
   );
 }

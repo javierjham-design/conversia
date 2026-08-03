@@ -28,40 +28,40 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     title: "Ajustes generales",
     pages: [
       { href: "/settings/general", label: "Información general", keywords: "nombre negocio logo rubro zona horaria moneda idioma empresa", perm: "settings:write", ready: true },
-      { href: "/settings/hours", label: "Horario de atención", keywords: "horario dias feriados atencion apertura", perm: "settings:write" },
-      { href: "/settings/plan", label: "Plan y uso", keywords: "plan consumo tokens mensajes facturacion límites uso", perm: "settings:write" },
+      { href: "/settings/hours", label: "Horario de atención", keywords: "horario dias feriados atencion apertura", perm: "settings:write", ready: true },
+      { href: "/settings/plan", label: "Plan y uso", keywords: "plan consumo tokens mensajes facturacion límites uso", perm: "settings:write", ready: true },
     ],
   },
   {
     title: "Usuarios y equipos",
     pages: [
-      { href: "/settings/users", label: "Usuarios", keywords: "usuarios invitar roles permisos acceso miembros", perm: "users:read" },
-      { href: "/settings/teams", label: "Equipos", keywords: "equipos ventas recepcion sede grupos", perm: "users:read" },
+      { href: "/settings/users", label: "Usuarios", keywords: "usuarios invitar roles permisos acceso miembros", perm: "users:read", ready: true },
+      { href: "/settings/teams", label: "Equipos", keywords: "equipos ventas recepcion sede grupos", perm: "users:read", ready: true },
     ],
   },
   {
     title: "Bandeja y CRM",
     pages: [
-      { href: "/settings/lifecycle", label: "Etapas del ciclo de vida", keywords: "etapas ciclo vida lifecycle lead estados embudo funnel conversion", perm: "leads:write" },
-      { href: "/settings/contact-fields", label: "Campos de contacto", keywords: "campos personalizados custom fields ficha columnas", perm: "contacts:write" },
-      { href: "/settings/tags", label: "Etiquetas", keywords: "tags etiquetas fusionar colores", perm: "contacts:write" },
-      { href: "/settings/snippets", label: "Respuestas rápidas", keywords: "snippets respuestas rapidas atajos plantillas texto", perm: "inbox:write" },
-      { href: "/settings/conversations", label: "Conversaciones", keywords: "bandeja auto cierre inactividad bot primera respuesta reglas", perm: "settings:write" },
+      { href: "/settings/lifecycle", label: "Etapas del ciclo de vida", keywords: "etapas ciclo vida lifecycle lead estados embudo funnel conversion", perm: "leads:write", ready: true },
+      { href: "/settings/contact-fields", label: "Campos de contacto", keywords: "campos personalizados custom fields ficha columnas", perm: "contacts:write", ready: true },
+      { href: "/settings/tags", label: "Etiquetas", keywords: "tags etiquetas fusionar colores", perm: "contacts:write", ready: true },
+      { href: "/settings/snippets", label: "Respuestas rápidas", keywords: "snippets respuestas rapidas atajos plantillas texto", perm: "inbox:write", ready: true },
+      { href: "/settings/conversations", label: "Conversaciones", keywords: "bandeja auto cierre inactividad bot primera respuesta reglas", perm: "settings:write", ready: true },
     ],
   },
   {
     title: "IA",
     pages: [
-      { href: "/settings/ia", label: "Ajustes de IA", keywords: "ia modelo tokens transcripcion idioma prompts plantillas asistente", perm: "settings:write" },
+      { href: "/settings/ia", label: "Ajustes de IA", keywords: "ia modelo tokens transcripcion idioma prompts plantillas asistente", perm: "settings:write", ready: true },
       { href: "/agents", label: "Agentes IA", keywords: "agentes bots", external: true, ready: true },
     ],
   },
   {
     title: "Datos",
     pages: [
-      { href: "/settings/import", label: "Importar contactos", keywords: "importar csv excel contactos migracion", perm: "contacts:write" },
-      { href: "/settings/export", label: "Exportar datos", keywords: "exportar descargar csv conversaciones citas respaldo", perm: "settings:write" },
-      { href: "/settings/audit", label: "Registro de auditoría", keywords: "auditoria logs seguridad quien hizo que", perm: "settings:write" },
+      { href: "/settings/import", label: "Importar contactos", keywords: "importar csv excel contactos migracion", perm: "contacts:write", ready: true },
+      { href: "/settings/export", label: "Exportar datos", keywords: "exportar descargar csv conversaciones citas respaldo", perm: "settings:write", ready: true },
+      { href: "/settings/audit", label: "Registro de auditoría", keywords: "auditoria logs seguridad quien hizo que", perm: "settings:write", ready: true },
     ],
   },
   {

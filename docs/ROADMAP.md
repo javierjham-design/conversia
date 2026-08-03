@@ -7,6 +7,7 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 - ✅ Esquema Prisma (~50 tablas) + RLS dinámico + FKs + rol de app
 - ✅ Auth (registro/login/JWT) + contexto de tenant (ALS) + roles/permisos por org
 - ✅ Organizaciones, sedes, equipos, auditoría, usage_events
+- ✅ **Centro de Configuración /settings** (docs/SETTINGS.md): información general, horario de atención, plan y uso, usuarios+equipos+roles, etapas/campos/etiquetas/snippets/reglas de bandeja, IA, import/export/auditoría
 - ⬜ Gestión de usuarios/invitaciones UI · ⬜ Cliente Prisma admin separado para operaciones de plataforma · ⬜ Archivos S3
 
 ## Fase 2 — Conversaciones y WhatsApp

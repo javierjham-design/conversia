@@ -36,6 +36,7 @@ export interface ConvItem {
 }
 
 export interface Counters {
+  firstResponseTargetMinutes?: number;
   fixed: { all: number; mine: number; unassigned: number; unanswered: number; blocked: number };
   agents: { id: string; name: string; count: number }[];
   stages: { code: string; name: string; color: string | null; emoji?: string | null; count: number }[];
