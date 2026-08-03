@@ -27,6 +27,15 @@ const generalSchema = z.object({
  * nodo «Fecha y hora»; moneda → default de servicios nuevos (no pisa el
  * currency por servicio); idioma → asistente del compositor.
  */
+/** Tipos de plantilla de prompt del tenant. */
+export const PROMPT_TEMPLATE_TYPES = ["instructions", "indications", "tone", "policy", "script"] as const;
+
+/** ¿La plantilla aplica a este agente? ([] = todos los agentes). Puro; testeado. */
+export function templateVisibleForAgent(tpl: { agentIds: unknown }, agentId: string): boolean {
+  const ids = Array.isArray(tpl.agentIds) ? (tpl.agentIds as string[]) : [];
+  return ids.length === 0 || ids.includes(agentId);
+}
+
 @Controller("settings")
 export class SettingsController {
   constructor(
@@ -209,16 +218,20 @@ export class SettingsController {
 
   // ------------------------- Biblioteca de plantillas de prompt -------------------------
 
+  /** Biblioteca del tenant; ?agentId= filtra las asignadas a ese agente ([]=todos). */
   @Get("prompt-templates")
-  promptTemplates() {
+  promptTemplates(@Query("agentId") agentId?: string) {
     const ctx = requireContext();
-    return this.prisma.withTenant(ctx.organizationId, (tx) => tx.promptTemplate.findMany({ orderBy: { name: "asc" } }));
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const all = await tx.promptTemplate.findMany({ orderBy: [{ type: "asc" }, { name: "asc" }] });
+      return agentId ? all.filter((t) => templateVisibleForAgent(t, agentId)) : all;
+    });
   }
 
   @Post("prompt-templates")
   createPromptTemplate(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const parsed = z.object({ name: z.string().min(2).max(60), body: z.string().min(5).max(8000) }).safeParse(body);
+    const parsed = z.object({ name: z.string().min(2).max(60), body: z.string().min(5).max(8000), type: z.enum(PROMPT_TEMPLATE_TYPES).optional(), agentIds: z.array(z.string()).max(50).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Plantilla inválida (nombre 2-60, contenido 5-8000)");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const exists = await tx.promptTemplate.findUnique({
@@ -226,7 +239,14 @@ export class SettingsController {
       });
       if (exists) throw new BadRequestException("Ya existe una plantilla con ese nombre");
       return tx.promptTemplate.create({
-        data: { organizationId: ctx.organizationId, name: parsed.data.name.trim(), body: parsed.data.body, createdById: ctx.userId },
+        data: {
+          organizationId: ctx.organizationId,
+          name: parsed.data.name.trim(),
+          body: parsed.data.body,
+          type: parsed.data.type ?? "instructions",
+          agentIds: (parsed.data.agentIds ?? []) as object,
+          createdById: ctx.userId,
+        },
       });
     });
   }
@@ -234,12 +254,27 @@ export class SettingsController {
   @Patch("prompt-templates/:id")
   updatePromptTemplate(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const parsed = z.object({ name: z.string().min(2).max(60).optional(), body: z.string().min(5).max(8000).optional() }).safeParse(body);
+    const parsed = z
+      .object({
+        name: z.string().min(2).max(60).optional(),
+        body: z.string().min(5).max(8000).optional(),
+        type: z.enum(PROMPT_TEMPLATE_TYPES).optional(),
+        agentIds: z.array(z.string()).max(50).optional(),
+      })
+      .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Plantilla inválida");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const tpl = await tx.promptTemplate.findUnique({ where: { id } });
       if (!tpl) throw new NotFoundException("Plantilla no encontrada");
-      return tx.promptTemplate.update({ where: { id }, data: parsed.data });
+      return tx.promptTemplate.update({
+        where: { id },
+        data: {
+          ...(parsed.data.name ? { name: parsed.data.name } : {}),
+          ...(parsed.data.body ? { body: parsed.data.body } : {}),
+          ...(parsed.data.type ? { type: parsed.data.type } : {}),
+          ...(parsed.data.agentIds ? { agentIds: parsed.data.agentIds as object } : {}),
+        },
+      });
     });
   }
 

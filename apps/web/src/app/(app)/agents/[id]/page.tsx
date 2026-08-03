@@ -408,7 +408,7 @@ export default function AgentEditorPage() {
             {/* Instrucciones */}
             <Section title="Instrucciones" subtitle="El cerebro del agente: quién es, qué sabe, cómo habla y qué puede hacer." helpKey="instrucciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <PromptTemplateMenu onPick={insertSnippet} />
+                <PromptTemplateMenu onPick={insertSnippet} agentId={id} />
                 <span className="text-xs text-slate-400">~{approxTokens.toLocaleString("es-CL")} tokens</span>
               </div>
               <textarea
@@ -768,8 +768,32 @@ function TesterBubble({ m }: { m: TestMsg }) {
   );
 }
 
-function PromptTemplateMenu({ onPick }: { onPick: (text: string) => void }) {
+const TENANT_TPL_TYPES: Record<string, string> = {
+  instructions: "Instrucciones",
+  indications: "Indicaciones",
+  tone: "Tono",
+  policy: "Política",
+  script: "Guion",
+};
+
+function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => void; agentId?: string }) {
   const [open, setOpen] = useState(false);
+  const [tenantTpls, setTenantTpls] = useState<{ id: string; name: string; body: string; type: string }[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Plantillas del tenant asignadas a ESTE agente ([] = todos) — Configuración → IA
+    const qs = agentId ? `?agentId=${agentId}` : "";
+    void api<{ id: string; name: string; body: string; type: string }[]>(`/settings/prompt-templates${qs}`)
+      .then(setTenantTpls)
+      .catch(() => setTenantTpls([]));
+  }, [open, agentId]);
+
+  const byType = tenantTpls.reduce<Record<string, typeof tenantTpls>>((acc, t) => {
+    (acc[t.type] = acc[t.type] ?? []).push(t);
+    return acc;
+  }, {});
+
   return (
     <div className="relative">
       <button onClick={() => setOpen((v) => !v)} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50">
@@ -778,12 +802,27 @@ function PromptTemplateMenu({ onPick }: { onPick: (text: string) => void }) {
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-pop">
-            {PROMPT_SNIPPETS.map((s) => (
-              <button key={s.label} onClick={() => { onPick(s.text); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50">
-                {s.label}
+          <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-pop">
+            {Object.entries(byType).map(([type, tpls]) => (
+              <div key={type}>
+                <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-cyan-600">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
+                {tpls.map((t) => (
+                  <button key={t.id} onClick={() => { onPick(t.body); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-cyan-50" title={t.body.slice(0, 200)}>
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {tenantTpls.length > 0 && <div className="my-1 border-t border-slate-100" />}
+            <p className="px-2 pt-1 text-[9px] font-semibold uppercase text-slate-400">Genéricas del sistema</p>
+            {PROMPT_SNIPPETS.map((sn) => (
+              <button key={sn.label} onClick={() => { onPick(sn.text); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50">
+                {sn.label}
               </button>
             ))}
+            <a href="/settings/ia" className="mt-1 block border-t border-slate-100 px-2 py-1.5 text-[11px] text-cyan-700 underline">
+              Administrar mi biblioteca ↗
+            </a>
           </div>
         </>
       )}
