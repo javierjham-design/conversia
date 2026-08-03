@@ -17,7 +17,8 @@ const TARGET_FIELDS: { key: string; label: string }[] = [
   { key: "email", label: "Email" },
   { key: "country", label: "País (ISO-2)" },
   { key: "locale", label: "Idioma" },
-  { key: "tags", label: "Etiquetas (coma)" },
+  { key: "tags", label: "Etiquetas (| o coma)" },
+  { key: "stage", label: "Etapa del ciclo de vida" },
 ];
 
 export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
@@ -29,9 +30,11 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
+  const [customFields, setCustomFields] = useState<{ key: string; label: string }[]>([]);
 
   useEffect(() => {
     if (open) {
+      void api<{ key: string; label: string }[]>("/contact-fields").then((r) => setCustomFields(r.map((f) => ({ key: f.key, label: f.label })))).catch(() => setCustomFields([]));
       setParsed(null);
       setMapping({});
       setUpdateExisting(false);
@@ -49,7 +52,12 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
         return;
       }
       setParsed(p);
-      setMapping(Object.fromEntries(p.headers.map((h, i) => [i, guessField(h)])));
+      setMapping(Object.fromEntries(p.headers.map((h, i) => {
+        const guessed = guessField(h);
+        if (guessed) return [i, guessed];
+        const custom = customFields.find((f) => f.key === h.trim().toLowerCase());
+        return [i, custom ? `custom:${custom.key}` : ""];
+      })));
     };
     reader.readAsText(file, "utf-8");
   }
@@ -64,10 +72,15 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
     setBusy(true);
     try {
       const rows = parsed.rows.map((r) => {
-        const obj: Record<string, string> = {};
+        const obj: Record<string, unknown> = {};
+        const custom: Record<string, string> = {};
         Object.entries(mapping).forEach(([idx, field]) => {
-          if (field && r[Number(idx)]) obj[field] = r[Number(idx)].trim();
+          const val = r[Number(idx)]?.trim();
+          if (!field || !val) return;
+          if (field.startsWith("custom:")) custom[field.slice(7)] = val;
+          else obj[field] = val;
         });
+        if (Object.keys(custom).length) obj.custom = custom;
         return obj;
       });
       const queued = await api<{ jobId: string; total: number }>("/contacts/import", { method: "POST", body: JSON.stringify({ rows, updateExisting }) });
@@ -140,6 +153,9 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
                 <select value={mapping[i] ?? ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })} className={cn(inputCls, "w-48")}>
                   {TARGET_FIELDS.map((f) => (
                     <option key={f.key} value={f.key}>{f.label}</option>
+                  ))}
+                  {customFields.map((f) => (
+                    <option key={`custom:${f.key}`} value={`custom:${f.key}`}>Campo: {f.label}</option>
                   ))}
                 </select>
               </div>

@@ -562,8 +562,12 @@ export interface ContactImportRow {
   email?: string;
   country?: string;
   locale?: string;
-  /** etiquetas separadas por coma */
+  /** etiquetas separadas por coma o | */
   tags?: string;
+  /** etapa del ciclo de vida (code o nombre) */
+  stage?: string;
+  /** campos personalizados del tenant: key → valor */
+  custom?: Record<string, string>;
 }
 
 /** Import CSV en 2.º plano: la API valida y encola; el worker procesa por lotes. */

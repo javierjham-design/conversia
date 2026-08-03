@@ -70,9 +70,9 @@ export async function processContactImport(job: Job<ContactImportJob>): Promise<
           contactId = c.id;
           created++;
         }
-        // Etiquetas (separadas por coma) → upsert Tag + asignación
+        // Etiquetas (separadas por coma o |) → upsert Tag + asignación
         if (row.tags) {
-          for (const raw of row.tags.split(",").map((t) => t.trim()).filter(Boolean)) {
+          for (const raw of row.tags.split(/[|,]/).map((t) => t.trim()).filter(Boolean)) {
             const tag = await tx.tag.upsert({
               where: { organizationId_name: { organizationId: orgId, name: raw } },
               create: { organizationId: orgId, name: raw },
@@ -82,6 +82,33 @@ export async function processContactImport(job: Job<ContactImportJob>): Promise<
             await tx.tagAssignment.createMany({
               data: [{ organizationId: orgId, tagId: tag.id, entityType: "contact", entityId: contactId }],
               skipDuplicates: true,
+            });
+          }
+        }
+        // Etapa del ciclo de vida (acepta code o nombre, insensible a mayúsculas)
+        if (row.stage?.trim()) {
+          const wanted = row.stage.trim().toLowerCase();
+          const statuses = await tx.leadStatus.findMany({ where: { active: true } });
+          const status = statuses.find((st) => st.code.toLowerCase() === wanted || st.name.toLowerCase() === wanted);
+          if (status) {
+            const lead = await tx.lead.findFirst({ where: { contactId }, orderBy: { createdAt: "desc" } });
+            if (!lead) await tx.lead.create({ data: { organizationId: orgId, contactId, statusId: status.id } });
+            else if (lead.statusId !== status.id) await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
+          } else {
+            errors.push({ row: idx, reason: `etapa desconocida: ${row.stage}` });
+          }
+        }
+        // Campos personalizados por key
+        if (row.custom && Object.keys(row.custom).length) {
+          const defs = await tx.customFieldDefinition.findMany({ where: { entity: "contact" } });
+          const byKey = new Map(defs.map((d) => [d.key, d.id]));
+          for (const [key, value] of Object.entries(row.custom)) {
+            const defId = byKey.get(key);
+            if (!defId || !value.trim()) continue;
+            await tx.customFieldValue.upsert({
+              where: { organizationId_definitionId_entityId: { organizationId: orgId, definitionId: defId, entityId: contactId } },
+              create: { organizationId: orgId, definitionId: defId, entityId: contactId, value: value.trim() },
+              update: { value: value.trim() },
             });
           }
         }
