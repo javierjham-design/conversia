@@ -2,11 +2,11 @@
 
 /** Zona 3: cabecera con indicadores + hilo de mensajes + compositor. */
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Megaphone, PanelRight } from "lucide-react";
+import { Clock, ExternalLink, Megaphone, PanelRight, Smartphone } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import { Composer } from "./composer";
-import { displayName, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
+import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
 
 function AudioBubble({ conversationId, messageId, transcript, outbound }: { conversationId: string; messageId: string; transcript: string | null; outbound: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -147,97 +147,133 @@ export function Thread({
     }
   };
 
-  const sel = "rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs";
+  // Selects terciarios: compactos, borde sutil, sin competir con la acción primaria.
+  const sel = "rounded-control border border-line bg-app px-2 py-1.5 text-xs text-ink transition-colors hover:border-line-strong max-w-[8.5rem] truncate";
   const closed = conversation.status === "CLOSED";
+  const windowTone =
+    windowLevel === "ok"
+      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+      : windowLevel === "warn"
+        ? "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+        : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300";
+  const windowShort = windowOpen ? `${Math.floor(msLeft / 3_600_000)} h ${Math.floor((msLeft % 3_600_000) / 60_000)} m` : "cerrada";
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       {/* ---------- Cabecera ---------- */}
-      <header className="border-b border-slate-200 bg-white px-3 py-2">
+      <header className="border-b border-line bg-panel px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={onBack} className="text-lg text-slate-500 hover:text-slate-800 lg:hidden" aria-label="Volver">←</button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate font-medium">{displayName(conversation.contact)}</h2>
-              {/* Selector de etapa del ciclo de vida, editable aquí mismo */}
-              <select
-                value={context?.stage?.code ?? ""}
-                onChange={(e) => void setStage(e.target.value)}
-                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium"
-                style={context?.stage?.color ? { borderColor: context.stage.color, color: context.stage.color } : {}}
-                title="Etapa del ciclo de vida"
-              >
-                <option value="">— etapa —</option>
-                {stages.map((s) => (
-                  <option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
-                ))}
-              </select>
+          <button onClick={onBack} className="text-lg text-ink-muted hover:text-ink lg:hidden" aria-label="Volver">←</button>
+          {/* Zona izquierda: identidad */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold", avatarColor(conversation.contact))}>
+              {initials(conversation.contact).toUpperCase()}
             </div>
-            <p className="truncate text-[11px] text-slate-400">
-              {conversation.contact.phone}
-              {channel && (
-                <span title="Número por el que se conversa">
-                  {" "}· 📱 {channel.name}
-                  {channel.displayPhone ? ` (${channel.displayPhone})` : ""}
-                  {channel.status === "error" && <span className="text-red-500"> ⚠ reautorizar</span>}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-base font-semibold text-ink">{displayName(conversation.contact)}</h2>
+                {/* Etapa como CHIP con el color de la etapa (select estilizado) */}
+                <div
+                  className="relative inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium"
+                  style={
+                    context?.stage
+                      ? { backgroundColor: `${context.stage.color ?? "#94a3b8"}1f`, color: context.stage.color ?? "#64748b" }
+                      : undefined
+                  }
+                >
+                  <span className={cn("pointer-events-none flex items-center gap-1", !context?.stage && "text-ink-subtle")}>
+                    {context?.stage ? `${context.stage.emoji ? `${context.stage.emoji} ` : ""}${context.stage.name}` : "— etapa —"}
+                    <span className="opacity-60">▾</span>
+                  </span>
+                  <select
+                    value={context?.stage?.code ?? ""}
+                    onChange={(e) => void setStage(e.target.value)}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                    title="Etapa del ciclo de vida"
+                    aria-label="Etapa del ciclo de vida"
+                  >
+                    <option value="">— etapa —</option>
+                    {stages.map((s) => (
+                      <option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Segunda línea de contexto: teléfono · canal · ventana 24h */}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-ink-subtle">
+                <span className="tnum">{conversation.contact.phone}</span>
+                {channel && (
+                  <span className="inline-flex items-center gap-1" title="Número por el que se conversa">
+                    <Smartphone size={11} /> {channel.name}
+                    {channel.displayPhone ? ` · ${channel.displayPhone}` : ""}
+                    {channel.status === "error" && <span className="text-red-500">⚠ reautorizar</span>}
+                  </span>
+                )}
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium tnum", windowTone)} title={windowLabel}>
+                  <Clock size={10} /> {windowShort}
                 </span>
-              )}
-            </p>
+              </div>
+            </div>
           </div>
 
+          {/* Zona derecha: 1 primaria + secundaria + terciarios */}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
-              <option value="">👤 Sin asignar</option>
-              {users.map((u) => (
-                <option key={u.userId} value={u.userId}>👤 {u.name}</option>
-              ))}
-            </select>
-            {teams.length > 0 && (
-              <select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
-                <option value="">👥 Sin equipo</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>👥 {t.name}</option>
+            <div className="flex items-center gap-1 rounded-control bg-app p-0.5">
+              <select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
+                <option value="">👤 Sin asignar</option>
+                {users.map((u) => (
+                  <option key={u.userId} value={u.userId}>👤 {u.name}</option>
                 ))}
               </select>
-            )}
-            <select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
-              <option value="">🤖 Sin agente</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>🤖 {a.name}</option>
-              ))}
-            </select>
-            {workflows.length > 0 && (
-              <select
-                value=""
-                onChange={(e) => {
-                  if (e.target.value) {
-                    void act("run-workflow", { workflowId: e.target.value }).then(() => toast.push("Flujo ejecutado", "ok"));
-                  }
-                }}
-                className={sel}
-                title="Ejecutar un flujo"
-              >
-                <option value="">⚡ Flujo…</option>
-                {workflows.map((w) => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
+              {teams.length > 0 && (
+                <select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
+                  <option value="">👥 Sin equipo</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>👥 {t.name}</option>
+                  ))}
+                </select>
+              )}
+              <select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
+                <option value="">🤖 Sin agente</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>🤖 {a.name}</option>
                 ))}
               </select>
-            )}
+              {workflows.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      void act("run-workflow", { workflowId: e.target.value }).then(() => toast.push("Flujo ejecutado", "ok"));
+                    }
+                  }}
+                  className={sel}
+                  title="Ejecutar un flujo"
+                >
+                  <option value="">⚡ Flujo…</option>
+                  {workflows.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {/* Acción primaria única */}
             <button
               onClick={() => void act(conversation.aiEnabled ? "takeover" : "release")}
               className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-medium",
-                conversation.aiEnabled ? "bg-amber-100 text-amber-800 hover:bg-amber-200" : "bg-cyan-100 text-cyan-800 hover:bg-cyan-200",
+                "rounded-control px-3 py-1.5 text-xs font-semibold shadow-e1 transition-colors",
+                conversation.aiEnabled ? "bg-brand-600 text-white hover:bg-brand-700" : "border border-brand-300 bg-brand-soft text-brand-700 hover:bg-brand-100 dark:border-brand-500/40 dark:text-brand-300",
               )}
             >
               {conversation.aiEnabled ? "Tomar control" : "Devolver a IA"}
             </button>
+            {/* Secundaria */}
             {closed ? (
-              <button onClick={() => void act("reopen")} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50">Reabrir</button>
+              <button onClick={() => void act("reopen")} className="rounded-control border border-line-strong px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-app">Reabrir</button>
             ) : (
-              <button onClick={() => setCloseNote("")} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs hover:bg-slate-50">Cerrar</button>
+              <button onClick={() => setCloseNote("")} className="rounded-control border border-line-strong px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-app">Cerrar</button>
             )}
-            <button onClick={onTogglePanel} className={cn("rounded-lg border px-2 py-1.5", panelOpen ? "border-cyan-300 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-500 hover:bg-slate-50")} title="Panel del contacto">
+            <button onClick={onTogglePanel} className={cn("rounded-control border p-1.5 transition-colors", panelOpen ? "border-brand-300 bg-brand-soft text-brand-700 dark:border-brand-500/40 dark:text-brand-300" : "border-line-strong text-ink-muted hover:bg-app")} title="Panel del contacto">
               <PanelRight size={14} />
             </button>
           </div>
