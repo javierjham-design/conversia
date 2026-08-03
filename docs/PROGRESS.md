@@ -1,5 +1,17 @@
 # Registro de progreso
 
+## 2026-08-03 (4) — Rediseño visual de la Bandeja + modo oscuro (rama `feature/inbox-redesign`)
+
+Trabajo **exclusivamente visual**: ninguna funcionalidad de la Bandeja se agrega, quita ni cambia; todo lo que funcionaba sigue idéntico. Sin migraciones. No se tocó `apps/api/src/platform` ni `apps/web/src/app/admin`. Toda la UI en español. **CERO regresiones**: los tests de lógica (workflows/agents/scheduling/worker) siguen verdes y no hay tests de DOM que el remarcado pueda romper.
+
+Sistema de diseño con tokens sobre CSS vars (Tailwind v4 `@theme inline`) que se voltean bajo `.dark`. **Modo claro 100% idéntico** al previo (los valores de token en claro son exactamente los slate anteriores); el **modo oscuro** se enciende con esos mismos tokens. Toggle en el pie del sidebar, persistido por usuario (`tubot-theme`), respeta `prefers-color-scheme` y sin parpadeo (script inline en el layout raíz). Un color de marca (azul, escala 50→900), neutros fríos, semánticos acotados, ámbar **reservado solo a «atención requerida»**. Superficies en capas (app/panel/raised) con borde 1px sutil y sombras e1/e2/e3, tipografía 11–20 con numerales tabulares, radios 6/10/16, foco visible. Página de muestra en `/design` + `docs/DESIGN.md`.
+
+Commits por zona (CP1–CP8): CP1 tokens+dark+/design, CP2 sidebar+lista, CP3 cabecera (jerarquía: una acción primaria, Cerrar secundaria, resto agrupado), CP4 hilo (separadores Hoy/Ayer, eventos de sistema como líneas finas, comentarios/resumen IA como *note cards* con borde izquierdo — no bloque ámbar, resumen colapsable, botón flotante de scroll), CP5 panel de contacto + indicaciones IA como tarjeta de marca con chispa, CP6 compositor (barra de herramientas IA cohesionada + pestañas Responder/Comentario interno con fondo cálido en nota + estado elegante de ventana cerrada), CP7 micro-interacciones + atajos de teclado (`/`, `?`, `j/k`) + responsive, CP8 coherencia global (barrido determinista neutros→tokens en 44 archivos: shell, badges semánticos con variantes dark, y páginas de Contactos/Configuración/Flujos/Reportes/Billing/Integraciones).
+
+Contraste **AA verificado** en ambos modos (texto primario/secundario ≥ 4.5; `ink-subtle` de metadatos 11px en AA-large ≥ 3.0). typecheck 22/22 y build de web limpios; tests verdes.
+
+**Pendiente reportado** (no bloquea): envío optimista se omitió a propósito (el SSE ya se siente instantáneo); sidebar colapsable a solo-íconos no incluido; los bloques de código de `/integrations/developers` se dejan como terminal oscuro intencional; algunas páginas interiores tienen dark aproximado donde el barrido no alcanza colores semánticos puntuales.
+
 ## 2026-08-03 (3) — Pulido de /settings: 8 ajustes de usabilidad (rama `feature/settings-polish`)
 
 **DESPLEGADO EN PROD 2026-08-03** (PR #19, migración settings_polish aplicada). Backup real DOBLE previo: snapshot manual de Railway (2026-08-03 15:06, 191 MB) + pg_dump 18.4 completo (81 tablas + datos → Downloads/pgdump-prod-pre-settings_polish-20260803-151115.sql). Runbook fijado en docs/DEPLOYMENT.md (pg_dump portable en C:/Users/Javier/pgtools). Smoke post-deploy ✔: 3 columnas nuevas con defaults correctos (agent_ids=[], type=instructions) y conteos idénticos al backup; smoke funcional a nivel de datos de los 3 puntos — logo round-trip byte-idéntico en files.content, aislamiento de plantilla por agente (A ve [A,todos] / B ve [todos]) y catálogo de 4 planes con Enterprise; los 5 endpoints nuevos del API rutean (401) y las páginas de /settings sirven 200.

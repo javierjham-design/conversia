@@ -82,7 +82,14 @@ esencial). Recalcular con el script si se ajustan tonos.
 
 ## Cómo se aplica
 
-El rediseño migra la Bandeja por zonas (sidebar, lista, cabecera, hilo, panel,
-compositor) usando estos tokens; luego se propaga al resto del panel
-(Contactos, Configuración, Workflows) en un commit de coherencia global. Cada
-zona "enciende" el modo oscuro al migrarse.
+El rediseño migró la Bandeja por zonas (sidebar, lista, cabecera, hilo, panel,
+compositor) usando estos tokens y luego se propagó al resto del panel
+(Contactos, Configuración, Flujos, Reportes, Billing, Integraciones) en el
+commit de coherencia global (CP8: barrido determinista neutros→tokens en 44
+archivos). Cada zona "enciende" el modo oscuro al migrarse.
+
+**Pendiente conocido** (no bloquea): los bloques de código de
+`/integrations/developers` se dejan como terminal oscuro intencional; algunas
+páginas interiores tienen modo oscuro aproximado donde el barrido no alcanza
+colores semánticos puntuales; el sidebar aún no colapsa a solo-íconos; el
+envío se omitió como optimista a propósito (el SSE ya se siente instantáneo).
