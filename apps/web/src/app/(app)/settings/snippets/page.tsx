@@ -1,10 +1,15 @@
 "use client";
 
-/** Respuestas rápidas del compositor (atajo "/"), con ámbito equipo/personal. */
-import { useCallback, useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+/**
+ * Respuestas rápidas (atajo "/" del compositor de la Bandeja): página de
+ * gestión con búsqueda, filtro por ámbito, editor con picker de variables y
+ * vista previa. Al primer uso se siembran 5 ejemplos genéricos «edítame».
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Skeleton, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { renderSnippet } from "../../inbox/types";
 
 interface SnippetRow {
   id: string;
@@ -13,12 +18,24 @@ interface SnippetRow {
   scope: string;
 }
 
+const VARIABLES: { label: string; token: string }[] = [
+  { label: "Nombre", token: "{{contact.firstName}}" },
+  { label: "Apellido", token: "{{contact.lastName}}" },
+  { label: "Nombre completo", token: "{{contact.name}}" },
+  { label: "Teléfono", token: "{{contact.phone}}" },
+  { label: "Email", token: "{{contact.email}}" },
+];
+
+const SAMPLE_CONTACT = { id: "x", firstName: "María", lastName: "Pérez", profileName: null, phone: "+56 9 1234 5678", email: "maria@ejemplo.cl" };
+
 export default function SnippetsSettingsPage() {
   const toast = useToast();
   const [items, setItems] = useState<SnippetRow[] | null>(null);
-  const [shortcut, setShortcut] = useState("");
-  const [body, setBody] = useState("");
-  const [scope, setScope] = useState("team");
+  const [q, setQ] = useState("");
+  const [scopeFilter, setScopeFilter] = useState("all");
+  const [editing, setEditing] = useState<SnippetRow | null>(null);
+  const [creating, setCreating] = useState<Partial<SnippetRow> | null>(null);
+  const [deleting, setDeleting] = useState<SnippetRow | null>(null);
 
   const load = useCallback(async () => {
     setItems(await api<SnippetRow[]>("/inbox/snippets").catch(() => []));
@@ -27,57 +44,199 @@ export default function SnippetsSettingsPage() {
     void load();
   }, [load]);
 
-  async function add() {
-    try {
-      await api("/inbox/snippets", {
-        method: "POST",
-        body: JSON.stringify({ shortcut: shortcut.trim().toLowerCase(), body: body.trim(), scope }),
-      });
-      setShortcut("");
-      setBody("");
-      toast.push("Respuesta rápida creada", "ok");
-      await load();
-    } catch (err) {
-      toast.push((err as Error).message, "error");
-    }
-  }
+  const filtered = useMemo(
+    () =>
+      (items ?? []).filter(
+        (s) =>
+          (scopeFilter === "all" || s.scope === scopeFilter) &&
+          (!q.trim() || `${s.shortcut} ${s.body}`.toLowerCase().includes(q.trim().toLowerCase())),
+      ),
+    [items, q, scopeFilter],
+  );
 
-  if (!items) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!items) return <div className="mx-auto max-w-3xl p-6"><Skeleton className="h-72" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <h2 className="text-lg font-semibold">Respuestas rápidas</h2>
-      <p className="mt-1 text-xs text-slate-500">
-        Se usan con <code className="rounded bg-slate-100 px-1">/atajo</code> en el compositor de la Bandeja. Admiten
-        variables como <code className="rounded bg-slate-100 px-1">{"{{contact.firstName}}"}</code>. Ámbito «Equipo» = las
-        ve todo el equipo; «Solo yo» = solo quien la creó.
-      </p>
+    <div className="mx-auto max-w-3xl p-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Respuestas rápidas</h2>
+        <Button onClick={() => setCreating({ scope: "team" })}><Plus size={14} /> Nueva respuesta</Button>
+      </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <input value={shortcut} onChange={(e) => setShortcut(e.target.value)} placeholder="atajo (ej: saludo)" className="w-36 rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
-        <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Hola {{contact.firstName}}! ¿En qué te ayudo?" className="min-w-52 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
-        <select value={scope} onChange={(e) => setScope(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs">
+      {/* Cómo se usan: mini ejemplo visual */}
+      <div className="mt-3 rounded-card border border-cyan-100 bg-cyan-50/60 p-4">
+        <p className="text-sm text-cyan-900">
+          Escribe <code className="rounded bg-white px-1.5 py-0.5 font-mono text-cyan-700">/</code> en el chat de la
+          Bandeja y elige tu respuesta — se pega con los datos reales del contacto.
+        </p>
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-slate-500">/saludo</span>
+          <span className="text-slate-400">→</span>
+          <span className="rounded-2xl bg-cyan-700 px-3 py-1.5 text-white">¡Hola María! 👋 Gracias por escribirnos…</span>
+        </div>
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <div className="relative flex-1">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por atajo o contenido…" className="w-full rounded-lg border border-slate-300 py-1.5 pl-8 pr-3 text-sm" />
+        </div>
+        <select value={scopeFilter} onChange={(e) => setScopeFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+          <option value="all">Todos los ámbitos</option>
           <option value="team">Equipo</option>
           <option value="mine">Solo yo</option>
         </select>
-        <Button onClick={() => void add()} disabled={shortcut.trim().length < 2 || body.trim().length < 2}><Plus size={14} /> Crear</Button>
       </div>
 
-      <ul className="mt-3 space-y-1">
-        {items.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Sin respuestas rápidas aún.</p>}
-        {items.map((s) => (
-          <li key={s.id} className="flex items-center gap-2 rounded-lg border border-slate-100 bg-white px-2 py-1.5 text-xs">
-            <span className="w-28 shrink-0 font-mono text-cyan-700">/{s.shortcut}</span>
-            <span className="min-w-0 flex-1 truncate text-slate-600">{s.body}</span>
-            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{s.scope === "mine" ? "Solo yo" : "Equipo"}</span>
-            <button
-              onClick={() => void api(`/inbox/snippets/${s.id}`, { method: "DELETE" }).then(load)}
-              className="text-slate-300 hover:text-red-500"
-              title="Eliminar"
-            >✕</button>
+      <ul className="mt-3 space-y-1.5">
+        {filtered.length === 0 && (
+          <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+            {items.length === 0 ? "Crea tu primera respuesta rápida con el botón de arriba." : "Nada calza con la búsqueda."}
+          </p>
+        )}
+        {filtered.map((s) => (
+          <li key={s.id} className="flex items-center gap-3 rounded-card border border-slate-200 bg-white px-3 py-2.5 shadow-card">
+            <span className="w-32 shrink-0 truncate font-mono text-sm text-cyan-700">/{s.shortcut}</span>
+            <p className="min-w-0 flex-1 truncate text-sm text-slate-600" title={s.body}>{s.body}</p>
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500")}>
+              {s.scope === "mine" ? "Solo yo" : "Equipo"}
+            </span>
+            <button onClick={() => setEditing(s)} className="text-slate-400 hover:text-cyan-700" title="Editar"><Pencil size={14} /></button>
+            <button onClick={() => setCreating({ shortcut: `${s.shortcut}-copia`, body: s.body, scope: s.scope })} className="text-slate-400 hover:text-cyan-700" title="Duplicar"><Copy size={14} /></button>
+            <button onClick={() => setDeleting(s)} className="text-slate-300 hover:text-red-500" title="Eliminar"><Trash2 size={14} /></button>
           </li>
         ))}
       </ul>
+
+      {(editing || creating) && (
+        <SnippetEditor
+          snippet={editing}
+          initial={creating ?? undefined}
+          onClose={() => {
+            setEditing(null);
+            setCreating(null);
+          }}
+          onSaved={() => {
+            setEditing(null);
+            setCreating(null);
+            void load();
+          }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          void api(`/inbox/snippets/${deleting.id}`, { method: "DELETE" })
+            .then(() => { toast.push("Respuesta eliminada", "info"); setDeleting(null); void load(); })
+            .catch((err) => toast.push((err as Error).message, "error"));
+        }}
+        title={`¿Eliminar /${deleting?.shortcut}?`}
+        description="Dejará de aparecer en el compositor de la Bandeja."
+        confirmLabel="Eliminar"
+        danger
+      />
     </div>
+  );
+}
+
+function SnippetEditor({
+  snippet,
+  initial,
+  onClose,
+  onSaved,
+}: {
+  snippet: SnippetRow | null;
+  initial?: Partial<SnippetRow>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [shortcut, setShortcut] = useState(snippet?.shortcut ?? initial?.shortcut ?? "");
+  const [body, setBody] = useState(snippet?.body ?? initial?.body ?? "");
+  const [scope, setScope] = useState(snippet?.scope ?? initial?.scope ?? "team");
+  const [busy, setBusy] = useState(false);
+  const shortcutOk = /^[a-z0-9_-]{2,30}$/.test(shortcut);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const payload = { shortcut, body: body.trim(), scope };
+      if (snippet) await api(`/inbox/snippets/${snippet.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      else await api("/inbox/snippets", { method: "POST", body: JSON.stringify(payload) });
+      toast.push(snippet ? "Respuesta actualizada" : "Respuesta creada", "ok");
+      onSaved();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={snippet ? `Editar /${snippet.shortcut}` : "Nueva respuesta rápida"} wide>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Atajo (minúsculas, sin espacios)</span>
+          <div className="mt-1 flex items-center rounded-lg border border-slate-300 focus-within:border-cyan-400">
+            <span className="pl-2 font-mono text-slate-400">/</span>
+            <input
+              value={shortcut}
+              onChange={(e) => setShortcut(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+              placeholder="precio-implante"
+              className="w-full rounded-lg px-1 py-2 font-mono text-sm outline-none"
+            />
+          </div>
+          {!shortcutOk && shortcut.length > 0 && (
+            <span className="text-[10px] text-red-500">2-30 caracteres: letras, números, guion o guion bajo.</span>
+          )}
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-slate-500">Ámbito</span>
+          <select value={scope} onChange={(e) => setScope(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+            <option value="team">Equipo (la ve todo el equipo)</option>
+            <option value="mine">Solo yo</option>
+          </select>
+        </label>
+      </div>
+
+      <label className="mt-3 block text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500">Contenido</span>
+          <span className={cn("text-[10px]", body.length > 1900 ? "text-red-500" : "text-slate-400")}>{body.length}/2000</span>
+        </div>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value.slice(0, 2000))}
+          rows={4}
+          placeholder="Hola {{contact.firstName}}! …"
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <span className="text-[10px] text-slate-400">Insertar variable:</span>
+        {VARIABLES.map((v) => (
+          <button key={v.token} onClick={() => setBody((b) => (b + " " + v.token).slice(0, 2000))} className="rounded-full border border-slate-200 px-2 py-0.5 text-[10px] text-slate-600 hover:border-cyan-300 hover:text-cyan-700">
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {body.trim() && (
+        <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+          <p className="text-[10px] font-medium uppercase text-slate-400">Vista previa (con datos de ejemplo)</p>
+          <p className="mt-1 inline-block max-w-md whitespace-pre-wrap rounded-2xl bg-cyan-700 px-3 py-2 text-sm text-white">{renderSnippet(body, SAMPLE_CONTACT)}</p>
+        </div>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+        <Button onClick={() => void save()} disabled={busy || !shortcutOk || body.trim().length < 2}>
+          {snippet ? "Guardar cambios" : "Crear respuesta"}
+        </Button>
+      </div>
+    </Modal>
   );
 }
