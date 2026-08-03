@@ -59,18 +59,6 @@ export default function ChannelsPage() {
       .catch(() => undefined);
   }, []);
 
-  async function toggleTranscription() {
-    if (transcription === null) return;
-    try {
-      const r = await api<{ enabled: boolean }>("/organizations/me/transcription", {
-        method: "PUT",
-        body: JSON.stringify({ enabled: !transcription }),
-      });
-      setTranscription(r.enabled);
-    } catch (err) {
-      setMsg((err as Error).message);
-    }
-  }
 
   useEffect(() => {
     void load().catch((e) => setMsg((e as Error).message));
@@ -389,24 +377,18 @@ export default function ChannelsPage() {
         {channels.length === 0 && <p className="text-sm text-slate-400">Sin canales aún.</p>}
       </div>
 
-      {/* Transcripción de audios (Whisper) — switch por tenant */}
+      {/* Transcripción de audios: la fuente única vive en Configuración → IA */}
       {transcription !== null && (
         <div className="mt-6 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4">
           <div>
             <h2 className="text-sm font-medium">Transcripción de audios</h2>
             <p className="text-xs text-slate-500">
-              Las notas de voz entrantes se transcriben automáticamente para leerlas en la bandeja y que el agente IA las
-              entienda. Desactívala si no quieres usarla (tiene costo de IA).
+              {transcription ? "Activada" : "Desactivada"} — las notas de voz entrantes {transcription ? "se transcriben" : "no se transcriben"} automáticamente.
             </p>
           </div>
-          <button
-            onClick={() => void toggleTranscription()}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
-              transcription ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-            }`}
-          >
-            {transcription ? "● Activada" : "○ Desactivada"}
-          </button>
+          <a href="/settings/ia" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+            Configurar en Ajustes ↗
+          </a>
         </div>
       )}
 

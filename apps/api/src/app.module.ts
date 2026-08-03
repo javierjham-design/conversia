@@ -6,6 +6,8 @@ import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
 import { ContactsController } from "./contacts/contacts.controller";
 import { LifecycleController } from "./contacts/lifecycle.controller";
+import { ContactFieldsController } from "./contacts/fields.controller";
+import { TagsController } from "./contacts/tags.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { InboxController } from "./conversations/inbox.controller";
 import { RealtimeService } from "./common/realtime.service";
@@ -17,6 +19,7 @@ import { MetaController } from "./integrations/meta.controller";
 import { OAuthController } from "./integrations/oauth.controller";
 import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
+import { SettingsController } from "./organizations/settings.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
 import { BillingController } from "./billing/billing.controller";
@@ -39,11 +42,14 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     HealthController,
     AuthController,
     OrganizationsController,
+    SettingsController, // Centro de Configuración del tenant (/settings)
     AgentsController,
     ConversationsController,
     InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA
     ContactsController,
     LifecycleController, // etapas del ciclo de vida editables por tenant
+    ContactFieldsController, // campos personalizados de contacto (/settings)
+    TagsController, // etiquetas del tenant (/settings)
     ChannelsController,
     UsersController,
     IntegrationsController,

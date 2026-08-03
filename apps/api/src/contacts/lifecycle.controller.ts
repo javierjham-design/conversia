@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
@@ -13,6 +13,7 @@ const stageSchema = z.object({
     .optional()
     .nullable(),
   category: z.enum(["OPEN", "WON", "LOST", "FROZEN"]).optional(),
+  active: z.boolean().optional(),
 });
 
 /** code estable a partir del nombre (los workflows referencian el code). */
@@ -54,6 +55,7 @@ export class LifecycleController {
         category: s.category,
         order: s.order,
         system: s.system,
+        active: s.active,
         leadsCount: countByStatus.get(s.id) ?? 0,
       }));
     });
@@ -105,6 +107,7 @@ export class LifecycleController {
           ...(parsed.data.emoji !== undefined ? { emoji: parsed.data.emoji || null } : {}),
           ...(parsed.data.color !== undefined ? { color: parsed.data.color || null } : {}),
           ...(parsed.data.category ? { category: parsed.data.category as any } : {}),
+          ...(parsed.data.active !== undefined ? { active: parsed.data.active } : {}),
         },
       });
       await tx.auditLog.create({
@@ -128,17 +131,26 @@ export class LifecycleController {
     });
   }
 
+  /** Elimina una etapa. Si tiene leads, exige ?migrateTo=<id> para moverlos antes. */
   @Delete(":id")
-  remove(@Param("id") id: string) {
+  remove(@Param("id") id: string, @Query("migrateTo") migrateTo?: string) {
     const ctx = requirePermission("leads:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const stage = await tx.leadStatus.findUnique({ where: { id } });
       if (!stage) throw new NotFoundException("Etapa no encontrada");
       const inUse = await tx.lead.count({ where: { statusId: id } });
       if (inUse > 0) {
-        throw new BadRequestException(
-          `No se puede eliminar «${stage.name}»: ${inUse} lead(s) están en esta etapa. Muévelos a otra etapa primero (o renómbrala).`,
-        );
+        if (!migrateTo || migrateTo === id) {
+          throw new BadRequestException(
+            `«${stage.name}» tiene ${inUse} lead(s). Elige a qué etapa migrarlos para poder eliminarla.`,
+          );
+        }
+        const target = await tx.leadStatus.findUnique({ where: { id: migrateTo } });
+        if (!target) throw new BadRequestException("Etapa destino no encontrada");
+        await tx.lead.updateMany({ where: { statusId: id }, data: { statusId: target.id } });
+        await tx.auditLog.create({
+          data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "lifecycle.stage_migrate", entityType: "lead_status", entityId: id, after: { to: target.code, moved: inUse } },
+        });
       }
       await tx.leadStatus.delete({ where: { id } });
       await tx.auditLog.create({

@@ -579,6 +579,15 @@ function makeDeps(): EngineDeps {
     },
 
     now: () => new Date(),
+
+    async getBusinessHoursDefault(ctx) {
+      const org = await withTenant(ctx.organizationId, (tx) =>
+        tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { timezone: true, settings: true } }),
+      );
+      const bh = ((org?.settings ?? {}) as Record<string, any>).businessHours;
+      if (!bh?.hours) return null;
+      return { hours: bh.hours, holidays: bh.holidays ?? [], timezone: org?.timezone ?? "America/Santiago" };
+    },
   };
 }
 

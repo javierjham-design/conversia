@@ -163,7 +163,7 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       ? await tx.leadStatus.findUnique({ where: { organizationId_code: { organizationId, code: statusCode } } })
       : null;
     if (!status) {
-      status = await tx.leadStatus.findFirst({ where: { category: "OPEN" }, orderBy: { order: "asc" } });
+      status = await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" } });
     }
     let leadId: string | null = null;
     if (status) {

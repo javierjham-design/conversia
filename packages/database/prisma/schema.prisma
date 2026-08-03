@@ -586,6 +586,8 @@ model CustomFieldDefinition {
   type           String // text | number | date | select | multiselect | boolean | phone | email | url
   options        Json     @default("[]")
   required       Boolean  @default(false)
+  order          Int      @default(0) // orden en la ficha
+  showInList     Boolean  @default(false) @map("show_in_list") // columna disponible en Contactos
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@unique([organizationId, entity, key])
@@ -612,6 +614,7 @@ model LeadStatus {
   category       LeadStatusCategory @default(OPEN)
   color          String?
   emoji          String? // icono visible en bandeja/selectores (estilo Respond.io)
+  active         Boolean            @default(true) // desactivar sin borrar (no aparece en selectores)
   order          Int                @default(0)
   system         Boolean            @default(false)
   leads          Lead[]
@@ -817,6 +820,7 @@ model Snippet {
   organizationId String   @map("organization_id")
   shortcut       String
   body           String
+  scope          String   @default("team") // team | mine (solo el creador)
   createdById    String?  @map("created_by_id")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -1570,4 +1574,39 @@ model Notification {
 
   @@index([organizationId, userId, readAt])
   @@map("notifications")
+}
+
+// Exports de datos en background (BullMQ). El archivo expira a los 7 días y
+// la descarga requiere permiso de Datos; queda registro de quién exportó.
+model ExportJob {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  type           String // contacts | conversations | appointments
+  params         Json      @default("{}") // { from, to }
+  status         String    @default("PENDING") // PENDING | RUNNING | DONE | FAILED
+  content        String? // CSV generado (se borra al expirar)
+  rows           Int?
+  error          String?
+  createdById    String?   @map("created_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  finishedAt     DateTime? @map("finished_at")
+  expiresAt      DateTime? @map("expires_at")
+
+  @@index([organizationId, createdAt])
+  @@map("export_jobs")
+}
+
+// Biblioteca de plantillas de prompt del tenant (editor de agentes y compositor)
+model PromptTemplate {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  body           String
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("prompt_templates")
 }

@@ -1324,6 +1324,9 @@ function BusinessHoursForm({ config, onChange }: { config: Record<string, any>; 
   }
   return (
     <div className="space-y-2 text-sm">
+      <p className="rounded-lg bg-slate-50 p-2 text-[10px] text-slate-500">
+        Si no marcas ningún día aquí, el nodo usa el horario de <a href="/settings/hours" className="underline">Configuración → Horario de atención</a>. Define uno propio solo si esta campaña atiende en un horario distinto.
+      </p>
       <label className="block">
         <span className="text-xs text-slate-500">Zona horaria</span>
         <input value={config.timezone ?? "America/Santiago"} onChange={(e) => onChange({ timezone: e.target.value })} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />

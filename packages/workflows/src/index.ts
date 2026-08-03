@@ -44,6 +44,8 @@ export interface EngineDeps {
   sendInternalEmail(ctx: RunCtx, config: { to: string[]; subject: string; body: string }): Promise<void>;
   /** Evento GA4 vía Measurement Protocol; params ya renderizados. */
   sendGa4Event(ctx: RunCtx, config: { eventName: string; params: Record<string, string> }): Promise<void>;
+  /** Horario de atención del negocio (Configuración → Horario) como default del nodo «Fecha y hora». */
+  getBusinessHoursDefault?(ctx: RunCtx): Promise<Record<string, unknown> | null>;
   /** Agrega una fila a Google Sheets (valores ya renderizados). */
   appendGoogleSheetRow(ctx: RunCtx, config: { spreadsheetId: string; sheetName: string; values: string[] }): Promise<void>;
   /** Entrega la conversación a un agente con un objetivo. "met"/"unmet"
@@ -224,9 +226,15 @@ async function executeNode(
     case "add_note":
       await deps.addNote(ctx, renderVars(String(cfg.text ?? ""), ctx.variables));
       return {};
-    case "business_hours":
-      // Evaluación pura (determinista dado now()): "in" dentro de horario, "out" fuera.
-      return { branch: evalBusinessHours(cfg, deps.now()) ? "in" : "out" };
+    case "business_hours": {
+      // Sin horario propio en el nodo → usa el de Configuración → Horario de atención.
+      let effective = cfg;
+      if (!cfg.hours && deps.getBusinessHoursDefault) {
+        const orgDefault = await deps.getBusinessHoursDefault(ctx);
+        if (orgDefault) effective = { ...orgDefault, ...cfg, timezone: cfg.timezone || (orgDefault as Record<string, any>).timezone };
+      }
+      return { branch: evalBusinessHours(effective, deps.now()) ? "in" : "out" };
+    }
     case "goto":
       return { goto: String(cfg.targetNodeId ?? "") };
     case "send_capi":

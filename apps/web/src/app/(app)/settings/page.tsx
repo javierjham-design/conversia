@@ -3,11 +3,11 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-/** Los usuarios ahora viven en Configuración (redirección para no romper enlaces). */
-export default function UsersRedirect() {
+/** /settings → primera página del centro de configuración. */
+export default function SettingsIndex() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/settings/users");
+    router.replace("/settings/general");
   }, [router]);
   return null;
 }

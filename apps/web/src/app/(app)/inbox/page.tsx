@@ -9,7 +9,6 @@ import { Bot, Search, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { EmptyState, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
-import { LifecycleModal } from "./lifecycle-modal";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
 import { displayName, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
@@ -52,7 +51,6 @@ export default function InboxPage() {
   const [context, setContext] = useState<ConvContext | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
-  const [manageStages, setManageStages] = useState(false);
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [users, setUsers] = useState<{ userId: string; name: string }[]>([]);
@@ -249,7 +247,7 @@ export default function InboxPage() {
       <div className="flex min-h-0 flex-1">
         {/* Zona 1 — clasificador */}
         <div className={cn(selectedId ? "hidden xl:block" : "hidden md:block")}>
-          <InboxSidebar counters={counters} filter={filter} onSelect={(f) => { setFilter(f); setSelectedId(null); }} channels={channels} onViewsChanged={() => void loadCounters()} onManageStages={() => setManageStages(true)} />
+          <InboxSidebar counters={counters} filter={filter} onSelect={(f) => { setFilter(f); setSelectedId(null); }} channels={channels} onViewsChanged={() => void loadCounters()} onManageStages={() => (window.location.href = "/settings/lifecycle")} />
         </div>
 
         {/* Zona 2 — lista */}
@@ -308,6 +306,9 @@ export default function InboxPage() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-[13px] font-medium">{displayName(c.contact)}</span>
                       <span className="shrink-0 text-[10px] text-slate-400">
+                        {c.unreadCount > 0 && c.lastMessageAt && Date.now() - new Date(c.lastMessageAt).getTime() > (counters?.firstResponseTargetMinutes ?? 15) * 60_000 && (
+                          <span className="mr-1 text-red-500" title="Supera el tiempo objetivo de primera respuesta">⏱</span>
+                        )}
                         {c.lastMessageAt
                           ? new Date(c.lastMessageAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })
                           : ""}
@@ -392,17 +393,6 @@ export default function InboxPage() {
           </>
         )}
       </div>
-
-      {manageStages && (
-        <LifecycleModal
-          onClose={() => setManageStages(false)}
-          onChanged={() => {
-            void loadStages();
-            void loadCounters();
-            if (selectedId) void loadContext(selectedId);
-          }}
-        />
-      )}
     </div>
   );
 }
