@@ -2,6 +2,8 @@
 
 ## 2026-08-03 (2) — Centro de Configuración del tenant (rama `feature/settings-hub`)
 
+**DESPLEGADO EN PROD 2026-08-03** (PR #18, migración + setup.sql aplicados). Procedimiento: backup JSON de tablas afectadas + verificación estática (prisma migrate diff idéntico a la migración) → migración → RLS. Smoke test post-deploy ✔: columnas/tablas/políticas presentes, conteos idénticos al snapshot (33 etapas · 7 leads · 8 conversaciones · 9 contactos), /settings y /settings/lifecycle e /inbox y /users en 200 (redirección viva), y ciclo de expiración de exports probado en prod (registro vencido purgado por el tick del worker en <2 min; registro de prueba eliminado).
+
 /settings estilo Workspace Settings de Respond.io: sidebar propio de dos niveles (6 grupos) con búsqueda por sinónimos y visibilidad por rol (server-side en cada endpoint). Migración `20260803120000_settings_hub` — **pendiente aplicar a prod (+ setup.sql por export_jobs y prompt_templates)**. Mapa completo en docs/SETTINGS.md.
 
 - **Reubicación (una sola fuente de verdad)**: etapas del ciclo de vida → /settings/lifecycle (el engranaje de la Bandeja enlaza); snippets → /settings/snippets (el compositor enlaza); usuarios+equipos → /settings/users (con matriz de roles solo lectura; /users redirige); transcripción → /settings/ia (Canales enlaza); import CSV → /settings/import (modal compartido con Contactos).
