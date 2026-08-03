@@ -37,7 +37,7 @@ function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50"
+      className="rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-app"
     >
       {copied ? "✔ copiado" : "Copiar"}
     </button>
@@ -120,9 +120,9 @@ export default function DevelopersPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Desarrolladores</h1>
-          <p className="text-sm text-slate-500">Webhooks entrantes y API de Conversia — conecta tus sistemas externos.</p>
+          <p className="text-sm text-ink-muted">Webhooks entrantes y API de Conversia — conecta tus sistemas externos.</p>
         </div>
-        <a href="/integrations" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50">← Integraciones</a>
+        <a href="/integrations" className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-ink-muted hover:bg-app">← Integraciones</a>
       </div>
 
       {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{msg}</p>}
@@ -134,11 +134,11 @@ export default function DevelopersPage() {
           </p>
           {createdSecret.url && (
             <p className="mt-1 flex items-center gap-2 text-xs text-amber-700">
-              URL: <code className="rounded bg-white px-1.5 py-0.5">{createdSecret.url}</code> <CopyButton text={createdSecret.url} />
+              URL: <code className="rounded bg-panel px-1.5 py-0.5">{createdSecret.url}</code> <CopyButton text={createdSecret.url} />
             </p>
           )}
           <p className="mt-1 flex items-center gap-2 text-xs text-amber-700">
-            Secreto: <code className="rounded bg-white px-1.5 py-0.5">{createdSecret.secret}</code> <CopyButton text={createdSecret.secret} />
+            Secreto: <code className="rounded bg-panel px-1.5 py-0.5">{createdSecret.secret}</code> <CopyButton text={createdSecret.secret} />
           </p>
           <button onClick={() => setCreatedSecret(null)} className="mt-2 text-xs text-amber-700 underline">Entendido, lo guardé</button>
         </div>
@@ -146,53 +146,53 @@ export default function DevelopersPage() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* ---------------- Webhooks entrantes ---------------- */}
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="font-medium">Webhooks entrantes</h2>
-          <p className="mb-3 text-xs text-slate-500">
+          <p className="mb-3 text-xs text-ink-muted">
             URL única que dispara tus flujos con el trigger <b>«Webhook entrante»</b>. El cuerpo JSON queda disponible como
             variables (<code>{"{{webhook.campo}}"}</code>). Ideal para Make, Zapier o formularios de tu sitio.
           </p>
           <form onSubmit={createHook} className="mb-3 flex gap-2">
-            <input value={newHookName} onChange={(e) => setNewHookName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. Landing implantes)" className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
+            <input value={newHookName} onChange={(e) => setNewHookName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. Landing implantes)" className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm" />
             <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Crear</button>
           </form>
           <ul className="space-y-2">
             {hooks.map((h) => (
-              <li key={h.id} className="rounded-lg border border-slate-100 p-2.5">
+              <li key={h.id} className="rounded-lg border border-line p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">{h.name}{" "}
-                    <span className={`text-[10px] ${h.active ? "text-emerald-600" : "text-slate-400"}`}>{h.active ? "● activo" : "○ pausado"}</span>
+                    <span className={`text-[10px] ${h.active ? "text-emerald-600" : "text-ink-subtle"}`}>{h.active ? "● activo" : "○ pausado"}</span>
                   </p>
                   <div className="flex gap-2 text-xs">
-                    <button onClick={() => void toggleHook(h)} className="text-slate-500 hover:underline">{h.active ? "Pausar" : "Activar"}</button>
+                    <button onClick={() => void toggleHook(h)} className="text-ink-muted hover:underline">{h.active ? "Pausar" : "Activar"}</button>
                     <button onClick={() => void deleteHook(h.id)} className="text-red-400 hover:underline">Eliminar</button>
                   </div>
                 </div>
-                <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-500">
-                  <code className="max-w-[260px] truncate rounded bg-slate-50 px-1.5 py-0.5">{h.url}</code>
+                <p className="mt-1 flex items-center gap-2 text-[11px] text-ink-muted">
+                  <code className="max-w-[260px] truncate rounded bg-app px-1.5 py-0.5">{h.url}</code>
                   <CopyButton text={h.url} />
                 </p>
-                <p className="mt-0.5 text-[10px] text-slate-400">
+                <p className="mt-0.5 text-[10px] text-ink-subtle">
                   {h.hasSecret ? "Firmado (X-Conversia-Signature)" : "Sin firma"} · último recibido: {fmt(h.lastReceivedAt)}
                 </p>
               </li>
             ))}
-            {hooks.length === 0 && <p className="text-xs text-slate-400">Sin webhooks entrantes aún.</p>}
+            {hooks.length === 0 && <p className="text-xs text-ink-subtle">Sin webhooks entrantes aún.</p>}
           </ul>
         </section>
 
         {/* ---------------- API keys ---------------- */}
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="font-medium">API keys</h2>
-          <p className="mb-3 text-xs text-slate-500">
+          <p className="mb-3 text-xs text-ink-muted">
             Para que tus sistemas consulten o creen contactos vía la API pública. El secreto se muestra una sola vez.
           </p>
           <form onSubmit={createKey} className="mb-3 space-y-2">
             <div className="flex gap-2">
-              <input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. CRM interno)" className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
+              <input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. CRM interno)" className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm" />
               <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Crear</button>
             </div>
-            <div className="flex gap-4 text-xs text-slate-600">
+            <div className="flex gap-4 text-xs text-ink-muted">
               {["contacts:read", "contacts:write"].map((s) => (
                 <label key={s} className="flex items-center gap-1.5">
                   <input
@@ -207,13 +207,13 @@ export default function DevelopersPage() {
           </form>
           <ul className="space-y-2">
             {keys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between rounded-lg border border-slate-100 p-2.5">
+              <li key={k.id} className="flex items-center justify-between rounded-lg border border-line p-2.5">
                 <div>
                   <p className="text-sm font-medium">
                     {k.name}{" "}
                     {k.revokedAt && <span className="text-[10px] text-red-500">revocada</span>}
                   </p>
-                  <p className="text-[10px] text-slate-400">
+                  <p className="text-[10px] text-ink-subtle">
                     <code>{k.prefix}…</code> · {(k.scopes ?? []).join(", ")} · último uso: {fmt(k.lastUsedAt)}
                   </p>
                 </div>
@@ -222,17 +222,17 @@ export default function DevelopersPage() {
                 )}
               </li>
             ))}
-            {keys.length === 0 && <p className="text-xs text-slate-400">Sin API keys aún.</p>}
+            {keys.length === 0 && <p className="text-xs text-ink-subtle">Sin API keys aún.</p>}
           </ul>
         </section>
       </div>
 
       {/* ---------------- Documentación ---------------- */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+      <section className="mt-6 rounded-xl border border-line bg-panel p-4">
         <h2 className="font-medium">Documentación rápida</h2>
         <div className="mt-2 grid gap-4 lg:grid-cols-2">
           <div>
-            <h3 className="text-sm font-medium text-slate-700">Webhook entrante → disparar un flujo</h3>
+            <h3 className="text-sm font-medium text-ink">Webhook entrante → disparar un flujo</h3>
             <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`POST {tu URL de webhook}
 Content-Type: application/json
 X-Conversia-Signature: sha256=HMAC_SHA256(secreto, cuerpo)
@@ -243,7 +243,7 @@ X-Conversia-Signature: sha256=HMAC_SHA256(secreto, cuerpo)
   en el flujo: {{webhook.nombre}}, {{webhook.interes}}`}</pre>
           </div>
           <div>
-            <h3 className="text-sm font-medium text-slate-700">API pública v1 (Authorization: Bearer cnvk_…)</h3>
+            <h3 className="text-sm font-medium text-ink">API pública v1 (Authorization: Bearer cnvk_…)</h3>
             <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`GET  /public/v1/contacts?q=maria&page=1   (contacts:read)
 POST /public/v1/contacts                   (contacts:write)
      { "phone": "+56 9 1234 5678",
@@ -252,23 +252,23 @@ POST /public/v1/contacts                   (contacts:write)
 → dedupe por teléfono E.164; rellena solo campos vacíos.`}</pre>
           </div>
         </div>
-        <p className="mt-2 text-[10px] text-slate-400">
+        <p className="mt-2 text-[10px] text-ink-subtle">
           Base de la API: la misma URL del panel (vía «/backend») o la URL directa de la API. Los workflows que hacen
           peticiones HACIA afuera usan el paso «Petición HTTP» — esto es la dirección contraria.
         </p>
       </section>
 
       {/* ---------------- Contrato estándar de agenda ---------------- */}
-      <section id="agenda" className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+      <section id="agenda" className="mt-6 rounded-xl border border-line bg-panel p-4">
         <h2 className="font-medium">Contrato estándar de agenda (Agenda personalizada)</h2>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-ink-muted">
           Implementa estos endpoints en tu sistema y conéctalo en Integraciones → <b>Agenda personalizada</b>: los agentes
           IA y los workflows agendarán contra tu software sin código adicional. Todas las peticiones van firmadas; verifica
           la firma antes de responder. Timeout: 8 segundos.
         </p>
         <div className="mt-3 grid gap-4 lg:grid-cols-2">
           <div>
-            <h3 className="text-sm font-medium text-slate-700">Endpoints requeridos</h3>
+            <h3 className="text-sm font-medium text-ink">Endpoints requeridos</h3>
             <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`GET    /professionals                → [{id, name, specialty?}]
 GET    /services                     → [{id, name, durationMin, price?}]
 GET    /availability?professionalId=&serviceId=&from=YYYY-MM-DD&to=
@@ -286,7 +286,7 @@ POST   /appointments/:id/attendance  {attended: true|false}
 Opcional: GET /clinics → [{id, name, timezone}] (si tienes varias sedes)`}</pre>
           </div>
           <div>
-            <h3 className="text-sm font-medium text-slate-700">Firma HMAC (verifícala en cada petición)</h3>
+            <h3 className="text-sm font-medium text-ink">Firma HMAC (verifícala en cada petición)</h3>
             <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-900 p-3 text-[11px] leading-relaxed text-slate-100">{`Headers que enviamos:
   X-Conversia-Timestamp: 1785600000        (unix, rechaza si |ahora-ts| > 300s)
   X-Conversia-Signature: sha256=HEX
@@ -307,7 +307,7 @@ Prueba con curl (GET, cuerpo vacío):
   curl -H "X-Conversia-Timestamp: $TS" -H "X-Conversia-Signature: $SIG" https://agenda.tuclinica.cl/conversia/professionals`}</pre>
           </div>
         </div>
-        <p className="mt-2 text-[10px] text-slate-400">
+        <p className="mt-2 text-[10px] text-ink-subtle">
           «Probar conexión» valida profesionales + disponibilidad de ejemplo. Los estados de cita esperados:
           pending · confirmed · cancelled · rescheduled · completed · no_show.
         </p>

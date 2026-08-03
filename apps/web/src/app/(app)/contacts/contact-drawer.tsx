@@ -61,7 +61,7 @@ const ACTION_LABEL: Record<string, string> = {
   "contact.delete": "Contacto eliminado",
   "contact.merge": "Contactos fusionados",
 };
-const inputCls = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500";
+const inputCls = "w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm outline-none focus:border-brand-500";
 
 function fmt(s: string | null): string {
   if (!s) return "—";
@@ -172,9 +172,9 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col overflow-hidden bg-white shadow-pop">
+      <div className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col overflow-hidden bg-panel shadow-pop">
         {/* Cabecera */}
-        <div className="border-b border-slate-200 px-5 py-4">
+        <div className="border-b border-line px-5 py-4">
           {!d ? (
             <Skeleton className="h-10 w-48" />
           ) : (
@@ -188,7 +188,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                     {name}
                     {d.blocked && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600"><Ban size={12} /> Bloqueado</span>}
                   </h2>
-                  <p className="truncate font-mono text-xs text-slate-500">{d.phone ?? "sin teléfono"}</p>
+                  <p className="truncate font-mono text-xs text-ink-muted">{d.phone ?? "sin teléfono"}</p>
                 </div>
               </div>
               <div className="flex shrink-0 gap-1.5">
@@ -198,7 +198,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <Button variant="danger" className="px-2.5 py-1.5" onClick={() => setConfirmDel(true)} title="Eliminar">
                   <Trash2 size={15} />
                 </Button>
-                <button onClick={onClose} className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Cerrar">✕</button>
+                <button onClick={onClose} className="rounded-lg px-2 text-ink-subtle hover:bg-app hover:text-ink-muted" aria-label="Cerrar">✕</button>
               </div>
             </div>
           )}
@@ -252,13 +252,13 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <F label="Zona horaria"><input value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls} /></F>
               </div>
               <div className="flex gap-5 pt-1">
-                <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.consent} onChange={(e) => setForm({ ...form, consent: e.target.checked })} /> Consiente contacto</label>
-                <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={form.doNotContact} onChange={(e) => setForm({ ...form, doNotContact: e.target.checked })} /> No contactar</label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted"><input type="checkbox" checked={form.consent} onChange={(e) => setForm({ ...form, consent: e.target.checked })} /> Consiente contacto</label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted"><input type="checkbox" checked={form.doNotContact} onChange={(e) => setForm({ ...form, doNotContact: e.target.checked })} /> No contactar</label>
               </div>
 
               {d.customFields.length > 0 && (
-                <div className="border-t border-slate-100 pt-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Campos personalizados</p>
+                <div className="border-t border-line pt-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-subtle">Campos personalizados</p>
                   <div className="space-y-3">
                     {d.customFields.map((f) => (
                       <F key={f.id} label={f.label}>
@@ -269,7 +269,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 </div>
               )}
 
-              <div className="sticky bottom-0 -mx-5 mt-2 border-t border-slate-200 bg-white px-5 py-3">
+              <div className="sticky bottom-0 -mx-5 mt-2 border-t border-line bg-panel px-5 py-3">
                 <Button onClick={save} disabled={saving} className="w-full"><Save size={15} /> {saving ? "Guardando…" : "Guardar cambios"}</Button>
               </div>
             </div>
@@ -288,10 +288,10 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 {d.origin.ctwaClid && <Row k="CTWA click id" v={<span className="font-mono text-xs">{d.origin.ctwaClid}</span>} />}
                 {d.origin.campaignId && <Row k="Campaña" v={d.origin.campaignId} />}
                 {d.origin.referral?.headline && (
-                  <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                    <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500"><Megaphone size={13} /> Anuncio de origen</p>
-                    <p className="mt-1 font-medium text-slate-700">{d.origin.referral.headline}</p>
-                    {d.origin.referral.body && <p className="text-slate-500">{d.origin.referral.body}</p>}
+                  <div className="mt-2 rounded-lg border border-line bg-app p-2.5">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-ink-muted"><Megaphone size={13} /> Anuncio de origen</p>
+                    <p className="mt-1 font-medium text-ink">{d.origin.referral.headline}</p>
+                    {d.origin.referral.body && <p className="text-ink-muted">{d.origin.referral.body}</p>}
                     {d.origin.referral.source_url && (
                       <a href={d.origin.referral.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
                         Ver anuncio <ExternalLink size={11} />
@@ -308,26 +308,26 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
             </div>
           ) : tab === "conversaciones" ? (
             <div className="space-y-2">
-              {d.conversations.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Sin conversaciones.</p>}
+              {d.conversations.length === 0 && <p className="py-6 text-center text-sm text-ink-subtle">Sin conversaciones.</p>}
               {d.conversations.map((c) => (
-                <Link key={c.id} href={`/inbox?c=${c.id}`} className="flex items-center gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
-                  <MessageSquare size={16} className="shrink-0 text-slate-400" />
+                <Link key={c.id} href={`/inbox?c=${c.id}`} className="flex items-center gap-3 rounded-lg border border-line p-3 hover:bg-app">
+                  <MessageSquare size={16} className="shrink-0 text-ink-subtle" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-slate-700">{c.lastMessagePreview ?? "Sin mensajes"}</p>
-                    <p className="text-xs text-slate-400">{fmt(c.lastMessageAt)}</p>
+                    <p className="truncate text-sm text-ink">{c.lastMessagePreview ?? "Sin mensajes"}</p>
+                    <p className="text-xs text-ink-subtle">{fmt(c.lastMessageAt)}</p>
                   </div>
                   {c.unreadCount > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white">{c.unreadCount}</span>}
-                  <ExternalLink size={13} className="shrink-0 text-slate-400" />
+                  <ExternalLink size={13} className="shrink-0 text-ink-subtle" />
                 </Link>
               ))}
               {d.leads.length > 0 && (
-                <div className="border-t border-slate-100 pt-3">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Ciclo de vida</p>
+                <div className="border-t border-line pt-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-subtle">Ciclo de vida</p>
                   {d.leads.map((l) => (
                     <div key={l.id} className="flex items-center gap-2 py-1 text-sm">
                       <span className="h-2 w-2 rounded-full" style={{ background: l.status.color ?? "#94a3b8" }} />
-                      <span className="text-slate-700">{l.status.name}</span>
-                      <span className="ml-auto text-xs text-slate-400">{fmt(l.createdAt)}</span>
+                      <span className="text-ink">{l.status.name}</span>
+                      <span className="ml-auto text-xs text-ink-subtle">{fmt(l.createdAt)}</span>
                     </div>
                   ))}
                 </div>
@@ -344,26 +344,26 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <div className="mt-3 space-y-2">
                   {d.notes.map((n) => (
                     <div key={n.id} className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-sm">
-                      <p className="text-slate-700">{n.text}</p>
-                      <p className="mt-1 text-xs text-slate-400">{n.authorName ?? "—"} · {fmt(n.createdAt)}</p>
+                      <p className="text-ink">{n.text}</p>
+                      <p className="mt-1 text-xs text-ink-subtle">{n.authorName ?? "—"} · {fmt(n.createdAt)}</p>
                     </div>
                   ))}
                 </div>
               </div>
               {/* Historial */}
-              <div className="border-t border-slate-100 pt-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Historial</p>
+              <div className="border-t border-line pt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-subtle">Historial</p>
                 <ul className="space-y-2">
                   {d.activity.map((a) => (
                     <li key={a.id} className="flex items-start gap-2 text-sm">
                       <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
                       <div>
-                        <p className="text-slate-700">{ACTION_LABEL[a.action] ?? a.action}</p>
-                        <p className="text-xs text-slate-400">{a.actor ?? a.actorType} · {fmt(a.createdAt)}</p>
+                        <p className="text-ink">{ACTION_LABEL[a.action] ?? a.action}</p>
+                        <p className="text-xs text-ink-subtle">{a.actor ?? a.actorType} · {fmt(a.createdAt)}</p>
                       </div>
                     </li>
                   ))}
-                  {d.activity.length === 0 && <li className="text-sm text-slate-400">Sin actividad registrada.</li>}
+                  {d.activity.length === 0 && <li className="text-sm text-ink-subtle">Sin actividad registrada.</li>}
                 </ul>
               </div>
             </div>
@@ -381,7 +381,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
 function F({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-ink-muted">{label}</span>
       {children}
     </label>
   );
@@ -389,16 +389,16 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p>
-      <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">{children}</div>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-subtle">{title}</p>
+      <div className="divide-y divide-slate-100 rounded-lg border border-line">{children}</div>
     </div>
   );
 }
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-2">
-      <span className="text-slate-500">{k}</span>
-      <span className="text-right text-slate-800">{v}</span>
+      <span className="text-ink-muted">{k}</span>
+      <span className="text-right text-ink">{v}</span>
     </div>
   );
 }

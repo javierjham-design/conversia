@@ -60,18 +60,18 @@ export default function HoursSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h2 className="text-lg font-semibold">Horario de atención</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Horario del negocio en <code>{data.timezone}</code> (cámbiala en Información general). Lo usa el nodo «Fecha y
         hora» de los flujos como valor por defecto — cada nodo puede definir un horario propio que lo sobreescribe (p.
         ej. una campaña con horario especial). También está disponible para los agentes IA.
       </p>
 
-      <div className="mt-4 space-y-2 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 space-y-2 rounded-card border border-line bg-panel p-5 shadow-card">
         {DAYS.map(([key, label]) => {
           const intervals = data.hours[key] ?? [];
           const open = intervals.length > 0;
           return (
-            <div key={key} className="flex flex-wrap items-center gap-2 border-b border-slate-50 py-1.5 last:border-0">
+            <div key={key} className="flex flex-wrap items-center gap-2 border-b border-line py-1.5 last:border-0">
               <label className="flex w-28 items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -83,16 +83,16 @@ export default function HoursSettingsPage() {
               {open ? (
                 intervals.map((iv, idx) => (
                   <span key={idx} className="flex items-center gap-1 text-sm">
-                    <input type="time" value={iv.from} onChange={(e) => setDay(key, intervals.map((x, i) => (i === idx ? { ...x, from: e.target.value } : x)))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                    <input type="time" value={iv.from} onChange={(e) => setDay(key, intervals.map((x, i) => (i === idx ? { ...x, from: e.target.value } : x)))} className="rounded-lg border border-line-strong px-2 py-1 text-xs" />
                     –
-                    <input type="time" value={iv.to} onChange={(e) => setDay(key, intervals.map((x, i) => (i === idx ? { ...x, to: e.target.value } : x)))} className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                    <input type="time" value={iv.to} onChange={(e) => setDay(key, intervals.map((x, i) => (i === idx ? { ...x, to: e.target.value } : x)))} className="rounded-lg border border-line-strong px-2 py-1 text-xs" />
                     {intervals.length > 1 && (
-                      <button onClick={() => setDay(key, intervals.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-red-500">✕</button>
+                      <button onClick={() => setDay(key, intervals.filter((_, i) => i !== idx))} className="text-ink-subtle hover:text-red-500">✕</button>
                     )}
                   </span>
                 ))
               ) : (
-                <span className="text-xs text-slate-400">Cerrado</span>
+                <span className="text-xs text-ink-subtle">Cerrado</span>
               )}
               {open && intervals.length < 3 && (
                 <button onClick={() => setDay(key, [...intervals, { from: "15:00", to: "19:00" }])} className="text-[11px] text-cyan-700 underline">
@@ -104,7 +104,7 @@ export default function HoursSettingsPage() {
         })}
       </div>
 
-      <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Feriados (el negocio no atiende)</p>
           <Button
@@ -117,15 +117,15 @@ export default function HoursSettingsPage() {
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {data.holidays.map((h) => (
-            <span key={h} className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+            <span key={h} className="flex items-center gap-1 rounded-full bg-app px-2 py-0.5 text-xs text-ink-muted">
               {h}
-              <button onClick={() => setData({ ...data, holidays: data.holidays.filter((x) => x !== h) })} className="text-slate-400 hover:text-red-500">✕</button>
+              <button onClick={() => setData({ ...data, holidays: data.holidays.filter((x) => x !== h) })} className="text-ink-subtle hover:text-red-500">✕</button>
             </span>
           ))}
-          {data.holidays.length === 0 && <span className="text-xs text-slate-400">Sin feriados cargados.</span>}
+          {data.holidays.length === 0 && <span className="text-xs text-ink-subtle">Sin feriados cargados.</span>}
         </div>
         <div className="mt-2 flex gap-2">
-          <input type="date" value={newHoliday} onChange={(e) => setNewHoliday(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <input type="date" value={newHoliday} onChange={(e) => setNewHoliday(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5 text-xs" />
           <Button
             variant="ghost"
             onClick={() => {

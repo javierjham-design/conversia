@@ -50,17 +50,17 @@ export default function NotificationsSettingsPage() {
   return (
     <div className="mx-auto max-w-xl p-6">
       <h2 className="text-lg font-semibold">Notificaciones</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Preferencias personales — solo te afectan a ti, no al resto del equipo. Por defecto todo activado menos el
         resumen diario.
       </p>
 
-      <div className="mt-4 space-y-1 rounded-card border border-slate-200 bg-white p-2 shadow-card">
+      <div className="mt-4 space-y-1 rounded-card border border-line bg-panel p-2 shadow-card">
         {ITEMS.map((item) => (
-          <label key={item.key} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-slate-50">
+          <label key={item.key} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2.5 hover:bg-app">
             <span className="min-w-0">
               <span className="block text-sm font-medium">{item.label}</span>
-              <span className="block text-xs text-slate-400">{item.desc}</span>
+              <span className="block text-xs text-ink-subtle">{item.desc}</span>
             </span>
             <input type="checkbox" checked={prefs[item.key]} disabled={busy} onChange={() => void toggle(item.key)} className="h-4 w-4 shrink-0" />
           </label>

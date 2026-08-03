@@ -51,7 +51,7 @@ export default function TeamsSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h2 className="text-lg font-semibold">Equipos</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Ventas, Recepción, Sede… Los equipos se usan en las asignaciones de la <b>Bandeja</b>, la acción «Asignar a» de
         los <b>agentes IA</b> y el paso «Asignar» de los <b>flujos</b>. Los usuarios y sus roles viven en{" "}
         <a href="/settings/users" className="text-cyan-700 underline">Usuarios</a>.
@@ -63,14 +63,14 @@ export default function TeamsSettingsPage() {
           onChange={(e) => setNewName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void create()}
           placeholder="Nuevo equipo (p. ej. Recepción)…"
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm"
         />
         <Button onClick={() => void create()} disabled={newName.trim().length < 2}><Plus size={14} /> Crear equipo</Button>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {teams.length === 0 && (
-          <p className="col-span-full rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
+          <p className="col-span-full rounded-lg border border-dashed border-line p-6 text-center text-sm text-ink-subtle">
             Aún no hay equipos — crea el primero arriba.
           </p>
         )}
@@ -78,7 +78,7 @@ export default function TeamsSettingsPage() {
           const q = (memberSearch[t.id] ?? "").toLowerCase();
           const candidates = users.filter((u) => !t.members.some((m) => m.userId === u.userId) && (!q || u.name.toLowerCase().includes(q)));
           return (
-            <div key={t.id} className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
+            <div key={t.id} className="rounded-card border border-line bg-panel p-4 shadow-card">
               <div className="flex items-start justify-between">
                 <div className="min-w-0">
                   <input
@@ -89,43 +89,43 @@ export default function TeamsSettingsPage() {
                         void api(`/users/teams/${t.id}`, { method: "PATCH", body: JSON.stringify({ name }) }).then(load);
                       }
                     }}
-                    className="w-full rounded border border-transparent px-1 py-0.5 text-sm font-semibold hover:border-slate-200 focus:border-cyan-400"
+                    className="w-full rounded border border-transparent px-1 py-0.5 text-sm font-semibold hover:border-line focus:border-cyan-400"
                   />
                   <a href={`/inbox?team=${t.id}`} className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan-700 underline">
                     <Inbox size={11} /> {t.openConversations} conversación(es) asignadas hoy
                   </a>
                 </div>
-                <button onClick={() => setDeleting(t)} className="text-slate-300 hover:text-red-500" title="Eliminar equipo">
+                <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar equipo">
                   <Trash2 size={14} />
                 </button>
               </div>
 
-              <p className="mt-2 flex items-center gap-1 text-[10px] font-semibold uppercase text-slate-400">
+              <p className="mt-2 flex items-center gap-1 text-[10px] font-semibold uppercase text-ink-subtle">
                 <Users size={11} /> Miembros ({t.members.length})
               </p>
               <ul className="mt-1 space-y-0.5">
                 {t.members.map((m) => (
-                  <li key={m.userId} className="flex items-center justify-between rounded px-1 py-0.5 text-xs text-slate-600 hover:bg-slate-50">
+                  <li key={m.userId} className="flex items-center justify-between rounded px-1 py-0.5 text-xs text-ink-muted hover:bg-app">
                     {m.name}
                     <button
                       onClick={() => void api(`/users/teams/${t.id}/members/${m.userId}`, { method: "DELETE" }).then(load)}
-                      className="text-slate-300 hover:text-red-500"
+                      className="text-ink-subtle hover:text-red-500"
                       title="Quitar del equipo"
                     >
                       ✕
                     </button>
                   </li>
                 ))}
-                {t.members.length === 0 && <li className="text-xs text-slate-400">Sin miembros aún.</li>}
+                {t.members.length === 0 && <li className="text-xs text-ink-subtle">Sin miembros aún.</li>}
               </ul>
 
               <div className="relative mt-2">
-                <Search size={11} className="pointer-events-none absolute left-2 top-2 text-slate-400" />
+                <Search size={11} className="pointer-events-none absolute left-2 top-2 text-ink-subtle" />
                 <input
                   value={memberSearch[t.id] ?? ""}
                   onChange={(e) => setMemberSearch({ ...memberSearch, [t.id]: e.target.value })}
                   placeholder="Buscar para agregar…"
-                  className="w-full rounded-lg border border-slate-200 py-1 pl-6 pr-2 text-xs"
+                  className="w-full rounded-lg border border-line py-1 pl-6 pr-2 text-xs"
                 />
               </div>
               {(memberSearch[t.id] ?? "") !== "" && (
@@ -145,7 +145,7 @@ export default function TeamsSettingsPage() {
                       </button>
                     </li>
                   ))}
-                  {candidates.length === 0 && <li className="px-1.5 text-xs text-slate-400">Sin coincidencias.</li>}
+                  {candidates.length === 0 && <li className="px-1.5 text-xs text-ink-subtle">Sin coincidencias.</li>}
                 </ul>
               )}
             </div>

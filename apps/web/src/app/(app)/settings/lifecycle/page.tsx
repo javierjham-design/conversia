@@ -90,25 +90,25 @@ export default function LifecycleSettingsPage() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => onDrop(s.id)}
       className={cn(
-        "flex items-center gap-2 rounded-lg border bg-white px-2 py-2",
-        dragId === s.id ? "border-cyan-400 opacity-60" : "border-slate-100",
+        "flex items-center gap-2 rounded-lg border bg-panel px-2 py-2",
+        dragId === s.id ? "border-cyan-400 opacity-60" : "border-line",
         !s.active && "opacity-50",
       )}
     >
-      <GripVertical size={14} className="shrink-0 cursor-grab text-slate-300" />
+      <GripVertical size={14} className="shrink-0 cursor-grab text-ink-subtle" />
       <span className="w-7 text-center text-base">{s.emoji ?? "•"}</span>
       <span className="min-w-0 flex-1">
         <span className={cn("text-sm font-medium", !s.active && "line-through")} style={s.color ? { color: s.color } : {}}>{s.name}</span>
-        <span className="ml-2 font-mono text-[10px] text-slate-400">{s.code}</span>
+        <span className="ml-2 font-mono text-[10px] text-ink-subtle">{s.code}</span>
         {s.category === "WON" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Conversión → CAPI</span>}
       </span>
-      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{CATEGORY_LABELS[s.category]}</span>
-      <span className="w-16 shrink-0 text-right text-[10px] text-slate-400">{s.leadsCount} lead(s)</span>
-      <button onClick={() => void toggleActive(s)} className="text-[11px] text-slate-400 underline hover:text-slate-600">
+      <span className="shrink-0 rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{CATEGORY_LABELS[s.category]}</span>
+      <span className="w-16 shrink-0 text-right text-[10px] text-ink-subtle">{s.leadsCount} lead(s)</span>
+      <button onClick={() => void toggleActive(s)} className="text-[11px] text-ink-subtle underline hover:text-ink-muted">
         {s.active ? "Desactivar" : "Activar"}
       </button>
       <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setEditing(s)}>Editar</Button>
-      <button onClick={() => setDeleting(s)} className="text-slate-300 hover:text-red-500" title="Eliminar">✕</button>
+      <button onClick={() => setDeleting(s)} className="text-ink-subtle hover:text-red-500" title="Eliminar">✕</button>
     </li>
   );
 
@@ -118,18 +118,18 @@ export default function LifecycleSettingsPage() {
         <h2 className="text-lg font-semibold">Etapas del ciclo de vida</h2>
         <Button onClick={() => setAdding(true)}><Plus size={14} /> Nueva etapa</Button>
       </div>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Define TU proceso de venta: arrastra para reordenar, edita nombre/emoji/color, desactiva sin borrar. Las etapas de
         categoría <b>Ganada</b> cuentan como conversión (la Bandeja ofrece enviar el evento CAPI al marcarlas). Consumen
         esta definición: Bandeja, Contactos, Workflows y Agentes IA.
       </p>
 
-      <h3 className="mt-5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Etapas del ciclo</h3>
+      <h3 className="mt-5 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Etapas del ciclo</h3>
       <ul className="mt-1.5 space-y-1">{activeStages.map(renderRow)}</ul>
 
       {lostStages.length > 0 && (
         <>
-          <h3 className="mt-5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Etapas perdidas / congeladas</h3>
+          <h3 className="mt-5 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Etapas perdidas / congeladas</h3>
           <ul className="mt-1.5 space-y-1">{lostStages.map(renderRow)}</ul>
         </>
       )}
@@ -190,40 +190,40 @@ function StageFormModal({
   const [emoji, setEmoji] = useState(stage?.emoji ?? "");
   const [color, setColor] = useState(stage?.color ?? "#0891b2");
   const [category, setCategory] = useState(stage?.category ?? "OPEN");
-  const input = "mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm";
+  const input = "mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm";
 
   return (
     <Modal open onClose={onCancel} title={stage ? `Editar «${stage.name}»` : "Nueva etapa"}>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Nombre</span>
+          <span className="text-xs text-ink-muted">Nombre</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Presupuesto enviado" className={input} />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Categoría</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value as StageRow["category"])} className={`${input} bg-white`}>
+          <span className="text-xs text-ink-muted">Categoría</span>
+          <select value={category} onChange={(e) => setCategory(e.target.value as StageRow["category"])} className={`${input} bg-panel`}>
             {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
           </select>
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Emoji</span>
+          <span className="text-xs text-ink-muted">Emoji</span>
           <div className="mt-1 flex items-center gap-1">
-            <input value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={4} className="w-14 rounded-lg border border-slate-300 px-2 py-1.5 text-center text-sm" />
+            <input value={emoji} onChange={(e) => setEmoji(e.target.value)} maxLength={4} className="w-14 rounded-lg border border-line-strong px-2 py-1.5 text-center text-sm" />
             <div className="flex flex-wrap gap-0.5">
               {EMOJI_SUGGESTIONS.map((e) => (
-                <button key={e} onClick={() => setEmoji(e)} className="rounded p-0.5 text-sm hover:bg-slate-100">{e}</button>
+                <button key={e} onClick={() => setEmoji(e)} className="rounded p-0.5 text-sm hover:bg-app">{e}</button>
               ))}
             </div>
           </div>
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Color</span>
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-300" />
+          <span className="text-xs text-ink-muted">Color</span>
+          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-line-strong" />
         </label>
       </div>
-      <p className="mt-2 text-[10px] text-slate-400">
+      <p className="mt-2 text-[10px] text-ink-subtle">
         La categoría «Ganada» marca conversión (oferta CAPI en la Bandeja y métricas de reportes). El código interno no
         cambia al renombrar: tus flujos siguen funcionando.
       </p>
@@ -270,10 +270,10 @@ function DeleteStageModal({
     <Modal open onClose={onClose} title={`¿Eliminar «${stage.name}»?`}>
       {stage.leadsCount > 0 ? (
         <>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-ink-muted">
             Esta etapa tiene <b>{stage.leadsCount} lead(s)</b>. Elige a qué etapa migrarlos antes de eliminarla:
           </p>
-          <select value={migrateTo} onChange={(e) => setMigrateTo(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+          <select value={migrateTo} onChange={(e) => setMigrateTo(e.target.value)} className="mt-2 w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
             <option value="">— elegir etapa destino —</option>
             {others.map((s) => (
               <option key={s.id} value={s.id}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
@@ -281,7 +281,7 @@ function DeleteStageModal({
           </select>
         </>
       ) : (
-        <p className="text-sm text-slate-600">No tiene leads asociados. Esta acción no se puede deshacer.</p>
+        <p className="text-sm text-ink-muted">No tiene leads asociados. Esta acción no se puede deshacer.</p>
       )}
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancelar</Button>

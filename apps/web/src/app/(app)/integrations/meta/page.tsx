@@ -66,18 +66,18 @@ export interface MetaOverview {
 
 function AssetNode({ icon, title, items, empty }: { icon: React.ReactNode; title: string; items: Asset[]; empty: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-card">
-      <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-slate-600">
+    <div className="rounded-xl border border-line bg-panel p-3.5 shadow-card">
+      <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink-muted">
         <span className="text-brand-600">{icon}</span> {title}
       </p>
       {items.length === 0 ? (
-        <p className="text-xs text-slate-400">{empty}</p>
+        <p className="text-xs text-ink-subtle">{empty}</p>
       ) : (
         <ul className="space-y-1">
           {items.map((a) => (
             <li key={a.id} className={cn("flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-[13px]", a.enabled ? "bg-brand-50/60" : "opacity-50")}>
               <span className="truncate">{a.name}</span>
-              <span className="shrink-0 font-mono text-[10px] text-slate-400">{a.externalId.slice(0, 14)}</span>
+              <span className="shrink-0 font-mono text-[10px] text-ink-subtle">{a.externalId.slice(0, 14)}</span>
             </li>
           ))}
         </ul>
@@ -165,7 +165,7 @@ export default function MetaCenterPage() {
         ) : (
           <>
             {/* Estado de conexión */}
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-panel p-5 shadow-card">
               <div className="flex items-center gap-4">
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-navy-900 text-accent-400">
                   <Building2 size={24} />
@@ -175,7 +175,7 @@ export default function MetaCenterPage() {
                     <p className="font-semibold">{connection?.businessName ?? "Sin conexión con Meta"}</p>
                     <StatusBadge kind={statusKind as any} />
                   </div>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-ink-subtle">
                     {connection
                       ? `Modo: ${connection.mode === "MOCK" ? "simulación de desarrollo (no toca Meta)" : connection.mode === "MANUAL" ? "manual (ids + token)" : "Embedded Signup"}`
                       : "Conecta tu Business Portfolio para habilitar los módulos"}
@@ -222,7 +222,7 @@ export default function MetaCenterPage() {
                   </div>
                   <div>
                     <h2 className="mb-3 text-[15px] font-semibold">Checklist de configuración</h2>
-                    <div className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
+                    <div className="rounded-card border border-line bg-panel p-4 shadow-card">
                       <PermissionChecklist checklist={data.checklist} />
                       <Button className="mt-4 w-full" variant="secondary" onClick={() => setWizardOpen(true)}>
                         Abrir asistente de conexión
@@ -234,18 +234,18 @@ export default function MetaCenterPage() {
 
               {tab === "leadads" && (
                 <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                  <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                     <h2 className="mb-1 font-semibold">Mapeo de campos</h2>
-                    <p className="mb-4 text-[13px] text-slate-500">
+                    <p className="mb-4 text-[13px] text-ink-muted">
                       Cómo se transforma cada campo del formulario de Meta en datos de TuBot. Se aplica sede, estado
                       inicial, etiquetas y dispara los workflows con trigger <code className="text-xs">lead_created</code>.
                     </p>
                     <FieldMappingEditor initial={data.leadMapping} leadStatuses={leadStatuses} onSaved={() => void load()} />
                   </div>
                   <div className="space-y-4">
-                    <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Probar recepción</h2>
-                      <p className="mb-3 text-[13px] text-slate-500">
+                      <p className="mb-3 text-[13px] text-ink-muted">
                         Encola un lead de prueba por el pipeline real (contacto → lead → workflows → actividad).
                       </p>
                       <Button
@@ -258,7 +258,7 @@ export default function MetaCenterPage() {
                         <Send size={14} /> Simular lead entrante
                       </Button>
                     </div>
-                    <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Últimos leads recibidos</h2>
                       <RecentEvents provider="lead_ads" />
                     </div>
@@ -268,16 +268,16 @@ export default function MetaCenterPage() {
 
               {tab === "capi" && (
                 <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                  <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                     <h2 className="mb-1 font-semibold">Reglas de conversión</h2>
-                    <p className="mb-4 text-[13px] text-slate-500">
+                    <p className="mb-4 text-[13px] text-ink-muted">
                       Qué eventos del ciclo del lead se envían a Meta y con qué nombre. Con la conexión simulada los
                       envíos se registran como <b>[SIMULADO]</b> sin salir a Meta.
                     </p>
                     <EventMappingEditor initial={data.eventMapping} onSaved={() => void load()} />
                   </div>
                   <div className="space-y-4">
-                    <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Evento de prueba</h2>
                       <Button
                         variant="secondary"
@@ -289,7 +289,7 @@ export default function MetaCenterPage() {
                         <Send size={14} /> Enviar evento de prueba
                       </Button>
                     </div>
-                    <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Registro de envíos</h2>
                       <RecentEvents provider="capi" />
                     </div>
@@ -298,7 +298,7 @@ export default function MetaCenterPage() {
               )}
 
               {tab === "actividad" && (
-                <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+                <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                   {activity === null ? (
                     <Skeleton className="h-48" />
                   ) : activity.length === 0 ? (
@@ -306,14 +306,14 @@ export default function MetaCenterPage() {
                   ) : (
                     <ul className="space-y-1.5">
                       {activity.map((a) => (
-                        <li key={a.id} className="flex items-start justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 text-[13px]">
+                        <li key={a.id} className="flex items-start justify-between gap-3 rounded-lg border border-line px-3 py-2 text-[13px]">
                           <div>
-                            <span className="mr-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500">{a.provider}</span>
-                            <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-slate-700"}>
+                            <span className="mr-2 rounded bg-app px-1.5 py-0.5 font-mono text-[10px] uppercase text-ink-muted">{a.provider}</span>
+                            <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-ink"}>
                               {a.message ?? a.type}
                             </span>
                           </div>
-                          <span className="shrink-0 text-xs text-slate-400">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
+                          <span className="shrink-0 text-xs text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
                         </li>
                       ))}
                     </ul>
@@ -345,15 +345,15 @@ function RecentEvents({ provider }: { provider: string }) {
     void api<any[]>(`/integrations/activity?provider=${provider}&take=10`).then(setRows).catch(() => setRows([]));
   }, [provider]);
   if (rows === null) return <Skeleton className="h-20" />;
-  if (rows.length === 0) return <p className="text-sm text-slate-400">Sin registros todavía.</p>;
+  if (rows.length === 0) return <p className="text-sm text-ink-subtle">Sin registros todavía.</p>;
   return (
     <ul className="space-y-1.5">
       {rows.map((a) => (
-        <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs">
-          <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-slate-600"}>
+        <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2 text-xs">
+          <span className={a.status === "error" ? "text-red-600" : a.status === "warning" ? "text-amber-700" : "text-ink-muted"}>
             {a.message ?? a.type}
           </span>
-          <span className="shrink-0 text-slate-400">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
+          <span className="shrink-0 text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
         </li>
       ))}
     </ul>

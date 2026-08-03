@@ -55,30 +55,30 @@ export default function AuditSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h2 className="text-lg font-semibold">Registro de auditoría</h2>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-ink-muted">
         Quién hizo qué y cuándo en tu espacio (acciones de usuarios, agentes y sistema). Solo visible para Owner/Admin.
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
-        <select value={module} onChange={(e) => setModule(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5">
+        <select value={module} onChange={(e) => setModule(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
           {MODULES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
         </select>
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5" />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5" />
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" />
       </div>
 
       {!items ? (
         <Skeleton className="mt-4 h-64" />
       ) : (
         <ul className="mt-3 space-y-1">
-          {items.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Sin registros con estos filtros.</p>}
+          {items.length === 0 && <p className="rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin registros con estos filtros.</p>}
           {items.map((r) => (
-            <li key={r.id} className="rounded-lg border border-slate-100 bg-white px-3 py-1.5 text-xs">
+            <li key={r.id} className="rounded-lg border border-line bg-panel px-3 py-1.5 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-[11px] text-cyan-800">{r.action}</span>
-                <span className="shrink-0 text-slate-400">{new Date(r.createdAt).toLocaleString("es-CL")}</span>
+                <span className="shrink-0 text-ink-subtle">{new Date(r.createdAt).toLocaleString("es-CL")}</span>
               </div>
-              <p className="text-slate-500">
+              <p className="text-ink-muted">
                 {r.actorType === "user" ? `👤 ${r.actorName ?? "usuario"}` : r.actorType === "agent" ? "🤖 agente IA" : "⚙ sistema"}
                 {r.entityType ? ` · ${r.entityType}${r.entityId ? ` (${r.entityId.slice(0, 10)}…)` : ""}` : ""}
                 {r.after ? ` · ${JSON.stringify(r.after).slice(0, 120)}` : ""}

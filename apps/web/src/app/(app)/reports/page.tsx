@@ -19,10 +19,10 @@ interface Overview {
 
 function Kpi({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <p className="text-xs text-slate-400">{label}</p>
+    <div className="rounded-xl border border-line bg-panel p-4">
+      <p className="text-xs text-ink-subtle">{label}</p>
       <p className="text-2xl font-semibold">{value}</p>
-      {hint && <p className="text-[11px] text-slate-400">{hint}</p>}
+      {hint && <p className="text-[11px] text-ink-subtle">{hint}</p>}
     </div>
   );
 }
@@ -68,7 +68,7 @@ export default function ReportsPage() {
   }
 
   if (error) return <div className="p-6 text-red-600">{error}</div>;
-  if (!data) return <div className="p-6 text-slate-400">Cargando…</div>;
+  if (!data) return <div className="p-6 text-ink-subtle">Cargando…</div>;
 
   const funnelMax = Math.max(1, ...data.leadFunnel.map((f) => f.count));
   const apptLabel: Record<string, string> = {
@@ -85,18 +85,18 @@ export default function ReportsPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Reportes</h1>
-          <p className="text-sm text-slate-500">Actividad, conversión de leads y costos de IA del tenant.</p>
+          <p className="text-sm text-ink-muted">Actividad, conversión de leads y costos de IA del tenant.</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
             <option value={7}>Últimos 7 días</option>
             <option value={30}>Últimos 30 días</option>
             <option value={90}>Últimos 90 días</option>
           </select>
-          <button onClick={() => void download(`/reports/export/conversations?days=${days}`, `conversaciones_${days}d.csv`)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
+          <button onClick={() => void download(`/reports/export/conversations?days=${days}`, `conversaciones_${days}d.csv`)} className="rounded-lg border border-line-strong px-3 py-2 text-sm hover:bg-app">
             ⬇ Conversaciones CSV
           </button>
-          <button onClick={() => void download("/reports/export/leads", "leads.csv")} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
+          <button onClick={() => void download("/reports/export/leads", "leads.csv")} className="rounded-lg border border-line-strong px-3 py-2 text-sm hover:bg-app">
             ⬇ Leads CSV
           </button>
         </div>
@@ -110,15 +110,15 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Funnel de leads (actual)</h2>
           {data.leadFunnel.filter((f) => f.count > 0).length === 0 && (
-            <p className="text-sm text-slate-400">Sin leads registrados aún.</p>
+            <p className="text-sm text-ink-subtle">Sin leads registrados aún.</p>
           )}
           <div className="space-y-1.5">
             {data.leadFunnel.filter((f) => f.count > 0).map((f) => (
               <div key={f.code} className="flex items-center gap-2 text-sm">
-                <span className="w-40 truncate text-xs text-slate-500">{f.name}</span>
+                <span className="w-40 truncate text-xs text-ink-muted">{f.name}</span>
                 <div className="h-5 rounded bg-cyan-600/80" style={{ width: `${(f.count / funnelMax) * 60 + 4}%` }} />
                 <span className="text-xs font-medium">{f.count}</span>
               </div>
@@ -126,31 +126,31 @@ export default function ReportsPage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Citas ({data.days}d)</h2>
           {data.appointments.length === 0 ? (
-            <p className="text-sm text-slate-400">Sin citas en el período.</p>
+            <p className="text-sm text-ink-subtle">Sin citas en el período.</p>
           ) : (
             <div className="flex flex-wrap gap-3">
               {data.appointments.map((a) => (
-                <div key={a.status} className="rounded-lg bg-slate-50 px-4 py-2 text-center">
+                <div key={a.status} className="rounded-lg bg-app px-4 py-2 text-center">
                   <p className="text-xl font-semibold">{a.count}</p>
-                  <p className="text-xs text-slate-500">{apptLabel[a.status] ?? a.status}</p>
+                  <p className="text-xs text-ink-muted">{apptLabel[a.status] ?? a.status}</p>
                 </div>
               ))}
             </div>
           )}
-          <p className="mt-4 border-t border-slate-100 pt-3 text-sm">
+          <p className="mt-4 border-t border-line pt-3 text-sm">
             Escalamientos a humano en el período: <b>{data.humanHandoffs}</b>
           </p>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Conversaciones nuevas por día (14d)</h2>
           <Bars data={data.series.conversationsPerDay} />
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Mensajes recibidos por día (14d)</h2>
           <Bars data={data.series.inboundPerDay} />
         </section>

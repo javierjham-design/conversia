@@ -4,7 +4,7 @@ export default function PrivacidadPage() {
   return (
     <>
       <h1>Política de privacidad</h1>
-      <p className="text-slate-500">Última actualización: 27 de julio de 2026</p>
+      <p className="text-ink-muted">Última actualización: 27 de julio de 2026</p>
 
       <p>
         Esta política describe cómo <strong>TuBot</strong> (“la Plataforma”, “nosotros”) trata los datos

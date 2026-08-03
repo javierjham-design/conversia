@@ -57,11 +57,11 @@ const QUICK_EMOJIS = ["🤖", "💬", "👩‍💼", "🛎️", "🦷", "🏥", 
 /** Card de sección con título, ayuda opcional y contenido. */
 function Section({ title, subtitle, helpKey, onHelp, children }: { title: string; subtitle?: string; helpKey?: string; onHelp?: (k: string) => void; children: React.ReactNode }) {
   return (
-    <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+    <div className="mb-4 rounded-xl border border-line bg-panel p-4">
       <div className="mb-1 flex items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold text-navy-900">{title}</h2>
-          {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+          {subtitle && <p className="text-xs text-ink-subtle">{subtitle}</p>}
         </div>
         {helpKey && onHelp && (
           <button onClick={() => onHelp(helpKey)} className="shrink-0 text-xs font-medium text-brand-600 hover:underline">
@@ -77,7 +77,7 @@ function Section({ title, subtitle, helpKey, onHelp, children }: { title: string
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked} className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-brand-600" : "bg-slate-300")}>
-      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", checked ? "left-[18px]" : "left-0.5")} />
+      <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-panel transition-all", checked ? "left-[18px]" : "left-0.5")} />
     </button>
   );
 }
@@ -85,21 +85,21 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: AgentActionDef; state?: { enabled: boolean; instructions: string }; onToggle: (en: boolean) => void; onInstructions: (v: string) => void; mentions?: Mention[] }) {
   const enabled = state?.enabled ?? false;
   return (
-    <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40" : "border-slate-200")}>
+    <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40" : "border-line")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-navy-900">{def.label}</p>
-          <p className="text-xs text-slate-500">{def.description}</p>
+          <p className="text-xs text-ink-muted">{def.description}</p>
         </div>
         <Toggle checked={enabled} onChange={onToggle} />
       </div>
       {enabled && (
         <div className="mt-2">
-          <label className="text-xs text-slate-500">¿Cuándo y cómo debe ejecutarse esta acción?</label>
+          <label className="text-xs text-ink-muted">¿Cuándo y cómo debe ejecutarse esta acción?</label>
           {mentions ? (
             <MentionTextarea value={state?.instructions ?? ""} onChange={onInstructions} placeholder={def.placeholder} mentions={mentions} />
           ) : (
-            <textarea value={state?.instructions ?? ""} onChange={(e) => onInstructions(e.target.value)} rows={2} placeholder={def.placeholder} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            <textarea value={state?.instructions ?? ""} onChange={(e) => onInstructions(e.target.value)} rows={2} placeholder={def.placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
           )}
         </div>
       )}
@@ -126,18 +126,18 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
   }
   return (
     <div className="relative">
-      <textarea ref={ref} value={value} onChange={(e) => handle(e.target.value)} rows={2} placeholder={placeholder} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+      <textarea ref={ref} value={value} onChange={(e) => handle(e.target.value)} rows={2} placeholder={placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
       {query != null && filtered.length > 0 && (
-        <div className="absolute z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-pop">
+        <div className="absolute z-20 mt-1 w-56 rounded-lg border border-line bg-panel p-1 shadow-pop">
           {filtered.map((mm) => (
-            <button key={`${mm.type}-${mm.label}`} type="button" onClick={() => pick(mm.label)} className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-slate-50">
+            <button key={`${mm.type}-${mm.label}`} type="button" onClick={() => pick(mm.label)} className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-app">
               <span>{mm.label}</span>
-              <span className="text-[10px] text-slate-400">{mm.type}</span>
+              <span className="text-[10px] text-ink-subtle">{mm.type}</span>
             </button>
           ))}
         </div>
       )}
-      <p className="mt-1 text-[10px] text-slate-400">Escribe @ para mencionar equipos, usuarios u otros agentes.</p>
+      <p className="mt-1 text-[10px] text-ink-subtle">Escribe @ para mencionar equipos, usuarios u otros agentes.</p>
     </div>
   );
 }
@@ -326,13 +326,13 @@ export default function AgentEditorPage() {
     router.push("/agents");
   }
 
-  if (!agent) return <div className="p-6 text-slate-400">Cargando…</div>;
+  if (!agent) return <div className="p-6 text-ink-subtle">Cargando…</div>;
   const published = agent.publishedVersion != null;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-panel px-5 py-3">
         <div className="flex items-center gap-3">
           <span className="text-2xl">{emoji}</span>
           <div>
@@ -341,14 +341,14 @@ export default function AgentEditorPage() {
               <StatusBadge kind={published && agent.active ? "connected" : "beta"} label={published ? (agent.active ? "activo" : "inactivo") : "borrador"} />
               {dirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">cambios sin guardar</span>}
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-ink-subtle">
               {published ? `v${agent.publishedVersion} en producción` : "nunca publicado"}
               {agent.draftVersion ? ` · borrador v${agent.draftVersion}` : ""} · {agent.slug}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={cancel} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Cancelar</button>
+          <button onClick={cancel} className="rounded-lg border border-line-strong px-3 py-2 text-sm hover:bg-app">Cancelar</button>
           <Button variant="secondary" disabled={busy} onClick={() => void saveDraft()}>Guardar borrador</Button>
           <Button disabled={busy} onClick={() => void publish()}>Publicar</Button>
         </div>
@@ -357,7 +357,7 @@ export default function AgentEditorPage() {
       {/* Dos columnas */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Izquierda: formulario */}
-        <div className="min-w-0 flex-1 overflow-y-auto bg-slate-50 p-5">
+        <div className="min-w-0 flex-1 overflow-y-auto bg-app p-5">
           <div className="mx-auto max-w-2xl">
             {/* Punto de partida: plantillas */}
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3">
@@ -366,7 +366,7 @@ export default function AgentEditorPage() {
               </p>
               <button
                 onClick={() => setShowTemplates(true)}
-                className="shrink-0 rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
+                className="shrink-0 rounded-lg border border-brand-300 bg-panel px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
               >
                 Ver plantillas
               </button>
@@ -376,31 +376,31 @@ export default function AgentEditorPage() {
             <Section title="Configuración">
               <div className="flex gap-3">
                 <div>
-                  <label className="text-xs text-slate-500">Ícono</label>
-                  <input value={emoji} onChange={(e) => setEmoji(e.target.value.slice(0, 2))} className="mt-1 h-11 w-14 rounded-lg border border-slate-300 text-center text-xl" />
+                  <label className="text-xs text-ink-muted">Ícono</label>
+                  <input value={emoji} onChange={(e) => setEmoji(e.target.value.slice(0, 2))} className="mt-1 h-11 w-14 rounded-lg border border-line-strong text-center text-xl" />
                 </div>
                 <label className="flex-1 text-sm">
-                  <span className="text-xs text-slate-500">Nombre</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Recepcionista" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5" />
+                  <span className="text-xs text-ink-muted">Nombre</span>
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="p. ej. Recepcionista" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2.5" />
                 </label>
                 <label className="text-sm">
-                  <span className="text-xs text-slate-500">Tipo</span>
-                  <select value={kind} onChange={(e) => setKind(e.target.value)} className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm">
+                  <span className="text-xs text-ink-muted">Tipo</span>
+                  <select value={kind} onChange={(e) => setKind(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-3 py-2.5 text-sm">
                     {KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
                   </select>
                 </label>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
                 {QUICK_EMOJIS.map((e) => (
-                  <button key={e} onClick={() => setEmoji(e)} className={cn("rounded-lg border px-2 py-1 text-lg", emoji === e ? "border-brand-400 bg-brand-50" : "border-slate-200 hover:bg-slate-50")}>{e}</button>
+                  <button key={e} onClick={() => setEmoji(e)} className={cn("rounded-lg border px-2 py-1 text-lg", emoji === e ? "border-brand-400 bg-brand-50" : "border-line hover:bg-app")}>{e}</button>
                 ))}
               </div>
               {!showDescription ? (
                 <button onClick={() => setShowDescription(true)} className="mt-3 text-xs font-medium text-brand-600 hover:underline">+ Mostrar descripción</button>
               ) : (
                 <label className="mt-3 block text-sm">
-                  <span className="text-xs text-slate-500">Descripción interna (para tu equipo)</span>
-                  <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Para qué sirve este agente" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" />
+                  <span className="text-xs text-ink-muted">Descripción interna (para tu equipo)</span>
+                  <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Para qué sirve este agente" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2" />
                 </label>
               )}
             </Section>
@@ -409,19 +409,19 @@ export default function AgentEditorPage() {
             <Section title="Instrucciones" subtitle="El cerebro del agente: quién es, qué sabe, cómo habla y qué puede hacer." helpKey="instrucciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <PromptTemplateMenu onPick={insertSnippet} agentId={id} />
-                <span className="text-xs text-slate-400">~{approxTokens.toLocaleString("es-CL")} tokens</span>
+                <span className="text-xs text-ink-subtle">~{approxTokens.toLocaleString("es-CL")} tokens</span>
               </div>
               <textarea
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 rows={16}
                 placeholder="Eres el asistente de {{organization.name}}…"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-[13px] leading-relaxed"
+                className="w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-[13px] leading-relaxed"
               />
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
-                <span className="text-slate-400">Variables:</span>
+                <span className="text-ink-subtle">Variables:</span>
                 {AGENT_VARIABLES.map((v) => (
-                  <button key={v.key} onClick={() => setSystemPrompt((p) => `${p}{{${v.key}}}`)} title={v.label} className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-600 hover:bg-slate-200">
+                  <button key={v.key} onClick={() => setSystemPrompt((p) => `${p}{{${v.key}}}`)} title={v.label} className="rounded bg-app px-1.5 py-0.5 font-mono text-ink-muted hover:bg-line">
                     {"{{"}{v.key}{"}}"}
                   </button>
                 ))}
@@ -452,16 +452,16 @@ export default function AgentEditorPage() {
             {/* Fuentes de conocimiento — Fase 5 */}
             <Section title="Fuentes de conocimiento" subtitle="Qué bases de conocimiento puede consultar este agente para responder dudas." helpKey="knowledge" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               {knowledgeBases.length === 0 ? (
-                <p className="text-sm text-slate-400">Aún no hay bases de conocimiento cargadas para esta organización.</p>
+                <p className="text-sm text-ink-subtle">Aún no hay bases de conocimiento cargadas para esta organización.</p>
               ) : (
                 <div className="space-y-2">
                   {knowledgeBases.map((kb) => {
                     const on = knowledgeSources.includes(kb.id);
                     return (
-                      <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40" : "border-slate-200")}>
+                      <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40" : "border-line")}>
                         <div>
                           <p className="text-sm font-medium text-navy-900">{kb.name}</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-xs text-ink-muted">
                             {kb.description || "Sin descripción"} · {kb.publishedDocs} doc{kb.publishedDocs === 1 ? "" : "s"} publicado{kb.publishedDocs === 1 ? "" : "s"}
                           </p>
                         </div>
@@ -477,28 +477,28 @@ export default function AgentEditorPage() {
             </Section>
 
             {/* Avanzado */}
-            <div className="rounded-xl border border-slate-200 bg-white">
+            <div className="rounded-xl border border-line bg-panel">
               <button onClick={() => setShowAdvanced((v) => !v)} className="flex w-full items-center justify-between p-4 text-left">
                 <span className="font-semibold text-navy-900">Configuración avanzada</span>
-                <span className="text-slate-400">{showAdvanced ? "−" : "+"}</span>
+                <span className="text-ink-subtle">{showAdvanced ? "−" : "+"}</span>
               </button>
               {showAdvanced && (
-                <div className="space-y-4 border-t border-slate-100 p-4">
-                  <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                <div className="space-y-4 border-t border-line p-4">
+                  <div className="rounded-lg bg-app p-3 text-xs text-ink-muted">
                     El modelo de IA y sus límites (tokens por respuesta y rondas de herramientas) los administra tu proveedor para toda tu plataforma. No se configuran por agente.
                   </div>
                   <div>
-                    <p className="mb-1 text-xs font-medium text-slate-600">Canales que atiende por defecto</p>
-                    {channels.length === 0 && <p className="text-xs text-slate-400">Sin canales configurados.</p>}
+                    <p className="mb-1 text-xs font-medium text-ink-muted">Canales que atiende por defecto</p>
+                    {channels.length === 0 && <p className="text-xs text-ink-subtle">Sin canales configurados.</p>}
                     {channels.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 py-0.5 text-sm">
                         <input type="checkbox" checked={c.defaultAgentId === agent.id} onChange={(e) => void setChannelDefault(c.id, e.target.checked)} />
-                        {c.name} <span className="text-[10px] text-slate-400">({c.type})</span>
+                        {c.name} <span className="text-[10px] text-ink-subtle">({c.type})</span>
                       </label>
                     ))}
                   </div>
-                  <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                    <button onClick={() => void toggleActive()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">{agent.active ? "Desactivar agente" : "Activar agente"}</button>
+                  <div className="flex items-center justify-between border-t border-line pt-3">
+                    <button onClick={() => void toggleActive()} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app">{agent.active ? "Desactivar agente" : "Activar agente"}</button>
                     <button onClick={() => void removeAgent()} className="text-sm text-red-600 hover:underline">Eliminar agente</button>
                   </div>
                 </div>
@@ -527,22 +527,22 @@ export default function AgentEditorPage() {
 
       {/* Galería de plantillas */}
       <Modal open={showTemplates} onClose={() => setShowTemplates(false)} title="Plantillas de agente" wide>
-        <p className="mb-3 text-sm text-slate-500">
+        <p className="mb-3 text-sm text-ink-muted">
           Aplica una plantilla como punto de partida. Reemplaza las instrucciones y las acciones actuales; luego ajústalas a tu negocio.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           {AGENT_TEMPLATES.map((t) => (
-            <div key={t.key} className="flex flex-col rounded-xl border border-slate-200 p-4">
+            <div key={t.key} className="flex flex-col rounded-xl border border-line p-4">
               <div className="flex items-center gap-2">
                 <span className="text-2xl">{t.emoji}</span>
                 <p className="font-semibold text-navy-900">{t.name}</p>
               </div>
-              <p className="mt-1 flex-1 text-sm text-slate-500">{t.description}</p>
+              <p className="mt-1 flex-1 text-sm text-ink-muted">{t.description}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {Object.entries(t.actions)
                   .filter(([, a]) => a.enabled)
                   .map(([k]) => (
-                    <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                    <span key={k} className="rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">
                       {AGENT_ACTIONS.find((a) => a.key === k)?.label ?? k}
                     </span>
                   ))}
@@ -664,24 +664,24 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
   }
 
   return (
-    <aside className="hidden w-96 shrink-0 flex-col border-l border-slate-200 bg-white lg:flex">
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+    <aside className="hidden w-96 shrink-0 flex-col border-l border-line bg-panel lg:flex">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
         <div>
           <h2 className="font-semibold text-navy-900">Probar Agente IA</h2>
-          <p className="text-[11px] text-slate-400">Lee datos reales · simula acciones · no envía nada.</p>
+          <p className="text-[11px] text-ink-subtle">Lee datos reales · simula acciones · no envía nada.</p>
         </div>
         {messages.length > 0 && (
-          <button onClick={() => setMessages([])} className="text-xs text-slate-400 hover:text-slate-600">Reiniciar</button>
+          <button onClick={() => setMessages([])} className="text-xs text-ink-subtle hover:text-ink-muted">Reiniciar</button>
         )}
       </div>
-      <div className="flex gap-1 border-b border-slate-200 px-2 pt-2">
+      <div className="flex gap-1 border-b border-line px-2 pt-2">
         {(["chat", "contact"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={cn(
               "rounded-t-lg px-3 py-1.5 text-sm",
-              tab === t ? "bg-slate-100 font-medium text-navy-900" : "text-slate-500 hover:text-slate-700",
+              tab === t ? "bg-app font-medium text-navy-900" : "text-ink-muted hover:text-ink",
             )}
           >
             {t === "chat" ? "Chat" : "Campos del contacto"}
@@ -693,16 +693,16 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
         <>
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
             {messages.length === 0 && (
-              <p className="mt-8 text-center text-sm text-slate-400">
+              <p className="mt-8 text-center text-sm text-ink-subtle">
                 Escribe un mensaje como si fueras el cliente para probar el comportamiento del agente.
               </p>
             )}
             {messages.map((m, i) => (
               <TesterBubble key={i} m={m} />
             ))}
-            {loading && <p className="text-xs text-slate-400">El agente está pensando…</p>}
+            {loading && <p className="text-xs text-ink-subtle">El agente está pensando…</p>}
           </div>
-          <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="border-t border-slate-200 p-2">
+          <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="border-t border-line p-2">
             <div className="flex items-end gap-2">
               <textarea
                 value={input}
@@ -710,7 +710,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
                 rows={1}
                 placeholder="Escribe como el cliente…"
-                className="max-h-24 flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="max-h-24 flex-1 resize-none rounded-lg border border-line-strong px-3 py-2 text-sm"
               />
               <Button type="submit" disabled={loading || !input.trim()}>Enviar</Button>
             </div>
@@ -718,18 +718,18 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
         </>
       ) : (
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
-          <p className="text-xs text-slate-500">Datos del contacto simulado. El agente los lee y puede actualizarlos durante la prueba.</p>
+          <p className="text-xs text-ink-muted">Datos del contacto simulado. El agente los lee y puede actualizarlos durante la prueba.</p>
           {([["firstName", "Nombre"], ["lastName", "Apellido"], ["email", "Email"], ["phone", "Teléfono"]] as const).map(([key, label]) => (
             <label key={key} className="block">
-              <span className="text-xs text-slate-500">{label}</span>
+              <span className="text-xs text-ink-muted">{label}</span>
               <input
                 value={contact[key]}
                 onChange={(e) => setContact((c) => ({ ...c, [key]: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm"
               />
             </label>
           ))}
-          <p className="text-[11px] text-slate-400">Si dejas un campo vacío se usa un valor por defecto (teléfono ficticio para poder agendar).</p>
+          <p className="text-[11px] text-ink-subtle">Si dejas un campo vacío se usa un valor por defecto (teléfono ficticio para poder agendar).</p>
         </div>
       )}
     </aside>
@@ -745,10 +745,10 @@ function TesterBubble({ m }: { m: TestMsg }) {
   const hasFooter = tools.length > 0 || (m.meta?.simulated?.length ?? 0) > 0 || !!m.meta?.usage;
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
-      <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-slate-100 text-navy-900")}>
+      <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-app text-navy-900")}>
         <p className="whitespace-pre-wrap">{m.content}</p>
         {!isUser && hasFooter && (
-          <div className="mt-2 space-y-1 border-t border-slate-200 pt-1.5 text-[11px] text-slate-500">
+          <div className="mt-2 space-y-1 border-t border-line pt-1.5 text-[11px] text-ink-muted">
             {tools.map((t, i) => (
               <div key={`t${i}`}>🛠 {t.name}{t.isError ? " (error)" : ""}</div>
             ))}
@@ -796,13 +796,13 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
 
   return (
     <div className="relative">
-      <button onClick={() => setOpen((v) => !v)} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50">
+      <button onClick={() => setOpen((v) => !v)} className="rounded-lg border border-line-strong px-2.5 py-1.5 text-xs font-medium hover:bg-app">
         Plantillas de prompt ▾
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-pop">
+          <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-line bg-panel p-1 shadow-pop">
             {Object.entries(byType).map(([type, tpls]) => (
               <div key={type}>
                 <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-cyan-600">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
@@ -813,14 +813,14 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
                 ))}
               </div>
             ))}
-            {tenantTpls.length > 0 && <div className="my-1 border-t border-slate-100" />}
-            <p className="px-2 pt-1 text-[9px] font-semibold uppercase text-slate-400">Genéricas del sistema</p>
+            {tenantTpls.length > 0 && <div className="my-1 border-t border-line" />}
+            <p className="px-2 pt-1 text-[9px] font-semibold uppercase text-ink-subtle">Genéricas del sistema</p>
             {PROMPT_SNIPPETS.map((sn) => (
-              <button key={sn.label} onClick={() => { onPick(sn.text); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-slate-50">
+              <button key={sn.label} onClick={() => { onPick(sn.text); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-app">
                 {sn.label}
               </button>
             ))}
-            <a href="/settings/ia" className="mt-1 block border-t border-slate-100 px-2 py-1.5 text-[11px] text-cyan-700 underline">
+            <a href="/settings/ia" className="mt-1 block border-t border-line px-2 py-1.5 text-[11px] text-cyan-700 underline">
               Administrar mi biblioteca ↗
             </a>
           </div>
@@ -832,7 +832,7 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
 
 function HelpContent({ help }: { help: SectionHelp }) {
   return (
-    <div className="space-y-3 text-sm text-slate-700">
+    <div className="space-y-3 text-sm text-ink">
       <p>{help.intro}</p>
       <ul className="list-disc space-y-1 pl-5">
         {help.points.map((p, i) => (<li key={i}>{p}</li>))}
@@ -851,11 +851,11 @@ function HelpContent({ help }: { help: SectionHelp }) {
       )}
       {help.showVariables && (
         <div>
-          <p className="mb-1 text-xs font-semibold text-slate-600">Variables disponibles</p>
+          <p className="mb-1 text-xs font-semibold text-ink-muted">Variables disponibles</p>
           <div className="grid gap-1 sm:grid-cols-2">
             {AGENT_VARIABLES.map((v) => (
-              <div key={v.key} className="rounded bg-slate-50 px-2 py-1 text-xs">
-                <span className="font-mono text-slate-700">{"{{"}{v.key}{"}}"}</span> <span className="text-slate-400">— {v.label}</span>
+              <div key={v.key} className="rounded bg-app px-2 py-1 text-xs">
+                <span className="font-mono text-ink">{"{{"}{v.key}{"}}"}</span> <span className="text-ink-subtle">— {v.label}</span>
               </div>
             ))}
           </div>

@@ -89,7 +89,7 @@ export function ClarivaDrawer({
     <Drawer open={open} onClose={onClose} title="Cláriva — agenda clínica">
       {!connected ? (
         <div>
-          <p className="mb-4 text-sm text-slate-600">
+          <p className="mb-4 text-sm text-ink-muted">
             Conecta la agenda de tus sedes: disponibilidad y citas reales para los agentes IA. Las credenciales se
             envían al backend y se guardan <b>cifradas</b>; no vuelven a mostrarse completas.
           </p>
@@ -101,7 +101,7 @@ export function ClarivaDrawer({
                 onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
                 required
                 placeholder="https://api.clariva.cl"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
               />
             </label>
             <label className="block text-sm font-medium">
@@ -112,12 +112,12 @@ export function ClarivaDrawer({
                 required
                 type="password"
                 autoComplete="off"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
               />
             </label>
             <Button type="submit" disabled={busy}>Conectar y continuar</Button>
           </form>
-          <ol className="mt-6 space-y-1.5 border-t border-slate-100 pt-4 text-xs text-slate-400">
+          <ol className="mt-6 space-y-1.5 border-t border-line pt-4 text-xs text-ink-subtle">
             <li>1. Credenciales ✦ este paso</li>
             <li>2. Probar conexión y sedes visibles</li>
             <li>3. Mapeo de profesionales y prestaciones — próximamente</li>
@@ -126,13 +126,13 @@ export function ClarivaDrawer({
         </div>
       ) : (
         <div className="space-y-5">
-          <div className="flex items-center justify-between rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center justify-between rounded-xl border border-line p-4">
             <div>
               <div className="mb-1 flex items-center gap-2">
                 <StatusBadge kind={state?.lastError ? "attention" : "connected"} />
               </div>
-              <p className="font-mono text-xs text-slate-500">{state?.baseUrl}</p>
-              <p className="text-xs text-slate-400">
+              <p className="font-mono text-xs text-ink-muted">{state?.baseUrl}</p>
+              <p className="text-xs text-ink-subtle">
                 API key: <span className="font-mono">{state?.apiKeyMasked ?? "—"}</span> · Última sincronización:{" "}
                 {state?.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString("es-CL") : "nunca"}
               </p>
@@ -147,7 +147,7 @@ export function ClarivaDrawer({
             </Button>
             <Button variant="danger" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>
           </div>
-          {testDetail && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{testDetail}</p>}
+          {testDetail && <p className="rounded-lg bg-app px-3 py-2 text-xs text-ink-muted">{testDetail}</p>}
 
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-sm font-medium"><Activity size={14} /> Actividad reciente</p>
@@ -158,24 +158,24 @@ export function ClarivaDrawer({
             ) : (
               <ul className="space-y-1.5">
                 {activity.map((a) => (
-                  <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2 text-xs">
-                    <span className={a.status === "error" ? "text-red-600" : "text-slate-600"}>{a.message ?? a.type}</span>
-                    <span className="shrink-0 text-slate-400">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
+                  <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2 text-xs">
+                    <span className={a.status === "error" ? "text-red-600" : "text-ink-muted"}>{a.message ?? a.type}</span>
+                    <span className="shrink-0 text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
                   </li>
                 ))}
               </ul>
             )}
           </div>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-ink-subtle">
             Rotar credenciales: vuelve a conectar con una API key nueva (la anterior queda revocada para esta conexión).
             Mapeo de profesionales/prestaciones y verificación de cita de prueba: <b>próximamente</b>.
           </p>
 
-          <form onSubmit={connect} className="space-y-2 border-t border-slate-100 pt-4">
+          <form onSubmit={connect} className="space-y-2 border-t border-line pt-4">
             <p className="text-sm font-medium">Reconectar / rotar credenciales</p>
-            <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} required placeholder="https://api.clariva.cl" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-            <input value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} required type="password" placeholder="Nueva API key" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} required placeholder="https://api.clariva.cl" className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+            <input value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} required type="password" placeholder="Nueva API key" className="w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
             <Button type="submit" variant="secondary" disabled={busy}>Guardar credenciales nuevas</Button>
           </form>
         </div>
@@ -324,7 +324,7 @@ export function WebhooksDrawer({
       {mode === "list" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-500">Recibe eventos de TuBot en tus sistemas, firmados y con reintentos.</p>
+            <p className="text-sm text-ink-muted">Recibe eventos de TuBot en tus sistemas, firmados y con reintentos.</p>
             <Button onClick={() => setMode("new")}><Plus size={14} /> Nuevo</Button>
           </div>
           {webhooks.length === 0 && (
@@ -335,13 +335,13 @@ export function WebhooksDrawer({
             />
           )}
           {webhooks.map((w) => (
-            <button key={w.id} onClick={() => openDetail(w)} className="block w-full rounded-xl border border-slate-200 p-3 text-left hover:border-brand-300">
+            <button key={w.id} onClick={() => openDetail(w)} className="block w-full rounded-xl border border-line p-3 text-left hover:border-brand-300">
               <div className="flex items-center justify-between">
                 <p className="font-medium">{w.name}</p>
                 <StatusBadge kind={w.active ? (w.successRate !== null && w.successRate < 80 ? "attention" : "connected") : "disconnected"} label={w.active ? undefined : "Pausado"} />
               </div>
-              <p className="font-mono text-xs text-slate-400">{maskUrl(w.url)}</p>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="font-mono text-xs text-ink-subtle">{maskUrl(w.url)}</p>
+              <p className="mt-1 text-xs text-ink-muted">
                 {w.events.length} evento(s) · {w.deliveries7d} entregas 7d
                 {w.successRate !== null ? ` · ${w.successRate}% éxito` : ""}
                 {w.lastDeliveryAt ? ` · última ${new Date(w.lastDeliveryAt).toLocaleString("es-CL")}` : ""}
@@ -353,34 +353,34 @@ export function WebhooksDrawer({
 
       {mode === "new" && (
         <form onSubmit={create} className="space-y-3">
-          <button type="button" onClick={() => setMode("list")} className="text-xs text-slate-400 hover:text-slate-600">← Volver</button>
+          <button type="button" onClick={() => setMode("list")} className="text-xs text-ink-subtle hover:text-ink-muted">← Volver</button>
           <label className="block text-sm font-medium">
             Nombre
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="block text-sm font-medium">
             URL de destino (https)
-            <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required placeholder="https://tusistema.cl/conversia" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required placeholder="https://tusistema.cl/conversia" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="block text-sm font-medium">
             Descripción (opcional)
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm font-medium">
               Timeout (ms)
-              <input type="number" min={1000} max={30000} value={form.timeoutMs} onChange={(e) => setForm({ ...form, timeoutMs: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <input type="number" min={1000} max={30000} value={form.timeoutMs} onChange={(e) => setForm({ ...form, timeoutMs: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
             </label>
             <label className="block text-sm font-medium">
               Reintentos máx.
-              <input type="number" min={0} max={8} value={form.maxRetries} onChange={(e) => setForm({ ...form, maxRetries: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <input type="number" min={0} max={8} value={form.maxRetries} onChange={(e) => setForm({ ...form, maxRetries: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
             </label>
           </div>
           <div>
             <p className="mb-1.5 text-sm font-medium">Eventos suscritos</p>
             <div className="flex flex-wrap gap-1.5">
               {availableEvents.map((ev) => (
-                <label key={ev} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs ${form.events.includes(ev) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500 hover:border-slate-300"}`}>
+                <label key={ev} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs ${form.events.includes(ev) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line text-ink-muted hover:border-line-strong"}`}>
                   <input
                     type="checkbox"
                     className="sr-only"
@@ -403,17 +403,17 @@ export function WebhooksDrawer({
 
       {mode === "detail" && selected && (
         <div className="space-y-4">
-          <button type="button" onClick={() => setMode("list")} className="text-xs text-slate-400 hover:text-slate-600">← Volver</button>
-          <div className="rounded-xl border border-slate-200 p-4">
+          <button type="button" onClick={() => setMode("list")} className="text-xs text-ink-subtle hover:text-ink-muted">← Volver</button>
+          <div className="rounded-xl border border-line p-4">
             <div className="flex items-center justify-between">
               <p className="font-medium">{selected.name}</p>
               <StatusBadge kind={selected.active ? "connected" : "disconnected"} label={selected.active ? "Activo" : "Pausado"} />
             </div>
-            <p className="font-mono text-xs text-slate-500">{selected.url}</p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="font-mono text-xs text-ink-muted">{selected.url}</p>
+            <p className="mt-1 text-xs text-ink-subtle">
               Secreto: <span className="font-mono">{selected.secretMasked}</span> · timeout {selected.timeoutMs}ms · {selected.maxRetries} reintentos
             </p>
-            <p className="mt-1 text-xs text-slate-400">{selected.events.join(", ")}</p>
+            <p className="mt-1 text-xs text-ink-subtle">{selected.events.join(", ")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => void testWebhook(selected.id)}>Enviar prueba</Button>
@@ -429,9 +429,9 @@ export function WebhooksDrawer({
             ) : deliveries.length === 0 ? (
               <EmptyState title="Sin entregas todavía" description="Envía una prueba o espera el próximo evento suscrito." />
             ) : (
-              <div className="overflow-hidden rounded-xl border border-slate-200">
+              <div className="overflow-hidden rounded-xl border border-line">
                 <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-left text-slate-500">
+                  <thead className="bg-app text-left text-ink-muted">
                     <tr>
                       <th className="px-3 py-2">Evento</th>
                       <th className="px-3 py-2">Estado</th>
@@ -443,16 +443,16 @@ export function WebhooksDrawer({
                   </thead>
                   <tbody>
                     {deliveries.map((d) => (
-                      <tr key={d.id} className="border-t border-slate-100">
+                      <tr key={d.id} className="border-t border-line">
                         <td className="px-3 py-2 font-mono">{d.event}</td>
                         <td className="px-3 py-2">
-                          <span className={d.status === "DELIVERED" ? "text-emerald-600" : d.status === "PENDING" ? "text-slate-500" : "text-red-600"}>
+                          <span className={d.status === "DELIVERED" ? "text-emerald-600" : d.status === "PENDING" ? "text-ink-muted" : "text-red-600"}>
                             {d.status.toLowerCase()}
                           </span>
                         </td>
                         <td className="px-3 py-2">{d.responseCode ?? "—"}</td>
                         <td className="px-3 py-2">{d.attempts}</td>
-                        <td className="px-3 py-2 text-slate-400">{new Date(d.createdAt).toLocaleString("es-CL")}</td>
+                        <td className="px-3 py-2 text-ink-subtle">{new Date(d.createdAt).toLocaleString("es-CL")}</td>
                         <td className="px-3 py-2">
                           {(d.status === "FAILED" || d.status === "DEAD") && (
                             <button onClick={() => void retryDelivery(selected.id, d.id)} className="text-brand-600 hover:underline">
@@ -505,7 +505,7 @@ function RecipientsInput({ value, onChange, placeholder }: { value: string[]; on
       value={value.join(", ")}
       onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
       placeholder={placeholder ?? "correo@equipo.cl, otro@equipo.cl"}
-      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+      className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
     />
   );
 }
@@ -625,7 +625,7 @@ export function EmailDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title="Correo electrónico — avisos al equipo">
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Correo <b>interno para tu equipo</b> (escalamientos, resúmenes, alertas y el paso de workflow «Enviar correo
         interno»). No es correo masivo a pacientes.
       </p>
@@ -636,7 +636,7 @@ export function EmailDrawer({
           <button
             key={m}
             onClick={() => setForm({ ...form, mode: m })}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-cyan-700 text-white" : "border border-slate-300 text-slate-600"}`}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-cyan-700 text-white" : "border border-line-strong text-ink-muted"}`}
           >
             {m === "platform" ? "Remitente de plataforma" : "SMTP propio"}
           </button>
@@ -650,26 +650,26 @@ export function EmailDrawer({
       {form.mode === "smtp" && (
         <div className="mb-3 grid gap-2 md:grid-cols-2">
           <label className="text-sm md:col-span-2">
-            <span className="text-xs text-slate-500">Remitente (From)</span>
-            <input value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} placeholder="Clínica <avisos@tuclinica.cl>" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Remitente (From)</span>
+            <input value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} placeholder="Clínica <avisos@tuclinica.cl>" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="text-sm">
-            <span className="text-xs text-slate-500">Servidor (host)</span>
-            <input value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} placeholder="smtp.tuclinica.cl" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Servidor (host)</span>
+            <input value={form.smtpHost} onChange={(e) => setForm({ ...form, smtpHost: e.target.value })} placeholder="smtp.tuclinica.cl" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="text-sm">
-            <span className="text-xs text-slate-500">Puerto</span>
-            <input type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Puerto</span>
+            <input type="number" value={form.smtpPort} onChange={(e) => setForm({ ...form, smtpPort: Number(e.target.value) || 587 })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="text-sm">
-            <span className="text-xs text-slate-500">Usuario</span>
-            <input value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Usuario</span>
+            <input value={form.smtpUser} onChange={(e) => setForm({ ...form, smtpUser: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="text-sm">
-            <span className="text-xs text-slate-500">Contraseña {state?.smtp?.hasPass ? "(dejar vacío para conservar)" : ""}</span>
-            <input type="password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Contraseña {state?.smtp?.hasPass ? "(dejar vacío para conservar)" : ""}</span>
+            <input type="password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
-          <label className="flex items-center gap-2 text-xs text-slate-600">
+          <label className="flex items-center gap-2 text-xs text-ink-muted">
             <input type="checkbox" checked={form.smtpSecure} onChange={(e) => setForm({ ...form, smtpSecure: e.target.checked })} />
             Conexión segura (TLS/465)
           </label>
@@ -677,21 +677,21 @@ export function EmailDrawer({
       )}
 
       {/* Usos */}
-      <div className="mb-3 space-y-3 rounded-xl border border-slate-200 p-3">
+      <div className="mb-3 space-y-3 rounded-xl border border-line p-3">
         <div>
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={form.escalationEnabled} onChange={(e) => setForm({ ...form, escalationEnabled: e.target.checked })} />
             Escalamiento sin atender
           </label>
-          <p className="text-[11px] text-slate-400">Si un agente deriva a humano y nadie toma la conversación en X minutos.</p>
+          <p className="text-[11px] text-ink-subtle">Si un agente deriva a humano y nadie toma la conversación en X minutos.</p>
           {form.escalationEnabled && (
             <div className="mt-1 flex flex-wrap items-end gap-2">
-              <label className="text-xs text-slate-500">
+              <label className="text-xs text-ink-muted">
                 Minutos
-                <input type="number" min={2} max={240} value={form.escalationMinutes} onChange={(e) => setForm({ ...form, escalationMinutes: Number(e.target.value) || 10 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                <input type="number" min={2} max={240} value={form.escalationMinutes} onChange={(e) => setForm({ ...form, escalationMinutes: Number(e.target.value) || 10 })} className="mt-1 block w-20 rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
               </label>
               <div className="min-w-64 flex-1">
-                <span className="text-xs text-slate-500">Destinatarios</span>
+                <span className="text-xs text-ink-muted">Destinatarios</span>
                 <RecipientsInput value={form.escalationRecipients} onChange={(v) => setForm({ ...form, escalationRecipients: v })} />
               </div>
             </div>
@@ -702,15 +702,15 @@ export function EmailDrawer({
             <input type="checkbox" checked={form.dailyEnabled} onChange={(e) => setForm({ ...form, dailyEnabled: e.target.checked })} />
             Resumen diario
           </label>
-          <p className="text-[11px] text-slate-400">Conversaciones, contactos, leads y citas de las últimas 24 h.</p>
+          <p className="text-[11px] text-ink-subtle">Conversaciones, contactos, leads y citas de las últimas 24 h.</p>
           {form.dailyEnabled && (
             <div className="mt-1 flex flex-wrap items-end gap-2">
-              <label className="text-xs text-slate-500">
+              <label className="text-xs text-ink-muted">
                 Hora
-                <input type="number" min={0} max={23} value={form.dailyHour} onChange={(e) => setForm({ ...form, dailyHour: Number(e.target.value) || 8 })} className="mt-1 block w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                <input type="number" min={0} max={23} value={form.dailyHour} onChange={(e) => setForm({ ...form, dailyHour: Number(e.target.value) || 8 })} className="mt-1 block w-20 rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
               </label>
               <div className="min-w-64 flex-1">
-                <span className="text-xs text-slate-500">Destinatarios</span>
+                <span className="text-xs text-ink-muted">Destinatarios</span>
                 <RecipientsInput value={form.dailyRecipients} onChange={(v) => setForm({ ...form, dailyRecipients: v })} />
               </div>
             </div>
@@ -721,10 +721,10 @@ export function EmailDrawer({
             <input type="checkbox" checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} />
             Alertas de integraciones
           </label>
-          <p className="text-[11px] text-slate-400">P. ej. el token de WhatsApp venció y hay que reautorizar.</p>
+          <p className="text-[11px] text-ink-subtle">P. ej. el token de WhatsApp venció y hay que reautorizar.</p>
           {form.alertsEnabled && (
             <div className="mt-1">
-              <span className="text-xs text-slate-500">Destinatarios</span>
+              <span className="text-xs text-ink-muted">Destinatarios</span>
               <RecipientsInput value={form.alertsRecipients} onChange={(v) => setForm({ ...form, alertsRecipients: v })} />
             </div>
           )}
@@ -736,9 +736,9 @@ export function EmailDrawer({
           {connected ? "Guardar cambios" : "Conectar"}
         </Button>
         <div className="flex items-end gap-1">
-          <label className="text-xs text-slate-500">
+          <label className="text-xs text-ink-muted">
             Probar con
-            <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="tu@correo.cl" className="mt-1 block w-48 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            <input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="tu@correo.cl" className="mt-1 block w-48 rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
           </label>
           <Button variant="secondary" onClick={() => void test()} disabled={busy || !testTo}>
             Probar conexión
@@ -750,7 +750,7 @@ export function EmailDrawer({
           </Button>
         )}
       </div>
-      {testDetail && <p className="mb-2 text-xs text-slate-600">{testDetail}</p>}
+      {testDetail && <p className="mb-2 text-xs text-ink-muted">{testDetail}</p>}
       {state?.lastError && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
 
       <ConfirmDialog
@@ -844,25 +844,25 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
 
   return (
     <Drawer open={open} onClose={onClose} title="API personalizada — presets del paso HTTP">
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Define tus APIs una vez (URL base + autenticación con secreto <b>cifrado</b>) y en el canvas el paso «Petición
         HTTP» solo elige el preset y la ruta — sin pegar tokens en cada nodo. El dominio del preset queda como allowlist.
       </p>
 
       {editing ? (
-        <div className="mb-3 space-y-2 rounded-xl border border-slate-200 p-3">
+        <div className="mb-3 space-y-2 rounded-xl border border-line p-3">
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Nombre</span>
-            <input value={editing.name ?? ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="CRM interno" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">Nombre</span>
+            <input value={editing.name ?? ""} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="CRM interno" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">URL base</span>
-            <input value={editing.baseUrl ?? ""} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} placeholder="https://api.miempresa.cl/v1" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <span className="text-xs text-ink-muted">URL base</span>
+            <input value={editing.baseUrl ?? ""} onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })} placeholder="https://api.miempresa.cl/v1" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <div className="flex flex-wrap gap-2">
             <label className="text-sm">
-              <span className="text-xs text-slate-500">Autenticación</span>
-              <select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+              <span className="text-xs text-ink-muted">Autenticación</span>
+              <select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-2 text-sm">
                 <option value="none">Sin auth</option>
                 <option value="bearer">Bearer token</option>
                 <option value="header">Header personalizado</option>
@@ -870,14 +870,14 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
             </label>
             {editing.authType === "header" && (
               <label className="flex-1 text-sm">
-                <span className="text-xs text-slate-500">Nombre del header</span>
-                <input value={editing.headerName ?? ""} onChange={(e) => setEditing({ ...editing, headerName: e.target.value })} placeholder="X-Api-Key" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <span className="text-xs text-ink-muted">Nombre del header</span>
+                <input value={editing.headerName ?? ""} onChange={(e) => setEditing({ ...editing, headerName: e.target.value })} placeholder="X-Api-Key" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
               </label>
             )}
             {editing.authType !== "none" && (
               <label className="flex-1 text-sm">
-                <span className="text-xs text-slate-500">Secreto {editing.id && editing.hasSecret ? "(vacío = conservar)" : ""}</span>
-                <input type="password" value={editing.secret ?? ""} onChange={(e) => setEditing({ ...editing, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <span className="text-xs text-ink-muted">Secreto {editing.id && editing.hasSecret ? "(vacío = conservar)" : ""}</span>
+                <input type="password" value={editing.secret ?? ""} onChange={(e) => setEditing({ ...editing, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
               </label>
             )}
           </div>
@@ -901,22 +901,22 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
       ) : (
         <ul className="space-y-2">
           {presets.map((p) => (
-            <li key={p.id} className="rounded-lg border border-slate-100 p-2.5">
+            <li key={p.id} className="rounded-lg border border-line p-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium">{p.name}</p>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-ink-subtle">
                     <code>{p.baseUrl}</code> · {p.authType === "none" ? "sin auth" : p.authType === "bearer" ? "Bearer" : `header ${p.headerName}`}
                   </p>
                   {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700">Usado por: {p.usedBy.join(", ")}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2 text-xs">
-                  <button onClick={() => void test(p.id)} className="text-slate-500 hover:underline">Probar</button>
+                  <button onClick={() => void test(p.id)} className="text-ink-muted hover:underline">Probar</button>
                   <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline">Editar</button>
                   <button onClick={() => void remove(p)} className="text-red-400 hover:underline">Eliminar</button>
                 </div>
               </div>
-              {testDetail[p.id] && <p className="mt-1 text-[11px] text-slate-600">{testDetail[p.id]}</p>}
+              {testDetail[p.id] && <p className="mt-1 text-[11px] text-ink-muted">{testDetail[p.id]}</p>}
             </li>
           ))}
         </ul>
@@ -992,19 +992,19 @@ export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; 
 
   return (
     <Drawer open={open} onClose={onClose} title="Google Analytics (GA4)">
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Measurement Protocol — sin OAuth. En Analytics: <b>Administrar → Flujos de datos → tu flujo → Secretos de la API
         de Measurement Protocol</b> para crear el <code>api_secret</code>; el <code>measurement_id</code> (G-XXXX) está en
         los detalles del flujo.
       </p>
       <div className="space-y-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Measurement ID</span>
-          <input value={form.measurementId} onChange={(e) => setForm({ ...form, measurementId: e.target.value.toUpperCase() })} placeholder="G-ABC123XYZ" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm" />
+          <span className="text-xs text-ink-muted">Measurement ID</span>
+          <input value={form.measurementId} onChange={(e) => setForm({ ...form, measurementId: e.target.value.toUpperCase() })} placeholder="G-ABC123XYZ" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">API secret {connected ? "(vacío = conservar)" : ""}</span>
-          <input type="password" value={form.apiSecret} onChange={(e) => setForm({ ...form, apiSecret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">API secret {connected ? "(vacío = conservar)" : ""}</span>
+          <input type="password" value={form.apiSecret} onChange={(e) => setForm({ ...form, apiSecret: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.mirrorCapi} onChange={(e) => setForm({ ...form, mirrorCapi: e.target.checked })} />
@@ -1018,7 +1018,7 @@ export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; 
         )}
         {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
       </div>
-      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {testDetail && <p className="mt-2 text-xs text-ink-muted">{testDetail}</p>}
       {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
       <ConfirmDialog
         open={confirmDisconnect}
@@ -1071,22 +1071,22 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-slate-200 p-2">
+            <div className="rounded-lg border border-line p-2">
               <p className="text-lg font-semibold">{stats.totals?.total ?? 0}</p>
-              <p className="text-[10px] text-slate-400">eventos (30 d)</p>
+              <p className="text-[10px] text-ink-subtle">eventos (30 d)</p>
             </div>
-            <div className="rounded-lg border border-slate-200 p-2">
+            <div className="rounded-lg border border-line p-2">
               <p className="text-lg font-semibold text-emerald-600">{stats.totals?.successRate ?? "—"}%</p>
-              <p className="text-[10px] text-slate-400">tasa de éxito</p>
+              <p className="text-[10px] text-ink-subtle">tasa de éxito</p>
             </div>
-            <div className="rounded-lg border border-slate-200 p-2">
+            <div className="rounded-lg border border-line p-2">
               <p className="text-lg font-semibold text-red-500">{stats.totals?.error ?? 0}</p>
-              <p className="text-[10px] text-slate-400">errores</p>
+              <p className="text-[10px] text-ink-subtle">errores</p>
             </div>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium text-slate-600">Últimos 14 días</p>
+            <p className="mb-1 text-xs font-medium text-ink-muted">Últimos 14 días</p>
             <div className="flex items-end gap-1" style={{ height: 60 }}>
               {(stats.byDay ?? []).map((d) => (
                 <div key={d.day} className="flex-1" title={`${d.day}: ${d.ok} ok · ${d.error} error`}>
@@ -1094,12 +1094,12 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
                   <div className="w-full rounded-b bg-emerald-400" style={{ height: (d.ok / maxDay) * 56 }} />
                 </div>
               ))}
-              {(stats.byDay ?? []).length === 0 && <p className="text-xs text-slate-400">Sin eventos aún.</p>}
+              {(stats.byDay ?? []).length === 0 && <p className="text-xs text-ink-subtle">Sin eventos aún.</p>}
             </div>
           </div>
 
           <div>
-            <p className="mb-1 text-xs font-medium text-slate-600">Por tipo de evento</p>
+            <p className="mb-1 text-xs font-medium text-ink-muted">Por tipo de evento</p>
             <ul className="space-y-1">
               {(stats.byEvent ?? []).map((e) => (
                 <li key={e.event} className="flex items-center justify-between text-xs">
@@ -1198,7 +1198,7 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
 
   return (
     <Drawer open={open} onClose={onClose} title="Agenda personalizada — contrato estándar">
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Tu software clínico implementa el <b>contrato estándar de agenda</b> (disponibilidad, citas, profesionales,
         servicios) con firma HMAC, y los agentes IA y workflows lo usan igual que cualquier proveedor. La documentación
         completa con ejemplos curl está en{" "}
@@ -1206,12 +1206,12 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
       </p>
       <div className="space-y-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">URL base de tu API de agenda</span>
-          <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://agenda.tuclinica.cl/conversia" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">URL base de tu API de agenda</span>
+          <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://agenda.tuclinica.cl/conversia" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Secreto HMAC compartido {connected ? "(vacío = conservar)" : "(mínimo 12 caracteres)"}</span>
-          <input type="password" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">Secreto HMAC compartido {connected ? "(vacío = conservar)" : "(mínimo 12 caracteres)"}</span>
+          <input type="password" value={form.secret} onChange={(e) => setForm({ ...form, secret: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
       </div>
       <div className="mt-3 flex gap-2">
@@ -1219,7 +1219,7 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
         {connected && <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>}
         {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
       </div>
-      {testDetail && <p className="mt-2 text-xs text-slate-600">{testDetail}</p>}
+      {testDetail && <p className="mt-2 text-xs text-ink-muted">{testDetail}</p>}
       {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">Último error: {state.lastError}</p>}
       <ConfirmDialog
         open={confirmDisconnect}
@@ -1350,14 +1350,14 @@ export function AutomationDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title={`${label} — automatizaciones`}>
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Sin app nativa (queda como mejora futura): el asistente conecta {label} con lo que ya tienes — un <b>webhook
         saliente</b> como trigger y una <b>API key</b> para las acciones.
       </p>
 
       <label className="block text-sm">
-        <span className="text-xs text-slate-500">URL del webhook de {label} ({kind === "zapier" ? "Catch Hook" : "Custom webhook"})</span>
-        <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder={kind === "zapier" ? "https://hooks.zapier.com/hooks/catch/…" : "https://hook.us1.make.com/…"} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <span className="text-xs text-ink-muted">URL del webhook de {label} ({kind === "zapier" ? "Catch Hook" : "Custom webhook"})</span>
+        <input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder={kind === "zapier" ? "https://hooks.zapier.com/hooks/catch/…" : "https://hook.us1.make.com/…"} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
       </label>
       <div className="mt-2 flex gap-2">
         <Button onClick={() => void connect()} disabled={busy || !webhookUrl.trim()}>{connected ? "Actualizar" : "Conectar"}</Button>
@@ -1367,13 +1367,13 @@ export function AutomationDrawer({
       {secrets && (secrets.apiKeySecret || secrets.webhookSecret) && (
         <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           <p className="font-medium">Guarda estos secretos — se muestran una sola vez:</p>
-          {secrets.apiKeySecret && <p className="mt-1">API key (acciones): <code className="rounded bg-white px-1.5 py-0.5">{secrets.apiKeySecret}</code></p>}
-          {secrets.webhookSecret && <p className="mt-1">Secreto del webhook (firma sha256): <code className="rounded bg-white px-1.5 py-0.5">{secrets.webhookSecret}</code></p>}
+          {secrets.apiKeySecret && <p className="mt-1">API key (acciones): <code className="rounded bg-panel px-1.5 py-0.5">{secrets.apiKeySecret}</code></p>}
+          {secrets.webhookSecret && <p className="mt-1">Secreto del webhook (firma sha256): <code className="rounded bg-panel px-1.5 py-0.5">{secrets.webhookSecret}</code></p>}
         </div>
       )}
 
       {connected && endpoint && (
-        <p className="mt-3 text-xs text-slate-600">
+        <p className="mt-3 text-xs text-ink-muted">
           Estado: {endpoint.deliveries7d} entrega(s) en 7 días
           {endpoint.successRate !== null ? ` · ${endpoint.successRate}% OK` : ""} · última:{" "}
           {endpoint.lastDeliveryAt ? new Date(endpoint.lastDeliveryAt).toLocaleString("es-CL") : "sin entregas aún"}
@@ -1384,9 +1384,9 @@ export function AutomationDrawer({
         <h3 className="text-sm font-medium">Plantillas de casos comunes</h3>
         <div className="mt-2 space-y-3">
           {AUTOMATION_TEMPLATES[kind].map((t) => (
-            <div key={t.title} className="rounded-lg border border-slate-200 p-3">
+            <div key={t.title} className="rounded-lg border border-line p-3">
               <p className="text-sm font-medium">{t.title}</p>
-              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-slate-600">
+              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-ink-muted">
                 {t.steps.map((s, i) => (<li key={i}>{s}</li>))}
               </ol>
             </div>
@@ -1518,7 +1518,7 @@ export function GoogleDrawer({
         </div>
       ) : (
         <>
-          <p className="mb-3 text-xs text-slate-500">
+          <p className="mb-3 text-xs text-ink-muted">
             Una sola conexión habilita <b>Google Calendar</b> (espejo de tus citas de Conversia) y{" "}
             <b>Google Sheets</b> (paso «Añadir fila a Google Sheets» en los flujos). Los tokens quedan cifrados por
             organización.
@@ -1545,7 +1545,7 @@ export function GoogleDrawer({
                   </p>
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 p-3">
+              <div className="rounded-xl border border-line p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">Espejo de citas en Google Calendar</p>
                   <StatusBadge kind={state?.lastError ? "attention" : "connected"} label={state?.lastError ? "Atención" : "Activa"} />
@@ -1555,14 +1555,14 @@ export function GoogleDrawer({
                   Reflejar cada cita creada, actualizada o cancelada
                 </label>
                 <label className="mt-2 block text-sm">
-                  <span className="text-xs text-slate-500">Calendario destino</span>
+                  <span className="text-xs text-ink-muted">Calendario destino</span>
                   {calendars === null ? (
                     <Skeleton className="mt-1 h-9" />
                   ) : (
                     <select
                       value={calendarId}
                       onChange={(e) => setCalendarId(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                      className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
                     >
                       <option value="">— elegir calendario —</option>
                       {calendars.map((c) => (
@@ -1575,15 +1575,15 @@ export function GoogleDrawer({
                   )}
                 </label>
                 {state?.lastSyncAt && (
-                  <p className="mt-2 text-[11px] text-slate-400">
+                  <p className="mt-2 text-[11px] text-ink-subtle">
                     Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}
                   </p>
                 )}
                 {state?.lastError && <p className="mt-1 text-[11px] text-red-600">{state.lastError}</p>}
               </div>
 
-              <div className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600">
-                <p className="text-sm font-medium text-slate-800">Google Sheets</p>
+              <div className="rounded-xl border border-line p-3 text-xs text-ink-muted">
+                <p className="text-sm font-medium text-ink">Google Sheets</p>
                 <p className="mt-1">
                   Ya quedó habilitado: agrega el paso <b>«Añadir fila a Google Sheets»</b> en{" "}
                   <a href="/workflows" className="underline">Workflows</a> con el ID de la planilla y las columnas
@@ -1703,38 +1703,38 @@ export function DentalinkDrawer({
 
   return (
     <Drawer open={open} onClose={onClose} title="Dentalink — agenda dental">
-      <p className="mb-3 text-xs text-slate-500">
+      <p className="mb-3 text-xs text-ink-muted">
         Conecta tu Dentalink (Healthatom) con el token de <b>Configuración → API</b> de tu cuenta. Los agentes IA
         ofrecerán horas reales (tu ventana laboral menos las citas ya agendadas en Dentalink), crearán pacientes y
         agendarán directo en tu agenda. El token queda cifrado.
       </p>
 
       <label className="block text-sm">
-        <span className="text-xs text-slate-500">Token de la API {connected ? "(deja vacío para mantener el actual)" : ""}</span>
+        <span className="text-xs text-ink-muted">Token de la API {connected ? "(deja vacío para mantener el actual)" : ""}</span>
         <input
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="Token generado en Dentalink → Configuración API"
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
         />
       </label>
 
       <div className="mt-3 grid grid-cols-3 gap-2">
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Desde (hora)</span>
-          <input type="number" min={0} max={23} value={workStartHour} onChange={(e) => setWorkStartHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">Desde (hora)</span>
+          <input type="number" min={0} max={23} value={workStartHour} onChange={(e) => setWorkStartHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Hasta (hora)</span>
-          <input type="number" min={1} max={24} value={workEndHour} onChange={(e) => setWorkEndHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">Hasta (hora)</span>
+          <input type="number" min={1} max={24} value={workEndHour} onChange={(e) => setWorkEndHour(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-slate-500">Bloques (min)</span>
-          <input type="number" min={10} max={120} step={5} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <span className="text-xs text-ink-muted">Bloques (min)</span>
+          <input type="number" min={10} max={120} step={5} value={slotMinutes} onChange={(e) => setSlotMinutes(Number(e.target.value))} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
       </div>
-      <p className="mt-1 text-[10px] text-slate-400">
+      <p className="mt-1 text-[10px] text-ink-subtle">
         La ventana laboral define qué huecos se ofrecen; las citas existentes en Dentalink se descuentan automáticamente.
       </p>
 
@@ -1755,7 +1755,7 @@ export function DentalinkDrawer({
       )}
       {state?.lastError && !testResult && <p className="mt-2 text-xs text-red-600">{state.lastError}</p>}
       {state?.lastSyncAt && (
-        <p className="mt-2 text-[11px] text-slate-400">Última verificación: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+        <p className="mt-2 text-[11px] text-ink-subtle">Última verificación: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
       )}
 
       <ConfirmDialog
@@ -1905,7 +1905,7 @@ export function HubspotDrawer({
         </div>
       ) : (
         <>
-          <p className="mb-3 text-xs text-slate-500">
+          <p className="mb-3 text-xs text-ink-muted">
             Sincronización <b>unidireccional</b> Conversia → HubSpot: cada contacto nuevo o editado se refleja en tu
             CRM. Antes de crear se busca por teléfono/email — <b>sin duplicados</b>. Los tokens quedan cifrados.
           </p>
@@ -1937,17 +1937,17 @@ export function HubspotDrawer({
                 Sincronizar automáticamente contactos nuevos y editados
               </label>
 
-              <div className="rounded-xl border border-slate-200 p-3">
+              <div className="rounded-xl border border-line p-3">
                 <p className="text-sm font-medium">Mapeo de campos (HubSpot ← Conversia)</p>
                 <div className="mt-2 space-y-1.5">
                   {Object.entries(mapping).map(([prop, field]) => (
                     <div key={prop} className="flex items-center gap-2 text-xs">
-                      <code className="w-28 shrink-0 rounded bg-slate-100 px-1.5 py-1">{prop}</code>
-                      <span className="text-slate-400">←</span>
+                      <code className="w-28 shrink-0 rounded bg-app px-1.5 py-1">{prop}</code>
+                      <span className="text-ink-subtle">←</span>
                       <select
                         value={field}
                         onChange={(e) => setMapping({ ...mapping, [prop]: e.target.value })}
-                        className="flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                        className="flex-1 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
                       >
                         {HUBSPOT_FIELD_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
@@ -1960,7 +1960,7 @@ export function HubspotDrawer({
                           delete next[prop];
                           setMapping(next);
                         }}
-                        className="text-slate-400 hover:text-red-500"
+                        className="text-ink-subtle hover:text-red-500"
                         title="Quitar"
                       >
                         <Trash2 size={13} />
@@ -1969,7 +1969,7 @@ export function HubspotDrawer({
                   ))}
                 </div>
                 <AddHubspotProperty existing={mapping} onAdd={(prop) => setMapping({ ...mapping, [prop]: "source" })} />
-                <p className="mt-2 text-[10px] text-slate-400">
+                <p className="mt-2 text-[10px] text-ink-subtle">
                   La clave es el nombre interno de la propiedad en HubSpot (p. ej. <code>firstname</code>,{" "}
                   <code>lead_source</code> si la creaste como personalizada).
                 </p>
@@ -1985,7 +1985,7 @@ export function HubspotDrawer({
                 <p className={`text-xs ${testResult.startsWith("✔") ? "text-emerald-600" : "text-red-600"}`}>{testResult}</p>
               )}
               {state?.lastSyncAt && (
-                <p className="text-[11px] text-slate-400">Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
+                <p className="text-[11px] text-ink-subtle">Última sincronización: {new Date(state.lastSyncAt).toLocaleString("es-CL")}</p>
               )}
               {state?.lastError && <p className="text-[11px] text-red-600">{state.lastError}</p>}
             </div>
@@ -2015,7 +2015,7 @@ function AddHubspotProperty({ existing, onAdd }: { existing: Record<string, stri
         value={prop}
         onChange={(e) => setProp(e.target.value)}
         placeholder="agregar propiedad de HubSpot…"
-        className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+        className="flex-1 rounded-lg border border-line-strong px-2 py-1.5 text-xs"
       />
       <Button
         variant="ghost"

@@ -79,8 +79,8 @@ const CHANNEL_LABEL: Record<string, string> = {
 const CONV_STATUS: Record<string, { label: string; className: string }> = {
   OPEN: { label: "Abierta", className: "bg-emerald-50 text-emerald-700" },
   PENDING: { label: "Pendiente", className: "bg-amber-50 text-amber-700" },
-  RESOLVED: { label: "Resuelta", className: "bg-slate-100 text-slate-500" },
-  CLOSED: { label: "Cerrada", className: "bg-slate-100 text-slate-500" },
+  RESOLVED: { label: "Resuelta", className: "bg-app text-ink-muted" },
+  CLOSED: { label: "Cerrada", className: "bg-app text-ink-muted" },
   SNOOZED: { label: "Pospuesta", className: "bg-violet-50 text-violet-700" },
 };
 
@@ -314,7 +314,7 @@ export default function ContactsPage() {
   return (
     <div className="flex h-full">
       {/* ---------------------------- Sidebar ---------------------------- */}
-      <aside className="hidden w-60 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white md:flex">
+      <aside className="hidden w-60 shrink-0 flex-col overflow-y-auto border-r border-line bg-panel md:flex">
         <div className="p-3">
           <SideItem icon={<Users2 size={15} />} label="Todos" count={meta?.counts.all} active={primary.kind === "all"} onClick={() => setPrimaryReset({ kind: "all" })} />
           <SideItem icon={<Ban size={15} />} label="Bloqueados" count={meta?.counts.blocked} active={primary.kind === "blocked"} onClick={() => setPrimaryReset({ kind: "blocked" })} />
@@ -373,32 +373,32 @@ export default function ContactsPage() {
       {/* --------------------------- Contenido --------------------------- */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Barra de herramientas */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
           <div className="relative flex-1 min-w-[220px]">
-            <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-subtle" />
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Buscar por nombre, teléfono o email…"
-              className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm outline-none focus:border-brand-500"
+              className="w-full rounded-lg border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm outline-none focus:border-brand-500"
             />
           </div>
           <button
             onClick={() => setShowFilters((v) => !v)}
-            className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium", showFilters || secCount ? "border-brand-300 bg-brand-50 text-brand-700" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50")}
+            className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium", showFilters || secCount ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line-strong bg-panel text-ink-muted hover:bg-app")}
           >
             <Filter size={15} /> Filtros {secCount > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white">{secCount}</span>}
           </button>
           <div className="relative">
-            <button onClick={() => setColMenu((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <button onClick={() => setColMenu((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-app">
               <Columns3 size={15} /> Columnas
             </button>
             {colMenu && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setColMenu(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
+                <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-line bg-panel p-1.5 shadow-pop">
                   {COLUMNS.map((c) => (
-                    <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-slate-50">
+                    <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-app">
                       <input
                         type="checkbox"
                         checked={visibleCols.has(c.key)}
@@ -433,7 +433,7 @@ export default function ContactsPage() {
 
         {/* Panel de filtros combinables */}
         {showFilters && meta && (
-          <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-end gap-3 border-b border-line bg-app px-4 py-3 text-sm">
             <FilterSelect label="Etiqueta" value={sec.tag} onChange={(v) => setSecReset({ tag: v })} options={meta.tags.map((t) => ({ value: t.id, label: t.name }))} />
             <FilterSelect
               label="Canal"
@@ -444,20 +444,20 @@ export default function ContactsPage() {
             <FilterSelect label="País" value={sec.country} onChange={(v) => setSecReset({ country: v })} options={meta.countries.map((c) => ({ value: c, label: `${flag(c)} ${c}` }))} />
             <FilterSelect label="Origen" value={sec.source} onChange={(v) => setSecReset({ source: v })} options={[{ value: "ad", label: "Anuncio (CTWA)" }, { value: "organic", label: "Orgánico" }]} />
             <div>
-              <p className="mb-1 text-xs font-medium text-slate-500">Creado desde</p>
-              <input type="date" value={sec.dateFrom ?? ""} onChange={(e) => setSecReset({ dateFrom: e.target.value || undefined })} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+              <p className="mb-1 text-xs font-medium text-ink-muted">Creado desde</p>
+              <input type="date" value={sec.dateFrom ?? ""} onChange={(e) => setSecReset({ dateFrom: e.target.value || undefined })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
             </div>
             <div>
-              <p className="mb-1 text-xs font-medium text-slate-500">hasta</p>
-              <input type="date" value={sec.dateTo ?? ""} onChange={(e) => setSecReset({ dateTo: e.target.value || undefined })} className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+              <p className="mb-1 text-xs font-medium text-ink-muted">hasta</p>
+              <input type="date" value={sec.dateTo ?? ""} onChange={(e) => setSecReset({ dateTo: e.target.value || undefined })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
             </div>
             {secCount > 0 && (
-              <button onClick={() => setSecReset({ tag: undefined, channel: undefined, country: undefined, source: undefined, dateFrom: undefined, dateTo: undefined })} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-slate-500 hover:text-slate-700">
+              <button onClick={() => setSecReset({ tag: undefined, channel: undefined, country: undefined, source: undefined, dateFrom: undefined, dateTo: undefined })} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-ink-muted hover:text-ink">
                 <X size={14} /> Limpiar
               </button>
             )}
             {canSaveSegment && (
-              <button onClick={() => setSaveSegOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-white px-2.5 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
+              <button onClick={() => setSaveSegOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-panel px-2.5 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
                 <Bookmark size={14} /> Guardar segmento
               </button>
             )}
@@ -488,7 +488,7 @@ export default function ContactsPage() {
         {/* Tabla */}
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-sm">
-            <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-[12px] uppercase tracking-wide text-slate-500">
+            <thead className="sticky top-0 z-[1] bg-app text-left text-[12px] uppercase tracking-wide text-ink-muted">
               <tr>
                 <th className="w-10 px-3 py-2.5">
                   <input
@@ -522,7 +522,7 @@ export default function ContactsPage() {
             <tbody>
               {loading && rows.length === 0
                 ? Array.from({ length: 8 }).map((_, i) => (
-                    <tr key={i} className="border-t border-slate-100">
+                    <tr key={i} className="border-t border-line">
                       <td className="px-3 py-3" colSpan={13}>
                         <Skeleton className="h-6 w-full" />
                       </td>
@@ -538,7 +538,7 @@ export default function ContactsPage() {
                       <tr
                         key={c.id}
                         onClick={() => setOpenId(c.id)}
-                        className={cn("cursor-pointer border-t border-slate-100 hover:bg-slate-50/70", selected.has(c.id) && "bg-brand-50/40")}
+                        className={cn("cursor-pointer border-t border-line hover:bg-app/70", selected.has(c.id) && "bg-brand-50/40")}
                       >
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <input
@@ -555,58 +555,58 @@ export default function ContactsPage() {
                           <div className="flex items-center gap-2.5">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">{initials(c)}</span>
                             <div className="min-w-0">
-                              <p className="flex items-center gap-1.5 truncate font-medium text-slate-800">
+                              <p className="flex items-center gap-1.5 truncate font-medium text-ink">
                                 {displayName(c)}
                                 {c.blocked && <Ban size={12} className="shrink-0 text-red-500" />}
                               </p>
-                              {c.profileName && displayName(c) !== c.profileName && <p className="truncate text-xs text-slate-400">wa: {c.profileName}</p>}
+                              {c.profileName && displayName(c) !== c.profileName && <p className="truncate text-xs text-ink-subtle">wa: {c.profileName}</p>}
                             </div>
                           </div>
                         </td>
-                        {visibleCols.has("channel") && <td className="px-3 py-2.5 text-slate-600">{c.channels.map((ch) => CHANNEL_LABEL[ch] ?? ch).join(", ") || "—"}</td>}
+                        {visibleCols.has("channel") && <td className="px-3 py-2.5 text-ink-muted">{c.channels.map((ch) => CHANNEL_LABEL[ch] ?? ch).join(", ") || "—"}</td>}
                         {visibleCols.has("stage") && (
                           <td className="px-3 py-2.5">
                             {c.stage ? (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-app px-2 py-0.5 text-xs font-medium text-ink">
                                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: c.stage.color ?? "#94a3b8" }} />
                                 {c.stage.name}
                               </span>
                             ) : (
-                              <span className="text-slate-300">—</span>
+                              <span className="text-ink-subtle">—</span>
                             )}
                           </td>
                         )}
-                        {visibleCols.has("phone") && <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{c.phone ?? "—"}</td>}
-                        {visibleCols.has("email") && <td className="max-w-[180px] truncate px-3 py-2.5 text-slate-600">{c.email ?? "—"}</td>}
+                        {visibleCols.has("phone") && <td className="px-3 py-2.5 font-mono text-xs text-ink-muted">{c.phone ?? "—"}</td>}
+                        {visibleCols.has("email") && <td className="max-w-[180px] truncate px-3 py-2.5 text-ink-muted">{c.email ?? "—"}</td>}
                         {visibleCols.has("tags") && (
                           <td className="px-3 py-2.5">
                             <div className="flex flex-wrap gap-1">
-                              {c.tags.length === 0 && <span className="text-slate-300">—</span>}
+                              {c.tags.length === 0 && <span className="text-ink-subtle">—</span>}
                               {c.tags.slice(0, 3).map((t) => (
                                 <span key={t.name} className="rounded px-1.5 py-0.5 text-[11px] font-medium" style={{ background: (t.color ?? "#64748b") + "22", color: t.color ?? "#475569" }}>
                                   {t.name}
                                 </span>
                               ))}
-                              {c.tags.length > 3 && <span className="text-[11px] text-slate-400">+{c.tags.length - 3}</span>}
+                              {c.tags.length > 3 && <span className="text-[11px] text-ink-subtle">+{c.tags.length - 3}</span>}
                             </div>
                           </td>
                         )}
-                        {visibleCols.has("country") && <td className="px-3 py-2.5 text-slate-600">{c.country ? `${flag(c.country)} ${c.country}` : "—"}</td>}
-                        {visibleCols.has("locale") && <td className="px-3 py-2.5 uppercase text-slate-500">{c.locale ?? "—"}</td>}
+                        {visibleCols.has("country") && <td className="px-3 py-2.5 text-ink-muted">{c.country ? `${flag(c.country)} ${c.country}` : "—"}</td>}
+                        {visibleCols.has("locale") && <td className="px-3 py-2.5 uppercase text-ink-muted">{c.locale ?? "—"}</td>}
                         {visibleCols.has("conv") && (
                           <td className="px-3 py-2.5">
                             {c.conversation ? (
-                              <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", CONV_STATUS[c.conversation.status]?.className ?? "bg-slate-100 text-slate-500")}>
+                              <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", CONV_STATUS[c.conversation.status]?.className ?? "bg-app text-ink-muted")}>
                                 {CONV_STATUS[c.conversation.status]?.label ?? c.conversation.status}
                               </span>
                             ) : (
-                              <span className="text-slate-300">—</span>
+                              <span className="text-ink-subtle">—</span>
                             )}
                           </td>
                         )}
-                        {visibleCols.has("assigned") && <td className="px-3 py-2.5 text-slate-600">{assigned ?? "—"}</td>}
-                        {visibleCols.has("lastContactAt") && <td className="whitespace-nowrap px-3 py-2.5 text-slate-500">{fmtDate(c.lastContactAt)}</td>}
-                        {visibleCols.has("createdAt") && <td className="whitespace-nowrap px-3 py-2.5 text-slate-500">{fmtDate(c.createdAt)}</td>}
+                        {visibleCols.has("assigned") && <td className="px-3 py-2.5 text-ink-muted">{assigned ?? "—"}</td>}
+                        {visibleCols.has("lastContactAt") && <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted">{fmtDate(c.lastContactAt)}</td>}
+                        {visibleCols.has("createdAt") && <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted">{fmtDate(c.createdAt)}</td>}
                       </tr>
                     );
                   })}
@@ -626,7 +626,7 @@ export default function ContactsPage() {
         </div>
 
         {/* Paginación */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-panel px-4 py-2.5 text-sm text-ink-muted">
           <div className="flex items-center gap-2">
             <span>{total.toLocaleString("es-CL")} contactos</span>
             <select
@@ -635,7 +635,7 @@ export default function ContactsPage() {
                 setPageSize(Number(e.target.value));
                 setPage(1);
               }}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
+              className="rounded-lg border border-line-strong bg-panel px-2 py-1 text-sm"
             >
               {[25, 50, 100].map((n) => (
                 <option key={n} value={n}>{n} / página</option>
@@ -676,8 +676,8 @@ export default function ContactsPage() {
 
 function SideGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="border-t border-slate-100 px-3 py-2">
-      <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{title}</p>
+    <div className="border-t border-line px-3 py-2">
+      <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</p>
       {children}
     </div>
   );
@@ -704,19 +704,19 @@ function SideItem({
     <div
       className={cn(
         "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13.5px] transition-colors",
-        active ? "bg-brand-50 font-medium text-brand-700" : "text-slate-600 hover:bg-slate-100",
+        active ? "bg-brand-50 font-medium text-brand-700" : "text-ink-muted hover:bg-app",
       )}
     >
       <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-        {dot ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot }} /> : <span className="shrink-0 text-slate-400">{icon}</span>}
+        {dot ? <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dot }} /> : <span className="shrink-0 text-ink-subtle">{icon}</span>}
         <span className="flex-1 truncate">{label}</span>
       </button>
       {onDelete ? (
-        <button onClick={onDelete} className="hidden shrink-0 text-slate-400 hover:text-red-500 group-hover:block" aria-label="Eliminar segmento" title="Eliminar segmento">
+        <button onClick={onDelete} className="hidden shrink-0 text-ink-subtle hover:text-red-500 group-hover:block" aria-label="Eliminar segmento" title="Eliminar segmento">
           <X size={13} />
         </button>
       ) : (
-        count !== undefined && <span className={cn("shrink-0 text-xs", active ? "text-brand-500" : "text-slate-400")}>{count}</span>
+        count !== undefined && <span className={cn("shrink-0 text-xs", active ? "text-brand-500" : "text-ink-subtle")}>{count}</span>
       )}
     </div>
   );
@@ -738,7 +738,7 @@ function Th({
   return (
     <th className="whitespace-nowrap px-3 py-2.5 font-semibold">
       {sortable ? (
-        <button onClick={onSort} className={cn("inline-flex items-center gap-1 hover:text-slate-700", active && "text-slate-700")}>
+        <button onClick={onSort} className={cn("inline-flex items-center gap-1 hover:text-ink", active && "text-ink")}>
           {children}
           <ChevronDown size={13} className={cn("transition-transform", active && dir === "asc" && "rotate-180", !active && "opacity-30")} />
         </button>
@@ -762,11 +762,11 @@ function FilterSelect({
 }) {
   return (
     <div>
-      <p className="mb-1 text-xs font-medium text-slate-500">{label}</p>
+      <p className="mb-1 text-xs font-medium text-ink-muted">{label}</p>
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || undefined)}
-        className="min-w-[130px] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+        className="min-w-[130px] rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm"
       >
         <option value="">Todos</option>
         {options.map((o) => (
@@ -827,13 +827,13 @@ function AddContactModal({ open, onClose, onCreated }: { open: boolean; onClose:
   );
 }
 
-const inputCls = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500";
+const inputCls = "w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm outline-none focus:border-brand-500";
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-ink-muted">{label}</span>
       {children}
-      {hint && <span className="mt-0.5 block text-[11px] text-slate-400">{hint}</span>}
+      {hint && <span className="mt-0.5 block text-[11px] text-ink-subtle">{hint}</span>}
     </label>
   );
 }
@@ -842,14 +842,14 @@ function BulkMenu({ icon, label, options, empty }: { icon: React.ReactNode; labe
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-sm font-medium text-slate-600 hover:bg-slate-50">
+      <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-panel px-2.5 py-1 text-sm font-medium text-ink-muted hover:bg-app">
         {icon} {label} <ChevronDown size={13} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 max-h-64 w-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-pop">
-            {options.length === 0 && <p className="px-2 py-1.5 text-sm text-slate-400">{empty ?? "Sin opciones"}</p>}
+          <div className="absolute left-0 z-20 mt-1 max-h-64 w-52 overflow-y-auto rounded-xl border border-line bg-panel p-1.5 shadow-pop">
+            {options.length === 0 && <p className="px-2 py-1.5 text-sm text-ink-subtle">{empty ?? "Sin opciones"}</p>}
             {options.map((o, i) => (
               <button
                 key={i}
@@ -857,7 +857,7 @@ function BulkMenu({ icon, label, options, empty }: { icon: React.ReactNode; labe
                   o.onClick();
                   setOpen(false);
                 }}
-                className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50"
+                className="block w-full truncate rounded-lg px-2 py-1.5 text-left text-sm hover:bg-app"
               >
                 {o.label}
               </button>
@@ -893,13 +893,13 @@ function SaveSegmentModal({ open, onClose, definition, onSaved }: { open: boolea
 
   return (
     <Modal open={open} onClose={onClose} title="Guardar segmento">
-      <p className="mb-3 text-sm text-slate-500">Se guardan los filtros actuales como una vista reutilizable en el panel lateral.</p>
+      <p className="mb-3 text-sm text-ink-muted">Se guardan los filtros actuales como una vista reutilizable en el panel lateral.</p>
       <Field label="Nombre del segmento">
         <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="Ej.: Prospectos de anuncios" className={inputCls} autoFocus />
       </Field>
       <div className="mt-3 flex flex-wrap gap-1">
         {Object.entries(definition).map(([k, v]) => (
-          <span key={k} className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">{k}: {String(v)}</span>
+          <span key={k} className="rounded bg-app px-1.5 py-0.5 text-[11px] text-ink-muted">{k}: {String(v)}</span>
         ))}
       </div>
       <div className="mt-5 flex justify-end gap-2">

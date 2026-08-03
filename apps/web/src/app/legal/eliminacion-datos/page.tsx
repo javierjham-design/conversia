@@ -4,7 +4,7 @@ export default function EliminacionDatosPage() {
   return (
     <>
       <h1>Instrucciones de eliminación de datos</h1>
-      <p className="text-slate-500">Última actualización: 27 de julio de 2026</p>
+      <p className="text-ink-muted">Última actualización: 27 de julio de 2026</p>
 
       <p>
         En <strong>TuBot</strong> puedes solicitar la eliminación de los datos personales tratados a través de

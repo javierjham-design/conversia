@@ -116,15 +116,15 @@ export type StatusKind =
   | "mock";
 
 const STATUS_META: Record<StatusKind, { label: string; className: string; Icon: typeof CheckCircle2 }> = {
-  connected: { label: "Conectada", className: "bg-emerald-50 text-emerald-700 border-emerald-200", Icon: CheckCircle2 },
-  syncing: { label: "Sincronizando", className: "bg-brand-50 text-brand-700 border-brand-200", Icon: Loader2 },
-  incomplete: { label: "Configuración incompleta", className: "bg-amber-50 text-amber-700 border-amber-200", Icon: AlertTriangle },
-  attention: { label: "Requiere atención", className: "bg-amber-50 text-amber-800 border-amber-300", Icon: AlertTriangle },
-  error: { label: "Error", className: "bg-red-50 text-red-700 border-red-200", Icon: XCircle },
-  disconnected: { label: "Desconectada", className: "bg-slate-100 text-slate-500 border-slate-200", Icon: PauseCircle },
-  soon: { label: "Próximamente", className: "bg-slate-100 text-slate-500 border-slate-200", Icon: Clock },
+  connected: { label: "Conectada", className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30", Icon: CheckCircle2 },
+  syncing: { label: "Sincronizando", className: "bg-brand-50 text-brand-700 border-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/30", Icon: Loader2 },
+  incomplete: { label: "Configuración incompleta", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30", Icon: AlertTriangle },
+  attention: { label: "Requiere atención", className: "bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/30", Icon: AlertTriangle },
+  error: { label: "Error", className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30", Icon: XCircle },
+  disconnected: { label: "Desconectada", className: "bg-app text-ink-muted border-line", Icon: PauseCircle },
+  soon: { label: "Próximamente", className: "bg-app text-ink-muted border-line", Icon: Clock },
   beta: { label: "Beta", className: "bg-accent-500/10 text-accent-600 border-accent-500/30", Icon: Sparkles },
-  mock: { label: "Simulación (dev)", className: "bg-violet-50 text-violet-700 border-violet-200", Icon: Circle },
+  mock: { label: "Simulación (dev)", className: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/30", Icon: Circle },
 };
 
 export function StatusBadge({ kind, label }: { kind: StatusKind; label?: string }) {
@@ -143,7 +143,7 @@ export function HealthDot({ level }: { level: "ok" | "warn" | "error" | "off" })
     ok: "bg-emerald-500",
     warn: "bg-amber-500",
     error: "bg-red-500",
-    off: "bg-slate-300",
+    off: "bg-line-strong",
   };
   return <span className={cn("inline-block h-2.5 w-2.5 rounded-full", map[level])} aria-hidden />;
 }
@@ -378,7 +378,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             ) : t.kind === "error" ? (
               <XCircle size={16} className="mt-0.5 shrink-0 text-red-500" />
             ) : (
-              <Circle size={16} className="mt-0.5 shrink-0 text-slate-400" />
+              <Circle size={16} className="mt-0.5 shrink-0 text-ink-subtle" />
             )}
             <span className="text-ink">{t.text}</span>
           </div>

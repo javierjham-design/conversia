@@ -66,7 +66,7 @@ function NotificationsBell() {
           localStorage.setItem("notifSeenAt", String(now));
         }}
         aria-label="Notificaciones"
-        className="relative text-slate-500 hover:text-navy-900"
+        className="relative text-ink-muted hover:text-navy-900"
       >
         <Bell size={17} />
         {unread > 0 && (
@@ -78,17 +78,17 @@ function NotificationsBell() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-8 z-50 w-80 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-            <p className="px-2 py-1 text-xs font-medium text-slate-500">Incidencias de integraciones</p>
+          <div className="absolute right-0 top-8 z-50 w-80 rounded-xl border border-line bg-panel p-2 shadow-xl">
+            <p className="px-2 py-1 text-xs font-medium text-ink-muted">Incidencias de integraciones</p>
             {events.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-slate-400">Sin incidencias recientes ✔</p>
+              <p className="px-2 py-3 text-xs text-ink-subtle">Sin incidencias recientes ✔</p>
             ) : (
               <ul className="max-h-80 overflow-y-auto">
                 {events.map((e) => (
-                  <li key={e.id} className="rounded-lg px-2 py-1.5 text-xs hover:bg-slate-50">
+                  <li key={e.id} className="rounded-lg px-2 py-1.5 text-xs hover:bg-app">
                     <span className={e.status === "error" ? "text-red-500" : "text-amber-500"}>●</span>{" "}
-                    <span className="text-slate-600">{e.message ?? e.provider}</span>
-                    <span className="block pl-3 text-[10px] text-slate-400">
+                    <span className="text-ink-muted">{e.message ?? e.provider}</span>
+                    <span className="block pl-3 text-[10px] text-ink-subtle">
                       {e.provider} · {new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}
                     </span>
                   </li>
@@ -363,23 +363,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {/* ------------------------------ Contenido ------------------------------ */}
           <div className="flex min-w-0 flex-1 flex-col">
             {/* Barra superior */}
-            <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 md:px-5">
+            <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-panel px-4 md:px-5">
               <div className="flex items-center gap-2">
                 <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-navy-900 md:hidden">
                   <Menu size={22} />
                 </button>
-                <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-slate-400">
+                <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-ink-subtle">
                   {crumbs.map((c, i) => (
                     <span key={i} className="flex items-center gap-1.5">
                       {i > 0 && <span aria-hidden>/</span>}
-                      <span className={i === crumbs.length - 1 ? "font-medium text-slate-700" : ""}>{c}</span>
+                      <span className={i === crumbs.length - 1 ? "font-medium text-ink" : ""}>{c}</span>
                     </span>
                   ))}
                 </nav>
               </div>
               <div className="flex items-center gap-4">
                 <NotificationsBell />
-                <span className="flex items-center gap-1.5 text-xs text-slate-500" title="Estado del API">
+                <span className="flex items-center gap-1.5 text-xs text-ink-muted" title="Estado del API">
                   <HealthDot level={apiOk === null ? "off" : apiOk ? "ok" : "error"} />
                   {apiOk === false ? "Sin conexión" : "Operativo"}
                 </span>
@@ -394,7 +394,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
 
-            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+            <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
         </div>
       </MeContext.Provider>

@@ -90,18 +90,18 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="flex h-full min-h-0">
-      <nav className="flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white">
-        <div className="border-b border-slate-100 p-3">
+      <nav className="flex w-60 shrink-0 flex-col border-r border-line bg-panel">
+        <div className="border-b border-line p-3">
           <h1 className="flex items-center gap-1.5 text-sm font-semibold">
             <Settings size={15} /> Configuración
           </h1>
           <div className="relative mt-2">
-            <Search size={12} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
+            <Search size={12} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Buscar ajuste…"
-              className="w-full rounded-lg border border-slate-300 py-1.5 pl-7 pr-2 text-xs"
+              className="w-full rounded-lg border border-line-strong py-1.5 pl-7 pr-2 text-xs"
             />
           </div>
         </div>
@@ -111,12 +111,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             if (!pages.length) return null;
             return (
               <div key={g.title} className="mb-3">
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{g.title}</p>
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">{g.title}</p>
                 {pages.map((p) =>
                   p.ready === false || (!p.ready && !p.external) ? (
-                    <span key={p.href} className="flex cursor-default items-center gap-1 px-3 py-1.5 text-[13px] text-slate-300" title="Disponible pronto">
+                    <span key={p.href} className="flex cursor-default items-center gap-1 px-3 py-1.5 text-[13px] text-ink-subtle" title="Disponible pronto">
                       {p.label}
-                      <span className="rounded bg-slate-100 px-1 text-[9px] text-slate-400">pronto</span>
+                      <span className="rounded bg-app px-1 text-[9px] text-ink-subtle">pronto</span>
                     </span>
                   ) : (
                     <Link
@@ -124,11 +124,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                       href={p.href}
                       className={cn(
                         "flex items-center gap-1 px-3 py-1.5 text-[13px]",
-                        pathname === p.href ? "bg-cyan-50 font-medium text-cyan-800" : "text-slate-600 hover:bg-slate-50",
+                        pathname === p.href ? "bg-cyan-50 font-medium text-cyan-800" : "text-ink-muted hover:bg-app",
                       )}
                     >
                       {p.label}
-                      {p.external && <ExternalLink size={11} className="text-slate-400" />}
+                      {p.external && <ExternalLink size={11} className="text-ink-subtle" />}
                     </Link>
                   ),
                 )}
@@ -137,7 +137,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           })}
         </div>
       </nav>
-      <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50">{children}</main>
+      <main className="min-w-0 flex-1 overflow-y-auto bg-app">{children}</main>
     </div>
   );
 }

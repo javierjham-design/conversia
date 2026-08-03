@@ -56,14 +56,14 @@ export default function ProfilePage() {
   }
 
   if (!me) return <div className="mx-auto max-w-xl p-6"><Skeleton className="h-64" /></div>;
-  const input = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+  const input = "mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm";
 
   return (
     <div className="mx-auto max-w-xl p-6">
       <h2 className="text-lg font-semibold">Mi perfil</h2>
-      <p className="mt-1 text-xs text-slate-500">Configuración personal — solo te afecta a ti, no a la organización.</p>
+      <p className="mt-1 text-xs text-ink-muted">Configuración personal — solo te afecta a ti, no a la organización.</p>
 
-      <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <div className="flex items-center gap-4">
           <ImageUpload
             uploadPath="/settings/profile/avatar"
@@ -74,11 +74,11 @@ export default function ProfilePage() {
           />
           <div className="min-w-0">
             <p className="text-sm font-medium">{me.user?.name}</p>
-            <p className="text-xs text-slate-400">{me.user?.email} · rol: {me.role}</p>
+            <p className="text-xs text-ink-subtle">{me.user?.email} · rol: {me.role}</p>
           </div>
         </div>
         <label className="mt-3 block text-sm">
-          <span className="text-xs text-slate-500">Nombre</span>
+          <span className="text-xs text-ink-muted">Nombre</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className={input} />
         </label>
         <div className="mt-2 flex justify-end">
@@ -86,25 +86,25 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="mt-4 rounded-card border border-slate-200 bg-white p-5 shadow-card">
+      <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <p className="text-sm font-medium">Cambiar contraseña</p>
         <div className="mt-2 grid gap-3 md:grid-cols-3">
           <label className="block text-sm">
-          <span className="text-xs text-slate-500">Contraseña actual</span>
+          <span className="text-xs text-ink-muted">Contraseña actual</span>
             <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} className={input} />
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Nueva contraseña</span>
+            <span className="text-xs text-ink-muted">Nueva contraseña</span>
             <input type="password" value={next} onChange={(e) => setNext(e.target.value)} className={input} />
           </label>
           <label className="block text-sm">
-            <span className="text-xs text-slate-500">Repite la nueva</span>
+            <span className="text-xs text-ink-muted">Repite la nueva</span>
             <input type="password" value={next2} onChange={(e) => setNext2(e.target.value)} className={input} />
           </label>
         </div>
         <ul className="mt-2 flex flex-wrap gap-3 text-[11px]">
           {reqs.map((r) => (
-            <li key={r.label} className={cn("flex items-center gap-1", r.ok ? "text-emerald-600" : "text-slate-400")}>
+            <li key={r.label} className={cn("flex items-center gap-1", r.ok ? "text-emerald-600" : "text-ink-subtle")}>
               {r.ok ? "✓" : "○"} {r.label}
             </li>
           ))}
@@ -112,7 +112,7 @@ export default function ProfilePage() {
         <div className="mt-3 flex justify-end">
           <Button onClick={() => void changePassword()} disabled={busy || !passOk}>Cambiar contraseña</Button>
         </div>
-        <p className="mt-2 text-[10px] text-slate-400">
+        <p className="mt-2 text-[10px] text-ink-subtle">
           Nota: no existe aún «cerrar sesión en todos los dispositivos» — las sesiones expiran solas a las 12 h
           (brecha anotada; llegará con los refresh tokens).
         </p>
