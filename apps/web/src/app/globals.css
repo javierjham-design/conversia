@@ -1,12 +1,29 @@
 @import "tailwindcss";
 
+/* Modo oscuro por clase .dark (no solo prefers-color-scheme) */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ============================================================
-   TuBot — tokens de diseño
-   Identidad: azul noche (sidebar) + azul eléctrico (acción) +
-   cian tecnológico (acento). Escala de espaciado múltiplos de 4.
+   TuBot — Sistema de diseño (v2)
+   UN color de marca (brand, azul), un neutro frío (slate),
+   semánticos acotados. Superficies e "ink" (texto) por tokens
+   que voltean en claro/oscuro. Espaciado múltiplos de 4.
+   Ver docs/DESIGN.md.
    ============================================================ */
 @theme {
-  /* Deep Navy #0B1D3A — superficies de navegación */
+  /* -------- Marca: azul, escala 50→900 (único primario) -------- */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #172554;
+
+  /* -------- Navy: superficie de navegación (sidebar) -------- */
   --color-navy-950: #050c1a;
   --color-navy-900: #0b1d3a;
   --color-navy-800: #12284b;
@@ -15,46 +32,134 @@
   --color-navy-300: #8ea3d8;
   --color-navy-200: #b9c6e8;
 
-  /* Electric Blue #2563EB — acciones principales */
-  --color-brand-50: #eff6ff;
-  --color-brand-100: #dbeafe;
-  --color-brand-200: #bfdbfe;
-  --color-brand-300: #93c5fd;
-  --color-brand-500: #3b82f6;
-  --color-brand-600: #2563eb;
-  --color-brand-700: #1d4ed8;
-  --color-brand-800: #1e40af;
-
-  /* Cyan #00D4FF — acentos tecnológicos */
+  /* -------- Acentos heredados (se mantienen por compat) -------- */
   --color-accent-300: #7de9ff;
   --color-accent-400: #00d4ff;
   --color-accent-500: #00b0d9;
   --color-accent-600: #0891b2;
-
-  /* Soft Teal #14B8A6 — secundario */
   --color-teal-500: #14b8a6;
 
-  /* Sombras suaves */
-  --shadow-card: 0 1px 2px 0 rgb(10 18 38 / 0.05), 0 1px 3px 0 rgb(10 18 38 / 0.08);
-  --shadow-pop: 0 4px 12px -2px rgb(10 18 38 / 0.12), 0 2px 6px -2px rgb(10 18 38 / 0.08);
+  /* -------- Radios: 6 controles · 10 tarjetas · 16 burbujas -------- */
+  --radius-control: 0.375rem;
+  --radius-card: 0.625rem;
+  --radius-bubble: 1rem;
 
-  --radius-card: 0.75rem;
+  /* -------- Tipografía: escala 11/12/13/14/16/20 -------- */
+  --text-2xs: 0.6875rem; /* 11px — metadatos, contadores */
+  --text-2xs--line-height: 1rem;
+  --text-13: 0.8125rem; /* 13px — sidebar, ítems de lista */
+  --text-13--line-height: 1.15rem;
+
+  /* Compat: sombras antiguas usadas por el resto del panel */
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.05), 0 1px 3px 0 rgb(15 23 42 / 0.08);
+  --shadow-pop: 0 4px 12px -2px rgb(15 23 42 / 0.12), 0 2px 6px -2px rgb(15 23 42 / 0.08);
 }
 
+/* Tokens semánticos que VOLTEAN entre claro/oscuro (inline = la
+   utilidad referencia la variable, no su valor → cambia en runtime). */
+@theme inline {
+  --color-app: var(--app); /* fondo de la aplicación */
+  --color-panel: var(--panel); /* superficie de panel (lista, sidebar claro) */
+  --color-raised: var(--raised); /* tarjetas, popovers, burbuja entrante */
+  --color-line: var(--line); /* borde sutil 1px */
+  --color-line-strong: var(--line-strong); /* borde algo más marcado */
+  --color-ink: var(--ink); /* texto primario */
+  --color-ink-muted: var(--ink-muted); /* texto secundario */
+  --color-ink-subtle: var(--ink-subtle); /* texto terciario / metadatos */
+  --color-brand-soft: var(--brand-soft); /* fondo tenue con tinte de marca */
+
+  --shadow-e1: var(--sh-e1);
+  --shadow-e2: var(--sh-e2);
+  --shadow-e3: var(--sh-e3);
+}
+
+/* -------- Claro (idéntico a la estética actual: slate) -------- */
 :root {
   color-scheme: light;
+  --app: #f1f5f9; /* slate-100 */
+  --panel: #ffffff;
+  --raised: #ffffff;
+  --line: #e2e8f0; /* slate-200 */
+  --line-strong: #cbd5e1; /* slate-300 */
+  --ink: #0f172a; /* slate-900 */
+  --ink-muted: #556173; /* AA sobre panel y app */
+  --ink-subtle: #78859a; /* AA-large — metadatos 11px */
+  --brand-soft: #eff6ff; /* brand-50 */
+  --sh-e1: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+  --sh-e2: 0 2px 8px -2px rgb(15 23 42 / 0.1), 0 1px 3px 0 rgb(15 23 42 / 0.06);
+  --sh-e3: 0 10px 28px -8px rgb(15 23 42 / 0.16), 0 3px 8px -3px rgb(15 23 42 / 0.08);
+}
+
+/* -------- Oscuro (mismos tokens, navy frío; contraste AA) -------- */
+.dark {
+  color-scheme: dark;
+  --app: #0a0f1a; /* casi negro azulado */
+  --panel: #0f1626;
+  --raised: #16203a;
+  --line: #1f2a44;
+  --line-strong: #2c3a5c;
+  --ink: #e9eef8; /* AA sobre panel/raised */
+  --ink-muted: #9fb0c9; /* AA para texto pequeño */
+  --ink-subtle: #6b7a97;
+  --brand-soft: color-mix(in srgb, var(--color-brand-500) 16%, transparent);
+  --sh-e1: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+  --sh-e2: 0 2px 10px -2px rgb(0 0 0 / 0.55);
+  --sh-e3: 0 14px 34px -10px rgb(0 0 0 / 0.65);
+  /* En oscuro, las sombras "card/pop" del panel legado se suavizan */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 6px 18px -4px rgb(0 0 0 / 0.6);
 }
 
 body {
-  @apply bg-slate-100 text-slate-900 antialiased;
+  @apply bg-app text-ink antialiased;
   font-size: 15px;
   line-height: 1.55;
 }
 
-/* Barras de scroll discretas en paneles */
+/* Números tabulares: contadores y horas no "bailan" */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Foco accesible unificado para controles interactivos */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* Shimmer para skeletons (reemplaza spinners) */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink) 8%, transparent), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+/* Punto "en vivo" que late */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.live-dot {
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+
+/* Barras de scroll discretas */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+  scrollbar-color: color-mix(in srgb, var(--ink-subtle) 60%, transparent) transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -62,6 +167,7 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

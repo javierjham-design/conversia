@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { api, clearToken, getToken } from "@/lib/api";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
+import { ThemeToggle } from "@/components/theme";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -317,12 +318,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               })}
             </div>
 
-            {/* Pie: colapsar + usuario */}
+            {/* Pie: tema + colapsar + usuario */}
             <div className="border-t border-navy-800 p-2">
+              <ThemeToggle collapsed={collapsed} />
               <button
                 onClick={toggleCollapsed}
                 className={cn(
-                  "mb-1 hidden w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white md:flex",
+                  "mb-1 mt-1 hidden w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-navy-300 hover:bg-navy-800 hover:text-white md:flex",
                   collapsed && "justify-center",
                 )}
                 aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
