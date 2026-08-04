@@ -16,7 +16,8 @@ import {
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
-  private connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
+  // Expuesta para health checks (ping + lectura del latido del worker).
+  readonly connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
   readonly inbound = new Queue<InboundJob>(QUEUE_NAMES.inbound, { connection: this.connection });
   readonly outbound = new Queue<OutboundJob>(QUEUE_NAMES.outbound, { connection: this.connection });
   readonly events = new Queue<EventJob>(QUEUE_NAMES.events, { connection: this.connection });

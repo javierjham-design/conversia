@@ -36,8 +36,8 @@ export default function TerminosPage() {
       <h2>4. Agentes de IA</h2>
       <p>
         Las respuestas se generan con modelos de IA a partir de la configuración del Tenant y de las herramientas
-        habilitadas. El Tenant es responsable del contenido que configura. Los agentes no entregan diagnósticos ni
-        indicaciones clínicas.
+        habilitadas. El Tenant es responsable del contenido que configura. Los agentes no sustituyen asesoría
+        profesional (médica, legal o financiera).
       </p>
 
       <h2>5. Planes y pago</h2>

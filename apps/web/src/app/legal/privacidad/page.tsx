@@ -17,7 +17,7 @@ export default function PrivacidadPage() {
       <h2>1. Roles</h2>
       <p>
         Cada empresa cliente (“Tenant”) que contrata TuBot es la <strong>responsable</strong> de los datos de
-        sus propios contactos y pacientes. TuBot actúa como <strong>encargada del tratamiento</strong> (data
+        sus propios contactos y usuarios finales. TuBot actúa como <strong>encargada del tratamiento</strong> (data
         processor) por cuenta del Tenant, procesando esos datos solo para prestar el servicio conforme a sus
         instrucciones y a esta política.
       </p>
@@ -38,8 +38,9 @@ export default function PrivacidadPage() {
         </li>
       </ul>
       <p>
-        No solicitamos datos sensibles de salud a los usuarios finales; los agentes de IA están instruidos para no
-        entregar diagnósticos ni indicaciones clínicas.
+        No recopilamos categorías especiales de datos (como salud o información financiera) de los usuarios finales,
+        salvo que el Tenant lo configure para su caso de uso y bajo su responsabilidad. Los agentes de IA se instruyen
+        para no entregar asesoría profesional (médica, legal o financiera) sin supervisión de una persona.
       </p>
 
       <h2>3. Finalidades</h2>

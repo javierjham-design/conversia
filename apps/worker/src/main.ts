@@ -124,12 +124,22 @@ async function main() {
   const stopDailyDigests = startDailyDigests();
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
 
+  // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
+  // La API lo lee en /health/status; si envejece, el worker está caído/atascado.
+  const HEARTBEAT_KEY = "conversia:health:worker";
+  const writeHeartbeat = () =>
+    connection.set(HEARTBEAT_KEY, JSON.stringify({ ts: Date.now(), pid: process.pid }), "EX", 60).catch(() => undefined);
+  void writeHeartbeat();
+  const heartbeat = setInterval(() => void writeHeartbeat(), 15_000);
+  heartbeat.unref?.();
+
   console.log(
     `✔ Worker Conversia activo — colas: ${QUEUE_NAMES.inbound}, ${QUEUE_NAMES.outbound} | IA: ${env.AI_PROVIDER} | WhatsApp: ${env.WHATSAPP_PROVIDER}`,
   );
 
   const shutdown = async () => {
     console.log("Cerrando worker…");
+    clearInterval(heartbeat);
     stopScheduler();
     stopTemplateSync();
     stopDailyDigests();

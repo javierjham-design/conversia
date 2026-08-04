@@ -78,6 +78,8 @@ const envSchema = z.object({
   WHATSAPP_PROVIDER: z.enum(["meta", "mock"]).default("mock"),
   /** Token requerido para inyectar mensajes por canales mock (simulador). */
   MOCK_INBOUND_TOKEN: z.string().default("dev-mock-inbound-token"),
+  /** Opcional: protege /health/status (header x-monitor-token) para el monitor externo. */
+  MONITOR_TOKEN: z.string().optional().default(""),
   META_APP_SECRET: z.string().optional().default(""),
   META_VERIFY_TOKEN: z.string().default("conversia-verify-token-dev"),
   META_ACCESS_TOKEN: z.string().optional().default(""),

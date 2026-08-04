@@ -148,3 +148,40 @@ El trigger "Anuncios Click-to-Chat" del constructor de flujos permite elegir cam
   de campaña/anuncio en la bandeja. Reusa la conexión Meta unificada (`MetaBusinessConnection` + `appScopes`); `ads_read`
   se suma a los scopes acumulativos. **Pendiente:** el flujo de autorización con `ads_read` (Facebook Login for Business)
   para que un tenant no-admin conecte sus anuncios — hoy usa el token de la conexión existente si ya tiene el scope.
+
+---
+
+## Estado de la postulación — verificado por MCP 2026-08-04 (checklist anti-rechazo)
+
+App **TuBot** `2024917441656687`. Submission **PENDING** (`2026955961452835`, enviada
+~2026-08-01, `review_completed_time: null` = aún sin veredicto). **No hay nada que
+reenviar** — la postulación ya está en la cola de Meta. `can_submit: false` porque
+hay una en proceso (es lo esperado, no un error).
+
+**Gates formales que Meta exige — TODOS PASAN (`app_settings_valid`):**
+- ✅ `has_privacy_policy: true` → https://tubot.cl/legal/privacidad (carga 200 público).
+- ✅ `business_verification_passes: true` (negocio verificado).
+- ✅ App en Producción (`live_mode`), categoría MESSAGING, Términos + Eliminación de datos cargados.
+- ✅ Permisos correctos en la solicitud: `whatsapp_business_messaging`, `whatsapp_business_management`, `business_management`, `whatsapp_business_manage_events`, `public_profile`. (`ads_read` NO está — se pide aparte cuando se venda conexión de anuncios de terceros.)
+- ✅ `data_use_checkup` completado en todos los permisos.
+
+**Lectura de los pasos `screencast`/`api_precheck` en `requirements`:** aparecen
+`is_completed:false` PERO eso es el formulario de una **submission nueva** (reseteado
+porque hay una viva); **no** significa que falten los videos ya enviados en la
+submission PENDING. (Gotcha ya documentado.)
+
+**Por qué Meta podría rechazar (lo único que depende de ti, pre-empt):**
+1. **El video/screencast no demuestra claramente el uso real** de cada permiso con login real y flujo end-to-end. Es la causa #1 de rechazo. No verificable por MCP.
+2. **El usuario de revisión no puede entrar o el flujo está roto.** Meta entra con las credenciales que diste (`revisor.meta@tubot.cl`, tenant piloto Digital Dent). Si está desactivado o el flujo no reproduce, rechazan.
+3. **La app no está llamando las APIs** (señal de `api_precheck`). Como WhatsApp está vivo y CAPI funciona, debería estar OK; mantener la integración activa.
+
+**Qué hacer HOY (no acelera la cola, pero evita el rechazo):**
+- [ ] Entrar con `revisor.meta@tubot.cl` y verificar el recorrido completo: login → conectar WhatsApp visible → enviar/recibir un mensaje. Que el revisor pueda reproducir lo que muestra el video.
+- [ ] Confirmar que la política de privacidad y los términos cargan públicos (ok hoy).
+- [ ] NO desactivar el canal de prueba ni borrar plantillas mientras dure la revisión.
+- [ ] NO cancelar ni reenviar la submission (te manda al final de la cola).
+- [ ] (Opcional, benigno) verificar el email de contacto de la app — no afecta la submission.
+
+**Tiempo esperado:** revisión de permisos de WhatsApp/Business suele resolverse en
+**1–2 semanas** (a veces en días). Enviada ~2026-08-01 → dentro de la ventana normal.
+No hay forma de acelerar la cola; solo se puede evitar el rechazo por forma.
