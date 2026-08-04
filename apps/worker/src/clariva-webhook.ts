@@ -118,7 +118,7 @@ export async function processClarivaWebhook(
         startsAt: new Date(payload.start),
         endsAt: new Date(payload.end),
         notes: payload.notes ?? null,
-        meta: { clinicId: payload.clinicId ?? null, professionalId: payload.professionalId ?? null, serviceId: payload.serviceId ?? null } as object,
+        meta: { clinicId: payload.clinicId ?? null, professionalId: payload.professionalId ?? null, serviceId: payload.serviceId ?? null, serviceName: payload.serviceName ?? payload.service?.name ?? null } as object,
       },
     });
     return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString() };

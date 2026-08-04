@@ -29,6 +29,7 @@ export async function resolveTemplateParams(
       appointment?.professionalId ? tx.professional.findUnique({ where: { id: appointment.professionalId } }) : Promise.resolve(null),
     ]);
 
+    const apptMeta = (appointment?.meta as Record<string, any> | null) ?? {};
     const tz = appointment?.timezone || org?.timezone || "America/Santiago";
     const fmtDate = (d: Date) =>
       d.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: tz });
@@ -49,7 +50,11 @@ export async function resolveTemplateParams(
         case "appointment.time":
           return appointment ? fmtTime(appointment.startsAt) : "";
         case "appointment.service":
-          return service?.name ?? "";
+          // Nombre del servicio: tabla Service local (agente) o, para citas de
+          // Cláriva, el nombre que vino en el webhook (meta.serviceName).
+          return service?.name ?? (typeof apptMeta.serviceName === "string" ? apptMeta.serviceName : "");
+        case "appointment.serviceName":
+          return typeof apptMeta.serviceName === "string" ? apptMeta.serviceName : "";
         case "appointment.professional":
           return professional?.name ?? "";
         case "organization.name":
