@@ -785,6 +785,173 @@ function VarField({
   );
 }
 
+// ---- Selector de anuncios Click-to-Chat (catálogo Meta) ----
+interface AdLeaf { id: string; name: string; status: string; isCtwa: boolean; available: boolean }
+interface AdsetNode { id: string; name: string; ads: AdLeaf[] }
+interface CampaignNode { id: string; name: string; objective: string | null; adsets: AdsetNode[] }
+interface AdAccounts { connected: boolean; canReadAds: boolean; accounts: { id: string; externalId: string; name: string; enabled: boolean }[] }
+interface AdCatalog { total: number; lastSyncedAt: string | null; campaigns: CampaignNode[] }
+
+function ClickToChatConfig({ trigger, onChange }: { trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
+  const toast = useToast();
+  const cfg = trigger.config as Record<string, any>;
+  const setCfg = (patch: Record<string, unknown>) => onChange({ ...trigger, config: { ...cfg, ...patch } });
+  const [accts, setAccts] = useState<AdAccounts | null>(null);
+  const [catalog, setCatalog] = useState<AdCatalog | null>(null);
+  const [q, setQ] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+
+  const mode: "all" | "selected" = cfg.mode === "selected" ? "selected" : "all";
+  const campaignIds: string[] = Array.isArray(cfg.campaignIds) ? cfg.campaignIds.map(String) : [];
+  const adIds: string[] = Array.isArray(cfg.adIds) ? cfg.adIds.map(String) : [];
+  const adAccountId: string | undefined = cfg.adAccountId ? String(cfg.adAccountId) : accts?.accounts.find((a) => a.enabled)?.externalId;
+
+  useEffect(() => {
+    void api<AdAccounts>("/integrations/meta/ads/accounts").then(setAccts).catch(() => setAccts({ connected: false, canReadAds: false, accounts: [] }));
+  }, []);
+  const loadCatalog = useCallback(() => {
+    if (!accts?.canReadAds || !adAccountId) return;
+    void api<AdCatalog>(`/integrations/meta/ads/catalog?adAccountId=${encodeURIComponent(adAccountId)}`).then(setCatalog).catch(() => setCatalog({ total: 0, lastSyncedAt: null, campaigns: [] }));
+  }, [accts, adAccountId]);
+  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      await api("/integrations/meta/ads/sync", { method: "POST" });
+      toast.push("Sincronización encolada — recarga en unos segundos", "ok");
+      setTimeout(loadCatalog, 4000);
+    } catch (e) { toast.push((e as Error).message, "error"); }
+    finally { setSyncing(false); }
+  }
+
+  // Sin conexión → CTA al hub.
+  if (accts && !accts.connected) {
+    return (
+      <div className="rounded-card border border-line bg-app p-4 text-center">
+        <p className="text-sm font-medium text-ink">Conecta tu cuenta de Meta Business</p>
+        <p className="mt-1 text-xs text-ink-muted">Para elegir campañas y anuncios necesitas conectar Meta una vez.</p>
+        <a href="/integrations/meta" className="mt-3 inline-flex rounded-control bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700">Conectar cuenta de Meta Business</a>
+        <AdvancedManual cfg={cfg} setCfg={setCfg} show={showManual} setShow={setShowManual} />
+      </div>
+    );
+  }
+  // Conectada pero sin permiso de anuncios (App Review pendiente / no admin).
+  if (accts && accts.connected && !accts.canReadAds) {
+    return (
+      <div className="rounded-card border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+        <p className="font-medium">No podemos listar tus anuncios todavía</p>
+        <p className="mt-1">Falta el permiso <code>ads_read</code>. En desarrollo funciona con cuentas donde eres administrador; en producción requiere aprobación de Meta (App Review). Puedes conectarlo desde <a href="/integrations/meta" className="underline">Integraciones → Centro Meta</a> o pegar un ad_id manualmente.</p>
+        <AdvancedManual cfg={cfg} setCfg={setCfg} show={showManual} setShow={setShowManual} />
+      </div>
+    );
+  }
+
+  const acc = accts?.accounts.find((a) => a.externalId === adAccountId);
+  const ql = q.trim().toLowerCase();
+  const matchesQ = (s: string) => !ql || s.toLowerCase().includes(ql);
+  const campaigns = (catalog?.campaigns ?? []).map((c) => ({
+    ...c,
+    adsets: c.adsets.map((s) => ({ ...s, ads: s.ads.filter((a) => matchesQ(a.name) || matchesQ(s.name) || matchesQ(c.name)) })).filter((s) => s.ads.length > 0),
+  })).filter((c) => c.adsets.length > 0 || matchesQ(c.name));
+
+  const isCampaignSel = (id: string) => campaignIds.includes(id);
+  const isAdSel = (a: AdLeaf, campId: string) => isCampaignSel(campId) || adIds.includes(a.id);
+  const toggleCampaign = (id: string) => setCfg({ mode: "selected", campaignIds: isCampaignSel(id) ? campaignIds.filter((c) => c !== id) : [...campaignIds, id] });
+  const toggleAd = (a: AdLeaf) => setCfg({ mode: "selected", adIds: adIds.includes(a.id) ? adIds.filter((x) => x !== a.id) : [...adIds, a.id] });
+
+  // Advertencia: ¿todos los anuncios seleccionados están pausados?
+  const selectedAds = (catalog?.campaigns ?? []).flatMap((c) => c.adsets.flatMap((s) => s.ads.filter((a) => isAdSel(a, c.id))));
+  const onlyPaused = mode === "selected" && selectedAds.length > 0 && selectedAds.every((a) => a.status !== "ACTIVE");
+
+  return (
+    <div className="space-y-3">
+      {accts && accts.accounts.length > 1 && (
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">Cuenta publicitaria</span>
+          <select value={adAccountId ?? ""} onChange={(e) => setCfg({ adAccountId: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+            {accts.accounts.map((a) => <option key={a.externalId} value={a.externalId}>{a.name}</option>)}
+          </select>
+        </label>
+      )}
+      <div className="flex items-center justify-between text-[11px] text-ink-subtle">
+        <span>{acc?.name ?? "Cuenta"} · <a href="/integrations/meta" className="underline">Administrar</a></span>
+        <button onClick={() => void syncNow()} disabled={syncing} className="rounded border border-line-strong px-2 py-0.5 hover:bg-app disabled:opacity-50">{syncing ? "Sincronizando…" : "Sincronizar ahora"}</button>
+      </div>
+
+      <div className="flex gap-1 rounded-control bg-app p-0.5 text-xs">
+        {(["all", "selected"] as const).map((m) => (
+          <button key={m} onClick={() => setCfg({ mode: m })} className={cn("flex-1 rounded px-2 py-1 font-medium transition-colors", mode === m ? "bg-panel text-ink shadow-e1" : "text-ink-muted hover:text-ink")}>
+            {m === "all" ? "Todos los anuncios" : "Anuncios seleccionados"}
+          </button>
+        ))}
+      </div>
+
+      {mode === "all" ? (
+        <p className="rounded-card border border-line bg-app px-3 py-2 text-xs text-ink-muted">Cualquier anuncio Click-to-WhatsApp de esta cuenta dispara el flujo.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar campaña, conjunto o anuncio…" className="flex-1 rounded-control border border-line-strong bg-panel px-2.5 py-1.5 text-xs" />
+            <button onClick={() => setCfg({ mode: "selected", campaignIds: [...new Set([...campaignIds, ...campaigns.map((c) => c.id)])] })} className="whitespace-nowrap rounded border border-line-strong px-2 py-1.5 text-xs hover:bg-app">Seleccionar todo</button>
+          </div>
+          <p className="text-[11px] text-ink-subtle">{campaignIds.length} campaña(s) + {adIds.length} anuncio(s) seleccionados</p>
+          {onlyPaused && <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">⚠ Solo seleccionaste anuncios pausados: no llegarán mensajes hasta reactivarlos.</p>}
+
+          {catalog && catalog.total === 0 ? (
+            <div className="rounded-card border border-dashed border-line-strong bg-app p-4 text-center text-xs text-ink-muted">
+              Sin anuncios en el catálogo. <button onClick={() => void syncNow()} className="underline">Sincroniza ahora</button> para traerlos de Meta.
+            </div>
+          ) : (
+            <div className="max-h-64 space-y-1 overflow-y-auto rounded-card border border-line bg-panel p-1.5">
+              {campaigns.map((c) => (
+                <div key={c.id}>
+                  <label className="flex items-center gap-2 rounded px-1.5 py-1 text-xs font-medium hover:bg-app">
+                    <input type="checkbox" checked={isCampaignSel(c.id)} onChange={() => toggleCampaign(c.id)} className="h-3.5 w-3.5" />
+                    <span className="truncate text-ink">{c.name}</span>
+                  </label>
+                  {c.adsets.map((s) => (
+                    <div key={s.id} className="ml-4">
+                      <p className="px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-subtle">{s.name}</p>
+                      {s.ads.map((a) => (
+                        <label key={a.id} className={cn("ml-2 flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-app", !a.available && "opacity-50")} title={!a.available ? "Ya no está en Meta" : undefined}>
+                          <input type="checkbox" checked={isAdSel(a, c.id)} disabled={isCampaignSel(c.id)} onChange={() => toggleAd(a)} className="h-3.5 w-3.5" />
+                          <span className="truncate text-ink-muted">{a.name}</span>
+                          <span className={cn("ml-auto shrink-0 rounded px-1 text-[9px]", a.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-app text-ink-subtle")}>{a.status === "ACTIVE" ? "activo" : "pausado"}</span>
+                          {!a.available && <span className="shrink-0 text-[9px] text-amber-600 dark:text-amber-400">no disponible</span>}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {campaigns.length === 0 && <p className="px-2 py-2 text-xs text-ink-subtle">Sin resultados para «{q}».</p>}
+            </div>
+          )}
+        </div>
+      )}
+      <AdvancedManual cfg={cfg} setCfg={setCfg} show={showManual} setShow={setShowManual} />
+    </div>
+  );
+}
+
+function AdvancedManual({ cfg, setCfg, show, setShow }: { cfg: Record<string, any>; setCfg: (p: Record<string, unknown>) => void; show: boolean; setShow: (v: boolean) => void }) {
+  return (
+    <div className="mt-2 text-left">
+      <button onClick={() => setShow(!show)} className="text-[11px] text-ink-subtle underline">{show ? "Ocultar" : "Avanzado: pegar un ad_id manual"}</button>
+      {show && (
+        <input
+          value={String(cfg.adId ?? "")}
+          onChange={(e) => setCfg({ adId: e.target.value })}
+          placeholder="ad_id específico (alternativa avanzada)"
+          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-xs"
+        />
+      )}
+    </div>
+  );
+}
+
 function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
   return (
@@ -845,18 +1012,7 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
         </p>
       )}
 
-      {trigger.type === "click_to_chat" && (
-        <label className="block text-sm">
-          <span className="text-xs text-ink-muted">Anuncio específico (opcional)</span>
-          <input
-            value={String(trigger.config.adId ?? "")}
-            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, adId: e.target.value } })}
-            placeholder="ad_id — vacío = cualquier anuncio"
-            className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
-          />
-          <span className="mt-1 block text-[10px] text-ink-subtle">Guarda ctwa_clid / ad_id / headline en el contacto para el evento CAPI.</span>
-        </label>
-      )}
+      {trigger.type === "click_to_chat" && <ClickToChatConfig trigger={trigger} onChange={onChange} />}
 
       {trigger.type === "lead_status_changed" && (
         <div className="space-y-2 rounded-lg border border-line p-3">

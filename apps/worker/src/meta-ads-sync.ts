@@ -189,6 +189,48 @@ async function logSync(organizationId: string, status: "ok" | "warning" | "error
   );
 }
 
+/** Sincroniza UN solo anuncio (catálogo desactualizado / anuncio recién creado). */
+export async function syncSingleAd(organizationId: string, adId: string): Promise<void> {
+  const env = getEnv();
+  const token = await getMetaToken(organizationId);
+  if (!token || !adId) return;
+  const fields = "id,name,status,account_id,adset{id,name},campaign{id,name,objective},creative{object_story_spec}";
+  const json = await graphGet(
+    `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${adId}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(token)}`,
+  ).catch(() => null);
+  if (!json?.id) return;
+  const acctId = json.account_id ? `act_${String(json.account_id).replace(/^act_/, "")}` : "";
+  const m = mapAdRow(json as RawAd, acctId);
+  await withTenant(organizationId, (tx) =>
+    tx.metaAd.upsert({
+      where: { organizationId_adExternalId: { organizationId, adExternalId: m.adExternalId } },
+      update: { ...m, available: true, lastSyncedAt: new Date() },
+      create: { organizationId, ...m, available: true },
+    }),
+  );
+}
+
+/**
+ * Resuelve la campaña (y nombres) de un ad_id usando el catálogo cacheado. Si el
+ * anuncio no está (recién creado), hace una sincronización PUNTUAL antes de
+ * rendirse — así no se pierde el disparo por catálogo desactualizado.
+ */
+export async function resolveAdContext(
+  organizationId: string,
+  adId: string,
+): Promise<{ campaignId: string; campaignName: string; adName: string } | null> {
+  if (!adId) return null;
+  const find = () =>
+    withTenant(organizationId, (tx) => tx.metaAd.findUnique({ where: { organizationId_adExternalId: { organizationId, adExternalId: adId } } }));
+  let row = await find();
+  if (!row) {
+    await syncSingleAd(organizationId, adId).catch(() => undefined);
+    row = await find();
+  }
+  if (!row) return null;
+  return { campaignId: row.campaignId, campaignName: row.campaignName, adName: row.adName };
+}
+
 /** Encola un sync del catálogo para un tenant (botón "Sincronizar ahora"). */
 export async function enqueueMetaAdsSync(organizationId: string): Promise<void> {
   await getSyncQueue().add(

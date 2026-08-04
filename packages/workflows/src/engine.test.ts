@@ -89,6 +89,14 @@ describe("motor de workflows v0", () => {
     const anyAd: WorkflowDefinition = { ...ad, trigger: { type: "click_to_chat", config: {} } };
     expect(matchesTrigger(anyAd, { organizationId: "o", type: "click_to_chat", data: { ad_id: "X" }, occurredAt: "" })).toBe(true);
 
+    // Selección por anuncios y por campaña (catálogo Meta).
+    const sel: WorkflowDefinition = { ...ad, trigger: { type: "click_to_chat", config: { mode: "selected", adIds: ["A1", "A2"], campaignIds: ["C9"] } } };
+    expect(matchesTrigger(sel, { organizationId: "o", type: "click_to_chat", data: { ad_id: "A2" }, occurredAt: "" })).toBe(true);
+    // Anuncio NUEVO (no listado) pero de una campaña seleccionada → cubierto.
+    expect(matchesTrigger(sel, { organizationId: "o", type: "click_to_chat", data: { ad_id: "NUEVO", campaign_id: "C9" }, occurredAt: "" })).toBe(true);
+    // Anuncio y campaña fuera de la selección → no dispara.
+    expect(matchesTrigger(sel, { organizationId: "o", type: "click_to_chat", data: { ad_id: "Z", campaign_id: "C1" }, occurredAt: "" })).toBe(false);
+
     const life: WorkflowDefinition = { trigger: { type: "lead_status_changed", config: { toStatus: "agendado" } }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
     expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "agendado", fromCode: "nuevo" }, occurredAt: "" })).toBe(true);
     expect(matchesTrigger(life, { organizationId: "o", type: "lead_status_changed", data: { statusCode: "perdido" }, occurredAt: "" })).toBe(false);
