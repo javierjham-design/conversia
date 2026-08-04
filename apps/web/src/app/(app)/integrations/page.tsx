@@ -70,7 +70,7 @@ interface Overview {
 
 const CATEGORY_LABELS: Record<string, string> = {
   meta: "Meta y mensajería",
-  agenda: "Agenda y gestión clínica",
+  agenda: "Agenda y reservas",
   datos: "Productividad y datos",
   crm: "CRM y analítica",
 };
@@ -199,7 +199,7 @@ export default function IntegrationsPage() {
       rows.push({
         key: "clariva",
         name: "Cláriva",
-        category: "Agenda y gestión clínica",
+        category: "Agenda y reservas",
         icon: <CalendarCheck size={22} />,
         status: data.clariva.lastError ? "attention" : "connected",
         detail: `${data.clariva.baseUrl ?? ""} · sync ${data.clariva.lastSyncAt ? new Date(data.clariva.lastSyncAt).toLocaleString("es-CL") : "pendiente"}`,
@@ -254,7 +254,7 @@ export default function IntegrationsPage() {
       rows.push({
         key: "custom_scheduling",
         name: "Agenda personalizada",
-        category: "Agenda y gestión clínica",
+        category: "Agenda y reservas",
         icon: <CalendarCheck size={22} />,
         status: data.customScheduling.status === "error" ? "attention" : "connected",
         detail: data.customScheduling.baseUrl ?? "",
@@ -266,7 +266,7 @@ export default function IntegrationsPage() {
       rows.push({
         key: "dentalink",
         name: "Dentalink",
-        category: "Agenda y gestión clínica",
+        category: "Agenda y reservas",
         icon: <CalendarCheck size={22} />,
         status: data.dentalink.status === "error" ? "attention" : "connected",
         detail: `Ventana ${data.dentalink.workStartHour}:00–${data.dentalink.workEndHour}:00 · bloques de ${data.dentalink.slotMinutes} min`,
@@ -278,7 +278,7 @@ export default function IntegrationsPage() {
       rows.push({
         key: "google",
         name: "Google Calendar y Sheets",
-        category: "Agenda y gestión clínica",
+        category: "Agenda y reservas",
         icon: <CalendarCheck size={22} />,
         status: data.google.status === "reauthorize" ? "error" : data.google.lastError ? "attention" : "connected",
         statusLabel: data.google.status === "reauthorize" ? "Reconectar" : undefined,
@@ -432,7 +432,7 @@ export default function IntegrationsPage() {
       <div className="mx-auto max-w-[1400px] px-6 py-6 lg:px-8">
         <PageHeader
           title="Integraciones"
-          description="Conecta Meta, tu agenda clínica y tus sistemas. Todo con credenciales cifradas por organización."
+          description="Conecta Meta, tu agenda y tus sistemas. Todo con credenciales cifradas por organización."
           actions={
             <>
               <Button variant="secondary" onClick={() => (window.location.href = "/integrations/developers")}>
@@ -542,7 +542,7 @@ export default function IntegrationsPage() {
               <EmptyState
                 icon={<Plug size={32} />}
                 title="Todavía no hay integraciones conectadas"
-                description="Empieza por Meta Business Suite para WhatsApp y campañas, o conecta tu agenda Cláriva."
+                description="Empieza por Meta Business Suite para WhatsApp y campañas, o conecta tu agenda y tus sistemas."
                 action={<Button onClick={() => router.push("/integrations/meta")}>Conectar Meta</Button>}
               />
             ) : (

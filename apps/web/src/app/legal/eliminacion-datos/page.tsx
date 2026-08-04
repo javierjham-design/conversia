@@ -14,7 +14,7 @@ export default function EliminacionDatosPage() {
       <h2>Cómo solicitarla</h2>
       <ul>
         <li>
-          <strong>Usuarios finales (contactos/pacientes):</strong> la empresa (Tenant) que te contactó es la
+          <strong>Usuarios finales (contactos):</strong> la empresa (Tenant) que te contactó es la
           responsable de tus datos. Puedes pedirle la eliminación directamente, o escribirnos a{" "}
           <a href="mailto:privacidad@tubot.cl">privacidad@tubot.cl</a> y coordinaremos con ella.
         </li>

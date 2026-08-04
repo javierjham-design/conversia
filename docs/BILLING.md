@@ -2,6 +2,13 @@
 
 Módulo de suscripción y cobro de la plataforma hacia los tenants (SaaS billing). Implementado 2026-07-26.
 
+> **Facturación tributaria (Chile) — FUERA DE ALCANCE por decisión (2026-08-04).**
+> La emisión del documento tributario (boleta/factura del SII) se hace **fuera de la
+> plataforma**, asociada al método de pago. El `invoice` interno
+> (`CONV-AAAA-000000`) es **solo registro operativo** del cobro, **no** un DTE. No
+> construir emisión de DTE en la plataforma ni listarlo como brecha de
+> prelanzamiento.
+
 ## Modelo
 
 - **`plans`**: catálogo global (code, name, `priceClp`, `priceUsd`, `interval`, `limits` JSON, `features` JSON, `isPublic`, `order`, `active`). Seed crea 4: `free`, `starter`, `pro`, `enterprise` (privado).
