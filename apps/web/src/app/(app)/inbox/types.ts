@@ -111,6 +111,8 @@ export interface ConvContext {
   ad: {
     ctwaClid: string | null;
     adId: string | null;
+    campaignName: string | null;
+    adName: string | null;
     headline: string | null;
     body: string | null;
     imageUrl: string | null;

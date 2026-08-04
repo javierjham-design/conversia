@@ -132,6 +132,11 @@ export function ContactPanel({
         {context.ad && (
           <div className="rounded-card border border-line border-l-[3px] border-l-violet-400 bg-raised p-2.5 text-xs text-ink dark:border-l-violet-500">
             <p className="flex items-center gap-1 font-medium text-violet-700 dark:text-violet-300"><Megaphone size={12} /> Llegó desde un anuncio</p>
+            {(context.ad.campaignName || context.ad.adName) && (
+              <p className="mt-1 font-medium text-ink">
+                {context.ad.campaignName ?? ""}{context.ad.campaignName && context.ad.adName ? " · " : ""}{context.ad.adName ?? ""}
+              </p>
+            )}
             {context.ad.headline && <p className="mt-1 text-ink-muted">«{context.ad.headline}»</p>}
             {context.ad.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
