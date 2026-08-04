@@ -1,5 +1,16 @@
 # Registro de progreso
 
+## 2026-08-04 (2) — Workflows: D1 + M1 + U1 + tests (huecos restantes del catálogo)
+
+Cierre de los huecos restantes tras la auditoría (el catálogo ya estaba ~90% construido). PRs separados, sin migración:
+
+- **D1 — disparo manual masivo en Contactos**: nueva acción "Ejecutar flujo" en la barra de selección múltiple → elige flujo publicado → confirmación → `POST /workflows/:id/run-bulk` (endpoint ya existía). Cada contacto = una ejecución independiente.
+- **M1 — evento de prueba CAPI**: el botón y el endpoint `capi-test` ya existían y el card es conectable; el arreglo real fue enviar el test en **modo directo** (`eventName "Lead"`) para verificar dataset+token+test_event_code sin depender de reglas configuradas.
+- **U1 — autocompletado de variables `{{...}}`**: componente `VarField` en el canvas; al escribir `{{` ofrece las variables del flujo (contact/organization/clinic/appointment) con ↑/↓/Enter/clic. Aplicado a Enviar mensaje, Comentario, Objetivo IA, correo interno y cuerpo de Petición HTTP.
+- **Tests**: los pedidos ya existían (anti-bucle del salto, business_hours dentro/fuera/feriado con tz, SSRF localhost/metadata/esquemas/allowlist). Añadido el sub-caso **redirecciones** (`callHttp` usa `redirect:"error"`; test que lo fija). Worker 51 tests.
+
+**Hallazgo de prod (diagnóstico read-only vía Railway):** el flujo publicado "Confirmación de cita" (Digital Dent) usa `send_text` → **no entrega fuera de la ventana de 24 h y deja las variables vacías** (el run arranca sin variables; solo `send_template` las rellena). Además **0 plantillas HSM** sincronizadas. El flujo corregido (send_template → `recordatorio_cita`) y la especificación de la plantilla (UTILITY, 5 vars, botones) quedan en `docs/workflows/recordatorio-cita.md` para que el dueño cree la plantilla en Meta y publique el flujo. **Pendiente propietario:** crear `recordatorio_cita` en Meta + publicar el flujo corregido. **Gap menor:** `appointment.service` no se rellena para citas de Cláriva (serviceId en `meta`, no espejado) — decidir (a) sacar servicio o (b) cablear `serviceName`.
+
 ## 2026-08-04 (1) — Workflows AGENDA: recordatorios de cita robustos (rama `feature/workflow-catalog`)
 
 Auditoría previa: el catálogo de triggers/pasos ya estaba ~90% construido y **real** (motor + ejecutores + canvas con buscador/categorías + validación al publicar + SSRF). El trabajo se centra en cerrar huecos reales. Este bloque = **AGENDA**.

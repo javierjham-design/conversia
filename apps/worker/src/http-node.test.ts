@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeUrl, isBlockedIp } from "./http-node";
+import { assertSafeUrl, callHttp, isBlockedIp } from "./http-node";
 
 describe("guard SSRF de la Petición HTTP", () => {
   it("isBlockedIp bloquea rangos internos y metadata", () => {
@@ -26,5 +26,24 @@ describe("guard SSRF de la Petición HTTP", () => {
 
   it("respeta la allowlist del tenant", async () => {
     await expect(assertSafeUrl("http://evil.com/x", ["api.miempresa.cl"])).rejects.toThrow(/no permitido/i);
+  });
+
+  it("no sigue redirecciones (SSRF por redirect): pasa redirect:'error' y reporta no-ok si el redirect se bloquea", async () => {
+    const orig = globalThis.fetch;
+    let seen: any = null;
+    // Mock: captura las opciones y simula el bloqueo de redirect (redirect:"error" hace throw en runtime real).
+    globalThis.fetch = (async (_u: unknown, opts: any) => {
+      seen = opts;
+      throw new TypeError("net::ERR_FAILED redirect");
+    }) as unknown as typeof fetch;
+    try {
+      // IP pública (pasa el guard SSRF); el "redirect" bloqueado se refleja como no-ok, sin lanzar.
+      const out = await callHttp({ method: "GET", url: "http://93.184.216.34/x" }, {});
+      expect(out.__http_ok).toBe("false");
+      expect(out.__http_error).toBeTruthy();
+    } finally {
+      globalThis.fetch = orig;
+    }
+    expect(seen?.redirect).toBe("error");
   });
 });
