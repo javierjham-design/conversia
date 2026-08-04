@@ -89,6 +89,7 @@ const segmentDefinition = z
     assignedAgent: z.string().optional(),
     country: z.string().optional(),
     source: z.enum(["ad", "organic"]).optional(),
+    campaign: z.string().optional(), // id de campaña de Meta (origen del contacto)
     blocked: z.enum(["true", "false"]).optional(),
     dateFrom: z.string().optional(),
     dateTo: z.string().optional(),
@@ -128,6 +129,7 @@ function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
   if (f.blocked === "true" || f.blocked === true) where.blocked = true;
   if (f.blocked === "false" || f.blocked === false) where.blocked = false;
   if (f.source) where.acquisitionSource = f.source; // "ad" | "organic"
+  if (f.campaign) where.campaignId = f.campaign; // origen: campaña de Meta
   if (f.stage) where.leads = { some: { status: { code: f.stage } } };
   if (f.channel) where.identities = { some: { channelType: f.channel } };
   const convFilter: any = {};
@@ -158,7 +160,7 @@ async function resolveWhere(tx: any, q: Record<string, any>): Promise<{ where: a
     const seg = await tx.contactSegment.findUnique({ where: { id: q.segmentId } });
     if (seg) filters = { ...(seg.definition as Record<string, any>) };
   }
-  for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "blocked", "dateFrom", "dateTo"]) {
+  for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "campaign", "blocked", "dateFrom", "dateTo"]) {
     if (q[k] !== undefined) filters[k] = q[k];
   }
   let tagContactIds: string[] | undefined;
@@ -298,7 +300,7 @@ export class ContactsController {
   meta() {
     const ctx = requirePermission("contacts:read");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [all, blocked, leadStatuses, agents, members, teams, tags, leadsByStatus, convsByAgent, countryRows, segments] = await Promise.all([
+      const [all, blocked, leadStatuses, agents, members, teams, tags, leadsByStatus, convsByAgent, countryRows, segments, campaignRows] = await Promise.all([
         tx.contact.count({ where: { deletedAt: null } }),
         tx.contact.count({ where: { deletedAt: null, blocked: true } }),
         tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true, color: true, category: true } }),
@@ -310,7 +312,16 @@ export class ContactsController {
         tx.conversation.groupBy({ by: ["activeAgentId"], _count: { _all: true }, where: { activeAgentId: { not: null } } }),
         tx.contact.findMany({ where: { deletedAt: null, country: { not: null } }, select: { country: true }, distinct: ["country"] }),
         tx.contactSegment.findMany({ orderBy: { name: "asc" } }),
+        tx.contact.findMany({ where: { deletedAt: null, campaignId: { not: null } }, select: { campaignId: true }, distinct: ["campaignId"] }),
       ]);
+
+      // Nombres de las campañas de origen (desde el catálogo de anuncios).
+      const campaignIds = campaignRows.map((r) => r.campaignId).filter(Boolean) as string[];
+      const campaignNames = new Map(
+        campaignIds.length
+          ? (await tx.metaAd.findMany({ where: { campaignId: { in: campaignIds } }, select: { campaignId: true, campaignName: true }, distinct: ["campaignId"] })).map((a) => [a.campaignId, a.campaignName])
+          : [],
+      );
 
       const statusIdToCode = new Map((await tx.leadStatus.findMany({ select: { id: true, code: true } })).map((s) => [s.id, s.code]));
       const countByStage = new Map<string, number>();
@@ -326,6 +337,7 @@ export class ContactsController {
         teams,
         tags,
         countries: countryRows.map((r) => r.country).filter(Boolean),
+        campaigns: campaignIds.map((id) => ({ id, name: campaignNames.get(id) ?? id })),
         segments: segments.map((s) => ({ id: s.id, name: s.name, isDefault: s.isDefault })),
       };
     });

@@ -294,6 +294,10 @@ export async function processInbound(job: InboundJob): Promise<void> {
       // Resuelve la campaña del anuncio (catálogo cacheado + sync puntual si falta)
       // para que las selecciones por campaña coincidan sin perder leads.
       const adCtx = adId ? await resolveAdContext(organizationId, String(adId)).catch(() => null) : null;
+      // Persistir la campaña en el contacto → filtro "origen: campaña" en Contactos.
+      if (adCtx?.campaignId) {
+        await withTenant(organizationId, (tx) => tx.contact.update({ where: { id: result.contactId }, data: { campaignId: adCtx.campaignId } })).catch(() => undefined);
+      }
       const referral = {
         ad_id: adId ?? ref.source_url ?? null,
         campaign_id: adCtx?.campaignId ?? null,
