@@ -30,6 +30,9 @@ function Kpi({ label, value, hint }: { label: string; value: string | number; hi
 function Bars({ data }: { data: { day: string; count: number }[] | null | undefined }) {
   const rows = data ?? [];
   const max = Math.max(1, ...rows.map((d) => d.count));
+  if (rows.length === 0) {
+    return <div className="flex h-24 items-center justify-center text-sm text-ink-subtle">Sin datos en el período.</div>;
+  }
   return (
     <div className="flex h-24 items-end gap-1">
       {rows.map((d) => (

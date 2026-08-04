@@ -327,7 +327,18 @@ export default function InboxPage() {
           </header>
 
           <div className="flex-1 overflow-y-auto">
-            {items.length === 0 && <p className="p-4 text-sm text-ink-subtle">Sin conversaciones con estos filtros.</p>}
+            {items.length === 0 &&
+              (channels.length === 0 ? (
+                <div className="p-6 text-center">
+                  <p className="text-sm font-medium text-ink">Aún no recibes conversaciones</p>
+                  <p className="mt-1 text-xs text-ink-muted">Conecta WhatsApp para que tus clientes te escriban y sus mensajes aparezcan aquí.</p>
+                  <a href="/channels" className="mt-3 inline-flex items-center gap-1.5 rounded-control bg-brand-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-700">
+                    Conectar WhatsApp
+                  </a>
+                </div>
+              ) : (
+                <p className="p-4 text-sm text-ink-subtle">Sin conversaciones con estos filtros.</p>
+              ))}
             {items.map((c) => (
               <button
                 key={c.id}

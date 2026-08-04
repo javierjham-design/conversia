@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
+import { EmptyState } from "@/components/ui";
 
 interface AgentRow {
   id: string;
@@ -152,7 +154,19 @@ export default function AgentsPage() {
           </button>
         ))}
         {agents.length === 0 && (
-          <p className="text-sm text-ink-subtle">Aún no hay agentes. Crea el primero con “+ Nuevo agente”.</p>
+          <EmptyState
+            icon={<Bot size={28} />}
+            title="Aún no tienes agentes"
+            description="Crea tu primer agente de IA para que atienda, agende y responda por ti con la información de tu negocio."
+            action={
+              <button
+                onClick={() => setShowNew(true)}
+                className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800"
+              >
+                + Nuevo agente
+              </button>
+            }
+          />
         )}
       </div>
     </div>

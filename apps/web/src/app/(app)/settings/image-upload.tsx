@@ -48,7 +48,9 @@ export function ImageUpload({
   const loadCurrent = useCallback(async () => {
     try {
       const res = await fetch(`/backend${servePath}`, { headers: { authorization: `Bearer ${getToken() ?? ""}` } });
-      if (res.ok) {
+      // Solo tratamos la respuesta como imagen si realmente lo es: un 200 que no
+      // sea imagen (endpoint mal configurado) mostraría un <img> roto.
+      if (res.ok && res.headers.get("content-type")?.startsWith("image/")) {
         setPreview(URL.createObjectURL(await res.blob()));
         setHasUpload(true);
         return;
