@@ -185,7 +185,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone: "ok" | "brand" | "muted" }) {
-  const c = tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : tone === "brand" ? "text-brand-600" : "text-ink-muted";
+  const c = tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : tone === "brand" ? "text-brand-600 dark:text-brand-400" : "text-ink-muted";
   return (
     <div className="rounded-lg border border-line p-3 text-center">
       <p className={cn("text-2xl font-semibold", c)}>{value}</p>
@@ -253,13 +253,13 @@ export function DuplicatesModal({ open, onClose, onDone }: { open: boolean; onCl
               <p className="mb-2 font-mono text-xs text-ink-muted">{g.phone}</p>
               <div className="space-y-1.5">
                 {g.items.map((c) => (
-                  <label key={c.id} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-sm", primary[g.phone] === c.id ? "border-brand-300 bg-brand-50" : "border-line")}>
+                  <label key={c.id} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-sm", primary[g.phone] === c.id ? "border-brand-300 bg-brand-50 dark:bg-brand-500/10 dark:border-brand-500/40" : "border-line")}>
                     <input type="radio" name={`p-${g.phone}`} checked={primary[g.phone] === c.id} onChange={() => setPrimary({ ...primary, [g.phone]: c.id })} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-ink">{dupName(c)}</p>
                       <p className="truncate text-xs text-ink-subtle">{c.email ?? "sin email"} · creado {new Date(c.createdAt).toLocaleDateString("es-CL")}</p>
                     </div>
-                    {primary[g.phone] === c.id && <span className="shrink-0 text-[11px] font-medium text-brand-600">Principal</span>}
+                    {primary[g.phone] === c.id && <span className="shrink-0 text-[11px] font-medium text-brand-600 dark:text-brand-400">Principal</span>}
                   </label>
                 ))}
               </div>

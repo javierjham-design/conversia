@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { expandPerms } from "@/lib/safe";
 
 interface Member {
   membershipId: string;
@@ -50,15 +51,6 @@ function fmtLastLogin(iso: string | null): string {
   return `${d.toLocaleDateString("es-CL")} ${time}`;
 }
 
-function expandPerms(perms: string[], catalog: CatalogModule[]): string[] {
-  const out = new Set<string>();
-  for (const p of perms) {
-    if (p === "*") catalog.forEach((m) => m.actions.forEach((a) => out.add(a.key)));
-    else if (p.endsWith(":*")) catalog.find((m) => m.module === p.slice(0, -2))?.actions.forEach((a) => out.add(a.key));
-    else out.add(p);
-  }
-  return Array.from(out);
-}
 
 
 
@@ -276,7 +268,7 @@ Clave temporal: ${tempPassword}
                         ))}
                       </select>
                     </td>
-                    <td className="p-3 text-xs text-ink-muted">{m.teams.join(", ") || "—"}</td>
+                    <td className="p-3 text-xs text-ink-muted">{(m.teams ?? []).join(", ") || "—"}</td>
                     <td className="p-3 text-xs text-ink-muted" title={m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("es-CL") : "Nunca ha iniciado sesión"}>
                       {fmtLastLogin(m.lastLoginAt)}
                     </td>
@@ -312,7 +304,7 @@ Clave temporal: ${tempPassword}
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {roles.map((r) => {
-            const full = r.permissions.includes("*");
+            const full = (r.permissions ?? []).includes("*");
             const count = full ? "Acceso total" : `${expandPerms(r.permissions, catalog).length} permisos`;
             const locked = RESERVED.includes(r.code);
             return (
@@ -343,7 +335,7 @@ Clave temporal: ${tempPassword}
           <div className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-panel p-6 shadow-xl">
             <h2 className="mb-1 text-lg font-semibold">{selected.name}</h2>
             <p className="mb-4 text-xs text-ink-subtle">
-              {selected.roleName} · {selected.teams.join(", ") || "sin equipos"} · última conexión:{" "}
+              {selected.roleName} · {(selected.teams ?? []).join(", ") || "sin equipos"} · última conexión:{" "}
               {fmtLastLogin(selected.lastLoginAt)}
             </p>
 

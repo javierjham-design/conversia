@@ -68,7 +68,7 @@ function AssetNode({ icon, title, items, empty }: { icon: React.ReactNode; title
   return (
     <div className="rounded-xl border border-line bg-panel p-3.5 shadow-card">
       <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink-muted">
-        <span className="text-brand-600">{icon}</span> {title}
+        <span className="text-brand-600 dark:text-brand-400">{icon}</span> {title}
       </p>
       {items.length === 0 ? (
         <p className="text-xs text-ink-subtle">{empty}</p>

@@ -96,7 +96,7 @@ export function MetaWizard({
               onClick={() => setStep(i)}
               className={cn(
                 "rounded-full px-2.5 py-1 font-medium",
-                i === step ? "bg-brand-600 text-white" : i < step ? "bg-brand-50 text-brand-700" : "bg-app text-ink-subtle",
+                i === step ? "bg-brand-600 text-white" : i < step ? "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "bg-app text-ink-subtle",
               )}
             >
               {i + 1}. {s}
@@ -113,7 +113,7 @@ export function MetaWizard({
             al navegador.
           </p>
           <div className="rounded-xl border border-line bg-app p-4 text-sm">
-            <p className="mb-1.5 flex items-center gap-1.5 font-medium"><ShieldCheck size={15} className="text-brand-600" /> Permisos que se solicitarán</p>
+            <p className="mb-1.5 flex items-center gap-1.5 font-medium"><ShieldCheck size={15} className="text-brand-600 dark:text-brand-400" /> Permisos que se solicitarán</p>
             <p className="text-xs text-ink-muted">
               whatsapp_business_management · whatsapp_business_messaging · leads_retrieval · pages_show_list ·
               pages_manage_metadata · ads_management (solo lectura de activos)
@@ -208,7 +208,7 @@ export function MetaWizard({
                         key={a.id}
                         className={cn(
                           "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm",
-                          a.enabled ? "border-brand-300 bg-brand-50" : "border-line",
+                          a.enabled ? "border-brand-300 bg-brand-50 dark:bg-brand-500/10 dark:border-brand-500/40" : "border-line",
                         )}
                       >
                         <input

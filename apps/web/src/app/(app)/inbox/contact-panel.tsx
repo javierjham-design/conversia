@@ -103,7 +103,7 @@ export function ContactPanel({
             )}
           </dl>
           {c.blocked && <div className="mt-1.5"><StatusBadge kind="error" label="Bloqueado" /></div>}
-          <a href={`/contacts?open=${c.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 dark:text-brand-400">
+          <a href={`/contacts?open=${c.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 dark:text-brand-400 dark:text-brand-300">
             Ver ficha completa <ExternalLink size={11} />
           </a>
         </div>

@@ -138,10 +138,10 @@ function TriggerNode() {
         onClick={() => select(TRIGGER_NODE_ID)}
         className={cn(
           "w-56 cursor-pointer rounded-xl border-2 bg-panel px-3 py-2.5 shadow-card",
-          selected ? "border-brand-500" : "border-brand-200",
+          selected ? "border-brand-500" : "border-brand-200 dark:border-brand-500/30",
         )}
       >
-        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
           <Zap size={13} /> Disparador
         </p>
         <p className="mt-0.5 text-sm font-medium text-ink">{label}</p>
@@ -658,7 +658,7 @@ function Editor() {
             <ol className="space-y-2">
               {testTrace.map((s, i) => (
                 <li key={i} className="flex gap-3 rounded-lg border border-line p-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">{i + 1}</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{i + 1}</span>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-ink">{s.label}</p>
                     <p className="whitespace-pre-wrap text-xs text-ink-muted">{s.detail}</p>
@@ -692,7 +692,7 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
   return (
     <div className="space-y-3 p-5">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
         <Zap size={13} /> Disparador
       </div>
       <label className="block text-sm">
@@ -846,7 +846,7 @@ function AddStepModal({ open, onClose, onPick }: { open: boolean; onClose: () =>
                       <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
                         {n.label}
                         {n.soon && <span className="rounded bg-app px-1 text-[9px] text-ink-muted">Próximamente</span>}
-                        {n.premium && !n.soon && <span className="rounded bg-brand-100 px-1 text-[9px] text-brand-700">Premium</span>}
+                        {n.premium && !n.soon && <span className="rounded bg-brand-100 px-1 text-[9px] text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">Premium</span>}
                       </span>
                       <span className="block text-xs text-ink-muted">{n.description}</span>
                     </span>
@@ -1258,7 +1258,7 @@ function HttpForm({ config, onChange, presets = [] }: { config: Record<string, a
   }
   return (
     <div className="space-y-2 text-sm">
-      <p className="rounded bg-brand-50 px-2 py-1 text-[10px] text-brand-700">
+      <p className="rounded bg-brand-50 px-2 py-1 text-[10px] text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
         Paso <b>Premium</b>. Con guard SSRF (bloquea IPs internas). Luego tendrás <span className="font-mono">{"{{__http_ok}} {{__http_status}}"}</span> + lo que mapees.
       </p>
       {presets.length > 0 && (

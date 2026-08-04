@@ -108,7 +108,7 @@ export default async function LandingPage() {
       <section className="relative overflow-hidden">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-brand-50 to-white dark:from-brand-500/10 dark:to-transparent" />
         <div className="relative mx-auto max-w-6xl px-6 py-20 text-center">
-          <span className="inline-block rounded-full border border-brand-200 bg-panel px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700">
+          <span className="inline-block rounded-full border border-brand-200 bg-panel px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700 dark:text-brand-300 dark:border-brand-500/30">
             Conversa. Automatiza. Crece.
           </span>
           <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-tight tracking-tight text-ink md:text-5xl">

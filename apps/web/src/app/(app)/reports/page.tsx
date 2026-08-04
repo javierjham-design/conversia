@@ -27,11 +27,12 @@ function Kpi({ label, value, hint }: { label: string; value: string | number; hi
   );
 }
 
-function Bars({ data }: { data: { day: string; count: number }[] }) {
-  const max = Math.max(1, ...data.map((d) => d.count));
+function Bars({ data }: { data: { day: string; count: number }[] | null | undefined }) {
+  const rows = data ?? [];
+  const max = Math.max(1, ...rows.map((d) => d.count));
   return (
     <div className="flex h-24 items-end gap-1">
-      {data.map((d) => (
+      {rows.map((d) => (
         <div key={d.day} className="group relative flex-1">
           <div className="rounded-t bg-cyan-600/80 transition group-hover:bg-cyan-700" style={{ height: `${(d.count / max) * 88 + 4}px` }} />
           <span className="pointer-events-none absolute -top-5 left-1/2 hidden -translate-x-1/2 rounded bg-slate-800 px-1 text-[9px] text-white group-hover:block">
@@ -70,7 +71,9 @@ export default function ReportsPage() {
   if (error) return <div className="p-6 text-red-600 dark:text-red-400">{error}</div>;
   if (!data) return <div className="p-6 text-ink-subtle">Cargando…</div>;
 
-  const funnelMax = Math.max(1, ...data.leadFunnel.map((f) => f.count));
+  const leadFunnel = data.leadFunnel ?? [];
+  const appointments = data.appointments ?? [];
+  const funnelMax = Math.max(1, ...leadFunnel.map((f) => f.count));
   const apptLabel: Record<string, string> = {
     PENDING: "pendientes",
     CONFIRMED: "confirmadas",
@@ -112,11 +115,11 @@ export default function ReportsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Funnel de leads (actual)</h2>
-          {data.leadFunnel.filter((f) => f.count > 0).length === 0 && (
+          {leadFunnel.filter((f) => f.count > 0).length === 0 && (
             <p className="text-sm text-ink-subtle">Sin leads registrados aún.</p>
           )}
           <div className="space-y-1.5">
-            {data.leadFunnel.filter((f) => f.count > 0).map((f) => (
+            {leadFunnel.filter((f) => f.count > 0).map((f) => (
               <div key={f.code} className="flex items-center gap-2 text-sm">
                 <span className="w-40 truncate text-xs text-ink-muted">{f.name}</span>
                 <div className="h-5 rounded bg-cyan-600/80" style={{ width: `${(f.count / funnelMax) * 60 + 4}%` }} />
@@ -128,11 +131,11 @@ export default function ReportsPage() {
 
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Citas ({data.days}d)</h2>
-          {data.appointments.length === 0 ? (
+          {appointments.length === 0 ? (
             <p className="text-sm text-ink-subtle">Sin citas en el período.</p>
           ) : (
             <div className="flex flex-wrap gap-3">
-              {data.appointments.map((a) => (
+              {appointments.map((a) => (
                 <div key={a.status} className="rounded-lg bg-app px-4 py-2 text-center">
                   <p className="text-xl font-semibold">{a.count}</p>
                   <p className="text-xs text-ink-muted">{apptLabel[a.status] ?? a.status}</p>
@@ -147,12 +150,12 @@ export default function ReportsPage() {
 
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Conversaciones nuevas por día (14d)</h2>
-          <Bars data={data.series.conversationsPerDay} />
+          <Bars data={data.series?.conversationsPerDay} />
         </section>
 
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Mensajes recibidos por día (14d)</h2>
-          <Bars data={data.series.inboundPerDay} />
+          <Bars data={data.series?.inboundPerDay} />
         </section>
       </div>
     </div>

@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
+import { money } from "@/lib/safe";
 import { Button, ConfirmDialog, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
 
 interface Plan {
@@ -58,9 +59,6 @@ const INVOICE_STATUS: Record<string, { label: string; kind: "connected" | "beta"
   UNCOLLECTIBLE: { label: "Incobrable", kind: "error" },
 };
 
-function money(amount: number, currency: string): string {
-  return currency === "CLP" ? `$${amount.toLocaleString("es-CL")} CLP` : `US$ ${amount.toLocaleString("en-US")}`;
-}
 
 export default function BillingPage() {
   const toast = useToast();
@@ -167,14 +165,15 @@ export default function BillingPage() {
           <p className="text-sm font-medium text-ink-muted">Uso del período</p>
           <ul className="mt-3 space-y-2.5">
             {Object.entries(data.usage).map(([key, u]) => {
+              const used = u.used ?? 0;
               const unlimited = u.limit == null || u.limit === 0;
-              const pct = unlimited ? null : Math.min(100, Math.round((u.used / u.limit!) * 100));
+              const pct = unlimited ? null : Math.min(100, Math.round((used / u.limit!) * 100));
               return (
                 <li key={key} className="text-xs">
                   <div className="flex justify-between">
                     <span className="text-ink-muted">{USAGE_LABELS[key] ?? key}</span>
                     <span className="font-medium text-ink-muted">
-                      {u.used.toLocaleString("es-CL")} / {unlimited ? "∞" : u.limit!.toLocaleString("es-CL")}
+                      {used.toLocaleString("es-CL")} / {unlimited ? "∞" : u.limit!.toLocaleString("es-CL")}
                     </span>
                   </div>
                   <div className="mt-1 h-2 overflow-hidden rounded-full bg-app">

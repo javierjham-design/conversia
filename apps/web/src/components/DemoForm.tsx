@@ -35,7 +35,7 @@ export function DemoForm({ planCode }: { planCode?: string }) {
   if (sent) {
     return (
       <div className="text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-3xl">✓</div>
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-3xl dark:bg-brand-500/10">✓</div>
         <h2 className="text-xl font-semibold text-ink">¡Recibimos tu solicitud!</h2>
         <p className="mt-2 text-ink-muted">Te contactaremos muy pronto para coordinar tu demo de TuBot y activar tu acceso.</p>
         <Link href="/" className="mt-6 inline-block rounded-lg bg-brand-600 px-6 py-3 font-medium text-white hover:bg-brand-700">
@@ -48,7 +48,7 @@ export function DemoForm({ planCode }: { planCode?: string }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       {planCode && (
-        <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">Plan de interés: <b>{planCode}</b></p>
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">Plan de interés: <b>{planCode}</b></p>
       )}
       <label className="block text-sm font-medium text-ink">
         Nombre

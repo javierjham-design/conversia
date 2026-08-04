@@ -386,9 +386,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 {me?.user && (
                   <span
                     className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white"
-                    title={`${me.user.name} · ${me.role}`}
+                    title={`${me.user.name ?? me.user.email} · ${me.role}`}
                   >
-                    {me.user.name.slice(0, 1).toUpperCase()}
+                    {(me.user.name ?? me.user.email ?? "?").slice(0, 1).toUpperCase()}
                   </span>
                 )}
               </div>
