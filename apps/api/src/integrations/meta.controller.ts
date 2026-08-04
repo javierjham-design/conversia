@@ -420,18 +420,35 @@ export class MetaController {
     );
   }
 
-  /** Encola un evento de prueba hacia Meta CAPI (usa test_event_code si existe). */
+  /**
+   * Encola un evento de prueba hacia Meta CAPI. Va en modo DIRECTO (eventName
+   * "Lead"), así verifica dataset + token + test_event_code aunque el tenant
+   * todavía no haya configurado reglas source→evento. Con test_event_code el
+   * evento aparece en la pestaña "Eventos de prueba" del Events Manager.
+   */
   @Post("capi-test")
   async capiTest(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.string().optional() }), body ?? {});
+    const input = parse(z.object({ eventName: z.string().min(1).max(60).optional() }), body ?? {});
+    const mapping = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }),
+    );
+    if (!mapping?.datasetId) {
+      throw new BadRequestException("Configura primero el dataset de conversiones en la pestaña Conversions API");
+    }
     await this.queues.capi.add("test", {
       organizationId: ctx.organizationId,
-      source: input.source ?? "lead.created",
+      source: "test",
+      eventName: input.eventName ?? "Lead",
       contactPhone: "+56955556666",
       test: true,
       occurredAt: new Date().toISOString(),
     });
-    return { ok: true, detail: "Evento de prueba encolado — revisa la pestaña Actividad (capi.sent o el error correspondiente)" };
+    return {
+      ok: true,
+      detail: mapping.testEventCode
+        ? "Evento de prueba enviado — míralo en la pestaña «Eventos de prueba» del Events Manager (y en Actividad)."
+        : "Evento de prueba enviado. Sugerencia: define un test_event_code para verlo en tiempo real en «Eventos de prueba» del Events Manager.",
+    };
   }
 }
