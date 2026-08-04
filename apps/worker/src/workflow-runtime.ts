@@ -2,6 +2,7 @@ import { withTenant } from "@conversia/database";
 import {
   executeFrom,
   findStartNode,
+  matchesApptFilter,
   matchesTrigger,
   resumeAfterWait,
   resumeWithBranch,
@@ -777,7 +778,7 @@ async function loadOrgBusinessHours(tx: any, organizationId: string): Promise<{ 
  */
 export async function scheduleAppointmentReminders(
   organizationId: string,
-  appt: { id: string; start: string },
+  appt: { id: string; start: string; serviceId?: string | null; professionalId?: string | null; clinicId?: string | null },
   target: { conversationId?: string; contactId?: string },
 ): Promise<void> {
   const startsAt = new Date(appt.start);
@@ -792,6 +793,9 @@ export async function scheduleAppointmentReminders(
       const def = wf.versions[0]?.definition as any;
       if (def?.trigger?.type !== "appointment_upcoming") continue;
       const cfg = def.trigger.config ?? {};
+      // Filtros por servicio / profesional / sede: si la cita no encaja, no se
+      // programa recordatorio para este flujo.
+      if (!matchesApptFilter(cfg, { serviceId: appt.serviceId, professionalId: appt.professionalId, clinicId: appt.clinicId })) continue;
       const uniqueKey = `apptreminder:${wf.id}:${appt.id}`;
       const existing = await tx.scheduledJob.findUnique({
         where: { organizationId_uniqueKey: { organizationId, uniqueKey } },

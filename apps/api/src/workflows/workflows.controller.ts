@@ -12,7 +12,8 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
-import { workflowDefinitionSchema } from "@conversia/types";
+import { workflowDefinitionSchema, type WorkflowDefinition } from "@conversia/types";
+import { validateWorkflowDefinition, type WorkflowValidationContext } from "@conversia/workflows";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
@@ -80,6 +81,40 @@ const NODE_CATALOG = [
 export class WorkflowsController {
   constructor(private prisma: PrismaService, private queues: QueueService) {}
 
+  /** Reúne el contexto del tenant para validar referencias de un flujo. */
+  private async buildValidationContext(tx: any): Promise<WorkflowValidationContext> {
+    const [tags, agents, statuses, workflows] = await Promise.all([
+      tx.tag.findMany({ select: { name: true } }),
+      tx.agent.findMany({ where: { deletedAt: null, active: true }, select: { slug: true } }),
+      tx.leadStatus.findMany({ where: { active: true }, select: { code: true } }),
+      tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true } }),
+    ]);
+    return {
+      tags: tags.map((t: { name: string }) => t.name),
+      agentSlugs: agents.map((a: { slug: string }) => a.slug),
+      leadStatusCodes: statuses.map((s: { code: string }) => s.code),
+      workflowNames: workflows.map((w: { name: string }) => w.name),
+    };
+  }
+
+  /** Valida una definición (transversal) devolviendo TODOS los problemas. */
+  @Post(":id/validate")
+  validate(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const input = parse(z.object({ definition: z.unknown() }), body ?? {});
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (!wf) throw new NotFoundException("Flujo no encontrado");
+      const parsed = workflowDefinitionSchema.safeParse(input.definition);
+      if (!parsed.success) {
+        return { ok: false, issues: [{ target: "trigger", code: "invalid_definition", message: "La estructura del flujo no es válida." }] };
+      }
+      const vctx = await this.buildValidationContext(tx);
+      const issues = validateWorkflowDefinition(parsed.data as WorkflowDefinition, vctx);
+      return { ok: issues.length === 0, issues };
+    });
+  }
+
   /** Disparo manual masivo: ejecuta un flujo publicado sobre varios contactos. */
   @Post(":id/run-bulk")
   async runBulk(@Param("id") id: string, @Body() body: unknown) {
@@ -123,6 +158,19 @@ export class WorkflowsController {
         tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
         tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, select: { id: true, name: true, language: true }, orderBy: { name: "asc" } }),
       ]);
+      // Opciones para los filtros de triggers de cita: se agregan de la proyección
+      // local de citas (appointments.meta), que es lo que realmente dispara flujos.
+      const appts = await tx.appointment.findMany({ select: { meta: true }, orderBy: { startsAt: "desc" }, take: 3000 });
+      const dedup = (rows: Array<{ id: string; name: string }>) => {
+        const m = new Map<string, string>();
+        for (const r of rows) if (r.id && !m.has(r.id)) m.set(r.id, r.name || r.id);
+        return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "es"));
+      };
+      const appointmentFilters = {
+        services: dedup(appts.map((a) => ({ id: String((a.meta as any)?.serviceId ?? ""), name: String((a.meta as any)?.serviceName ?? "") }))),
+        professionals: dedup(appts.map((a) => ({ id: String((a.meta as any)?.professionalId ?? ""), name: String((a.meta as any)?.professionalName ?? "") }))),
+        clinics: dedup(appts.map((a) => ({ id: String((a.meta as any)?.clinicId ?? ""), name: String((a.meta as any)?.clinicName ?? "") }))),
+      };
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
@@ -131,6 +179,7 @@ export class WorkflowsController {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
         leadStatuses: statuses,
+        appointmentFilters,
         agents,
         users: members.map((m) => ({ id: m.userId, name: m.user.name })),
         teams,
@@ -306,6 +355,14 @@ export class WorkflowsController {
         (v) => v.status === "DRAFT" && (!published || v.version > published.version),
       );
       const editing = draft ?? published ?? workflow.versions[0];
+      // Valida la versión PUBLICADA (si la hay) para avisar de flujos ya rotos.
+      let publishedIssues: Awaited<ReturnType<typeof validateWorkflowDefinition>> = [];
+      if (published?.definition) {
+        const parsed = workflowDefinitionSchema.safeParse(published.definition);
+        if (parsed.success) {
+          publishedIssues = validateWorkflowDefinition(parsed.data as WorkflowDefinition, await this.buildValidationContext(tx));
+        }
+      }
       return {
         id: workflow.id,
         name: workflow.name,
@@ -314,6 +371,7 @@ export class WorkflowsController {
         publishedVersion: published?.version ?? null,
         draftVersion: draft?.version ?? null,
         definition: editing?.definition ?? null,
+        publishedIssues,
         versions: workflow.versions.map((v) => ({
           version: v.version,
           status: v.status,
@@ -448,6 +506,18 @@ export class WorkflowsController {
         orderBy: { version: "desc" },
       });
       if (!draft) throw new BadRequestException("No hay borrador para publicar");
+      // Validación transversal: campos requeridos, referencias rotas, nodos sin
+      // conectar… Bloquea la publicación y devuelve los problemas por nodo.
+      const parsedDef = workflowDefinitionSchema.safeParse(draft.definition);
+      if (!parsedDef.success) throw new BadRequestException("La estructura del flujo no es válida.");
+      const structuralIssues = validateWorkflowDefinition(parsedDef.data as WorkflowDefinition, await this.buildValidationContext(tx));
+      if (structuralIssues.length > 0) {
+        throw new BadRequestException({
+          message: "El flujo tiene problemas que impiden publicarlo. Revisa los pasos marcados.",
+          code: "workflow_invalid",
+          issues: structuralIssues,
+        });
+      }
       // Gating por plan: la "Petición HTTP" (call_api) es un paso premium.
       const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string; config?: Record<string, unknown> }[];
       if (nodes.some((n) => n.type === "call_api") && !(await canUseFeature(tx, "http_step"))) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesTrigger, resumeAfterWait, resumeWithBranch, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -109,6 +109,70 @@ describe("motor de workflows v0", () => {
     const anyTag: WorkflowDefinition = { ...specific, trigger: { type: "tag_added", config: {} } };
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "tag_added", data: { tag: "x" }, occurredAt: "" })).toBe(true);
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "message_received", data: {}, occurredAt: "" })).toBe(false);
+  });
+
+  it("filtros de triggers de cita (servicio / profesional / sede)", () => {
+    // Vacío = cualquiera.
+    const any: WorkflowDefinition = { trigger: { type: "appointment_created", config: {} }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(any, { organizationId: "o", type: "appointment_created", data: { serviceId: "s1" }, occurredAt: "" })).toBe(true);
+    // Filtro por servicio.
+    const svc: WorkflowDefinition = { ...any, trigger: { type: "appointment_created", config: { serviceIds: ["s1", "s2"] } } };
+    expect(matchesTrigger(svc, { organizationId: "o", type: "appointment_created", data: { serviceId: "s2" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(svc, { organizationId: "o", type: "appointment_created", data: { serviceId: "s9" }, occurredAt: "" })).toBe(false);
+    // Combinación con Y: servicio + profesional deben cumplirse ambos.
+    const both: WorkflowDefinition = { ...any, trigger: { type: "no_show", config: { serviceIds: ["s1"], professionalIds: ["p1"] } } };
+    expect(matchesTrigger(both, { organizationId: "o", type: "no_show", data: { serviceId: "s1", professionalId: "p1" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(both, { organizationId: "o", type: "no_show", data: { serviceId: "s1", professionalId: "p2" }, occurredAt: "" })).toBe(false);
+  });
+
+  it("matchesApptFilter es puro y trata array vacío como 'todos'", () => {
+    expect(matchesApptFilter({}, { serviceId: "x" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: [] }, { clinicId: "c1" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c1" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c2" })).toBe(false);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, {})).toBe(false);
+  });
+
+  it("validación al publicar: campos requeridos, referencias y nodos sin conectar", () => {
+    const ctx = { tags: ["vip"], agentSlugs: ["asesor"], leadStatusCodes: ["nuevo", "agendado"], workflowNames: ["Bienvenida"] };
+    // Flujo sano.
+    const ok: WorkflowDefinition = {
+      trigger: { type: "appointment_upcoming", config: { hoursBefore: 24 } },
+      variables: {},
+      nodes: [{ id: "n1", type: "send_text", config: { text: "Hola" } }],
+      edges: [],
+    };
+    expect(validateWorkflowDefinition(ok, ctx)).toEqual([]);
+
+    // click_to_chat "seleccionados" vacío.
+    const ctwa: WorkflowDefinition = { ...ok, trigger: { type: "click_to_chat", config: { mode: "selected", adIds: [], campaignIds: [] } } };
+    expect(validateWorkflowDefinition(ctwa, ctx).some((i) => i.code === "ctwa_empty")).toBe(true);
+
+    // hoursBefore <= 0.
+    const hb: WorkflowDefinition = { ...ok, trigger: { type: "appointment_upcoming", config: { hoursBefore: 0 } } };
+    expect(validateWorkflowDefinition(hb, ctx).some((i) => i.code === "hours_invalid")).toBe(true);
+
+    // lead_status_changed origen == destino.
+    const same: WorkflowDefinition = { ...ok, trigger: { type: "lead_status_changed", config: { fromStatus: "nuevo", toStatus: "nuevo" } } };
+    expect(validateWorkflowDefinition(same, ctx).some((i) => i.code === "status_same")).toBe(true);
+
+    // tag_added con etiqueta inexistente.
+    const tag: WorkflowDefinition = { ...ok, trigger: { type: "tag_added", config: { tag: "no-existe" } } };
+    expect(validateWorkflowDefinition(tag, ctx).some((i) => i.code === "tag_missing")).toBe(true);
+
+    // Nodo sin conectar + mensaje vacío.
+    const orphan: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} },
+      variables: {},
+      nodes: [
+        { id: "n1", type: "send_text", config: { text: "Hola" } },
+        { id: "n2", type: "send_text", config: { text: "" } },
+      ],
+      edges: [],
+    };
+    const issues = validateWorkflowDefinition(orphan, ctx);
+    expect(issues.some((i) => i.target === "n2" && i.code === "unconnected")).toBe(true);
+    expect(issues.some((i) => i.target === "n2" && i.code === "text_required")).toBe(true);
   });
 
   it("ejecuta hasta la espera y programa el timer", async () => {
