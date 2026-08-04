@@ -451,4 +451,78 @@ export class MetaController {
         : "Evento de prueba enviado. Sugerencia: define un test_event_code para verlo en tiempo real en «Eventos de prueba» del Events Manager.",
     };
   }
+
+  // ------------------------- Catálogo de anuncios -------------------------
+
+  /** Cuentas publicitarias del tenant (para elegir cuáles sincroniza). */
+  @Get("ads/accounts")
+  async adAccounts() {
+    const ctx = requirePermission("integrations:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [accounts, connection] = await Promise.all([
+        tx.metaAsset.findMany({ where: { kind: "ad_account" }, orderBy: { name: "asc" } }),
+        tx.metaBusinessConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
+      ]);
+      const scopes: string[] = Array.isArray(connection?.appScopes) ? (connection!.appScopes as string[]) : [];
+      return {
+        connected: connection?.status === "CONNECTED",
+        // ads_read es lo que habilita listar/sincronizar anuncios (App Review en prod).
+        canReadAds: scopes.includes("ads_read"),
+        accounts: accounts.map((a) => ({ id: a.id, externalId: a.externalId, name: a.name, enabled: a.enabled })),
+      };
+    });
+  }
+
+  /** Dispara una sincronización del catálogo de anuncios (botón "Sincronizar ahora"). */
+  @Post("ads/sync")
+  async adsSync() {
+    const ctx = requirePermission("integrations:write");
+    const connection = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaBusinessConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
+    );
+    if (connection?.status !== "CONNECTED") {
+      throw new BadRequestException("Conecta Meta y autoriza los anuncios (ads_read) antes de sincronizar.");
+    }
+    await this.queues.sync.add("meta_ads_sync", { organizationId: ctx.organizationId, kind: "meta_ads_sync", payload: {} });
+    return { ok: true, detail: "Sincronización encolada — el catálogo se actualizará en unos segundos." };
+  }
+
+  /**
+   * Árbol del catálogo para el trigger: campaña → conjunto → anuncio, con nombres,
+   * estado (activo/pausado), si es Click-to-WhatsApp y si sigue disponible.
+   */
+  @Get("ads/catalog")
+  async adsCatalog(@Query("adAccountId") adAccountId?: string) {
+    const ctx = requirePermission("integrations:read");
+    const ads = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaAd.findMany({
+        where: adAccountId ? { adAccountId } : {},
+        orderBy: [{ campaignName: "asc" }, { adsetName: "asc" }, { adName: "asc" }],
+      }),
+    );
+    // Agrupa en árbol campaña → conjunto → anuncio.
+    const campaigns = new Map<string, any>();
+    for (const a of ads) {
+      let c = campaigns.get(a.campaignId);
+      if (!c) {
+        c = { id: a.campaignId, name: a.campaignName, objective: a.objective, adsets: new Map<string, any>() };
+        campaigns.set(a.campaignId, c);
+      }
+      let s = c.adsets.get(a.adsetId);
+      if (!s) {
+        s = { id: a.adsetId, name: a.adsetName, ads: [] as any[] };
+        c.adsets.set(a.adsetId, s);
+      }
+      s.ads.push({ id: a.adExternalId, name: a.adName, status: a.status, isCtwa: a.isCtwa, available: a.available });
+    }
+    const tree = [...campaigns.values()].map((c) => ({
+      id: c.id, name: c.name, objective: c.objective,
+      adsets: [...c.adsets.values()],
+    }));
+    const lastSyncedAt = ads.reduce<string | null>((max, a) => {
+      const t = a.lastSyncedAt.toISOString();
+      return !max || t > max ? t : max;
+    }, null);
+    return { total: ads.length, lastSyncedAt, campaigns: tree };
+  }
 }
