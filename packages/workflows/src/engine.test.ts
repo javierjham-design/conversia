@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesTrigger, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesTrigger, resumeAfterWait, resumeWithBranch, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -131,6 +131,48 @@ describe("motor de workflows v0", () => {
     expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c1" })).toBe(true);
     expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c2" })).toBe(false);
     expect(matchesApptFilter({ clinicIds: ["c1"] }, {})).toBe(false);
+  });
+
+  it("validación al publicar: campos requeridos, referencias y nodos sin conectar", () => {
+    const ctx = { tags: ["vip"], agentSlugs: ["asesor"], leadStatusCodes: ["nuevo", "agendado"], workflowNames: ["Bienvenida"] };
+    // Flujo sano.
+    const ok: WorkflowDefinition = {
+      trigger: { type: "appointment_upcoming", config: { hoursBefore: 24 } },
+      variables: {},
+      nodes: [{ id: "n1", type: "send_text", config: { text: "Hola" } }],
+      edges: [],
+    };
+    expect(validateWorkflowDefinition(ok, ctx)).toEqual([]);
+
+    // click_to_chat "seleccionados" vacío.
+    const ctwa: WorkflowDefinition = { ...ok, trigger: { type: "click_to_chat", config: { mode: "selected", adIds: [], campaignIds: [] } } };
+    expect(validateWorkflowDefinition(ctwa, ctx).some((i) => i.code === "ctwa_empty")).toBe(true);
+
+    // hoursBefore <= 0.
+    const hb: WorkflowDefinition = { ...ok, trigger: { type: "appointment_upcoming", config: { hoursBefore: 0 } } };
+    expect(validateWorkflowDefinition(hb, ctx).some((i) => i.code === "hours_invalid")).toBe(true);
+
+    // lead_status_changed origen == destino.
+    const same: WorkflowDefinition = { ...ok, trigger: { type: "lead_status_changed", config: { fromStatus: "nuevo", toStatus: "nuevo" } } };
+    expect(validateWorkflowDefinition(same, ctx).some((i) => i.code === "status_same")).toBe(true);
+
+    // tag_added con etiqueta inexistente.
+    const tag: WorkflowDefinition = { ...ok, trigger: { type: "tag_added", config: { tag: "no-existe" } } };
+    expect(validateWorkflowDefinition(tag, ctx).some((i) => i.code === "tag_missing")).toBe(true);
+
+    // Nodo sin conectar + mensaje vacío.
+    const orphan: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} },
+      variables: {},
+      nodes: [
+        { id: "n1", type: "send_text", config: { text: "Hola" } },
+        { id: "n2", type: "send_text", config: { text: "" } },
+      ],
+      edges: [],
+    };
+    const issues = validateWorkflowDefinition(orphan, ctx);
+    expect(issues.some((i) => i.target === "n2" && i.code === "unconnected")).toBe(true);
+    expect(issues.some((i) => i.target === "n2" && i.code === "text_required")).toBe(true);
   });
 
   it("ejecuta hasta la espera y programa el timer", async () => {

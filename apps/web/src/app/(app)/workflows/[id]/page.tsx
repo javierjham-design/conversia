@@ -21,7 +21,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
+  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
   Pencil, Plus, Redo2, Search, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -285,9 +285,12 @@ interface SimStep { nodeId: string; nodeType: string; label: string; detail: str
 // Editor
 // ---------------------------------------------------------------------------
 
+interface WorkflowIssue { target: string; code: string; message: string }
+
 interface Detail {
   id: string; name: string; description: string | null; active: boolean;
   publishedVersion: number | null; draftVersion: number | null; definition: any; updatedAt?: string;
+  publishedIssues?: WorkflowIssue[];
 }
 
 function Editor() {
@@ -309,6 +312,22 @@ function Editor() {
   const [assumeNoReply, setAssumeNoReply] = useState(true);
   const [testTrace, setTestTrace] = useState<SimStep[] | null>(null);
   const [testBusy, setTestBusy] = useState(false);
+  // Problemas de validación (servidor): mensajes que apuntan al disparador y
+  // aviso del flujo YA publicado que hoy no pasaría la validación.
+  const [triggerIssues, setTriggerIssues] = useState<string[]>([]);
+  const [brokenBanner, setBrokenBanner] = useState<WorkflowIssue[] | null>(null);
+
+  /** Pinta los problemas del servidor sobre cada nodo y el disparador. */
+  const applyIssues = useCallback((issues: WorkflowIssue[]) => {
+    const byNode = new Map<string, string>();
+    const trig: string[] = [];
+    for (const it of issues) {
+      if (it.target === "trigger") trig.push(it.message);
+      else if (!byNode.has(it.target)) byNode.set(it.target, it.message);
+    }
+    setTriggerIssues(trig);
+    setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, invalid: byNode.get(n.id) ?? (n.data as any).invalid } })));
+  }, [setNodes]);
 
   const history = useRef<{ past: { n: Node[]; e: Edge[] }[]; future: { n: Node[]; e: Edge[] }[] }>({ past: [], future: [] });
   const [, forceRender] = useState(0);
@@ -347,6 +366,9 @@ function Editor() {
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setTrigger(flow.trigger);
+    setTriggerIssues([]);
+    // Aviso de flujo YA publicado que hoy no pasaría la validación.
+    setBrokenBanner(d.publishedIssues && d.publishedIssues.length ? d.publishedIssues : null);
     history.current = { past: [], future: [] };
   }, [id, setNodes, setEdges]);
 
@@ -502,6 +524,17 @@ function Editor() {
     if (!(await saveDraft())) return;
     setBusy(true);
     try {
+      // Validación transversal en el servidor (autoritativa): pinta los problemas
+      // sobre cada nodo/disparador y bloquea la publicación si los hay.
+      const v = await api<{ ok: boolean; issues: WorkflowIssue[] }>(`/workflows/${id}/validate`, {
+        method: "POST",
+        body: JSON.stringify({ definition: flowToDef(nodes, edges, trigger) }),
+      });
+      if (!v.ok) {
+        applyIssues(v.issues);
+        toast.push(`El flujo tiene ${v.issues.length} problema(s): revisa lo marcado en rojo`, "error");
+        return;
+      }
       const r = await api<{ publishedVersion: number }>(`/workflows/${id}/publish`, { method: "POST" });
       toast.push(`Versión ${r.publishedVersion} publicada y activa`, "ok");
       await load();
@@ -596,6 +629,22 @@ function Editor() {
           </div>
         </header>
 
+        {/* Aviso: el flujo YA publicado hoy no pasaría la validación (descubre los rotos). */}
+        {brokenBanner && (
+          <div className="flex items-start gap-2 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Este flujo está publicado pero hoy no pasaría la validación ({brokenBanner.length} problema{brokenBanner.length > 1 ? "s" : ""}):</p>
+              <ul className="mt-0.5 list-disc pl-4">
+                {brokenBanner.slice(0, 4).map((it, i) => (<li key={i}>{it.message}</li>))}
+                {brokenBanner.length > 4 && <li>…y {brokenBanner.length - 4} más.</li>}
+              </ul>
+              <p className="mt-0.5 text-amber-700/80 dark:text-amber-200/70">Sigue activo con la versión anterior; corrige y vuelve a publicar.</p>
+            </div>
+            <button onClick={() => { applyIssues(brokenBanner); setBrokenBanner(null); }} className="shrink-0 rounded px-2 py-0.5 font-medium underline">Marcar en el lienzo</button>
+          </div>
+        )}
+
         {/* Canvas + panel */}
         <div className="flex min-h-0 flex-1">
           <div className="min-w-0 flex-1 bg-app">
@@ -619,7 +668,7 @@ function Editor() {
 
           <aside className="w-96 shrink-0 overflow-y-auto border-l border-line bg-panel">
             {selectedId === TRIGGER_NODE_ID ? (
-              <TriggerPanel catalog={catalog} trigger={trigger} onChange={setTrigger} />
+              <TriggerPanel catalog={catalog} trigger={trigger} onChange={setTrigger} issues={triggerIssues} />
             ) : selectedNode ? (
               <NodePanel
                 node={selectedNode}
@@ -1007,13 +1056,19 @@ function ApptFilters({ catalog, trigger, onChange }: { catalog: Catalog; trigger
   );
 }
 
-function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
+function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void; issues?: string[] }) {
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
   return (
     <div className="space-y-3 p-5">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
         <Zap size={13} /> Disparador
       </div>
+      {issues.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300">
+          <p className="flex items-center gap-1 font-medium"><AlertTriangle size={13} /> Corrige antes de publicar:</p>
+          <ul className="mt-1 list-disc pl-4">{issues.map((m, i) => (<li key={i}>{m}</li>))}</ul>
+        </div>
+      )}
       <label className="block text-sm">
         <span className="text-xs text-ink-muted">¿Cuándo se ejecuta el flujo?</span>
         <select

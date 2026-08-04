@@ -12,7 +12,8 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
-import { workflowDefinitionSchema } from "@conversia/types";
+import { workflowDefinitionSchema, type WorkflowDefinition } from "@conversia/types";
+import { validateWorkflowDefinition, type WorkflowValidationContext } from "@conversia/workflows";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
@@ -79,6 +80,40 @@ const NODE_CATALOG = [
 @Controller("workflows")
 export class WorkflowsController {
   constructor(private prisma: PrismaService, private queues: QueueService) {}
+
+  /** Reúne el contexto del tenant para validar referencias de un flujo. */
+  private async buildValidationContext(tx: any): Promise<WorkflowValidationContext> {
+    const [tags, agents, statuses, workflows] = await Promise.all([
+      tx.tag.findMany({ select: { name: true } }),
+      tx.agent.findMany({ where: { deletedAt: null, active: true }, select: { slug: true } }),
+      tx.leadStatus.findMany({ where: { active: true }, select: { code: true } }),
+      tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true } }),
+    ]);
+    return {
+      tags: tags.map((t: { name: string }) => t.name),
+      agentSlugs: agents.map((a: { slug: string }) => a.slug),
+      leadStatusCodes: statuses.map((s: { code: string }) => s.code),
+      workflowNames: workflows.map((w: { name: string }) => w.name),
+    };
+  }
+
+  /** Valida una definición (transversal) devolviendo TODOS los problemas. */
+  @Post(":id/validate")
+  validate(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const input = parse(z.object({ definition: z.unknown() }), body ?? {});
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (!wf) throw new NotFoundException("Flujo no encontrado");
+      const parsed = workflowDefinitionSchema.safeParse(input.definition);
+      if (!parsed.success) {
+        return { ok: false, issues: [{ target: "trigger", code: "invalid_definition", message: "La estructura del flujo no es válida." }] };
+      }
+      const vctx = await this.buildValidationContext(tx);
+      const issues = validateWorkflowDefinition(parsed.data as WorkflowDefinition, vctx);
+      return { ok: issues.length === 0, issues };
+    });
+  }
 
   /** Disparo manual masivo: ejecuta un flujo publicado sobre varios contactos. */
   @Post(":id/run-bulk")
@@ -320,6 +355,14 @@ export class WorkflowsController {
         (v) => v.status === "DRAFT" && (!published || v.version > published.version),
       );
       const editing = draft ?? published ?? workflow.versions[0];
+      // Valida la versión PUBLICADA (si la hay) para avisar de flujos ya rotos.
+      let publishedIssues: Awaited<ReturnType<typeof validateWorkflowDefinition>> = [];
+      if (published?.definition) {
+        const parsed = workflowDefinitionSchema.safeParse(published.definition);
+        if (parsed.success) {
+          publishedIssues = validateWorkflowDefinition(parsed.data as WorkflowDefinition, await this.buildValidationContext(tx));
+        }
+      }
       return {
         id: workflow.id,
         name: workflow.name,
@@ -328,6 +371,7 @@ export class WorkflowsController {
         publishedVersion: published?.version ?? null,
         draftVersion: draft?.version ?? null,
         definition: editing?.definition ?? null,
+        publishedIssues,
         versions: workflow.versions.map((v) => ({
           version: v.version,
           status: v.status,
@@ -462,6 +506,18 @@ export class WorkflowsController {
         orderBy: { version: "desc" },
       });
       if (!draft) throw new BadRequestException("No hay borrador para publicar");
+      // Validación transversal: campos requeridos, referencias rotas, nodos sin
+      // conectar… Bloquea la publicación y devuelve los problemas por nodo.
+      const parsedDef = workflowDefinitionSchema.safeParse(draft.definition);
+      if (!parsedDef.success) throw new BadRequestException("La estructura del flujo no es válida.");
+      const structuralIssues = validateWorkflowDefinition(parsedDef.data as WorkflowDefinition, await this.buildValidationContext(tx));
+      if (structuralIssues.length > 0) {
+        throw new BadRequestException({
+          message: "El flujo tiene problemas que impiden publicarlo. Revisa los pasos marcados.",
+          code: "workflow_invalid",
+          issues: structuralIssues,
+        });
+      }
       // Gating por plan: la "Petición HTTP" (call_api) es un paso premium.
       const nodes = ((draft.definition as any)?.nodes ?? []) as { type?: string; config?: Record<string, unknown> }[];
       if (nodes.some((n) => n.type === "call_api") && !(await canUseFeature(tx, "http_step"))) {

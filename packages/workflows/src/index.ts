@@ -198,6 +198,129 @@ export function findStartNode(def: WorkflowDefinition): WorkflowNode | undefined
   return def.nodes.find((n) => !withIncoming.has(n.id)) ?? def.nodes[0];
 }
 
+/** Un problema de validación de un flujo, anclado a un nodo o al disparador. */
+export interface WorkflowIssue {
+  /** "trigger" o el id del nodo con el problema. */
+  target: string;
+  code: string;
+  message: string;
+}
+
+/** Contexto del tenant para validar referencias (etiquetas, agentes, etapas, flujos). */
+export interface WorkflowValidationContext {
+  tags?: string[];
+  agentSlugs?: string[];
+  leadStatusCodes?: string[];
+  workflowNames?: string[];
+}
+
+/**
+ * Validación transversal de un flujo antes de publicar. Pura y sin acceso a
+ * datos: recibe el contexto del tenant. Devuelve TODOS los problemas (no corta
+ * en el primero) para pintarlos sobre cada nodo y bloquear la publicación, y
+ * para avisar de flujos ya publicados que hoy no pasarían. Los requisitos de
+ * integraciones con dependencias externas (plantillas aprobadas, dataset CAPI…)
+ * se validan aparte en el endpoint de publicación.
+ */
+export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: WorkflowValidationContext = {}): WorkflowIssue[] {
+  const issues: WorkflowIssue[] = [];
+  const push = (target: string, code: string, message: string) => issues.push({ target, code, message });
+  const tags = new Set((ctx.tags ?? []).map((t) => t.toLowerCase()));
+  const agentSlugs = new Set(ctx.agentSlugs ?? []);
+  const statusCodes = new Set(ctx.leadStatusCodes ?? []);
+  const workflowNames = new Set(ctx.workflowNames ?? []);
+
+  // --- Disparador: campos requeridos por tipo ---
+  const t = def.trigger?.type;
+  const tc = (def.trigger?.config ?? {}) as Record<string, unknown>;
+  if (t === "keyword" && !String(tc.keyword ?? "").trim()) {
+    push("trigger", "keyword_required", "El disparador «Palabra clave» necesita una palabra o frase.");
+  }
+  if (t === "click_to_chat" && tc.mode === "selected") {
+    const adIds = Array.isArray(tc.adIds) ? tc.adIds : [];
+    const campaignIds = Array.isArray(tc.campaignIds) ? tc.campaignIds : [];
+    const legacy = String(tc.adId ?? "").trim();
+    if (adIds.length === 0 && campaignIds.length === 0 && !legacy) {
+      push("trigger", "ctwa_empty", "Elegiste «Anuncios seleccionados» pero no marcaste ninguna campaña ni anuncio. Marca al menos uno o cambia a «Todos los anuncios».");
+    }
+  }
+  if (t === "lead_status_changed") {
+    const from = String(tc.fromStatus ?? "");
+    const to = String(tc.toStatus ?? "");
+    if (from && to && from === to) push("trigger", "status_same", "El origen y el destino de la etapa son iguales: el disparador nunca coincidiría.");
+    if (from && statusCodes.size && !statusCodes.has(from)) push("trigger", "status_from_missing", "La etapa de origen ya no existe.");
+    if (to && statusCodes.size && !statusCodes.has(to)) push("trigger", "status_to_missing", "La etapa de destino ya no existe.");
+  }
+  if (t === "tag_added") {
+    const tag = String(tc.tag ?? "").trim();
+    if (tag && tags.size && !tags.has(tag.toLowerCase())) push("trigger", "tag_missing", `La etiqueta «${tag}» ya no existe: el disparador nunca coincidirá.`);
+  }
+  if (t === "appointment_upcoming") {
+    const hb = Number(tc.hoursBefore ?? 24);
+    if (!Number.isFinite(hb) || hb <= 0) push("trigger", "hours_invalid", "«Horas antes de la cita» debe ser un número mayor que 0.");
+  }
+
+  // --- Nodos: conectividad y campos requeridos por tipo ---
+  const nodes = def.nodes ?? [];
+  if (nodes.length === 0) {
+    push("trigger", "no_nodes", "El flujo no tiene ningún paso.");
+    return issues;
+  }
+  const start = findStartNode(def);
+  const withIncoming = new Set((def.edges ?? []).map((e) => e.to));
+  for (const n of nodes) {
+    const c = (n.config ?? {}) as Record<string, unknown>;
+    if (start && n.id !== start.id && !withIncoming.has(n.id)) {
+      push(n.id, "unconnected", "Este paso no está conectado a ningún otro: nunca se ejecutará.");
+    }
+    switch (n.type) {
+      case "send_text":
+        if (!String(c.text ?? "").trim()) push(n.id, "text_required", "El mensaje está vacío.");
+        break;
+      case "run_agent":
+      case "switch_agent": {
+        const slug = String(c.agentSlug ?? "");
+        if (!slug) push(n.id, "agent_required", "No hay agente IA elegido.");
+        else if (agentSlugs.size && !agentSlugs.has(slug)) push(n.id, "agent_missing", "El agente IA elegido ya no existe.");
+        break;
+      }
+      case "update_lead_status": {
+        const code = String(c.statusCode ?? "");
+        if (!code) push(n.id, "status_required", "No hay estado de lead elegido.");
+        else if (statusCodes.size && !statusCodes.has(code)) push(n.id, "status_missing", "El estado de lead elegido ya no existe.");
+        break;
+      }
+      case "add_tag":
+        if (!String(c.tag ?? "").trim()) push(n.id, "tag_required", "No hay etiqueta indicada.");
+        break;
+      case "remove_tag": {
+        const tag = String(c.tag ?? "").trim();
+        if (!tag) push(n.id, "tag_required", "No hay etiqueta indicada.");
+        else if (tags.size && !tags.has(tag.toLowerCase())) push(n.id, "tag_missing", `La etiqueta «${tag}» ya no existe.`);
+        break;
+      }
+      case "assign_user":
+        if (!String(c.userId ?? "")) push(n.id, "user_required", "No hay usuario elegido.");
+        break;
+      case "assign_team":
+        if (!String(c.teamId ?? "")) push(n.id, "team_required", "No hay equipo elegido.");
+        break;
+      case "start_workflow": {
+        const name = String(c.workflowName ?? "").trim();
+        if (!name) push(n.id, "workflow_required", "No hay flujo elegido para disparar.");
+        else if (workflowNames.size && !workflowNames.has(name)) push(n.id, "workflow_missing", `El flujo «${name}» ya no existe.`);
+        break;
+      }
+      case "wait": {
+        const total = Number(c.minutes ?? 0) + Number(c.hours ?? 0) + Number(c.days ?? 0);
+        if (!(total > 0)) push(n.id, "wait_zero", "La espera es de 0: no pausa nada.");
+        break;
+      }
+    }
+  }
+  return issues;
+}
+
 export function nextNodeId(def: WorkflowDefinition, from: string, branch?: string): string | undefined {
   const candidates = def.edges.filter((e) => e.from === from);
   if (branch !== undefined) {
