@@ -133,9 +133,24 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
     if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
     if (typeof cfg.channel === "string" && cfg.channel && data.channel && data.channel !== cfg.channel) return false;
   }
-  // Anuncios Click-to-Chat: cualquier anuncio, o uno específico por ad_id.
+  // Anuncios Click-to-Chat: "Todos", por anuncios/campañas seleccionados, o
+  // (legado) un ad_id específico. La campaña se resuelve del catálogo antes de
+  // despachar (data.campaign_id), así una selección por campaña cubre anuncios
+  // nuevos de esa campaña sin editar el flujo.
   if (t === "click_to_chat") {
-    if (typeof cfg.adId === "string" && cfg.adId.trim() && String(data.ad_id ?? "") !== cfg.adId.trim()) return false;
+    const legacyAdId = typeof cfg.adId === "string" ? cfg.adId.trim() : "";
+    const adIds = Array.isArray(cfg.adIds) ? cfg.adIds.map(String) : [];
+    const campaignIds = Array.isArray(cfg.campaignIds) ? cfg.campaignIds.map(String) : [];
+    const adId = String(data.ad_id ?? "");
+    const campaignId = String(data.campaign_id ?? "");
+    if (cfg.mode === "selected") {
+      if (adIds.includes(adId)) return true;
+      if (campaignId && campaignIds.includes(campaignId)) return true;
+      if (legacyAdId && adId === legacyAdId) return true;
+      return false;
+    }
+    // "Todos" (o legado): un ad_id específico debe coincidir; vacío = cualquiera.
+    if (legacyAdId && adId !== legacyAdId) return false;
   }
   // Etapa del ciclo de vida: condiciones opcionales origen → destino.
   if (t === "lead_status_changed") {

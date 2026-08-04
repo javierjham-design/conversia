@@ -9,6 +9,7 @@ import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
 import { handleAppointmentResponse } from "./appointment-responses";
+import { resolveAdContext } from "./meta-ads-sync";
 
 interface ParsedInbound {
   phoneNumberId: string;
@@ -289,8 +290,15 @@ export async function processInbound(job: InboundJob): Promise<void> {
     // aquí solo disparamos el flujo click_to_chat con los datos del anuncio.
     if (msg.referral && result.started) {
       const ref = msg.referral;
+      const adId = ref.source_id ?? null;
+      // Resuelve la campaña del anuncio (catálogo cacheado + sync puntual si falta)
+      // para que las selecciones por campaña coincidan sin perder leads.
+      const adCtx = adId ? await resolveAdContext(organizationId, String(adId)).catch(() => null) : null;
       const referral = {
-        ad_id: ref.source_id ?? ref.source_url ?? null,
+        ad_id: adId ?? ref.source_url ?? null,
+        campaign_id: adCtx?.campaignId ?? null,
+        campaign_name: adCtx?.campaignName ?? null,
+        ad_name: adCtx?.adName ?? null,
         ctwa_clid: ref.ctwa_clid ?? null,
         headline: ref.headline ?? null,
         source_type: ref.source_type ?? null,
