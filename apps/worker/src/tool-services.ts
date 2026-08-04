@@ -15,7 +15,7 @@ import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
  */
 const mockProviders = new Map<string, MockSchedulingProvider>();
 
-async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvider> {
+export async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvider> {
   const env = getEnv();
   const connection = await withTenant(orgId, (tx) =>
     tx.schedulingConnection.findFirst({ where: { status: "active" } }),

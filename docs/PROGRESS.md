@@ -1,5 +1,13 @@
 # Registro de progreso
 
+## 2026-08-04 (3) — AGENDA-2: respuestas del recordatorio (Confirmar/Reagendar)
+
+`apps/worker/src/appointment-responses.ts`: cuando el paciente toca "Confirmar"/"Reagendar" en el recordatorio (el inbound ya lo entrega como texto), se interpreta y se actúa REAL sobre la **próxima cita** del contacto (PENDING/CONFIRMED más cercana):
+- **Confirmar** → marca la cita `CONFIRMED`, **write-back a la agenda externa** (best-effort, `SchedulingProvider.confirmAppointment` — Cláriva lo implementa), dispara el trigger `appointment_confirmed` (idempotente) y acusa recibo al paciente.
+- **Reagendar** → deriva a recepción (handoff humano, pausa IA) + acuse.
+
+Enganchado en `processInbound` antes del turno del agente (si lo maneja, no improvisa). Detección pura y estricta (`detectAppointmentResponse`, 4 tests; no captura frases largas). Write-back reutiliza `getSchedulingProviderFor` (exportado). Sin migración. Worker 55 tests.
+
 ## 2026-08-04 (2) — Workflows: D1 + M1 + U1 + tests (huecos restantes del catálogo)
 
 Cierre de los huecos restantes tras la auditoría (el catálogo ya estaba ~90% construido). PRs separados, sin migración:
