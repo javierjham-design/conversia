@@ -2,6 +2,7 @@
  * @conversia/config — Carga y validación de variables de entorno.
  * Falla temprano y con mensajes claros si falta configuración crítica.
  */
+import { createHmac } from "node:crypto";
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
@@ -127,4 +128,28 @@ export function getEnv(): Env {
     }
   }
   return cached;
+}
+
+/**
+ * `appsecret_proof` = HMAC-SHA256 del access_token con el App Secret de Meta, en
+ * hex. Meta lo exige en las llamadas server-side a Graph cuando el ajuste
+ * "Require app secret proof for server API calls" está activo. Lo enviamos
+ * SIEMPRE (aunque el toggle esté apagado; Meta lo acepta sin problema), así el
+ * día que se active en el dashboard no se rompe ninguna llamada en producción.
+ * Sin App Secret o sin token configurados devuelve "" (no rompe en desarrollo).
+ */
+export function metaAppSecretProof(accessToken: string, appSecret: string = getEnv().META_APP_SECRET): string {
+  if (!appSecret || !accessToken) return "";
+  return createHmac("sha256", appSecret).update(accessToken).digest("hex");
+}
+
+/**
+ * Añade `appsecret_proof` a una URL de Graph (respeta si ya tiene query y es
+ * idempotente). Úsalo para llamadas que pasan el token por query string.
+ */
+export function withAppSecretProof(url: string, accessToken: string, appSecret?: string): string {
+  const proof = metaAppSecretProof(accessToken, appSecret);
+  if (!proof || url.includes("appsecret_proof=")) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}appsecret_proof=${proof}`;
 }

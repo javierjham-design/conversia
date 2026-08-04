@@ -10,7 +10,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { QUEUE_NAMES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -281,7 +281,7 @@ export class MetaController {
   private async inspectToken(token: string): Promise<{ scopes: string[]; adAccounts: { id: string; name: string; status: number }[]; name: string | null }> {
     const v = getEnv().META_GRAPH_VERSION;
     const g = async (path: string) => {
-      const res = await fetch(`https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`);
+      const res = await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`, token));
       const json: any = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error?.message ?? `Graph ${res.status}`);
       return json;

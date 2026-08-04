@@ -4,6 +4,7 @@ import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
+import { MetaAppController } from "./channels/meta-app.controller";
 import { ContactsController } from "./contacts/contacts.controller";
 import { LifecycleController } from "./contacts/lifecycle.controller";
 import { ContactFieldsController } from "./contacts/fields.controller";
@@ -62,6 +63,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ReportsController,
     BillingController,
     WhatsappController,
+    MetaAppController,
     ClarivaWebhookController,
     PublicController, // API pública de precios (sin auth)
     // Plataforma (super-admin) — autenticación y audiencia separadas

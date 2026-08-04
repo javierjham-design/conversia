@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
 import type { CapiJob } from "@conversia/types";
@@ -83,7 +83,7 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(config.token)}`,
+      withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(config.token)}`, config.token),
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     );
     const json: any = await res.json().catch(() => ({}));

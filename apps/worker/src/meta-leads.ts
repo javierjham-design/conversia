@@ -1,5 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { decryptCredential } from "./credentials";
 import { dispatchEvent } from "./workflow-runtime";
 import { emitPlatformEvent } from "./platform-events";
@@ -44,7 +44,7 @@ async function fetchLeadFromGraph(
   });
   if (!token) return null;
   const res = await fetch(
-    `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${leadgenId}?fields=field_data,campaign_id,ad_id,form_id,created_time&access_token=${encodeURIComponent(token)}`,
+    withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${leadgenId}?fields=field_data,campaign_id,ad_id,form_id,created_time&access_token=${encodeURIComponent(token)}`, token),
   );
   if (!res.ok) throw new Error(`Graph ${res.status}`);
   const json: any = await res.json();
