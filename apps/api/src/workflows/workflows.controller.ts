@@ -46,12 +46,14 @@ const TRIGGER_CATALOG = [
   { type: "click_to_chat", label: "Anuncios Click-to-Chat (Meta)", description: "El primer mensaje viene de un anuncio Click-to-WhatsApp", conditions: ["adId"] },
   { type: "lead_status_changed", label: "Etapa del ciclo de vida actualizada", description: "Cuando el lead cambia de etapa (origen → destino)", conditions: ["fromStatus", "toStatus"] },
   { type: "tag_added", label: "Etiqueta añadida", description: "Al etiquetar un contacto o conversación (panel, flujo, IA o Lead Ads)", conditions: ["tag"] },
-  { type: "appointment_created", label: "Cita creada", description: "Al agendar una cita para el contacto" },
-  { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita agendada", conditions: ["hoursBefore"] },
+  // Agenda (requieren una agenda conectada, p. ej. Cláriva, que emita los eventos):
+  { type: "appointment_created", label: "Cita creada", description: "Al agendarse una cita para el contacto (agente o clínica)" },
+  { type: "appointment_confirmed", label: "Cita confirmada", description: "Cuando el paciente/clínica confirma la cita" },
+  { type: "appointment_rescheduled", label: "Cita reprogramada", description: "Al reprogramarse una cita — el recordatorio se re-agenda solo" },
+  { type: "appointment_cancelled", label: "Cita cancelada", description: "Al cancelarse una cita — cancela el recordatorio pendiente" },
+  { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita; respeta el horario de atención", conditions: ["hoursBefore"] },
   { type: "manual", label: "Disparo manual", description: "Se ejecuta a mano desde la bandeja o la lista de contactos" },
   // Próximamente (estructura lista; falta la fuente del evento):
-  { type: "appointment_cancelled", label: "Cita cancelada", description: "Al cancelarse una cita (requiere webhook de agenda)", soon: true },
-  { type: "appointment_rescheduled", label: "Cita reprogramada", description: "Al reprogramarse una cita (requiere webhook de agenda)", soon: true },
   { type: "missed_call", label: "Llamada perdida", description: "Llamada de WhatsApp no contestada (requiere eventos de llamada)", soon: true },
   { type: "tiktok_ad", label: "Anuncios de mensajería TikTok", description: "Mensaje desde un anuncio de TikTok (requiere canal TikTok)", soon: true },
 ];
