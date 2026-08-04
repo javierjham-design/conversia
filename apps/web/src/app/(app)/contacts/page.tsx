@@ -62,6 +62,7 @@ interface Meta {
   teams: { id: string; name: string }[];
   tags: { id: string; name: string; color: string | null }[];
   countries: string[];
+  campaigns: { id: string; name: string }[];
   segments: { id: string; name: string; isDefault: boolean }[];
 }
 
@@ -154,7 +155,7 @@ export default function ContactsPage() {
 
   // Filtro primario (sidebar) + secundarios (barra de filtros) + búsqueda.
   const [primary, setPrimary] = useState<Primary>({ kind: "all" });
-  const [sec, setSec] = useState<{ tag?: string; channel?: string; country?: string; source?: string; dateFrom?: string; dateTo?: string }>({});
+  const [sec, setSec] = useState<{ tag?: string; channel?: string; country?: string; source?: string; campaign?: string; dateFrom?: string; dateTo?: string }>({});
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
 
@@ -214,6 +215,7 @@ export default function ContactsPage() {
     if (sec.channel) p.set("channel", sec.channel);
     if (sec.country) p.set("country", sec.country);
     if (sec.source) p.set("source", sec.source);
+    if (sec.campaign) p.set("campaign", sec.campaign);
     if (sec.dateFrom) p.set("dateFrom", sec.dateFrom);
     if (sec.dateTo) p.set("dateTo", sec.dateTo);
     return p.toString();
@@ -461,6 +463,9 @@ export default function ContactsPage() {
               options={Object.entries(CHANNEL_LABEL).filter(([k]) => ["WHATSAPP_CLOUD", "MOCK", "INSTAGRAM"].includes(k)).map(([value, label]) => ({ value, label }))}
             />
             <FilterSelect label="País" value={sec.country} onChange={(v) => setSecReset({ country: v })} options={meta.countries.map((c) => ({ value: c, label: `${flag(c)} ${c}` }))} />
+            {meta.campaigns.length > 0 && (
+              <FilterSelect label="Campaña" value={sec.campaign} onChange={(v) => setSecReset({ campaign: v })} options={meta.campaigns.map((c) => ({ value: c.id, label: c.name }))} />
+            )}
             <FilterSelect label="Origen" value={sec.source} onChange={(v) => setSecReset({ source: v })} options={[{ value: "ad", label: "Anuncio (CTWA)" }, { value: "organic", label: "Orgánico" }]} />
             <div>
               <p className="mb-1 text-xs font-medium text-ink-muted">Creado desde</p>
