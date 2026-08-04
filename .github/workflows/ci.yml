@@ -25,3 +25,32 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+  # Smoke de robustez del panel: carga cada pantalla con datos deliberadamente
+  # incompletos (tenant vacío + registros con null) y falla si alguna revienta.
+  # DEBE usar `next start`: la CSP de prod prohíbe unsafe-eval y `next dev` no
+  # hidrata. Ver apps/web/e2e/robustness/README.md.
+  e2e-robustness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @conversia/database db:generate
+      - run: pnpm --filter @conversia/web build
+      - run: pnpm --filter @conversia/web exec playwright install --with-deps chromium
+      - name: Smoke de robustez (datos incompletos)
+        run: |
+          PORT=3010 pnpm --filter @conversia/web start &
+          SERVER_PID=$!
+          for i in $(seq 1 40); do curl -sf http://localhost:3010/login >/dev/null 2>&1 && break; sleep 2; done
+          set +e
+          BASE=http://localhost:3010 pnpm --filter @conversia/web test:e2e
+          STATUS=$?
+          set -e
+          kill $SERVER_PID 2>/dev/null || true
+          exit $STATUS
+

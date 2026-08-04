@@ -7,7 +7,8 @@
     "dev": "next dev -p 3000",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "node e2e/robustness/probe.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",
@@ -22,6 +23,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vitest": "^3.0.2"
