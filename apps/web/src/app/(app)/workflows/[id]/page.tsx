@@ -102,7 +102,7 @@ const NODE_DEFS: NodeDef[] = [
 const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 
 interface Catalog {
-  triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean }[];
+  triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean; hidden?: boolean }[];
   nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string; emoji?: string | null }[];
   appointmentFilters?: {
@@ -1006,6 +1006,84 @@ function AdvancedManual({ cfg, setCfg, show, setShow }: { cfg: Record<string, an
   );
 }
 
+/** Canales de mensajería para la condición de canal (multi-canal en camino). */
+const MSG_CHANNELS = [
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "instagram", label: "Instagram (pronto)" },
+  { value: "messenger", label: "Messenger (pronto)" },
+];
+
+/** Condiciones del disparador «Mensaje recibido»: canal, palabras, contiene/exacto. */
+function MessageReceivedConditions({ trigger, onChange }: { trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
+  const cfg = trigger.config;
+  const words: string[] = Array.isArray(cfg.keywords) ? (cfg.keywords as string[]) : cfg.keyword ? [String(cfg.keyword)] : [];
+  // Al editar migramos el `keyword` legado a `keywords[]`.
+  const set = (patch: Record<string, unknown>) => onChange({ ...trigger, config: { ...cfg, ...patch, keyword: undefined } });
+  const matchType = cfg.matchType === "exact" ? "exact" : "contains";
+  const matchAll = cfg.matchAll === true;
+  const showAllAny = matchType !== "exact" && words.length >= 2;
+  return (
+    <div className="space-y-3 rounded-lg border border-line p-3">
+      <p className="text-xs font-medium text-ink-muted">Condiciones (opcionales)</p>
+
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Canal</span>
+        <select
+          value={String(cfg.channel ?? "")}
+          onChange={(e) => set({ channel: e.target.value || undefined })}
+          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+        >
+          <option value="">— cualquier canal —</option>
+          {MSG_CHANNELS.map((c) => (<option key={c.value} value={c.value}>{c.label}</option>))}
+        </select>
+      </label>
+
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Palabras o frases (una por línea)</span>
+        <textarea
+          value={words.join("\n")}
+          onChange={(e) => set({ keywords: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })}
+          rows={3}
+          placeholder={"hora\nagendar\nprecio"}
+          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+        />
+        <span className="mt-1 block text-[10px] text-ink-subtle">Vacío = cualquier mensaje.</span>
+      </label>
+
+      <div className="flex flex-wrap gap-3 text-xs text-ink-muted">
+        <span className="text-ink-subtle">Coincidencia:</span>
+        {(["contains", "exact"] as const).map((m) => (
+          <label key={m} className="flex items-center gap-1">
+            <input type="radio" name="matchType" checked={matchType === m} onChange={() => set({ matchType: m })} />
+            {m === "contains" ? "Contiene" : "Exacta"}
+          </label>
+        ))}
+      </div>
+
+      {showAllAny && (
+        <div className="flex flex-wrap gap-3 text-xs text-ink-muted">
+          <span className="text-ink-subtle">Con varias palabras:</span>
+          {([["false", "Cualquiera"], ["true", "Todas"]] as const).map(([v, label]) => (
+            <label key={v} className="flex items-center gap-1">
+              <input type="radio" name="matchAll" checked={String(matchAll) === v} onChange={() => set({ matchAll: v === "true" })} />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+
+      <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          checked={cfg.firstMessage === true}
+          onChange={(e) => set({ firstMessage: e.target.checked })}
+        />
+        Solo el primer mensaje de la conversación
+      </label>
+    </div>
+  );
+}
+
 /** Triggers de cita que aceptan filtros por servicio/profesional/sede. */
 const APPT_FILTERABLE = new Set([
   "appointment_created", "appointment_confirmed", "appointment_rescheduled",
@@ -1076,45 +1154,31 @@ function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Ca
           onChange={(e) => onChange({ type: e.target.value, config: {} })}
           className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
         >
-          {catalog.triggers.map((t) => (<option key={t.type} value={t.type}>{t.label}</option>))}
+          {catalog.triggers
+            .filter((t) => !t.hidden || t.type === trigger.type)
+            .map((t) => (<option key={t.type} value={t.type}>{t.label}</option>))}
         </select>
       </label>
       {desc && <p className="text-xs text-ink-subtle">{desc}</p>}
 
       {trigger.type === "keyword" && (
-        <label className="block text-sm">
-          <span className="text-xs text-ink-muted">Palabra o frase</span>
-          <input
-            value={String(trigger.config.keyword ?? "")}
-            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, keyword: e.target.value } })}
-            placeholder="p. ej. hora, precio, agendar"
-            className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
-          />
-        </label>
-      )}
-
-      {trigger.type === "message_received" && (
-        <div className="space-y-2 rounded-lg border border-line p-3">
-          <p className="text-xs font-medium text-ink-muted">Condiciones (opcionales)</p>
+        <div className="space-y-2">
           <label className="block text-sm">
-            <span className="text-xs text-ink-muted">Contiene la palabra/frase</span>
+            <span className="text-xs text-ink-muted">Palabra o frase</span>
             <input
               value={String(trigger.config.keyword ?? "")}
               onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, keyword: e.target.value } })}
-              placeholder="dejar vacío = cualquier mensaje"
+              placeholder="p. ej. hora, precio, agendar"
               className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
             />
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <input
-              type="checkbox"
-              checked={trigger.config.firstMessage === true}
-              onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, firstMessage: e.target.checked } })}
-            />
-            Solo el primer mensaje de la conversación
-          </label>
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            Disparador <b>legado</b>. Cambia a <b>«Mensaje recibido»</b>, que admite varias palabras, «contiene» vs «exacta» y filtro por canal. Los flujos existentes siguen funcionando.
+          </div>
         </div>
       )}
+
+      {trigger.type === "message_received" && <MessageReceivedConditions trigger={trigger} onChange={onChange} />}
 
       {catalog.triggers.find((t) => t.type === trigger.type)?.soon && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
@@ -1157,18 +1221,29 @@ function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Ca
       )}
 
       {trigger.type === "appointment_upcoming" && (
-        <label className="block text-sm">
-          <span className="text-xs text-ink-muted">Horas antes de la cita</span>
-          <input
-            type="number"
-            min={1}
-            max={168}
-            value={Number(trigger.config.hoursBefore ?? 24)}
-            onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, hoursBefore: Number(e.target.value) } })}
-            className="mt-1 block w-28 rounded-lg border border-line-strong px-3 py-2 text-sm"
-          />
-          <span className="mt-1 block text-[10px] text-ink-subtle">Se programa el recordatorio al crear la cita.</span>
-        </label>
+        <div className="space-y-2">
+          <label className="block text-sm">
+            <span className="text-xs text-ink-muted">Horas antes de la cita</span>
+            <input
+              type="number"
+              min={1}
+              max={168}
+              value={Number(trigger.config.hoursBefore ?? 24)}
+              onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, hoursBefore: Number(e.target.value) } })}
+              className="mt-1 block w-28 rounded-lg border border-line-strong px-3 py-2 text-sm"
+            />
+            <span className="mt-1 block text-[10px] text-ink-subtle">Se programa el recordatorio al crear la cita.</span>
+          </label>
+          <label className="flex items-start gap-1.5 text-xs text-ink-muted">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={trigger.config.avoidOffHours !== false}
+              onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, avoidOffHours: e.target.checked } })}
+            />
+            <span>Respetar el horario de atención<span className="block text-[10px] text-ink-subtle">Si el recordatorio cae de madrugada o fuera de horario, se corre al siguiente tramo hábil (salvo que quede después de la cita).</span></span>
+          </label>
+        </div>
       )}
 
       {APPT_FILTERABLE.has(trigger.type) && <ApptFilters catalog={catalog} trigger={trigger} onChange={onChange} />}

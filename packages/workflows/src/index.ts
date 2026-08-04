@@ -136,6 +136,25 @@ const APPOINTMENT_EVENT_TRIGGERS = new Set([
   "no_show",
 ]);
 
+/**
+ * ¿El texto cumple las condiciones de palabra/frase del disparador? Admite varias
+ * palabras (`keywords[]` + `keyword` legado), "contiene" vs "exacto" (`matchType`)
+ * y "cualquiera" vs "todas" (`matchAll`). Sin palabras configuradas = cualquiera.
+ */
+export function matchesKeywords(cfg: Record<string, unknown>, text: string): boolean {
+  const words = [
+    ...(Array.isArray(cfg.keywords) ? cfg.keywords.map(String) : []),
+    ...(typeof cfg.keyword === "string" ? [cfg.keyword] : []),
+  ]
+    .map((w) => w.trim().toLowerCase())
+    .filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = text.toLowerCase().trim();
+  const exact = cfg.matchType === "exact";
+  const test = (w: string) => (exact ? haystack === w : haystack.includes(w));
+  return cfg.matchAll === true ? words.every(test) : words.some(test);
+}
+
 /** ¿El evento dispara este workflow? (matching de triggers, sección 16) */
 export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): boolean {
   const t = def.trigger.type;
@@ -145,20 +164,17 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
   // "keyword" (legado) se comporta como un message_received con palabra clave.
   if (t === "keyword") {
     if (event.type !== "message_received") return false;
-    return typeof cfg.keyword === "string"
-      ? String(data.text ?? "").toLowerCase().includes(cfg.keyword.toLowerCase())
-      : true;
+    return matchesKeywords(cfg, String(data.text ?? ""));
   }
 
   if (t !== event.type) return false;
 
-  // Condiciones opcionales del mensaje entrante.
+  // Condiciones opcionales del mensaje entrante: canal, primer mensaje y
+  // palabras/frases (varias, "contiene" vs "exacto", "cualquiera" vs "todas").
   if (t === "message_received") {
-    if (typeof cfg.keyword === "string" && cfg.keyword.trim() && !String(data.text ?? "").toLowerCase().includes(cfg.keyword.toLowerCase())) {
-      return false;
-    }
-    if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
     if (typeof cfg.channel === "string" && cfg.channel && data.channel && data.channel !== cfg.channel) return false;
+    if (cfg.firstMessage === true && data.isFirstMessage !== true) return false;
+    if (!matchesKeywords(cfg, String(data.text ?? ""))) return false;
   }
   // Anuncios Click-to-Chat: "Todos", por anuncios/campañas seleccionados, o
   // (legado) un ad_id específico. La campaña se resuelve del catálogo antes de
@@ -233,8 +249,9 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
   // --- Disparador: campos requeridos por tipo ---
   const t = def.trigger?.type;
   const tc = (def.trigger?.config ?? {}) as Record<string, unknown>;
-  if (t === "keyword" && !String(tc.keyword ?? "").trim()) {
-    push("trigger", "keyword_required", "El disparador «Palabra clave» necesita una palabra o frase.");
+  if (t === "keyword") {
+    const hasKw = String(tc.keyword ?? "").trim() || (Array.isArray(tc.keywords) && tc.keywords.some((w) => String(w).trim()));
+    if (!hasKw) push("trigger", "keyword_required", "El disparador «Palabra clave» necesita una palabra o frase.");
   }
   if (t === "click_to_chat" && tc.mode === "selected") {
     const adIds = Array.isArray(tc.adIds) ? tc.adIds : [];

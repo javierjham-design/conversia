@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesTrigger, resumeAfterWait, resumeWithBranch, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesKeywords, matchesTrigger, resumeAfterWait, resumeWithBranch, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -109,6 +109,29 @@ describe("motor de workflows v0", () => {
     const anyTag: WorkflowDefinition = { ...specific, trigger: { type: "tag_added", config: {} } };
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "tag_added", data: { tag: "x" }, occurredAt: "" })).toBe(true);
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "message_received", data: {}, occurredAt: "" })).toBe(false);
+  });
+
+  it("condiciones de message_received (canal, contiene/exacto, varias palabras)", () => {
+    const base = (config: Record<string, unknown>): WorkflowDefinition => ({ trigger: { type: "message_received", config }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] });
+    // Canal.
+    const ch = base({ channel: "whatsapp" });
+    expect(matchesTrigger(ch, { organizationId: "o", type: "message_received", data: { text: "hola", channel: "whatsapp" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(ch, { organizationId: "o", type: "message_received", data: { text: "hola", channel: "instagram" }, occurredAt: "" })).toBe(false);
+    // Contiene (por defecto), cualquiera.
+    const kw = base({ keywords: ["hora", "precio"] });
+    expect(matchesTrigger(kw, { organizationId: "o", type: "message_received", data: { text: "quiero una HORA" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(kw, { organizationId: "o", type: "message_received", data: { text: "hola" }, occurredAt: "" })).toBe(false);
+    // Todas.
+    const all = base({ keywords: ["hora", "lunes"], matchAll: true });
+    expect(matchesTrigger(all, { organizationId: "o", type: "message_received", data: { text: "una hora el lunes" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(all, { organizationId: "o", type: "message_received", data: { text: "una hora" }, occurredAt: "" })).toBe(false);
+    // Exacta.
+    const exact = base({ keywords: ["hola"], matchType: "exact" });
+    expect(matchesTrigger(exact, { organizationId: "o", type: "message_received", data: { text: "  Hola  " }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(exact, { organizationId: "o", type: "message_received", data: { text: "hola qué tal" }, occurredAt: "" })).toBe(false);
+    // Legado: keyword string sigue funcionando y se combina con keywords[].
+    expect(matchesKeywords({ keyword: "precio" }, "cuál es el PRECIO")).toBe(true);
+    expect(matchesKeywords({}, "cualquier cosa")).toBe(true);
   });
 
   it("filtros de triggers de cita (servicio / profesional / sede)", () => {
