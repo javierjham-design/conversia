@@ -1457,6 +1457,33 @@ model MetaEventMapping {
   @@map("meta_event_mappings")
 }
 
+// Catálogo de anuncios de Meta por organización (campaña → conjunto → anuncio).
+// Plano y denormalizado: cada fila es un anuncio con el nombre de su campaña y
+// conjunto, para armar el árbol del trigger y resolver ad_id→campaña en runtime.
+// Cacheado; se sincroniza a diario + "Sincronizar ahora". Anuncios borrados en
+// Meta se marcan available=false (no se eliminan: pueden estar en flujos vivos).
+model MetaAd {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  adAccountId    String   @map("ad_account_id") // external act_...
+  campaignId     String   @map("campaign_id")
+  campaignName   String   @map("campaign_name")
+  adsetId        String   @map("adset_id")
+  adsetName      String   @map("adset_name")
+  adExternalId   String   @map("ad_external_id") // el ad_id que llega en el referral
+  adName         String   @map("ad_name")
+  status         String // ACTIVE | PAUSED | ARCHIVED | …
+  objective      String? // objetivo de la campaña
+  isCtwa         Boolean  @default(false) @map("is_ctwa") // lleva a WhatsApp (Click-to-WhatsApp)
+  available      Boolean  @default(true) // false = ya no está en Meta
+  lastSyncedAt   DateTime @default(now()) @map("last_synced_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, adExternalId])
+  @@index([organizationId, campaignId])
+  @@map("meta_ads")
+}
+
 // Actividad/logs de integraciones (payloads SIEMPRE sanitizados)
 model IntegrationEvent {
   id             String   @id @default(cuid())

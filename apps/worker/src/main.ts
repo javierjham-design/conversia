@@ -23,6 +23,7 @@ import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
 import { processSyncJob } from "./sync-worker";
+import { getSyncQueue } from "./ga4";
 import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
@@ -73,6 +74,15 @@ async function main() {
     async (job) => processSyncJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Sincronización diaria (05:00) del catálogo de anuncios de Meta: un job
+  // repetible que abanica un sync por cada tenant con Meta conectado.
+  void getSyncQueue()
+    .add(
+      "meta_ads_daily",
+      { organizationId: "__all__", kind: "meta_ads_sync", payload: { all: true } },
+      { repeat: { pattern: "0 5 * * *" }, jobId: "meta_ads_daily", removeOnComplete: true, removeOnFail: 50 },
+    )
+    .catch((e) => console.error("No se pudo registrar el sync diario de anuncios:", (e as Error).message));
   // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
   // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
   // workflow (conversation.closed → conversation_closed), inicia los flujos.

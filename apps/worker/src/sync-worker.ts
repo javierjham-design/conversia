@@ -26,6 +26,16 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
       const { syncContactToHubspot } = await import("./hubspot.js");
       return syncContactToHubspot(job.organizationId, job.payload as { contactId: string });
     }
+    case "meta_ads_sync": {
+      const { syncMetaAds, fanOutMetaAdsSync } = await import("./meta-ads-sync.js");
+      // Job diario con {all:true} → abanica un sync por tenant conectado.
+      if ((job.payload as { all?: boolean } | undefined)?.all) {
+        await fanOutMetaAdsSync();
+        return;
+      }
+      await syncMetaAds(job.organizationId);
+      return;
+    }
     default:
       console.warn(`⚠ SyncJob desconocido: ${(job as { kind?: string }).kind}`);
   }
