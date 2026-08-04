@@ -1,4 +1,4 @@
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import type { ChannelProvider, ChannelSendOptions, ChannelSendResult, OutboundMessage } from "@conversia/types";
 import { ChannelAuthError } from "./channel-auth";
 
@@ -50,7 +50,7 @@ export class MetaChannelProvider implements ChannelProvider {
     }
 
     const token = options?.accessToken || env.META_ACCESS_TOKEN;
-    const res = await fetch(url, {
+    const res = await fetch(withAppSecretProof(url, token), {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,

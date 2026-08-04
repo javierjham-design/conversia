@@ -1,4 +1,4 @@
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
 
@@ -40,7 +40,7 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
     let json: any;
     try {
       const res = await fetch(
-        `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(account.wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=200`,
+        withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(account.wabaId)}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=200`, token),
         { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) },
       );
       json = await res.json().catch(() => ({}));

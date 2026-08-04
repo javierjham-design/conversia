@@ -12,7 +12,7 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { RealtimeService } from "../common/realtime.service";
@@ -544,7 +544,7 @@ export class ConversationsController {
     const mediaId = payload?.audio?.id ?? payload?.voice?.id;
     if (!mediaId) throw new NotFoundException("Este mensaje no tiene audio");
     const env = getEnv();
-    const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(String(mediaId))}`, {
+    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(String(mediaId))}`, env.META_ACCESS_TOKEN), {
       headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` },
     });
     const meta: any = await metaRes.json().catch(() => ({}));
@@ -644,7 +644,7 @@ export class ConversationsController {
     form.append("messaging_product", "whatsapp");
     form.append("type", parsed.data.mime);
     form.append("file", new Blob([new Uint8Array(buf)], { type: parsed.data.mime }), parsed.data.filename);
-    const upload = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${chan.phoneNumberId}/media`, {
+    const upload = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${chan.phoneNumberId}/media`, chan.token), {
       method: "POST",
       headers: { authorization: `Bearer ${chan.token}` },
       body: form,

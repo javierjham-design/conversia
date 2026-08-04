@@ -10,7 +10,7 @@ import {
   Post,
 } from "@nestjs/common";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { TEMPLATE_FIELD_IDS } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
@@ -245,14 +245,14 @@ export class ChannelsController {
     }
 
     // 2. Suscribir nuestra app al WABA del cliente (webhooks) — best-effort
-    await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, {
+    await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, accessToken), {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}` },
     }).catch(() => undefined);
 
     // 3. Registrar el número para Cloud API — best-effort (puede estar ya registrado)
     const pin = String(Math.floor(100000 + Math.random() * 900000));
-    await fetch(`https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}/register`, {
+    await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}/register`, accessToken), {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({ messaging_product: "whatsapp", pin }),
@@ -262,7 +262,7 @@ export class ChannelsController {
     let displayPhone = input.phoneNumberId;
     try {
       const numRes = await fetch(
-        `https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}?fields=display_phone_number,verified_name`,
+        withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}?fields=display_phone_number,verified_name`, accessToken),
         { headers: { authorization: `Bearer ${accessToken}` } },
       );
       const numJson: any = await numRes.json();
@@ -277,7 +277,7 @@ export class ChannelsController {
     if (input.businessId) {
       try {
         const bRes = await fetch(
-          `https://graph.facebook.com/${v}/${encodeURIComponent(input.businessId)}?fields=name`,
+          withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.businessId)}?fields=name`, accessToken),
           { headers: { authorization: `Bearer ${accessToken}` } },
         );
         const bJson: any = await bRes.json();
@@ -285,6 +285,18 @@ export class ChannelsController {
       } catch {
         /* ignore */
       }
+    }
+    // 4c. Id del usuario/negocio de Meta que autorizó — para mapear el
+    // callback de desautorización de la app (deauthorize) a este canal.
+    let metaUserId: string | null = null;
+    try {
+      const meRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/me?fields=id`, accessToken), {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      const meJson: any = await meRes.json();
+      if (meRes.ok && meJson?.id) metaUserId = String(meJson.id);
+    } catch {
+      /* ignore */
     }
     const name = input.name ?? `WhatsApp ${displayPhone}`;
 
@@ -308,11 +320,13 @@ export class ChannelsController {
           data: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
         });
         if (existing.channelConnectionId) {
+          const cc = await tx.channelConnection.findUnique({ where: { id: existing.channelConnectionId }, select: { config: true } });
           await tx.channelConnection.update({
             where: { id: existing.channelConnectionId },
             data: {
               status: "active",
               ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}),
+              ...(metaUserId ? { config: { ...((cc?.config as Record<string, unknown>) ?? {}), metaUserId } } : {}),
             },
           });
         }
@@ -338,6 +352,7 @@ export class ChannelsController {
           name,
           defaultAgentId: input.defaultAgentId ?? null,
           status: "active",
+          ...(metaUserId ? { config: { metaUserId } } : {}),
         },
       });
       const credential = await tx.integrationCredential.create({
@@ -561,7 +576,8 @@ export class ChannelsController {
    */
   private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any; usedFallback: boolean }> {
     const doFetch = async (tk: string) => {
-      const res = await fetch(url, {
+      // appsecret_proof va firmado con el token efectivo de cada intento.
+      const res = await fetch(withAppSecretProof(url, tk), {
         ...init,
         headers: { ...((init?.headers as Record<string, string>) ?? {}), authorization: `Bearer ${tk}` },
       });

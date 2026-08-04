@@ -9,7 +9,7 @@
  * de página (se dispara a diario por BullMQ + botón "Sincronizar ahora"). Los
  * anuncios que ya no vuelven de Meta se marcan available=false (no se borran).
  */
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
 import { getSyncQueue } from "./ga4";
@@ -138,7 +138,7 @@ export async function syncMetaAds(organizationId: string): Promise<SyncResult> {
     try {
       // Paginación con tope defensivo (evita bucles infinitos).
       for (let page = 0; page < 100 && url; page++) {
-        const json = await graphGet(url);
+        const json = await graphGet(withAppSecretProof(url, token));
         const rows: RawAd[] = Array.isArray(json?.data) ? json.data : [];
         for (const raw of rows) {
           const m = mapAdRow(raw, acc.externalId);
@@ -196,7 +196,7 @@ export async function syncSingleAd(organizationId: string, adId: string): Promis
   if (!token || !adId) return;
   const fields = "id,name,status,account_id,adset{id,name},campaign{id,name,objective},creative{object_story_spec}";
   const json = await graphGet(
-    `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${adId}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(token)}`,
+    withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${adId}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(token)}`, token),
   ).catch(() => null);
   if (!json?.id) return;
   const acctId = json.account_id ? `act_${String(json.account_id).replace(/^act_/, "")}` : "";

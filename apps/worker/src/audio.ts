@@ -1,4 +1,4 @@
-import { getEnv } from "@conversia/config";
+import { getEnv, withAppSecretProof } from "@conversia/config";
 import { transcribeAudio } from "@conversia/agents";
 
 const MAX_BYTES = 24 * 1024 * 1024; // límite de Whisper (25MB) con margen
@@ -15,7 +15,7 @@ export async function transcribeWhatsappAudio(mediaId: string, accessToken?: str
   if (!env.OPENAI_API_KEY || !token) return null;
   try {
     // 1) Resolver la URL temporal del media
-    const metaRes = await fetch(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, {
+    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(mediaId)}`, token), {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!metaRes.ok) return null;
