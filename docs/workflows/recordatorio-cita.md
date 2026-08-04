@@ -44,9 +44,9 @@ WhatsApp"** → elegir `recordatorio_cita`. No publicar hasta revisar.
 - **Nombre:** `recordatorio_cita`
 - **Categoría:** **UTILITY** (no MARKETING — Meta la clasifica/cobra distinto)
 - **Idioma:** Español (`es`)
-- **Cuerpo (5 variables, en este orden):**
+- **Cuerpo (4 variables, en este orden):**
 
-  > Hola {{1}} 👋 Te recordamos tu cita en {{2}} para {{3}} el {{4}} a las {{5}}. ¿Confirmas tu asistencia?
+  > Hola {{1}} 👋 Te recordamos tu cita en {{2}} el {{3}} a las {{4}}. ¿Confirmas tu asistencia?
 
 - **Botones (quick reply):** `Confirmar` · `Reagendar`
 
@@ -56,21 +56,24 @@ WhatsApp"** → elegir `recordatorio_cita`. No publicar hasta revisar.
 |---|----------|--------------------------|
 | 1 | nombre paciente | `contact.firstName` |
 | 2 | clínica | `organization.name` |
-| 3 | servicio | `appointment.service` |
-| 4 | fecha | `appointment.date` |
-| 5 | hora | `appointment.time` |
+| 3 | fecha | `appointment.date` |
+| 4 | hora | `appointment.time` |
 
 ```
-variableFields = ["contact.firstName","organization.name","appointment.service","appointment.date","appointment.time"]
+variableFields = ["contact.firstName","organization.name","appointment.date","appointment.time"]
 ```
 
-> ⚠️ **Gap "servicio":** hoy `appointment.service` resuelve por la tabla `Service`
-> de Conversia (`appointment.service_id`), pero el webhook de Cláriva guarda el
-> `serviceId` en `meta` y el servicio de Cláriva no está espejado como `Service`
-> nuestro → en citas de Cláriva la variable **saldría vacía**. Opciones: (a) quitar
-> "servicio" de la plantilla (4 variables), o (b) cablear `appointment.serviceName`
-> leyendo el nombre del servicio desde el payload de Cláriva (cambio chico). Las
-> otras 4 (nombre, clínica, fecha, hora) sí se rellenan.
+> **Decisión (2026-08-04): 4 variables por ahora.** Se dejó "servicio" fuera
+> porque si esa variable llega vacía, WhatsApp rechaza el envío completo y el
+> recordatorio no sale. Las 4 (nombre, clínica, fecha, hora) sí se rellenan de la
+> BD (`resolveTemplateParams`).
+>
+> **v2 con servicio (cableado, pendiente de verificación):** el webhook de Cláriva
+> ahora guarda `meta.serviceName` (si el payload lo trae) y `resolveTemplateParams`
+> expone `appointment.serviceName` (y `appointment.service` cae a él). Falta
+> **verificar con una cita real** que Cláriva envía el nombre del servicio en el
+> webhook; si solo manda `serviceId`, hará falta un pull de `services`. Cuando esté
+> verificado se crea la plantilla v2 con la 5.ª variable `appointment.serviceName`.
 
 ## 3) Respuestas a los botones (interino, sin código)
 
