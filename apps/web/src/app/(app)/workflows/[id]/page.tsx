@@ -688,6 +688,103 @@ export default function WorkflowEditorPage() {
 // Paneles de configuración (derecha)
 // ---------------------------------------------------------------------------
 
+/** Variables del flujo disponibles para {{...}} (mismas que resuelve el motor). */
+const FLOW_VARIABLES: { key: string; label: string }[] = [
+  { key: "contact.firstName", label: "Nombre del contacto" },
+  { key: "contact.lastName", label: "Apellido del contacto" },
+  { key: "contact.phone", label: "Teléfono del contacto" },
+  { key: "organization.name", label: "Nombre del negocio" },
+  { key: "clinic.name", label: "Nombre de la clínica" },
+  { key: "clinic.address", label: "Dirección de la clínica" },
+  { key: "appointment.date", label: "Fecha de la cita" },
+  { key: "appointment.time", label: "Hora de la cita" },
+  { key: "appointment.service", label: "Servicio de la cita" },
+  { key: "appointment.professional", label: "Profesional" },
+];
+
+/**
+ * Campo de texto (input o textarea) con autocompletado de variables: al escribir
+ * "{{" o "{{par" ofrece las variables del flujo; ↑/↓ navegan, Enter/Tab/clic
+ * insertan `{{clave}}`. Funciona en claro y oscuro (tokens del sistema).
+ */
+function VarField({
+  value, onChange, multiline, className, rows, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  multiline?: boolean;
+  className?: string;
+  rows?: number;
+  placeholder?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const [menu, setMenu] = useState<{ open: boolean; query: string; start: number; index: number }>({ open: false, query: "", start: 0, index: 0 });
+  const matches = useMemo(
+    () => (menu.open ? FLOW_VARIABLES.filter((v) => `${v.key} ${v.label}`.toLowerCase().includes(menu.query.toLowerCase())) : []),
+    [menu.open, menu.query],
+  );
+
+  function detect(el: HTMLTextAreaElement | HTMLInputElement) {
+    const pos = el.selectionStart ?? 0;
+    const m = value.slice(0, pos).match(/\{\{\s*([\w.]*)$/);
+    if (m) setMenu({ open: true, query: m[1], start: pos - m[0].length, index: 0 });
+    else setMenu((s) => (s.open ? { ...s, open: false } : s));
+  }
+
+  function insert(key: string) {
+    const el = ref.current;
+    if (!el) return;
+    const pos = el.selectionStart ?? value.length;
+    const token = `{{${key}}}`;
+    onChange(value.slice(0, menu.start) + token + value.slice(pos));
+    setMenu((s) => ({ ...s, open: false }));
+    const caret = menu.start + token.length;
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (!menu.open || matches.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setMenu((s) => ({ ...s, index: (s.index + 1) % matches.length })); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setMenu((s) => ({ ...s, index: (s.index - 1 + matches.length) % matches.length })); }
+    else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insert(matches[Math.min(menu.index, matches.length - 1)].key); }
+    else if (e.key === "Escape") { e.preventDefault(); setMenu((s) => ({ ...s, open: false })); }
+  }
+
+  const common = {
+    ref: ref as React.Ref<any>,
+    value,
+    placeholder,
+    className,
+    onChange: (e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => { onChange(e.target.value); detect(e.target); },
+    onKeyUp: (e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => detect(e.currentTarget),
+    onClick: (e: React.MouseEvent<HTMLTextAreaElement | HTMLInputElement>) => detect(e.currentTarget),
+    onKeyDown,
+    onBlur: () => setTimeout(() => setMenu((s) => ({ ...s, open: false })), 120),
+  };
+
+  return (
+    <div className="relative">
+      {multiline ? <textarea {...common} rows={rows ?? 3} /> : <input {...common} />}
+      {menu.open && matches.length > 0 && (
+        <div className="absolute left-0 z-30 mt-1 max-h-52 w-72 overflow-y-auto rounded-lg border border-line bg-panel p-1 text-sm shadow-pop">
+          <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-ink-subtle">Variables del flujo</p>
+          {matches.map((v, i) => (
+            <button
+              key={v.key}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); insert(v.key); }}
+              className={cn("flex w-full items-baseline gap-2 rounded px-2 py-1 text-left", i === menu.index ? "bg-brand-soft" : "hover:bg-app")}
+            >
+              <span className="shrink-0 font-mono text-xs text-brand-700 dark:text-brand-300">{`{{${v.key}}}`}</span>
+              <span className="truncate text-xs text-ink-subtle">{v.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
   return (
@@ -886,14 +983,15 @@ function NodePanel({
       {type === "send_text" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Mensaje</span>
-          <textarea
-            value={config.text ?? ""}
-            onChange={(e) => onChange({ text: e.target.value })}
+          <VarField
+            multiline
+            value={String(config.text ?? "")}
+            onChange={(v) => onChange({ text: v })}
             rows={4}
             placeholder="Hola {{contact.firstName}} 👋"
             className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
           />
-          <span className="mt-1 block text-[10px] text-ink-subtle">Variables: {"{{contact.firstName}} {{organization.name}} {{clinic.name}} {{clinic.address}}"}</span>
+          <span className="mt-1 block text-[10px] text-ink-subtle">Escribe <code>{"{{"}</code> para insertar variables.</span>
         </label>
       )}
 
@@ -924,7 +1022,7 @@ function NodePanel({
       {type === "add_note" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Comentario interno (el cliente NO lo ve)</span>
-          <textarea value={config.text ?? ""} onChange={(e) => onChange({ text: e.target.value })} rows={3} placeholder="p. ej. Lead de campaña {{ad.headline}}" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+          <VarField multiline value={String(config.text ?? "")} onChange={(v) => onChange({ text: v })} rows={3} placeholder="p. ej. Lead de campaña {{contact.firstName}}" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
       )}
 
@@ -958,7 +1056,7 @@ function NodePanel({
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Objetivo</span>
-            <textarea value={config.objective ?? ""} onChange={(e) => onChange({ objective: e.target.value })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+            <VarField multiline value={String(config.objective ?? "")} onChange={(v) => onChange({ objective: v })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-sm">
@@ -1064,18 +1162,19 @@ function NodePanel({
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Asunto</span>
-            <input
-              value={config.subject ?? ""}
-              onChange={(e) => onChange({ subject: e.target.value })}
+            <VarField
+              value={String(config.subject ?? "")}
+              onChange={(v) => onChange({ subject: v })}
               placeholder="Nuevo lead: {{contact.firstName}}"
               className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
             />
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Cuerpo (admite variables {"{{contact.firstName}}"}…)</span>
-            <textarea
-              value={config.body ?? ""}
-              onChange={(e) => onChange({ body: e.target.value })}
+            <VarField
+              multiline
+              value={String(config.body ?? "")}
+              onChange={(v) => onChange({ body: v })}
               rows={3}
               className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
             />
@@ -1301,7 +1400,7 @@ function HttpForm({ config, onChange, presets = [] }: { config: Record<string, a
       {method !== "GET" && (
         <label className="block">
           <span className="text-xs text-ink-muted">Body (admite {"{{variables}}"})</span>
-          <textarea value={config.body ?? ""} onChange={(e) => onChange({ body: e.target.value })} rows={3} placeholder='{"nombre":"{{contact.firstName}}"}' className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 font-mono text-xs" />
+          <VarField multiline value={String(config.body ?? "")} onChange={(v) => onChange({ body: v })} rows={3} placeholder='{"nombre":"{{contact.firstName}}"}' className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 font-mono text-xs" />
         </label>
       )}
       <label className="block">
