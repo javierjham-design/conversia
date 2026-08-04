@@ -8,6 +8,7 @@ import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
+import { handleAppointmentResponse } from "./appointment-responses";
 
 interface ParsedInbound {
   phoneNumberId: string;
@@ -252,6 +253,15 @@ export async function processInbound(job: InboundJob): Promise<void> {
 
     // El contacto respondió → cancelar seguimientos pendientes
     await cancelTimersOnReply(organizationId, result.conversationId);
+
+    // AGENDA-2: ¿es una respuesta al recordatorio (Confirmar/Reagendar)? Si la
+    // maneja (confirma la cita / deriva a recepción), no seguimos al agente ni
+    // al trigger message_received para no improvisar sobre la cita.
+    const apptResponse = await handleAppointmentResponse(organizationId, result.conversationId, result.contactId, text).catch((err) => {
+      console.error(`✖ Error en respuesta de recordatorio (${result.conversationId}):`, (err as Error).message);
+      return false;
+    });
+    if (apptResponse) continue;
 
     // Disparar workflows (conversación iniciada y mensaje recibido)
     const base = {
