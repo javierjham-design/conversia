@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { evalBusinessHours, executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
+import { evalBusinessHours, executeFrom, findStartNode, matchesApptFilter, matchesTrigger, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
 
 function makeDeps(overrides: Partial<EngineDeps> = {}) {
   const calls: string[] = [];
@@ -109,6 +109,28 @@ describe("motor de workflows v0", () => {
     const anyTag: WorkflowDefinition = { ...specific, trigger: { type: "tag_added", config: {} } };
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "tag_added", data: { tag: "x" }, occurredAt: "" })).toBe(true);
     expect(matchesTrigger(anyTag, { organizationId: "o", type: "message_received", data: {}, occurredAt: "" })).toBe(false);
+  });
+
+  it("filtros de triggers de cita (servicio / profesional / sede)", () => {
+    // Vacío = cualquiera.
+    const any: WorkflowDefinition = { trigger: { type: "appointment_created", config: {} }, variables: {}, nodes: [{ id: "n1", type: "stop", config: {} }], edges: [] };
+    expect(matchesTrigger(any, { organizationId: "o", type: "appointment_created", data: { serviceId: "s1" }, occurredAt: "" })).toBe(true);
+    // Filtro por servicio.
+    const svc: WorkflowDefinition = { ...any, trigger: { type: "appointment_created", config: { serviceIds: ["s1", "s2"] } } };
+    expect(matchesTrigger(svc, { organizationId: "o", type: "appointment_created", data: { serviceId: "s2" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(svc, { organizationId: "o", type: "appointment_created", data: { serviceId: "s9" }, occurredAt: "" })).toBe(false);
+    // Combinación con Y: servicio + profesional deben cumplirse ambos.
+    const both: WorkflowDefinition = { ...any, trigger: { type: "no_show", config: { serviceIds: ["s1"], professionalIds: ["p1"] } } };
+    expect(matchesTrigger(both, { organizationId: "o", type: "no_show", data: { serviceId: "s1", professionalId: "p1" }, occurredAt: "" })).toBe(true);
+    expect(matchesTrigger(both, { organizationId: "o", type: "no_show", data: { serviceId: "s1", professionalId: "p2" }, occurredAt: "" })).toBe(false);
+  });
+
+  it("matchesApptFilter es puro y trata array vacío como 'todos'", () => {
+    expect(matchesApptFilter({}, { serviceId: "x" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: [] }, { clinicId: "c1" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c1" })).toBe(true);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, { clinicId: "c2" })).toBe(false);
+    expect(matchesApptFilter({ clinicIds: ["c1"] }, {})).toBe(false);
   });
 
   it("ejecuta hasta la espera y programa el timer", async () => {

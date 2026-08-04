@@ -105,6 +105,11 @@ interface Catalog {
   triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean }[];
   nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string; emoji?: string | null }[];
+  appointmentFilters?: {
+    services: { id: string; name: string }[];
+    professionals: { id: string; name: string }[];
+    clinics: { id: string; name: string }[];
+  };
   agents: { slug: string; name: string }[];
   users: { id: string; name: string }[];
   teams: { id: string; name: string }[];
@@ -952,6 +957,56 @@ function AdvancedManual({ cfg, setCfg, show, setShow }: { cfg: Record<string, an
   );
 }
 
+/** Triggers de cita que aceptan filtros por servicio/profesional/sede. */
+const APPT_FILTERABLE = new Set([
+  "appointment_created", "appointment_confirmed", "appointment_rescheduled",
+  "appointment_cancelled", "no_show", "appointment_upcoming",
+]);
+
+/** Filtros opcionales (servicio / profesional / sede) para los triggers de cita. */
+function ApptFilters({ catalog, trigger, onChange }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
+  const opts = catalog.appointmentFilters;
+  const dims: { key: string; label: string; items: { id: string; name: string }[] }[] = [
+    { key: "serviceIds", label: "Servicio", items: opts?.services ?? [] },
+    { key: "professionalIds", label: "Profesional", items: opts?.professionals ?? [] },
+    { key: "clinicIds", label: "Sede", items: opts?.clinics ?? [] },
+  ];
+  const anyOptions = dims.some((d) => d.items.length > 0);
+  const toggle = (key: string, id: string) => {
+    const cur = Array.isArray(trigger.config[key]) ? (trigger.config[key] as string[]) : [];
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    onChange({ ...trigger, config: { ...trigger.config, [key]: next } });
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-line p-3">
+      <p className="text-xs font-medium text-ink-muted">Filtros (opcionales)</p>
+      {!anyOptions ? (
+        <p className="text-[11px] text-ink-subtle">
+          Aún no hay servicios, profesionales ni sedes en tus citas. Aparecerán aquí cuando la agenda registre citas con esos datos; sin filtros el flujo aplica a todas las citas.
+        </p>
+      ) : (
+        dims.filter((d) => d.items.length > 0).map((d) => {
+          const sel = Array.isArray(trigger.config[d.key]) ? (trigger.config[d.key] as string[]) : [];
+          return (
+            <div key={d.key}>
+              <p className="mb-1 text-[11px] font-medium text-ink-subtle">{d.label}{sel.length > 0 ? ` · ${sel.length}` : " · todos"}</p>
+              <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-line-strong bg-panel p-1.5">
+                {d.items.map((it) => (
+                  <label key={it.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-[13px] hover:bg-app">
+                    <input type="checkbox" className="h-3.5 w-3.5" checked={sel.includes(it.id)} onChange={() => toggle(d.key, it.id)} />
+                    <span className="truncate">{it.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })
+      )}
+      <p className="text-[10px] text-ink-subtle">Vacío = cualquiera. Se combinan con Y: la cita debe cumplir todos los filtros marcados.</p>
+    </div>
+  );
+}
+
 function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
   return (
@@ -1060,6 +1115,8 @@ function TriggerPanel({ catalog, trigger, onChange }: { catalog: Catalog; trigge
           <span className="mt-1 block text-[10px] text-ink-subtle">Se programa el recordatorio al crear la cita.</span>
         </label>
       )}
+
+      {APPT_FILTERABLE.has(trigger.type) && <ApptFilters catalog={catalog} trigger={trigger} onChange={onChange} />}
     </div>
   );
 }

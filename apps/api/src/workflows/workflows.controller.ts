@@ -123,6 +123,19 @@ export class WorkflowsController {
         tx.workflow.findMany({ where: { deletedAt: null }, select: { name: true }, orderBy: { name: "asc" } }),
         tx.whatsappTemplate.findMany({ where: { status: "APPROVED" }, select: { id: true, name: true, language: true }, orderBy: { name: "asc" } }),
       ]);
+      // Opciones para los filtros de triggers de cita: se agregan de la proyección
+      // local de citas (appointments.meta), que es lo que realmente dispara flujos.
+      const appts = await tx.appointment.findMany({ select: { meta: true }, orderBy: { startsAt: "desc" }, take: 3000 });
+      const dedup = (rows: Array<{ id: string; name: string }>) => {
+        const m = new Map<string, string>();
+        for (const r of rows) if (r.id && !m.has(r.id)) m.set(r.id, r.name || r.id);
+        return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "es"));
+      };
+      const appointmentFilters = {
+        services: dedup(appts.map((a) => ({ id: String((a.meta as any)?.serviceId ?? ""), name: String((a.meta as any)?.serviceName ?? "") }))),
+        professionals: dedup(appts.map((a) => ({ id: String((a.meta as any)?.professionalId ?? ""), name: String((a.meta as any)?.professionalName ?? "") }))),
+        clinics: dedup(appts.map((a) => ({ id: String((a.meta as any)?.clinicId ?? ""), name: String((a.meta as any)?.clinicName ?? "") }))),
+      };
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
@@ -131,6 +144,7 @@ export class WorkflowsController {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
         leadStatuses: statuses,
+        appointmentFilters,
         agents,
         users: members.map((m) => ({ id: m.userId, name: m.user.name })),
         teams,

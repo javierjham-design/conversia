@@ -109,6 +109,33 @@ export function evalBusinessHours(config: Record<string, any>, now: Date): boole
   return false;
 }
 
+/**
+ * Filtros de los triggers de cita: servicio / profesional / sede. La config
+ * guarda arrays de ids (`serviceIds`, `professionalIds`, `clinicIds`); un array
+ * vacío o ausente = sin filtro (cualquiera). Puro y reutilizable tanto en el
+ * matching de eventos como al programar recordatorios (appointment_upcoming).
+ */
+export function matchesApptFilter(cfg: Record<string, unknown>, data: Record<string, unknown>): boolean {
+  const check = (ids: unknown, val: unknown): boolean => {
+    if (!Array.isArray(ids) || ids.length === 0) return true;
+    return ids.map(String).includes(String(val ?? ""));
+  };
+  return (
+    check(cfg.serviceIds, data.serviceId) &&
+    check(cfg.professionalIds, data.professionalId) &&
+    check(cfg.clinicIds, data.clinicId)
+  );
+}
+
+/** Triggers de cita basados en evento (excluye appointment_upcoming, que es programado). */
+const APPOINTMENT_EVENT_TRIGGERS = new Set([
+  "appointment_created",
+  "appointment_confirmed",
+  "appointment_rescheduled",
+  "appointment_cancelled",
+  "no_show",
+]);
+
 /** ¿El evento dispara este workflow? (matching de triggers, sección 16) */
 export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): boolean {
   const t = def.trigger.type;
@@ -161,6 +188,8 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
   if (t === "tag_added") {
     if (typeof cfg.tag === "string" && cfg.tag.trim() && String(data.tag ?? "").toLowerCase() !== cfg.tag.trim().toLowerCase()) return false;
   }
+  // Triggers de cita: filtros opcionales por servicio / profesional / sede.
+  if (APPOINTMENT_EVENT_TRIGGERS.has(t) && !matchesApptFilter(cfg, data)) return false;
   return true;
 }
 
