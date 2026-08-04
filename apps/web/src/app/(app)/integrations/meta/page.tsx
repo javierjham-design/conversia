@@ -203,6 +203,7 @@ export default function MetaCenterPage() {
 
             <div className="py-6">
               {tab === "resumen" && (
+                <>
                 <div className="grid gap-6 lg:grid-cols-3">
                   <div className="lg:col-span-2">
                     <h2 className="mb-3 text-[15px] font-semibold">Mapa de activos del ecosistema</h2>
@@ -230,6 +231,8 @@ export default function MetaCenterPage() {
                     </div>
                   </div>
                 </div>
+                <div className="mt-6"><SystemUserTokenPanel onConnected={() => void load()} /></div>
+                </>
               )}
 
               {tab === "leadads" && (
@@ -357,5 +360,122 @@ function RecentEvents({ provider }: { provider: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+interface TokenInfo {
+  ok: boolean;
+  scopes: string[];
+  adAccounts: { id: string; name: string; status: number }[];
+  name: string | null;
+  hasAdsRead: boolean;
+  hasBusinessManagement: boolean;
+  error?: string;
+}
+
+/**
+ * Carga manual de un token de Usuario del Sistema (permanente) de Meta. Lo valida
+ * contra Graph mostrando permisos + cuentas publicitarias antes de guardar.
+ * Alternativa al OAuth (Facebook Login) para cuentas donde el usuario es admin.
+ */
+function SystemUserTokenPanel({ onConnected }: { onConnected: () => void }) {
+  const toast = useToast();
+  const [token, setToken] = useState("");
+  const [info, setInfo] = useState<TokenInfo | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  async function validate() {
+    if (token.trim().length < 20) return;
+    setBusy(true);
+    setInfo(null);
+    try {
+      const r = await api<TokenInfo>("/integrations/meta/token/validate", { method: "POST", body: JSON.stringify({ accessToken: token.trim() }) });
+      if (!r.ok) {
+        toast.push(r.error ?? "Token inválido", "error");
+        return;
+      }
+      setInfo(r);
+      setPicked(new Set(r.adAccounts.map((a) => a.id)));
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const r = await api<{ adAccounts: number; hasAdsRead: boolean }>("/integrations/meta/token/connect", { method: "POST", body: JSON.stringify({ accessToken: token.trim(), adAccountIds: [...picked] }) });
+      toast.push(`Conectado: ${r.adAccounts} cuenta(s) publicitaria(s)${r.hasAdsRead ? " · ads_read ✓" : ""}`, "ok");
+      setToken("");
+      setInfo(null);
+      onConnected();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-line bg-panel p-4 shadow-card">
+      <h2 className="text-[15px] font-semibold">Conectar con token de Usuario del Sistema</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        Pega un token <b>permanente</b> generado en Business Manager (con <code>ads_read</code> y <code>business_management</code>). Lo validamos contra Meta y te mostramos qué trae antes de guardarlo. El token se guarda cifrado.
+      </p>
+      <textarea
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        rows={2}
+        placeholder="EAAG… (token de Usuario del Sistema)"
+        className="mt-2 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 font-mono text-xs"
+      />
+      <div className="mt-2 flex gap-2">
+        <Button variant="secondary" onClick={() => void validate()} disabled={busy || token.trim().length < 20}>
+          {busy && !info ? "Validando…" : "Validar token"}
+        </Button>
+        {info && (
+          <Button onClick={() => void connect()} disabled={busy}>
+            {busy ? "Conectando…" : "Conectar"}
+          </Button>
+        )}
+      </div>
+
+      {info && (
+        <div className="mt-3 space-y-2 rounded-card border border-line bg-app p-3 text-xs">
+          {info.name && <p className="font-medium text-ink">{info.name}</p>}
+          <div className="flex flex-wrap gap-1">
+            {["ads_read", "business_management", "whatsapp_business_messaging"].map((s) => (
+              <span key={s} className={cn("rounded px-1.5 py-0.5 text-[10px]", info.scopes.includes(s) ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-app text-ink-subtle line-through")}>{s}</span>
+            ))}
+            <span className="text-[10px] text-ink-subtle">+{Math.max(0, info.scopes.length - 3)} más</span>
+          </div>
+          {!info.hasAdsRead && <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">⚠ El token no trae <code>ads_read</code>: no podrás listar anuncios. Regenéralo con ese permiso.</p>}
+          <div>
+            <p className="mb-1 font-medium text-ink-muted">Cuentas publicitarias con acceso ({info.adAccounts.length}):</p>
+            {info.adAccounts.length === 0 ? (
+              <p className="text-ink-subtle">Ninguna. El token no da acceso a cuentas publicitarias.</p>
+            ) : (
+              <div className="max-h-40 space-y-0.5 overflow-y-auto">
+                {info.adAccounts.map((a) => (
+                  <label key={a.id} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-panel">
+                    <input
+                      type="checkbox"
+                      checked={picked.has(a.id)}
+                      onChange={() => setPicked((prev) => { const n = new Set(prev); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className="truncate text-ink">{a.name}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-subtle">{a.id}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

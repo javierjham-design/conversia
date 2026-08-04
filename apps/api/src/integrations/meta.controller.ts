@@ -277,6 +277,78 @@ export class MetaController {
     });
   }
 
+  /** Inspecciona un token contra Graph: permisos otorgados + cuentas publicitarias. */
+  private async inspectToken(token: string): Promise<{ scopes: string[]; adAccounts: { id: string; name: string; status: number }[]; name: string | null }> {
+    const v = getEnv().META_GRAPH_VERSION;
+    const g = async (path: string) => {
+      const res = await fetch(`https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`);
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error?.message ?? `Graph ${res.status}`);
+      return json;
+    };
+    const [me, perms, accounts] = await Promise.all([
+      g("me?fields=name").catch(() => ({})),
+      g("me/permissions"),
+      g("me/adaccounts?fields=id,name,account_status&limit=200").catch(() => ({ data: [] })),
+    ]);
+    const scopes: string[] = (perms.data ?? []).filter((p: any) => p.status === "granted").map((p: any) => String(p.permission));
+    const adAccounts = (accounts.data ?? []).map((a: any) => ({ id: String(a.id), name: String(a.name ?? a.id), status: Number(a.account_status ?? 0) }));
+    return { scopes, adAccounts, name: me.name ?? null };
+  }
+
+  /** Valida un token (dry-run): muestra permisos y cuentas publicitarias, sin guardar. */
+  @Post("token/validate")
+  async validateToken(@Body() body: unknown) {
+    requirePermission("integrations:write");
+    const input = parse(z.object({ accessToken: z.string().trim().min(20) }), body ?? {});
+    try {
+      const info = await this.inspectToken(input.accessToken);
+      return {
+        ok: true,
+        ...info,
+        hasAdsRead: info.scopes.includes("ads_read"),
+        hasBusinessManagement: info.scopes.includes("business_management"),
+      };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  /** Guarda un token de Usuario del Sistema (permanente) como conexión Meta. */
+  @Post("token/connect")
+  async connectToken(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ accessToken: z.string().trim().min(20), adAccountIds: z.array(z.string()).optional() }), body ?? {});
+    const info = await this.inspectToken(input.accessToken).catch((e) => {
+      throw new BadRequestException(`Token inválido: ${(e as Error).message}`);
+    });
+    if (!info.scopes.includes("ads_read") && info.adAccounts.length === 0) {
+      throw new BadRequestException("El token no trae ads_read ni acceso a cuentas publicitarias. Revisa los permisos del Usuario del Sistema en Business Manager.");
+    }
+    const pick = input.adAccountIds?.length ? info.adAccounts.filter((a) => input.adAccountIds!.includes(a.id)) : info.adAccounts;
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const credential = await tx.integrationCredential.create({
+        data: { organizationId: ctx.organizationId, provider: "meta", label: "Token Usuario del Sistema (Meta)", ciphertext: encryptSecret(input.accessToken) },
+      });
+      const connection = await tx.metaBusinessConnection.upsert({
+        where: { organizationId: ctx.organizationId },
+        update: { status: "CONNECTED", mode: "MANUAL", businessName: info.name ?? "Cuenta Meta", appScopes: info.scopes, credentialId: credential.id, lastError: null },
+        create: { organizationId: ctx.organizationId, status: "CONNECTED", mode: "MANUAL", businessName: info.name ?? "Cuenta Meta", appScopes: info.scopes, credentialId: credential.id, connectedById: ctx.userId },
+      });
+      for (const a of pick) {
+        await tx.metaAsset.upsert({
+          where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "ad_account", externalId: a.id } },
+          update: { name: a.name, enabled: true },
+          create: { organizationId: ctx.organizationId, connectionId: connection.id, kind: "ad_account", externalId: a.id, name: a.name, enabled: true },
+        });
+      }
+      await tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "meta", type: "connection.token", status: "ok", message: `Token cargado: ${info.scopes.length} permisos, ${pick.length} cuenta(s) publicitaria(s).` },
+      });
+      return { ok: true, scopes: info.scopes, adAccounts: pick.length, hasAdsRead: info.scopes.includes("ads_read") };
+    });
+  }
+
   @Post("disconnect")
   disconnect() {
     const ctx = requirePermission("integrations:write");
