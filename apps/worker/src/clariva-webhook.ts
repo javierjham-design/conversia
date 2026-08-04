@@ -1,6 +1,6 @@
 import { withTenant } from "@conversia/database";
 import { emitPlatformEvent } from "./platform-events";
-import { dispatchEvent } from "./workflow-runtime";
+import { cancelAppointmentReminders, dispatchEvent, scheduleAppointmentReminders } from "./workflow-runtime";
 import { geoFromPhone } from "./phone-geo";
 
 // Webhooks Cláriva → Conversia (docs/CLARIVA.md). La API ya verificó la firma
@@ -86,7 +86,7 @@ export async function processClarivaWebhook(
       if (payload.end) upd.endsAt = new Date(payload.end);
       if (payload.notes !== undefined) upd.notes = payload.notes ?? null;
       const appt = await tx.appointment.update({ where: { id: existing.id }, data: upd });
-      return { appointmentId: appt.id, contactId: appt.contactId, externalId };
+      return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString() };
     }
 
     // Cita nueva (o desconocida): necesita horario y un contacto (por teléfono).
@@ -121,7 +121,7 @@ export async function processClarivaWebhook(
         meta: { clinicId: payload.clinicId ?? null, professionalId: payload.professionalId ?? null, serviceId: payload.serviceId ?? null } as object,
       },
     });
-    return { appointmentId: appt.id, contactId: appt.contactId, externalId };
+    return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString() };
   });
 
   if (!result) return;
@@ -134,5 +134,11 @@ export async function processClarivaWebhook(
   if (mapped.publicEvent) await emitPlatformEvent(organizationId, mapped.publicEvent, eventData);
   if (mapped.trigger) {
     await dispatchEvent({ organizationId, type: mapped.trigger, contactId: result.contactId, data: eventData, occurredAt });
+  }
+  // Recordatorios de cita: programar al crear/reprogramar, cancelar al cancelar.
+  if (mapped.trigger === "appointment_created" || mapped.trigger === "appointment_rescheduled") {
+    await scheduleAppointmentReminders(organizationId, { id: result.externalId, start: result.startsAt }, { contactId: result.contactId });
+  } else if (mapped.trigger === "appointment_cancelled") {
+    await cancelAppointmentReminders(organizationId, result.externalId);
   }
 }

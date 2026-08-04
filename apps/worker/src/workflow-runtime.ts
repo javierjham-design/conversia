@@ -20,6 +20,34 @@ import { ga4ClientId, getSyncQueue } from "./ga4";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
+import { planAppointmentReminder, type BusinessHoursConfig } from "./appointment-reminders";
+
+/**
+ * Abre (o reutiliza la abierta más reciente) una conversación para el contacto.
+ * Usado por el paso "Abrir conversación" y por "Enviar plantilla" (para que un
+ * recordatorio de cita externa, sin conversación previa y fuera de la ventana de
+ * 24 h, tenga dónde enviarse). Devuelve el id o null si no se pudo.
+ */
+async function ensureConversationForContact(organizationId: string, contactId: string): Promise<string | null> {
+  return withTenant(organizationId, async (tx) => {
+    const existing = await tx.conversation.findFirst({
+      where: { contactId, status: { not: "CLOSED" } },
+      orderBy: { lastMessageAt: "desc" },
+    });
+    if (existing) return existing.id;
+    const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
+    const created = await tx.conversation.create({
+      data: {
+        organizationId,
+        contactId,
+        channelConnectionId: channel?.id ?? null,
+        activeAgentId: channel?.defaultAgentId ?? null,
+        status: "OPEN",
+      },
+    });
+    return created.id;
+  });
+}
 
 /** Implementación de efectos del motor sobre la plataforma real. */
 function makeDeps(): EngineDeps {
@@ -281,25 +309,8 @@ function makeDeps(): EngineDeps {
 
     async openConversation(ctx) {
       if (ctx.conversationId || !ctx.contactId) return; // ya hay una / sin contacto
-      const convId = await withTenant(ctx.organizationId, async (tx) => {
-        const existing = await tx.conversation.findFirst({
-          where: { contactId: ctx.contactId!, status: { not: "CLOSED" } },
-          orderBy: { lastMessageAt: "desc" },
-        });
-        if (existing) return existing.id;
-        const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
-        const created = await tx.conversation.create({
-          data: {
-            organizationId: ctx.organizationId,
-            contactId: ctx.contactId!,
-            channelConnectionId: channel?.id ?? null,
-            activeAgentId: channel?.defaultAgentId ?? null,
-            status: "OPEN",
-          },
-        });
-        return created.id;
-      });
-      ctx.conversationId = convId; // los pasos siguientes escriben en esta conversación
+      const convId = await ensureConversationForContact(ctx.organizationId, ctx.contactId);
+      if (convId) ctx.conversationId = convId; // los pasos siguientes escriben aquí
     },
 
     async addNote(ctx, text) {
@@ -344,6 +355,13 @@ function makeDeps(): EngineDeps {
     },
 
     async sendTemplate(ctx, cfg) {
+      // Fuera de la ventana de 24 h una cita puede no tener conversación abierta
+      // (agendada hace días / creada por la clínica). Abrimos/reutilizamos una
+      // para poder enviar la plantilla HSM.
+      if (!ctx.conversationId && ctx.contactId) {
+        const convId = await ensureConversationForContact(ctx.organizationId, ctx.contactId);
+        if (convId) ctx.conversationId = convId;
+      }
       if (!ctx.conversationId) return;
       const templateId = String(cfg.templateId ?? "");
       const data = await withTenant(ctx.organizationId, async (tx) => {
@@ -740,10 +758,22 @@ async function runWorkflowVersion(
   return { ok: true };
 }
 
+/** Horario de atención del negocio (default de recordatorios y del nodo horario). */
+async function loadOrgBusinessHours(tx: any, organizationId: string): Promise<{ bh: BusinessHoursConfig | null; timezone: string }> {
+  const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true, settings: true } });
+  const raw = ((org?.settings ?? {}) as Record<string, any>).businessHours;
+  const timezone = org?.timezone ?? "America/Santiago";
+  return { bh: raw?.hours ? { hours: raw.hours, holidays: raw.holidays ?? [], timezone } : null, timezone };
+}
+
 /**
- * Programa recordatorios de cita: por cada workflow activo con trigger
- * "Recordatorio de cita" (appointment_upcoming), crea un scheduled_job a
- * (inicio − hoursBefore) que ejecutará ese flujo. Idempotente por (wf, cita).
+ * Programa (o reprograma) los recordatorios de cita: por cada workflow activo
+ * con trigger "Recordatorio de cita" (appointment_upcoming), materializa un
+ * scheduled_job a (inicio − hoursBefore), ajustado a horario de atención.
+ *
+ * Idempotente por (workflow, id EXTERNO de la cita): reenvíos del webhook no
+ * duplican ni resucitan un job ya enviado; al reprogramar la cita re-apunta el
+ * job PENDIENTE a la fecha nueva. Ver planAppointmentReminder (lógica y bordes).
  */
 export async function scheduleAppointmentReminders(
   organizationId: string,
@@ -751,7 +781,9 @@ export async function scheduleAppointmentReminders(
   target: { conversationId?: string; contactId?: string },
 ): Promise<void> {
   const startsAt = new Date(appt.start);
+  const now = new Date();
   await withTenant(organizationId, async (tx) => {
+    const { bh, timezone } = await loadOrgBusinessHours(tx, organizationId);
     const wfs = await tx.workflow.findMany({
       where: { active: true, deletedAt: null },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
@@ -759,22 +791,64 @@ export async function scheduleAppointmentReminders(
     for (const wf of wfs) {
       const def = wf.versions[0]?.definition as any;
       if (def?.trigger?.type !== "appointment_upcoming") continue;
-      const hoursBefore = Number(def.trigger.config?.hoursBefore ?? 24);
-      const dueAt = new Date(startsAt.getTime() - hoursBefore * 3600 * 1000);
-      if (dueAt.getTime() <= Date.now()) continue; // el recordatorio ya pasó
+      const cfg = def.trigger.config ?? {};
+      const uniqueKey = `apptreminder:${wf.id}:${appt.id}`;
+      const existing = await tx.scheduledJob.findUnique({
+        where: { organizationId_uniqueKey: { organizationId, uniqueKey } },
+        select: { id: true, status: true, dueAt: true },
+      });
+      const plan = planAppointmentReminder({
+        now,
+        startsAt,
+        hoursBefore: Number(cfg.hoursBefore ?? 24),
+        existing: existing ? { status: existing.status, dueAt: existing.dueAt } : null,
+        businessHours: bh,
+        timezone,
+        avoidOffHours: cfg.avoidOffHours !== false,
+      });
+      if (plan.action === "skip") continue;
+      if (plan.action === "cancel") {
+        if (existing) await tx.scheduledJob.update({ where: { id: existing.id }, data: { status: "CANCELLED" } });
+        continue;
+      }
+      // schedule
       await tx.scheduledJob.upsert({
-        where: { organizationId_uniqueKey: { organizationId, uniqueKey: `apptreminder:${wf.id}:${appt.id}` } },
-        update: { dueAt, status: "PENDING" },
+        where: { organizationId_uniqueKey: { organizationId, uniqueKey } },
+        update: { dueAt: plan.dueAt!, status: "PENDING" },
         create: {
           organizationId,
           kind: "appointment_reminder",
-          dueAt,
-          uniqueKey: `apptreminder:${wf.id}:${appt.id}`,
-          payload: { workflowId: wf.id, contactId: target.contactId ?? null, conversationId: target.conversationId ?? null, appointmentExternalId: appt.id },
+          dueAt: plan.dueAt!,
+          uniqueKey,
+          payload: {
+            workflowId: wf.id,
+            contactId: target.contactId ?? null,
+            conversationId: target.conversationId ?? null,
+            appointmentExternalId: appt.id,
+            startsAt: startsAt.toISOString(),
+          },
         },
       });
     }
   });
+}
+
+/**
+ * Cancela los recordatorios PENDIENTES de una cita (todos sus workflows) al
+ * cancelarse la cita — evita recordatorios huérfanos de una cita inexistente.
+ * Clave por id EXTERNO de la cita (mismo que usa el scheduling).
+ */
+export async function cancelAppointmentReminders(organizationId: string, appointmentExternalId: string): Promise<void> {
+  await withTenant(organizationId, (tx) =>
+    tx.scheduledJob.updateMany({
+      where: {
+        kind: "appointment_reminder",
+        status: "PENDING",
+        uniqueKey: { endsWith: `:${appointmentExternalId}` },
+      },
+      data: { status: "CANCELLED" },
+    }),
+  );
 }
 
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */

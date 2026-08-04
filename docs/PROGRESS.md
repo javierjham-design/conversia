@@ -1,5 +1,25 @@
 # Registro de progreso
 
+## 2026-08-04 (1) — Workflows AGENDA: recordatorios de cita robustos (rama `feature/workflow-catalog`)
+
+Auditoría previa: el catálogo de triggers/pasos ya estaba ~90% construido y **real** (motor + ejecutores + canvas con buscador/categorías + validación al publicar + SSRF). El trabajo se centra en cerrar huecos reales. Este bloque = **AGENDA**.
+
+**A1 (bug de producción):** las citas creadas por la clínica en Cláriva (la mayoría) **no programaban recordatorio** — `scheduleAppointmentReminders` solo se llamaba cuando el agente agendaba (tool-services), no desde el webhook. Ahora el webhook de Cláriva programa el recordatorio al **crear** y **reprogramar**, y lo **cancela** al cancelar la cita.
+
+**A2 (ciclo de vida + idempotencia):**
+- Identidad del recordatorio = **id externo de la cita** (mismo id en el camino del agente y del webhook → un reenvío de Cláriva no duplica ni resucita un job ya enviado; un job `DONE`/`PROCESSING` nunca vuelve a `PENDING`).
+- Reprogramar re-apunta el job PENDIENTE a la fecha nueva; cancelar la cita cancela el recordatorio pendiente (**sin huérfanos** avisando de citas inexistentes).
+- Triggers `appointment_rescheduled`/`appointment_cancelled` promovidos de "Próximamente" a **vivos** (el webhook ya los emite); añadido **"Cita confirmada"**. `missed_call` y TikTok siguen "Próximamente".
+
+**A2 — política de bordes de tiempo (configurable con `hoursBefore` y `avoidOffHours`, default true):**
+- Cita en el pasado → no se recuerda (y se cancela un job huérfano si lo hubiera).
+- Ventana más corta que `hoursBefore` (recordatorio 24 h y la cita en 3 h) → se envía **cuanto antes**, nunca después de la cita.
+- Recordatorio que caería de madrugada / fuera de horario → se **corre al inicio del siguiente tramo hábil** (horario de atención de la org; sin configurar, tramo por defecto **08:00–21:00** para no escribir de madrugada). Si el único hueco hábil cae **después** de la cita, se envía a la hora calculada (recordatorio inminente > silencio).
+
+**A1/A2 — plantilla fuera de la ventana de 24 h:** una cita agendada hace días no tiene conversación abierta; `sendTemplate` ahora **abre/reutiliza una conversación** para el contacto antes de enviar la plantilla HSM, así el recordatorio llega aunque la ventana esté cerrada.
+
+**A3 — tests:** módulo puro `apps/worker/src/appointment-reminders.ts` con `appointment-reminders.test.ts` (13 casos: hora correcta, ventana corta, cita pasada, cancelación, madrugada→horario, borde "inminente", tramo por defecto, e idempotencia DONE/duplicado/reprogramación). Suites verdes: workflows 15 · api 39 · worker 50. Sin migración (usa `scheduled_jobs`, `appointments`, `organization.settings`).
+
 ## 2026-08-03 (6) — Robustez ante datos incompletos + dark de la escala de marca (rama `fix/dark-null-safety`)
 
 El recorrido Playwright con fixtures **deliberadamente incompletas** (tenant vacío y registros con opcionales en `null`) reveló que varias pantallas se quedaban en blanco con datos que un usuario real puede tener — no era artefacto del harness. Corregido:
