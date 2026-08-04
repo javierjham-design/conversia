@@ -20,6 +20,7 @@ import {
   Upload,
   UserCog,
   Users2,
+  Workflow,
   X,
 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
@@ -146,6 +147,8 @@ function isPresetActive(preset: { sec: Record<string, string> }, primary: Primar
 export default function ContactsPage() {
   const toast = useToast();
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
+  const [runWfTarget, setRunWfTarget] = useState<{ id: string; name: string } | null>(null);
   const [data, setData] = useState<ListResp | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -189,6 +192,10 @@ export default function ContactsPage() {
 
   const loadMeta = useCallback(() => {
     void api<Meta>("/contacts/meta").then(setMeta).catch(() => undefined);
+    // Flujos publicados+activos, para el disparo manual masivo.
+    void api<{ id: string; name: string; status: string }[]>("/workflows")
+      .then((r) => setWorkflows(r.filter((w) => w.status === "published").map((w) => ({ id: w.id, name: w.name }))))
+      .catch(() => setWorkflows([]));
   }, []);
   useEffect(loadMeta, [loadMeta]);
 
@@ -282,6 +289,18 @@ export default function ContactsPage() {
       refresh();
     } catch (e: any) {
       toast.push(e.message ?? "Error en la acción masiva", "error");
+    }
+  }
+
+  /** Disparo manual masivo: ejecuta un flujo publicado sobre los seleccionados. */
+  async function runWorkflowBulk(workflowId: string) {
+    const ids = [...selected];
+    try {
+      await api(`/workflows/${workflowId}/run-bulk`, { method: "POST", body: JSON.stringify({ contactIds: ids }) });
+      toast.push(`Flujo ejecutado sobre ${ids.length} contacto(s)`, "ok");
+      setSelected(new Set());
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo ejecutar el flujo", "error");
     }
   }
 
@@ -478,6 +497,12 @@ export default function ContactsPage() {
                 ...meta.users.map((u) => ({ label: `👤 ${u.name}`, onClick: () => runBulk("assign", { assignedUserId: u.id, activeAgentId: null }) })),
               ]}
             />
+            <BulkMenu
+              icon={<Workflow size={14} />}
+              label="Ejecutar flujo"
+              options={workflows.map((w) => ({ label: w.name, onClick: () => setRunWfTarget(w) }))}
+              empty="Sin flujos publicados"
+            />
             <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("block")}><Ban size={14} /> Bloquear</Button>
             <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("unblock")}><ShieldCheck size={14} /> Desbloquear</Button>
             <Button variant="danger" className="px-2.5 py-1" onClick={() => setConfirmBulkDel(true)}><Trash2 size={14} /> Eliminar</Button>
@@ -662,6 +687,15 @@ export default function ContactsPage() {
         description="Se dan de baja (borrado lógico). Sus conversaciones se conservan."
         confirmLabel="Eliminar"
         danger
+      />
+
+      <ConfirmDialog
+        open={runWfTarget !== null}
+        onClose={() => setRunWfTarget(null)}
+        onConfirm={() => runWfTarget && runWorkflowBulk(runWfTarget.id)}
+        title={`Ejecutar «${runWfTarget?.name ?? ""}»`}
+        description={`Se ejecutará el flujo sobre los ${selected.size} contacto(s) seleccionados. Cada uno inicia una ejecución independiente (según sus condiciones).`}
+        confirmLabel="Ejecutar flujo"
       />
 
       <SaveSegmentModal open={saveSegOpen} onClose={() => setSaveSegOpen(false)} definition={currentDefinition} onSaved={() => { setSaveSegOpen(false); loadMeta(); }} />
