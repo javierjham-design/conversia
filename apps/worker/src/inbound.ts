@@ -269,7 +269,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
       organizationId,
       conversationId: result.conversationId,
       contactId: result.contactId,
-      data: { text: text ?? "", isFirstMessage: result.started },
+      data: { text: text ?? "", isFirstMessage: result.started, channel: "whatsapp" },
       occurredAt: new Date().toISOString(),
     };
     if (result.started) {

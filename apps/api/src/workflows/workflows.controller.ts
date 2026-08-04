@@ -41,9 +41,11 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 /** Catálogo del constructor: triggers y pasos IMPLEMENTADOS por el motor v0. */
 const TRIGGER_CATALOG = [
   { type: "conversation_started", label: "Conversación nueva", description: "Primer mensaje de un contacto (crea la conversación)" },
-  { type: "message_received", label: "Mensaje recibido", description: "Cada mensaje entrante; admite condiciones", conditions: ["keyword", "firstMessage"] },
+  { type: "message_received", label: "Mensaje recibido", description: "Cada mensaje entrante; admite condiciones (canal, palabras, contiene/exacto)", conditions: ["keywords", "channel", "firstMessage"] },
   { type: "conversation_closed", label: "Conversación cerrada", description: "Cuando se cierra la conversación (p. ej. encuesta post-atención)" },
-  { type: "keyword", label: "Palabra clave (simple)", description: "El mensaje contiene una palabra o frase", config: ["keyword"] },
+  // Legado: reemplazado por «Mensaje recibido» con condiciones de palabra. Se
+  // oculta del selector (hidden) pero sigue funcionando en flujos que ya lo usan.
+  { type: "keyword", label: "Palabra clave (simple, legado)", description: "El mensaje contiene una palabra o frase. Usa «Mensaje recibido» en su lugar.", config: ["keyword"], hidden: true },
   { type: "click_to_chat", label: "Anuncios Click-to-Chat (Meta)", description: "El primer mensaje viene de un anuncio Click-to-WhatsApp", conditions: ["adId"] },
   { type: "lead_status_changed", label: "Etapa del ciclo de vida actualizada", description: "Cuando el lead cambia de etapa (origen → destino)", conditions: ["fromStatus", "toStatus"] },
   { type: "tag_added", label: "Etiqueta añadida", description: "Al etiquetar un contacto o conversación (panel, flujo, IA o Lead Ads)", conditions: ["tag"] },
