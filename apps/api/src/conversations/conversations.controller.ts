@@ -223,6 +223,13 @@ export class ConversationsController {
       const meta = (contact.meta as Record<string, any>) ?? {};
       const attributes = (contact.attributes as Record<string, any>) ?? {};
       const referral = meta.referral ?? null;
+      // Nombre de campaña/anuncio desde el catálogo (en vez del id crudo).
+      const adCatalog = contact.adId
+        ? await tx.metaAd.findUnique({
+            where: { organizationId_adExternalId: { organizationId: ctx.organizationId, adExternalId: contact.adId } },
+            select: { campaignName: true, adName: true },
+          })
+        : null;
       const noteAuthors = await this.userNames(tx, aiNotes.map((n) => n.createdById).filter(Boolean) as string[]);
       return {
         contact: {
@@ -247,6 +254,8 @@ export class ConversationsController {
             ? {
                 ctwaClid: contact.ctwaClid,
                 adId: contact.adId,
+                campaignName: adCatalog?.campaignName ?? null,
+                adName: adCatalog?.adName ?? null,
                 headline: referral?.headline ?? null,
                 body: referral?.body ?? null,
                 imageUrl: referral?.image_url ?? referral?.thumbnail_url ?? null,

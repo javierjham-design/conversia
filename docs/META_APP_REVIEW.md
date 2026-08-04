@@ -123,3 +123,28 @@ El código de CAPI + Lead Ads **ya existe** (worker: `meta-leads.ts`, `capi.ts`;
 gatea la producción son estos permisos. **Atajo para el piloto** (CAPI sin permisos nuevos): el tenant genera el
 **token de su dataset** en Events Manager y lo carga; con eso se envían conversiones de una. Falta un ajuste de
 código menor: leer el `referral`/`ctwa_clid` del anuncio Click-to-WhatsApp que ya llega en el webhook de `messages`.
+
+### Etapa 2b — Catálogo de anuncios (`ads_read`) — para el selector de campañas del trigger
+
+El trigger "Anuncios Click-to-Chat" del constructor de flujos permite elegir campañas/anuncios reales desde un árbol
+(campaña → conjunto → anuncio) en vez de pegar un `ad_id`. Para leer ese catálogo del negocio del tenant se necesita:
+
+| Permiso | Para qué | Nivel |
+| --- | --- | --- |
+| `ads_read` | Leer campañas/conjuntos/anuncios de la(s) cuenta(s) publicitaria(s) del tenant (Marketing API) | Avanzado (App Review) |
+| `business_management` | Listar las cuentas publicitarias del Business del tenant | Avanzado (App Review) |
+
+- **Caso de uso (para el formulario):** «El negocio conecta su cuenta de Meta Business una vez y elige, desde un árbol
+  de sus propias campañas y anuncios Click-to-WhatsApp, cuáles activan sus automatizaciones de atención en Conversia.
+  Solo lectura de metadatos de anuncios (nombres, estado, id); no se crean ni editan anuncios.»
+- **Video:** conectar la cuenta → abrir un flujo → elegir "Anuncios seleccionados" → mostrar el árbol de campañas del
+  negocio → seleccionar una campaña → guardar. Dejar claro que es **solo lectura**.
+- **Mientras NO esté aprobado (modo desarrollo):** funciona con las cuentas donde el usuario que conecta es
+  **administrador** (roles de la app en Meta). Para cuentas de terceros, la UI muestra el aviso "No podemos listar tus
+  anuncios todavía — falta `ads_read` (App Review)". El resto del trigger (ad_id manual, "Todos los anuncios") sigue
+  funcionando sin este permiso.
+- **Ya implementado en Conversia:** modelo `meta_ads`, sincronización con paginación + backoff (`meta-ads-sync.ts`),
+  fan-out diario, endpoints `ads/accounts | ads/sync | ads/catalog`, árbol en el trigger, matching por campaña y nombres
+  de campaña/anuncio en la bandeja. Reusa la conexión Meta unificada (`MetaBusinessConnection` + `appScopes`); `ads_read`
+  se suma a los scopes acumulativos. **Pendiente:** el flujo de autorización con `ads_read` (Facebook Login for Business)
+  para que un tenant no-admin conecte sus anuncios — hoy usa el token de la conexión existente si ya tiene el scope.
