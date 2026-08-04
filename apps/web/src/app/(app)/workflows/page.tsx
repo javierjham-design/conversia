@@ -242,7 +242,7 @@ function WorkflowCard({
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const badge = STATUS_BADGE[w.status];
+  const badge = STATUS_BADGE[w.status] ?? { kind: "disconnected" as const, label: w.status ?? "—" };
   const longDesc = (w.description?.length ?? 0) > 90;
   return (
     <div className="flex items-start justify-between gap-4 rounded-card border border-line bg-panel p-4 shadow-card">
@@ -261,7 +261,7 @@ function WorkflowCard({
               <span
                 role="button"
                 onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-                className="font-medium text-brand-600 hover:underline"
+                className="font-medium text-brand-600 hover:underline dark:text-brand-400"
               >
                 {expanded ? "Ver menos" : "Ver más"}
               </span>

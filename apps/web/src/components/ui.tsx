@@ -123,7 +123,7 @@ const STATUS_META: Record<StatusKind, { label: string; className: string; Icon: 
   error: { label: "Error", className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/30", Icon: XCircle },
   disconnected: { label: "Desconectada", className: "bg-app text-ink-muted border-line", Icon: PauseCircle },
   soon: { label: "Próximamente", className: "bg-app text-ink-muted border-line", Icon: Clock },
-  beta: { label: "Beta", className: "bg-accent-500/10 text-accent-600 border-accent-500/30", Icon: Sparkles },
+  beta: { label: "Beta", className: "bg-accent-500/10 text-accent-600 border-accent-500/30 dark:text-accent-400", Icon: Sparkles },
   mock: { label: "Simulación (dev)", className: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-300 dark:border-violet-500/30", Icon: Circle },
 };
 

@@ -180,7 +180,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
           ) : (
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
                   {(name.trim()[0] ?? "?").toUpperCase()}
                 </span>
                 <div className="min-w-0">
@@ -293,7 +293,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                     <p className="mt-1 font-medium text-ink">{d.origin.referral.headline}</p>
                     {d.origin.referral.body && <p className="text-ink-muted">{d.origin.referral.body}</p>}
                     {d.origin.referral.source_url && (
-                      <a href={d.origin.referral.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-brand-600 hover:underline">
+                      <a href={d.origin.referral.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-brand-600 hover:underline dark:text-brand-400">
                         Ver anuncio <ExternalLink size={11} />
                       </a>
                     )}

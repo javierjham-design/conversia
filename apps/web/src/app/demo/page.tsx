@@ -20,7 +20,7 @@ export default async function DemoPage({ searchParams }: { searchParams: Promise
 
       <main className="mx-auto grid max-w-5xl gap-10 px-6 py-12 md:grid-cols-2 md:py-16">
         <div>
-          <span className="inline-block rounded-full border border-brand-200 bg-panel px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700">
+          <span className="inline-block rounded-full border border-brand-200 bg-panel px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand-700 dark:text-brand-300 dark:border-brand-500/30">
             Empieza hoy
           </span>
           <h1 className="mt-5 text-3xl font-bold leading-tight tracking-tight text-ink md:text-4xl">

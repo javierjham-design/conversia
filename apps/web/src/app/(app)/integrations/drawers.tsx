@@ -380,7 +380,7 @@ export function WebhooksDrawer({
             <p className="mb-1.5 text-sm font-medium">Eventos suscritos</p>
             <div className="flex flex-wrap gap-1.5">
               {availableEvents.map((ev) => (
-                <label key={ev} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs ${form.events.includes(ev) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line text-ink-muted hover:border-line-strong"}`}>
+                <label key={ev} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs ${form.events.includes(ev) ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line text-ink-muted hover:border-line-strong"} dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/40`}>
                   <input
                     type="checkbox"
                     className="sr-only"
@@ -455,7 +455,7 @@ export function WebhooksDrawer({
                         <td className="px-3 py-2 text-ink-subtle">{new Date(d.createdAt).toLocaleString("es-CL")}</td>
                         <td className="px-3 py-2">
                           {(d.status === "FAILED" || d.status === "DEAD") && (
-                            <button onClick={() => void retryDelivery(selected.id, d.id)} className="text-brand-600 hover:underline">
+                            <button onClick={() => void retryDelivery(selected.id, d.id)} className="text-brand-600 hover:underline dark:text-brand-400">
                               Reintentar
                             </button>
                           )}

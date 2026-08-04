@@ -3,6 +3,7 @@
 /** Información general del negocio (fuente de verdad: organization + settings.general). */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { withStringDefaults } from "@/lib/safe";
 import { Button, Skeleton, useToast } from "@/components/ui";
 import { ImageUpload } from "../image-upload";
 
@@ -18,6 +19,11 @@ interface GeneralSettings {
   contactPhone: string;
   website: string;
 }
+
+const GENERAL_DEFAULTS: GeneralSettings = {
+  name: "", slug: "", timezone: "", logoUrl: "", industry: "",
+  currency: "", language: "", contactEmail: "", contactPhone: "", website: "",
+};
 
 const TIMEZONES = [
   "America/Santiago",
@@ -51,7 +57,12 @@ export default function GeneralSettingsPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void api<GeneralSettings>("/settings/general").then(setData).catch(() => setData(null));
+    // Normaliza a cadenas: los campos opcionales pueden venir null desde la API
+    // (tenant recién creado sin industria/web/contacto), lo que rompería inputs
+    // controlados y `.trim()`.
+    void api<Partial<GeneralSettings>>("/settings/general")
+      .then((d) => setData(withStringDefaults(GENERAL_DEFAULTS, d)))
+      .catch(() => setData(null));
   }, []);
 
   async function save() {

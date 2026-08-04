@@ -385,7 +385,7 @@ export default function ContactsPage() {
           </div>
           <button
             onClick={() => setShowFilters((v) => !v)}
-            className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium", showFilters || secCount ? "border-brand-300 bg-brand-50 text-brand-700" : "border-line-strong bg-panel text-ink-muted hover:bg-app")}
+            className={cn("inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium", showFilters || secCount ? "border-brand-300 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/40" : "border-line-strong bg-panel text-ink-muted hover:bg-app")}
           >
             <Filter size={15} /> Filtros {secCount > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white">{secCount}</span>}
           </button>
@@ -457,7 +457,7 @@ export default function ContactsPage() {
               </button>
             )}
             {canSaveSegment && (
-              <button onClick={() => setSaveSegOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-panel px-2.5 py-1.5 font-medium text-brand-700 hover:bg-brand-50">
+              <button onClick={() => setSaveSegOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-panel px-2.5 py-1.5 font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:border-brand-500/40">
                 <Bookmark size={14} /> Guardar segmento
               </button>
             )}
@@ -466,8 +466,8 @@ export default function ContactsPage() {
 
         {/* Barra de acciones masivas */}
         {selected.size > 0 && meta && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-brand-200 bg-brand-50 px-4 py-2 text-sm">
-            <span className="font-medium text-brand-800">{selected.size} seleccionados</span>
+          <div className="flex flex-wrap items-center gap-2 border-b border-brand-200 bg-brand-50 px-4 py-2 text-sm dark:bg-brand-500/10 dark:border-brand-500/30">
+            <span className="font-medium text-brand-800 dark:text-brand-300">{selected.size} seleccionados</span>
             <BulkMenu icon={<Tag size={14} />} label="Etiquetar" options={meta.tags.map((t) => ({ label: t.name, onClick: () => runBulk("tag_add", { tagId: t.id }) }))} empty="Sin etiquetas" />
             <BulkMenu icon={<SlidersHorizontal size={14} />} label="Etapa" options={meta.lifecycle.map((s) => ({ label: s.name, onClick: () => runBulk("stage", { statusCode: s.code }) }))} />
             <BulkMenu
@@ -481,7 +481,7 @@ export default function ContactsPage() {
             <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("block")}><Ban size={14} /> Bloquear</Button>
             <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("unblock")}><ShieldCheck size={14} /> Desbloquear</Button>
             <Button variant="danger" className="px-2.5 py-1" onClick={() => setConfirmBulkDel(true)}><Trash2 size={14} /> Eliminar</Button>
-            <button onClick={() => setSelected(new Set())} className="ml-auto text-brand-600 hover:underline">Deseleccionar</button>
+            <button onClick={() => setSelected(new Set())} className="ml-auto text-brand-600 hover:underline dark:text-brand-400">Deseleccionar</button>
           </div>
         )}
 
@@ -553,7 +553,7 @@ export default function ContactsPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2.5">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">{initials(c)}</span>
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">{initials(c)}</span>
                             <div className="min-w-0">
                               <p className="flex items-center gap-1.5 truncate font-medium text-ink">
                                 {displayName(c)}
@@ -563,7 +563,7 @@ export default function ContactsPage() {
                             </div>
                           </div>
                         </td>
-                        {visibleCols.has("channel") && <td className="px-3 py-2.5 text-ink-muted">{c.channels.map((ch) => CHANNEL_LABEL[ch] ?? ch).join(", ") || "—"}</td>}
+                        {visibleCols.has("channel") && <td className="px-3 py-2.5 text-ink-muted">{(c.channels ?? []).map((ch) => CHANNEL_LABEL[ch] ?? ch).join(", ") || "—"}</td>}
                         {visibleCols.has("stage") && (
                           <td className="px-3 py-2.5">
                             {c.stage ? (
@@ -581,13 +581,13 @@ export default function ContactsPage() {
                         {visibleCols.has("tags") && (
                           <td className="px-3 py-2.5">
                             <div className="flex flex-wrap gap-1">
-                              {c.tags.length === 0 && <span className="text-ink-subtle">—</span>}
-                              {c.tags.slice(0, 3).map((t) => (
+                              {(c.tags ?? []).length === 0 && <span className="text-ink-subtle">—</span>}
+                              {(c.tags ?? []).slice(0, 3).map((t) => (
                                 <span key={t.name} className="rounded px-1.5 py-0.5 text-[11px] font-medium" style={{ background: (t.color ?? "#64748b") + "22", color: t.color ?? "#475569" }}>
                                   {t.name}
                                 </span>
                               ))}
-                              {c.tags.length > 3 && <span className="text-[11px] text-ink-subtle">+{c.tags.length - 3}</span>}
+                              {(c.tags ?? []).length > 3 && <span className="text-[11px] text-ink-subtle">+{(c.tags ?? []).length - 3}</span>}
                             </div>
                           </td>
                         )}
@@ -704,7 +704,7 @@ function SideItem({
     <div
       className={cn(
         "group mb-0.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13.5px] transition-colors",
-        active ? "bg-brand-50 font-medium text-brand-700" : "text-ink-muted hover:bg-app",
+        active ? "bg-brand-50 font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300" : "text-ink-muted hover:bg-app",
       )}
     >
       <button onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 text-left">

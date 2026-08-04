@@ -44,7 +44,7 @@ export default function HoursSettingsPage() {
     if (!data) return;
     setBusy(true);
     try {
-      await api("/settings/hours", { method: "PUT", body: JSON.stringify({ hours: data.hours, holidays: data.holidays }) });
+      await api("/settings/hours", { method: "PUT", body: JSON.stringify({ hours: data.hours ?? {}, holidays: data.holidays ?? [] }) });
       toast.push("Horario guardado ✔", "ok");
     } catch (err) {
       toast.push((err as Error).message, "error");
@@ -55,7 +55,7 @@ export default function HoursSettingsPage() {
 
   if (!data) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-72" /></div>;
 
-  const setDay = (day: DayKey, intervals: Interval[]) => setData({ ...data, hours: { ...data.hours, [day]: intervals } });
+  const setDay = (day: DayKey, intervals: Interval[]) => setData({ ...data, hours: { ...(data.hours ?? {}), [day]: intervals } });
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -68,7 +68,7 @@ export default function HoursSettingsPage() {
 
       <div className="mt-4 space-y-2 rounded-card border border-line bg-panel p-5 shadow-card">
         {DAYS.map(([key, label]) => {
-          const intervals = data.hours[key] ?? [];
+          const intervals = (data.hours ?? {})[key] ?? [];
           const open = intervals.length > 0;
           return (
             <div key={key} className="flex flex-wrap items-center gap-2 border-b border-line py-1.5 last:border-0">
@@ -116,10 +116,10 @@ export default function HoursSettingsPage() {
           </Button>
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {data.holidays.map((h) => (
+          {(data.holidays ?? []).map((h) => (
             <span key={h} className="flex items-center gap-1 rounded-full bg-app px-2 py-0.5 text-xs text-ink-muted">
               {h}
-              <button onClick={() => setData({ ...data, holidays: data.holidays.filter((x) => x !== h) })} className="text-ink-subtle hover:text-red-500">✕</button>
+              <button onClick={() => setData({ ...data, holidays: (data.holidays ?? []).filter((x) => x !== h) })} className="text-ink-subtle hover:text-red-500">✕</button>
             </span>
           ))}
           {data.holidays.length === 0 && <span className="text-xs text-ink-subtle">Sin feriados cargados.</span>}

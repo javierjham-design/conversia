@@ -396,7 +396,7 @@ export default function InboxPage() {
                   void loadList(nextCursor).finally(() => setLoadingMore(false));
                 }}
                 disabled={loadingMore}
-                className="block w-full py-2.5 text-center text-xs font-medium text-brand-700 transition-colors hover:bg-app dark:text-brand-400"
+                className="block w-full py-2.5 text-center text-xs font-medium text-brand-700 transition-colors hover:bg-app dark:text-brand-400 dark:text-brand-300"
               >
                 {loadingMore ? "Cargando…" : "Cargar más"}
               </button>

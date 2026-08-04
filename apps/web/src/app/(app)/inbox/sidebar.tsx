@@ -53,12 +53,12 @@ function Item({
   return (
     <div className={cn("group relative flex items-center border-l-2 transition-colors", active ? "border-brand-500 bg-brand-soft" : "border-transparent hover:bg-app")}>
       <button onClick={onClick} className={cn("flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-13", active ? "font-medium text-brand-700 dark:text-brand-300" : "text-ink-muted")}>
-        <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center", active ? "text-brand-600 dark:text-brand-300" : "text-ink-subtle")}>
+        <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center", active ? "text-brand-600 dark:text-brand-300 dark:text-brand-400" : "text-ink-subtle")}>
           {color ? <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} /> : icon}
         </span>
         <span className="truncate">{label}</span>
         {typeof count === "number" && count > 0 && (
-          <span className={cn("ml-auto shrink-0 rounded-full px-1.5 text-2xs tnum font-medium", active ? "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200" : "bg-line text-ink-subtle")}>{count}</span>
+          <span className={cn("ml-auto shrink-0 rounded-full px-1.5 text-2xs tnum font-medium", active ? "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-200 dark:bg-brand-500/15 dark:text-brand-300" : "bg-line text-ink-subtle")}>{count}</span>
         )}
       </button>
       {onDelete && (
@@ -99,9 +99,9 @@ export function InboxSidebar({
         <Item label="No respondidas" icon={<Inbox size={13} />} count={counters?.fixed.unanswered} active={is("unanswered")} onClick={() => onSelect({ kind: "unanswered" })} />
       </Group>
 
-      {(counters?.agents.length ?? 0) > 0 && (
+      {(counters?.agents?.length ?? 0) > 0 && (
         <Group title="Agentes IA">
-          {counters!.agents.map((a) => (
+          {(counters?.agents ?? []).map((a) => (
             <Item key={a.id} label={a.name} icon={<Bot size={13} />} count={a.count} active={is("agent", a.id)} onClick={() => onSelect({ kind: "agent", id: a.id, label: a.name })} />
           ))}
         </Group>
@@ -115,8 +115,8 @@ export function InboxSidebar({
           </button>
         }
       >
-        {(counters?.stages.length ?? 0) === 0 && <p className="px-3 py-1 text-2xs text-ink-subtle">Sin conversaciones con etapa aún</p>}
-        {counters?.stages.map((s) => (
+        {(counters?.stages?.length ?? 0) === 0 && <p className="px-3 py-1 text-2xs text-ink-subtle">Sin conversaciones con etapa aún</p>}
+        {(counters?.stages ?? []).map((s) => (
           <Item
             key={s.code}
             label={s.name}
@@ -129,9 +129,9 @@ export function InboxSidebar({
         ))}
       </Group>
 
-      {(counters?.teams.length ?? 0) > 0 && (
+      {(counters?.teams?.length ?? 0) > 0 && (
         <Group title="Bandejas de equipo">
-          {counters!.teams.map((t) => (
+          {(counters?.teams ?? []).map((t) => (
             <Item key={t.id} label={t.name} icon={<Users size={13} />} count={t.count} active={is("team", t.id)} onClick={() => onSelect({ kind: "team", id: t.id, label: t.name })} />
           ))}
         </Group>
@@ -145,10 +145,10 @@ export function InboxSidebar({
           </button>
         }
       >
-        {(counters?.views.length ?? 0) === 0 && (
+        {(counters?.views?.length ?? 0) === 0 && (
           <p className="px-3 py-1 text-2xs text-ink-subtle">Guarda filtros con el botón +</p>
         )}
-        {counters?.views.map((v) => (
+        {(counters?.views ?? []).map((v) => (
           <Item
             key={v.id}
             label={v.name}

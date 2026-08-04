@@ -106,7 +106,9 @@ export default function IntegrationsPage() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api<Overview>("/integrations"));
+      const o = await api<Overview>("/integrations");
+      // Blinda los arrays que la UI recorre (un tenant sin nada podría no traerlos).
+      setData({ ...o, webhooks: o.webhooks ?? [], availableEvents: o.availableEvents ?? [], catalog: o.catalog ?? [] });
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -473,7 +475,7 @@ export default function IntegrationsPage() {
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-xs font-medium",
                     statusFilter === value
-                      ? "border-brand-300 bg-brand-50 text-brand-700"
+                      ? "border-brand-300 bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/40"
                       : "border-line bg-panel text-ink-muted hover:border-line-strong",
                   )}
                 >
@@ -488,7 +490,7 @@ export default function IntegrationsPage() {
                   className={cn(
                     "rounded-full border px-3 py-1.5 text-xs font-medium",
                     categoryFilter === value
-                      ? "border-accent-500/40 bg-accent-500/10 text-accent-600"
+                      ? "border-accent-500/40 bg-accent-500/10 text-accent-600 dark:text-accent-400"
                       : "border-line bg-panel text-ink-muted hover:border-line-strong",
                   )}
                 >
@@ -612,7 +614,7 @@ export default function IntegrationsPage() {
                         <p className="mt-2.5 font-semibold">{item.name}</p>
                         <p className="mt-0.5 flex-1 text-[13px] leading-relaxed text-ink-muted">{item.description}</p>
                         <div className="mt-2.5 flex flex-wrap gap-1">
-                          {item.capabilities.map((cap) => (
+                          {(item.capabilities ?? []).map((cap) => (
                             <span key={cap} className="rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{cap}</span>
                           ))}
                         </div>

@@ -107,6 +107,10 @@ tres mecanismos aditivos (ninguno toca el modo claro ni la lógica):
    usaba como texto de encabezado no se voltea; se reemplazó por `text-ink` en
    Agentes, Flujos, barra superior, landing y demo. (El sidebar conserva su
    navy fijo a propósito: es una superficie siempre-oscura en ambos modos.)
+4. **Escala de marca** — el mismo barrido aditivo se aplicó a `brand/accent/teal`
+   (`bg-brand-50`, `text-brand-700`, `border-brand-300`, … → variantes `dark:`),
+   67 clases en 18 archivos. Corrige chips/links/estados activos que quedaban
+   claros en oscuro (p. ej. el ítem activo del clasificador de Contactos).
 
 **Canvas de Flujos (ReactFlow):** overrides `.dark` en `globals.css` para los
 botones de `Controls`, minimapa y atribución; el lienzo es `bg-app` y los nodos
@@ -123,8 +127,24 @@ Recorrido automatizado a 1366–1440px capturando claro/oscuro:
   Reportes, Plan y facturación, editor de Agentes, lista y **canvas** de Flujos,
   Horarios y lista de Agentes renderizan coherentes en oscuro (sidebar, tarjetas,
   tablas, inputs/selects, gráficos, badges y ReactFlow correctos).
-- Nota de método: el recorrido usa `next start` (no `next dev`), porque la CSP de
-  producción prohíbe `unsafe-eval` y el HMR de dev no hidrata bajo esa CSP.
+- Nota de método (IMPORTANTE para el próximo que corra el harness): el recorrido
+  usa **`next start`, no `next dev`**. La CSP de producción prohíbe `unsafe-eval`
+  y el HMR de `next dev` usa `eval()` → no hidrata bajo esa CSP y **toda** página
+  queda en blanco (no es un fallo de la app). Ver `apps/web/e2e/robustness/README.md`.
+
+### Robustez ante datos incompletos
+
+El recorrido con datos **deliberadamente incompletos** (tenant vacío y registros
+con campos opcionales en `null`) destapó varias pantallas que se quedaban en
+blanco con datos que un usuario real puede tener (contacto sin etiquetas,
+conversación sin asignado, plan "a medida" sin precio, permisos sin definir,
+horario sin configurar, series sin datos…). Se blindaron con optional chaining /
+valores por defecto en 9 pantallas, se extrajo la lógica pura resistente a
+`apps/web/src/lib/safe.ts` (con tests en `safe.test.ts`), y se añadió un **error
+boundary** en `src/app/(app)/error.tsx`: si algo imprevisto falla al renderizar,
+el usuario ve un estado amable con «Reintentar / Recargar» (sidebar intacto) en
+vez de la pantalla de error de Next. El smoke que reproduce estos casos vive en
+`apps/web/e2e/robustness/`.
 
 **Pendiente conocido** (no bloquea): los bloques de código de
 `/integrations/developers` se dejan como terminal oscuro intencional; el sidebar

@@ -40,7 +40,7 @@ export default function DesignPage() {
       <Section title="Marca (brand) — único primario, escala 50→900">
         <div className="flex flex-wrap gap-3">
           {[
-            ["50", "bg-brand-50"], ["100", "bg-brand-100"], ["200", "bg-brand-200"], ["300", "bg-brand-300"], ["400", "bg-brand-400"],
+            ["50", "bg-brand-50 dark:bg-brand-500/10"], ["100", "bg-brand-100 dark:bg-brand-500/15"], ["200", "bg-brand-200"], ["300", "bg-brand-300"], ["400", "bg-brand-400"],
             ["500", "bg-brand-500"], ["600", "bg-brand-600"], ["700", "bg-brand-700"], ["800", "bg-brand-800"], ["900", "bg-brand-900"],
           ].map(([name, cls]) => (
             <Swatch key={name} name={name} className={cls} />

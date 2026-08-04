@@ -1,5 +1,16 @@
 # Registro de progreso
 
+## 2026-08-03 (6) — Robustez ante datos incompletos + dark de la escala de marca (rama `fix/dark-null-safety`)
+
+El recorrido Playwright con fixtures **deliberadamente incompletas** (tenant vacío y registros con opcionales en `null`) reveló que varias pantallas se quedaban en blanco con datos que un usuario real puede tener — no era artefacto del harness. Corregido:
+
+- **Robustez de datos** (9 pantallas): optional chaining / valores por defecto donde el dato puede faltar legítimamente — Bandeja (contadores del clasificador), Contactos (contacto sin etiquetas/canales), Reportes (funnel/citas/series vacías), Plan y facturación (plan "a medida" sin precio → `money(null)`), Usuarios (permisos/equipos sin definir → `expandPerms`), Config. general (`name` null → `.trim()`), Horarios (sin configurar), Flujos (estado desconocido), Integraciones (catálogo sin `capabilities`).
+- **Error boundary** `src/app/(app)/error.tsx`: un fallo de render muestra un estado amable con «Reintentar / Recargar» (sidebar intacto) en vez de la pantalla de error de Next. Layout blindado (`me.user.name` null).
+- **Lógica pura extraída y testeada**: `src/lib/safe.ts` (`money`, `expandPerms`, `withStringDefaults`) con `safe.test.ts` (11 tests con nulls) → 23 tests en web. Smoke de integración versionado en `apps/web/e2e/robustness/` (fixtures VACÍO+NULLS; corre contra `next start`).
+- **Dark de la escala de marca**: barrido aditivo extendido a `brand/accent/teal` (67 clases, 18 archivos) — corrige chips/links/estados activos que quedaban claros en oscuro (p. ej. ítem activo del clasificador de Contactos).
+
+Verificación: probe de robustez ✔ (13 pantallas, 0 crashes en VACÍO y NULLS); recorrido dark de las 5 pantallas antes pendientes (Bandeja, Contactos, Configuración, Usuarios, Integraciones) capturado en ambos modos, sin bloques blancos. typecheck 22/22, build limpio, 23 tests web (131 en total). Nota fijada en docs: el harness usa `next start` (la CSP prohíbe `unsafe-eval`; `next dev` no hidrata).
+
 ## 2026-08-03 (5) — Modo oscuro pulido en TODO el panel + merge/deploy (PR #20)
 
 **DESPLEGADO EN PROD 2026-08-03** (PR #20 mergeado a main y auto-deploy de Railway verificado en `www.tubot.cl`). Solo UI, sin migraciones ni backup. 39 archivos `.tsx`/`.css`; **ningún `.ts` de lógica**; typecheck 22/22, build limpio, **131 tests verdes**.

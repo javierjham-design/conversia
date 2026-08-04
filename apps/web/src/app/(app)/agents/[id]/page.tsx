@@ -64,7 +64,7 @@ function Section({ title, subtitle, helpKey, onHelp, children }: { title: string
           {subtitle && <p className="text-xs text-ink-subtle">{subtitle}</p>}
         </div>
         {helpKey && onHelp && (
-          <button onClick={() => onHelp(helpKey)} className="shrink-0 text-xs font-medium text-brand-600 hover:underline">
+          <button onClick={() => onHelp(helpKey)} className="shrink-0 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
             Aprende a escribir esto
           </button>
         )}
@@ -85,7 +85,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: AgentActionDef; state?: { enabled: boolean; instructions: string }; onToggle: (en: boolean) => void; onInstructions: (v: string) => void; mentions?: Mention[] }) {
   const enabled = state?.enabled ?? false;
   return (
-    <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40" : "border-line")}>
+    <div className={cn("rounded-lg border p-3", enabled ? "border-brand-300 bg-brand-50/40 dark:border-brand-500/40" : "border-line")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-ink">{def.label}</p>
@@ -360,13 +360,13 @@ export default function AgentEditorPage() {
         <div className="min-w-0 flex-1 overflow-y-auto bg-app p-5">
           <div className="mx-auto max-w-2xl">
             {/* Punto de partida: plantillas */}
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3">
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3 dark:border-brand-500/30">
               <p className="text-sm text-ink">
                 ¿Quieres un punto de partida? Aplica una <span className="font-medium">plantilla</span> y ajústala a tu negocio.
               </p>
               <button
                 onClick={() => setShowTemplates(true)}
-                className="shrink-0 rounded-lg border border-brand-300 bg-panel px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50"
+                className="shrink-0 rounded-lg border border-brand-300 bg-panel px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:border-brand-500/40"
               >
                 Ver plantillas
               </button>
@@ -392,11 +392,11 @@ export default function AgentEditorPage() {
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
                 {QUICK_EMOJIS.map((e) => (
-                  <button key={e} onClick={() => setEmoji(e)} className={cn("rounded-lg border px-2 py-1 text-lg", emoji === e ? "border-brand-400 bg-brand-50" : "border-line hover:bg-app")}>{e}</button>
+                  <button key={e} onClick={() => setEmoji(e)} className={cn("rounded-lg border px-2 py-1 text-lg", emoji === e ? "border-brand-400 bg-brand-50 dark:bg-brand-500/10" : "border-line hover:bg-app")}>{e}</button>
                 ))}
               </div>
               {!showDescription ? (
-                <button onClick={() => setShowDescription(true)} className="mt-3 text-xs font-medium text-brand-600 hover:underline">+ Mostrar descripción</button>
+                <button onClick={() => setShowDescription(true)} className="mt-3 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">+ Mostrar descripción</button>
               ) : (
                 <label className="mt-3 block text-sm">
                   <span className="text-xs text-ink-muted">Descripción interna (para tu equipo)</span>
@@ -458,7 +458,7 @@ export default function AgentEditorPage() {
                   {knowledgeBases.map((kb) => {
                     const on = knowledgeSources.includes(kb.id);
                     return (
-                      <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40" : "border-line")}>
+                      <div key={kb.id} className={cn("flex items-start justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40 dark:border-brand-500/40" : "border-line")}>
                         <div>
                           <p className="text-sm font-medium text-ink">{kb.name}</p>
                           <p className="text-xs text-ink-muted">
