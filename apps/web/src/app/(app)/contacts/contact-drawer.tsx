@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Ban, ExternalLink, Megaphone, MessageSquare, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { Ban, Download, ExternalLink, Megaphone, MessageSquare, Save, ShieldCheck, Trash2, UserX } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, ConfirmDialog, Skeleton, Tabs, cn, useToast } from "@/components/ui";
 
@@ -79,6 +79,8 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [eraseConfirm, setEraseConfirm] = useState("");
 
   useEffect(() => {
     if (!id) return;
@@ -167,6 +169,39 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
     }
   }
 
+  /** Export de todos los datos del titular → descarga JSON. */
+  async function exportData() {
+    if (!id) return;
+    try {
+      const data = await api<unknown>(`/contacts/${id}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `contacto-${id}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.push("Datos exportados ✔", "ok");
+    } catch (e: any) {
+      toast.push(e.message ?? "Error", "error");
+    }
+  }
+
+  /** Borrado a solicitud del titular (anonimiza) — irreversible. */
+  async function erase() {
+    if (!id) return;
+    try {
+      const r = await api<{ conversationsDeleted: number }>(`/contacts/${id}/erase`, { method: "POST", body: JSON.stringify({ confirm: eraseConfirm.trim() }) });
+      toast.push(`Datos del titular eliminados (${r.conversationsDeleted} conversación/es borradas)`, "ok");
+      setEraseOpen(false);
+      setEraseConfirm("");
+      onChanged();
+      onClose();
+    } catch (e: any) {
+      toast.push(e.message ?? "Error", "error");
+    }
+  }
+
   if (!id) return null;
 
   return (
@@ -192,10 +227,16 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 </div>
               </div>
               <div className="flex shrink-0 gap-1.5">
+                <Button variant="secondary" className="px-2.5 py-1.5" onClick={() => void exportData()} title="Exportar datos del titular (JSON)">
+                  <Download size={15} />
+                </Button>
                 <Button variant={d.blocked ? "secondary" : "danger"} className="px-2.5 py-1.5" onClick={toggleBlock} title={d.blocked ? "Desbloquear" : "Bloquear"}>
                   {d.blocked ? <ShieldCheck size={15} /> : <Ban size={15} />}
                 </Button>
-                <Button variant="danger" className="px-2.5 py-1.5" onClick={() => setConfirmDel(true)} title="Eliminar">
+                <Button variant="danger" className="px-2.5 py-1.5" onClick={() => setEraseOpen(true)} title="Eliminar datos del titular (irreversible)">
+                  <UserX size={15} />
+                </Button>
+                <Button variant="danger" className="px-2.5 py-1.5" onClick={() => setConfirmDel(true)} title="Eliminar contacto (baja lógica)">
                   <Trash2 size={15} />
                 </Button>
                 <button onClick={onClose} className="rounded-lg px-2 text-ink-subtle hover:bg-app hover:text-ink-muted" aria-label="Cerrar">✕</button>
@@ -372,6 +413,28 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
       </div>
 
       <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={del} title="Eliminar contacto" description="El contacto se dará de baja (borrado lógico). Sus conversaciones se conservan." confirmLabel="Eliminar" danger />
+
+      {/* Borrado a solicitud del titular (irreversible, confirmación por texto). */}
+      {eraseOpen && d && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEraseOpen(false)}>
+          <div className="w-full max-w-md rounded-card border border-line bg-panel p-5 shadow-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="flex items-center gap-2 text-base font-semibold text-red-700 dark:text-red-400"><UserX size={18} /> Eliminar datos del titular</h3>
+            <p className="mt-2 text-sm text-ink-muted">
+              Borra <b>permanentemente</b> las conversaciones, mensajes, transcripciones, campos personalizados, etiquetas
+              e identidades de este contacto, y <b>anonimiza</b> su ficha. No se puede deshacer. Los reportes y la
+              facturación no se rompen (la ficha queda como «titular eliminado»). Queda registrado en Auditoría.
+            </p>
+            <label className="mt-3 block text-sm">
+              <span className="text-xs text-ink-muted">Para confirmar, escribe: <b className="font-mono">{d.phone || d.firstName || "ELIMINAR"}</b></span>
+              <input value={eraseConfirm} onChange={(e) => setEraseConfirm(e.target.value)} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm" autoFocus />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => { setEraseOpen(false); setEraseConfirm(""); }}>Cancelar</Button>
+              <Button variant="danger" onClick={() => void erase()} disabled={eraseConfirm.trim() !== (d.phone || d.firstName || "ELIMINAR").trim()}>Eliminar datos</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

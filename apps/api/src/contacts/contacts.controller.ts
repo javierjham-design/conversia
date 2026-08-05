@@ -599,6 +599,81 @@ export class ContactsController {
     };
   }
 
+  // --------------------------- Derechos del titular (privacidad) ---------------------------
+
+  /**
+   * Exporta TODOS los datos de un contacto (derecho de acceso del titular):
+   * ficha + conversaciones + mensajes + campos personalizados + leads + citas +
+   * etiquetas + identidades. Respuesta JSON descargable.
+   */
+  @Get(":id/export")
+  async exportContact(@Param("id") id: string, @Res({ passthrough: true }) res: Response) {
+    const ctx = requirePermission("contacts:read");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const contact = await tx.contact.findFirst({ where: { id } });
+      if (!contact) throw new NotFoundException("Contacto no encontrado");
+      const [conversations, leads, appointments, identities, customFields, tags] = await Promise.all([
+        tx.conversation.findMany({ where: { contactId: id }, include: { messages: { orderBy: { createdAt: "asc" } } } }),
+        tx.lead.findMany({ where: { contactId: id } }),
+        tx.appointment.findMany({ where: { contactId: id } }),
+        tx.contactIdentity.findMany({ where: { contactId: id } }),
+        tx.customFieldValue.findMany({ where: { entityId: id } }),
+        tx.tagAssignment.findMany({ where: { entityType: "contact", entityId: id } }),
+      ]);
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "contact.data_export", entityType: "contact", entityId: id },
+      });
+      return { exportedAt: new Date().toISOString(), contact, conversations, leads, appointments, identities, customFields, tags };
+    });
+    res.setHeader("content-type", "application/json; charset=utf-8");
+    res.setHeader("content-disposition", `attachment; filename="contacto-${id}.json"`);
+    return data;
+  }
+
+  /**
+   * BORRA los datos personales de un contacto a solicitud del titular. Elimina
+   * conversaciones+mensajes (cascada de adjuntos), transcripciones, campos
+   * personalizados, etiquetas e identidades; **anonimiza** la ficha (sin borrar la
+   * fila) para no romper la integridad de leads/citas/reportes históricos ni la
+   * facturación. Irreversible → exige confirmación por texto. Auditado.
+   */
+  @Post(":id/erase")
+  async eraseContact(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const input = parse(z.object({ confirm: z.string() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const contact = await tx.contact.findFirst({ where: { id } });
+      if (!contact) throw new NotFoundException("Contacto no encontrado");
+      // Confirmación fuerte: hay que escribir el teléfono o el nombre del contacto.
+      const expected = (contact.phone || contact.firstName || "ELIMINAR").trim();
+      if (input.confirm.trim() !== expected) {
+        throw new BadRequestException(`Confirmación incorrecta. Escribe exactamente: ${expected}`);
+      }
+      const [convs] = await Promise.all([
+        tx.conversation.deleteMany({ where: { contactId: id } }), // cascada mensajes+adjuntos (incluye transcripciones en body)
+        tx.customFieldValue.deleteMany({ where: { entityId: id } }),
+        tx.contactIdentity.deleteMany({ where: { contactId: id } }),
+        tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: id } }),
+      ]);
+      // Anonimiza la ficha (conserva la fila para integridad de leads/citas/reportes).
+      await tx.contact.update({
+        where: { id },
+        data: {
+          firstName: "[titular eliminado]", lastName: null, email: null, documentId: null, birthDate: null,
+          // El teléfono se reemplaza por un token no-PII para no reidentificar ni
+          // colisionar; futuros mensajes de ese número crean un contacto nuevo.
+          phone: `erased:${id.slice(0, 8)}`, profileName: null,
+          adId: null, ctwaClid: null, meta: {} as object, attributes: { erased: true } as object,
+          blocked: true, doNotContact: true, consent: false, deletedAt: new Date(),
+        },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "contact.data_erasure", entityType: "contact", entityId: id, after: { conversationsDeleted: convs.count } },
+      });
+      return { ok: true, conversationsDeleted: convs.count };
+    });
+  }
+
   // --------------------------------- Fusión de duplicados ---------------------------------
 
   /** Fusiona contactos en uno primario: reasigna conversaciones/leads/citas/

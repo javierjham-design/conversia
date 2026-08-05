@@ -29,6 +29,7 @@ import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
+import { startRetentionPurge } from "./retention-purge";
 
 async function main() {
   const env = getEnv();
@@ -125,6 +126,7 @@ async function main() {
   const stopDailyDigests = startDailyDigests();
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
   const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
+  const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
   // La API lo lee en /health/status; si envejece, el worker está caído/atascado.
@@ -143,6 +145,7 @@ async function main() {
     console.log("Cerrando worker…");
     clearInterval(heartbeat);
     stopBillingDunning();
+    stopRetentionPurge();
     stopScheduler();
     stopTemplateSync();
     stopDailyDigests();

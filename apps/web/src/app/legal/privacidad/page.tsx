@@ -62,26 +62,42 @@ export default function PrivacidadPage() {
       <p>Nos apoyamos en proveedores que tratan datos por cuenta nuestra bajo contrato:</p>
       <ul>
         <li>
-          <strong>Meta Platforms</strong> — mensajería de WhatsApp Business.
+          <strong>Meta Platforms</strong> — mensajería de WhatsApp Business (envío y recepción de mensajes).
         </li>
         <li>
           <strong>Anthropic</strong> — modelos de IA que generan las respuestas (se envía el contexto necesario de
           la conversación).
         </li>
         <li>
+          <strong>OpenAI</strong> — transcripción de mensajes de audio a texto, cuando el Tenant la mantiene activa.
+        </li>
+        <li>
           <strong>Railway</strong> — alojamiento de la aplicación y la base de datos.
+        </li>
+        <li>
+          <strong>Cloudflare</strong> — red de entrega y protección de la aplicación web.
         </li>
       </ul>
       <p>
         Algunos proveedores procesan datos fuera de Chile (por ejemplo, en EE. UU.). Adoptamos salvaguardas
-        contractuales para dichas transferencias.
+        contractuales para dichas transferencias. La lista vigente de subencargados puede actualizarse; los cambios
+        se reflejan en esta página.
       </p>
 
-      <h2>6. Conservación</h2>
+      <h2>6. Conservación, retención y eliminación</h2>
       <p>
         Conservamos los datos mientras el Tenant mantenga su cuenta activa y por el plazo necesario para cumplir
-        obligaciones legales. El Tenant puede solicitar la eliminación según se indica en{" "}
-        <a href="/legal/eliminacion-datos">Eliminación de datos</a>.
+        obligaciones legales. Cada Tenant puede definir una <strong>política de retención</strong> (por ejemplo 6, 12 o
+        24 meses, o indefinida) para sus conversaciones, mensajes y transcripciones de audio, desde
+        <em> Configuración → Retención y privacidad</em>; una tarea automática elimina de forma periódica los datos que
+        exceden ese plazo.
+      </p>
+      <p>
+        A solicitud de una persona (usuario final), el Tenant puede <strong>exportar</strong> todos sus datos (derecho de
+        acceso) o <strong>eliminarlos</strong>: se borran sus conversaciones, mensajes, transcripciones, campos y
+        etiquetas, y su ficha se <strong>anonimiza</strong>. Las solicitudes de usuarios finales se canalizan a través del
+        Tenant responsable; también puedes escribirnos a <a href="mailto:privacidad@tubot.cl">privacidad@tubot.cl</a>.
+        Ver <a href="/legal/eliminacion-datos">Eliminación de datos</a>.
       </p>
 
       <h2>7. Seguridad</h2>
