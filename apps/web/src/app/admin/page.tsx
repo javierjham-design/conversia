@@ -11,6 +11,8 @@ interface Metrics {
   mrr: { clp: number; usd: number };
   aiCostUsd30d: number;
   aiRequests30d: number;
+  whatsappCostUsd30d: number;
+  whatsappMessages30d: number;
   revenuePaidClp: number;
 }
 
@@ -42,9 +44,10 @@ export default function PlatformOverview() {
             <MetricCard label="MRR (aprox.)" value={clp(m.mrr.clp)} hint={`USD ${m.mrr.usd.toLocaleString("en-US")}`} tone="ok" icon={<DollarSign size={16} />} />
             <MetricCard label="Ingresos cobrados" value={clp(m.revenuePaidClp)} hint="facturas pagadas" icon={<DollarSign size={16} />} />
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <MetricCard label="Costo IA (30 d)" value={`US$ ${m.aiCostUsd30d.toFixed(2)}`} hint={`${m.aiRequests30d.toLocaleString("es-CL")} requests`} icon={<Cpu size={16} />} />
-            <MetricCard label="Margen bruto IA (aprox.)" value={m.mrr.usd > 0 ? `${Math.round((1 - m.aiCostUsd30d / Math.max(m.mrr.usd, 1)) * 100)}%` : "—"} hint="MRR USD vs costo IA 30d — referencial" />
+            <MetricCard label="Costo Meta / WhatsApp (30 d)" value={`US$ ${(m.whatsappCostUsd30d ?? 0).toFixed(2)}`} hint={`${(m.whatsappMessages30d ?? 0).toLocaleString("es-CL")} mensajes facturables · tarifa aprox.`} icon={<DollarSign size={16} />} />
+            <MetricCard label="Margen bruto (aprox.)" value={m.mrr.usd > 0 ? `${Math.round((1 - (m.aiCostUsd30d + (m.whatsappCostUsd30d ?? 0)) / Math.max(m.mrr.usd, 1)) * 100)}%` : "—"} hint="MRR USD vs costo IA + Meta 30d — referencial" />
           </div>
         </>
       )}

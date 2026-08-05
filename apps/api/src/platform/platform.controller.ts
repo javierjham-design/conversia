@@ -55,7 +55,7 @@ export class PlatformController {
   async metrics() {
     const db = this.prisma.admin;
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const [orgs, active, trialing, suspended, plans, subs, ai, invoicesPaid] = await Promise.all([
+    const [orgs, active, trialing, suspended, plans, subs, ai, invoicesPaid, whatsapp] = await Promise.all([
       db.organization.count({ where: { deletedAt: null } }),
       db.organization.count({ where: { status: "ACTIVE", deletedAt: null } }),
       db.organization.count({ where: { status: "TRIAL", deletedAt: null } }),
@@ -64,6 +64,8 @@ export class PlatformController {
       db.subscription.findMany({ where: { status: { in: ["ACTIVE", "TRIALING"] } } }),
       db.aiRequest.aggregate({ where: { createdAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
       db.invoice.aggregate({ where: { status: "PAID" }, _sum: { amountDue: true } }),
+      // Costo que cobra Meta por mensajes de WhatsApp (últimos 30 días).
+      db.usageEvent.aggregate({ where: { type: "whatsapp_message", occurredAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
     ]);
     // MRR aproximado: suma del precio del plan de cada suscripción activa
     const planById = new Map(plans.map((p) => [p.id, p]));
@@ -81,6 +83,8 @@ export class PlatformController {
       mrr: { clp: mrrClp, usd: mrrUsd },
       aiCostUsd30d: Number(ai._sum.costUsd ?? 0),
       aiRequests30d: ai._count._all,
+      whatsappCostUsd30d: Number(whatsapp._sum.costUsd ?? 0),
+      whatsappMessages30d: whatsapp._count._all,
       revenuePaidClp: Number(invoicesPaid._sum.amountDue ?? 0),
     };
   }

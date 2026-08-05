@@ -128,6 +128,7 @@ export default function OrgDetailPage() {
   const usagePct = dailyLimit > 0 ? Math.min(100, Math.round((tokensToday / dailyLimit) * 100)) : 0;
   const aiCostMonthly = estCostMonthly(dailyLimit);
   const aiCost30d = Number(d.usage?.find((u: any) => u.type === "ai_tokens")?._sum?.costUsd ?? 0);
+  const metaCost30d = Number(d.usage?.find((u: any) => u.type === "whatsapp_message")?._sum?.costUsd ?? 0);
   const expired = d.validUntil && new Date(d.validUntil).getTime() < Date.now();
 
   return (
@@ -286,9 +287,10 @@ export default function OrgDetailPage() {
               </div>
             )}
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
             {[
               { label: "Costo IA 30d", value: `US$${aiCost30d.toFixed(2)}` },
+              { label: "Costo Meta 30d", value: `US$${metaCost30d.toFixed(2)}` },
               { label: "Conversaciones", value: d.metrics.conversationsInitiated },
               { label: "Clientes activos", value: d.metrics.activeClients },
             ].map((s) => (
