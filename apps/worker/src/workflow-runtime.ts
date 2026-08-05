@@ -10,6 +10,7 @@ import {
   type RunCtx,
 } from "@conversia/workflows";
 import { workflowDefinitionSchema, type PlatformEvent, type WorkflowDefinition } from "@conversia/types";
+import { isOrgOperational } from "./billing-dunning";
 import { createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
@@ -614,6 +615,13 @@ const deps = makeDeps();
 
 /** Despacha un evento de plataforma: inicia los workflows cuyo trigger coincide. */
 export async function dispatchEvent(event: PlatformEvent): Promise<void> {
+  // Suspensión por impago: si la organización no opera, los flujos se detienen
+  // (no se inician nuevos runs). Los datos y las definiciones quedan intactos.
+  const org = await withTenant(event.organizationId, (tx) =>
+    tx.organization.findUnique({ where: { id: event.organizationId }, select: { status: true } }),
+  );
+  if (!isOrgOperational(org?.status)) return;
+
   const candidates = await withTenant(event.organizationId, (tx) =>
     tx.workflow.findMany({
       where: { active: true, deletedAt: null },

@@ -27,7 +27,7 @@ limpiar el lenguaje "paciente/salud" de las páginas legales y la de integracion
 | B1 | Onboarding WhatsApp de terceros depende de App Review (Advanced access) **en revisión** | 🔴 Crítico | — (esperar Meta) | **BLOQUEANTE** |
 | B2 | Línea de crédito compartida / OBO billing (Meta cobra a TuBot, TuBot al cliente) **no implementada** | 🔴 Alto | Alto | **BLOQUEANTE (modelo reventa)** |
 | I1 | Sin monitoreo/alertas: webhook caído, worker muerto, cola atascada → **no te enteras** | 🟠 Alto | Bajo-Medio | Importante |
-| I2 | Impago no suspende ni degrada; "sin plan = ilimitado" | 🟠 Alto | Medio | Importante |
+| I2 | ~~Impago no suspende; "sin plan = ilimitado"~~ → **RESUELTO** (gracia 7d + suspensión + read-only + free por defecto) | ✅ | — | Cerrado |
 | I3 | Restauración de backups **nunca probada** | 🟠 Alto | Bajo | Importante |
 | I4 | Legal: copy "paciente/salud" + **sin DPA** ni DPA firmados con subprocesadores | 🟠 Alto | Bajo (copy) / legal | Importante |
 | I5 | Sin MFA en cuentas owner/admin del tenant | 🟠 Medio-Alto | Medio | Importante |

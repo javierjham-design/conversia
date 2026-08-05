@@ -25,6 +25,7 @@ import {
 import { api, clearToken, getToken } from "@/lib/api";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
+import { BillingBanner } from "@/components/BillingBanner";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -394,6 +395,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
 
+            <BillingBanner />
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
         </div>

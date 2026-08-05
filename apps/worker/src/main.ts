@@ -28,6 +28,7 @@ import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
+import { startBillingDunning } from "./billing-dunning";
 
 async function main() {
   const env = getEnv();
@@ -123,6 +124,7 @@ async function main() {
   const stopTemplateSync = startTemplateSync();
   const stopDailyDigests = startDailyDigests();
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
+  const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
   // La API lo lee en /health/status; si envejece, el worker está caído/atascado.
@@ -140,6 +142,7 @@ async function main() {
   const shutdown = async () => {
     console.log("Cerrando worker…");
     clearInterval(heartbeat);
+    stopBillingDunning();
     stopScheduler();
     stopTemplateSync();
     stopDailyDigests();
