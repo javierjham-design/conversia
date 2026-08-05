@@ -4,7 +4,7 @@ import { verifyAppToken, type AppTokenClaims } from "../auth/jwt";
 import { runWithContext, type RequestContext } from "./context";
 
 /** Rutas sin JWT: auth, webhooks (firma propia), API pública (API key) y health. */
-const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/google", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
+const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/google", "/auth/mfa", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
 
 /** @deprecated usar AppTokenClaims de auth/jwt */
 export type JwtPayload = AppTokenClaims;

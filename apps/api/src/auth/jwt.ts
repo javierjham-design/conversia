@@ -33,6 +33,33 @@ export function signAppToken(
   } as jwt.SignOptions);
 }
 
+/**
+ * Token PENDIENTE de MFA: audiencia distinta (`${AUD}:mfa`) → el middleware de
+ * tenancy (que exige la audiencia normal) lo rechaza, así NO da acceso a la app;
+ * solo sirve para completar el 2.º factor o el enrolamiento forzado. Vida corta.
+ */
+export function signMfaToken(userId: string, purpose: "verify" | "setup"): string {
+  const env = getEnv();
+  return jwt.sign({ sub: userId, purpose, jti: randomUUID() }, env.JWT_SECRET, {
+    algorithm: ALGO,
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:mfa`,
+    expiresIn: "10m",
+  } as jwt.SignOptions);
+}
+
+export function verifyMfaToken(token: string, purpose: "verify" | "setup"): { sub: string } {
+  const env = getEnv();
+  const decoded = jwt.verify(token, env.JWT_SECRET, {
+    algorithms: [ALGO],
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:mfa`,
+    clockTolerance: 5,
+  }) as jwt.JwtPayload;
+  if (!decoded.sub || decoded.purpose !== purpose) throw new Error("Token MFA inválido");
+  return { sub: String(decoded.sub) };
+}
+
 export function verifyAppToken(token: string): AppTokenClaims {
   const env = getEnv();
   const decoded = jwt.verify(token, env.JWT_SECRET, {

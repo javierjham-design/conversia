@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { Button, Skeleton, cn, useToast } from "@/components/ui";
 import { useMe } from "../../layout";
 import { ImageUpload } from "../image-upload";
+import { MfaCard } from "./mfa-card";
 
 export default function ProfilePage() {
   const toast = useToast();
@@ -117,6 +118,8 @@ export default function ProfilePage() {
           (brecha anotada; llegará con los refresh tokens).
         </p>
       </div>
+
+      <MfaCard />
     </div>
   );
 }
