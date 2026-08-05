@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, Building2, CreditCard, KeyRound, LayoutDashboard, LogOut, Menu, Package, Rocket, ScrollText, ShieldCheck, Ticket, X } from "lucide-react";
+import { AlertTriangle, Building2, Calculator, CreditCard, KeyRound, LayoutDashboard, LogOut, Menu, Package, Rocket, ScrollText, ShieldCheck, Ticket, X } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 import { ToastProvider, cn } from "@/components/ui";
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/admin/organizations", label: "Organizaciones", icon: Building2 },
   { href: "/admin/demos", label: "Demos / CRM", icon: Rocket },
   { href: "/admin/plans", label: "Planes", icon: Package },
+  { href: "/admin/calculator", label: "Calculadora de costos", icon: Calculator },
   { href: "/admin/coupons", label: "Cupones", icon: Ticket },
   { href: "/admin/billing", label: "Facturación", icon: CreditCard },
   { href: "/admin/alerts", label: "Alertas", icon: AlertTriangle },

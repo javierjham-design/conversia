@@ -13,7 +13,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
-import { MODEL_PRICING, createAIRouter } from "@conversia/agents";
+import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { AuthService } from "../auth/auth.service";
@@ -504,10 +504,10 @@ export class PlatformController {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
   }
 
-  /** Precios por token (USD/millón) por modelo — insumo del estimador de costos de planes. */
+  /** Tarifas (IA por token + WhatsApp por mensaje) — insumo de la calculadora de costos. */
   @Get("cost-model")
   costModel() {
-    return { models: MODEL_PRICING };
+    return { models: MODEL_PRICING, whatsapp: WHATSAPP_PRICING };
   }
 
   /** Prueba rápida de IA: manda un prompt al modelo y devuelve la respuesta + uso.
