@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui";
 interface BillingOverview {
   plan: { code: string; name: string; priceClp: number; priceUsd: number; interval: string } | null;
   usage: Record<string, { used: number; limit: number | null }>;
+  templates?: { used: number; included: number; overageCount: number; overagePriceUsd: number; overageEstimateUsd: number };
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -70,6 +71,42 @@ export default function PlanSettingsPage() {
           })}
         </ul>
       </div>
+
+      {data.templates && (
+        <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
+          <p className="text-sm font-medium">Mensajes de plantilla (WhatsApp)</p>
+          <p className="mt-0.5 text-[11px] text-ink-subtle">
+            Son los mensajes que Meta cobra: marketing, autenticación y recordatorios fuera de la ventana de 24 h. Las
+            respuestas dentro de las 24 h son gratis y no cuentan.
+          </p>
+          {(() => {
+            const t = data.templates!;
+            const unlimited = t.included < 0;
+            const pct = unlimited || t.included === 0 ? null : Math.min(100, Math.round((t.used / t.included) * 100));
+            return (
+              <div className="mt-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-ink-muted">Usados este período</span>
+                  <span className="text-ink-subtle">
+                    {t.used.toLocaleString("es-CL")}{unlimited ? " (ilimitado)" : ` / ${t.included.toLocaleString("es-CL")} incluidos`}
+                  </span>
+                </div>
+                {pct !== null && (
+                  <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-app">
+                    <div className={`h-full ${pct > 90 ? "bg-red-400" : pct > 70 ? "bg-amber-400" : "bg-cyan-500"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+                {t.overageCount > 0 && (
+                  <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                    Excedente: <b>{t.overageCount.toLocaleString("es-CL")}</b> mensajes × US${t.overagePriceUsd} ={" "}
+                    <b>US${t.overageEstimateUsd.toFixed(2)}</b> — se cobra aparte en tu próxima factura.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }

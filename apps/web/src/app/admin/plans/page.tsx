@@ -17,7 +17,7 @@ interface Plan {
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string };
+type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number; templateOverageUsd: number };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -71,6 +71,8 @@ export default function PlansPage() {
         limits: Object.fromEntries(LIMIT_FIELDS.map((f) => [f.key, Number(plan.limits?.[f.key] ?? 0)])),
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
         lsVariantId: String((plan.features as any)?.lsVariantId ?? ""),
+        templateMessages: Number((plan.features as any)?.templateMessages ?? 0),
+        templateOverageUsd: Number((plan.features as any)?.templateOverageUsd ?? 0),
       };
     }
     setDrafts(d);
@@ -90,7 +92,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages, templateOverageUsd: d.templateOverageUsd } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -205,6 +207,18 @@ export default function PlansPage() {
                     </label>
                   ))}
                   <p className="pt-1 text-[10px] text-slate-400">0 = ilimitado</p>
+                </div>
+
+                <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2">
+                  <p className="text-[11px] font-medium text-slate-600">Mensajes de plantilla (WhatsApp) — los que Meta cobra</p>
+                  <label className="flex items-center justify-between text-xs text-slate-600">
+                    <span>Incluidos / mes (−1 = ilimitado)</span>
+                    <input type="number" value={d.templateMessages} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, templateMessages: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                  </label>
+                  <label className="flex items-center justify-between text-xs text-slate-600">
+                    <span>Precio excedente (USD/mensaje)</span>
+                    <input type="number" step="0.01" value={d.templateOverageUsd} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, templateOverageUsd: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                  </label>
                 </div>
 
                 <div className="mt-2 flex gap-3">

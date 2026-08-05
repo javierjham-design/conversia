@@ -126,3 +126,35 @@ export async function enforceLimit(tx: TenantTx, resource: string, currentCount:
 
 /** Alias de compatibilidad — los controladores ya importan `enforcePlanLimit`. */
 export const enforcePlanLimit = enforceLimit;
+
+export interface TemplateUsage {
+  used: number;
+  included: number; // -1 = ilimitado
+  overageCount: number;
+  overagePriceUsd: number;
+  overageEstimateUsd: number;
+  periodStart: string;
+}
+
+/**
+ * Uso de mensajes de plantilla facturables del período (cupo incluido + excedente).
+ * `included`/`overagePriceUsd` vienen del plan (features.templateMessages/
+ * templateOverageUsd). El excedente se estima en USD (con tu margen ya incluido en
+ * el precio del plan). Cuenta los usage_events `whatsapp_message` (solo facturables).
+ */
+export async function getTemplateUsage(tx: TenantTx): Promise<TemplateUsage> {
+  const ent = await getEntitlements(tx);
+  const included = typeof ent.features.templateMessages === "number" ? (ent.features.templateMessages as number) : 0;
+  const overagePriceUsd = typeof ent.features.templateOverageUsd === "number" ? (ent.features.templateOverageUsd as number) : 0;
+  const sub = await tx.subscription.findFirst({
+    where: { status: { in: ACTIVE_STATUSES as unknown as string[] } as never },
+    orderBy: { createdAt: "desc" },
+    select: { periodStart: true },
+  });
+  const now = new Date();
+  const periodStart = sub?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
+  const agg = await tx.usageEvent.aggregate({ where: { type: "whatsapp_message", occurredAt: { gte: periodStart } }, _count: { _all: true } });
+  const used = agg._count._all;
+  const overageCount = included < 0 ? 0 : Math.max(0, used - included);
+  return { used, included, overageCount, overagePriceUsd, overageEstimateUsd: Number((overageCount * overagePriceUsd).toFixed(4)), periodStart: periodStart.toISOString() };
+}
