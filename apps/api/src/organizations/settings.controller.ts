@@ -165,6 +165,33 @@ export class SettingsController {
     return this.mergeSettings(ctx.organizationId, ctx.userId, "businessHours", parsed.data, "settings.hours_update");
   }
 
+  // ------------------------- Datos: retención y borrado -------------------------
+
+  /** Política de retención del tenant (0 = indefinido = default conservador). */
+  @Get("data")
+  dataPolicy() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      const r = (((org?.settings ?? {}) as Record<string, any>).retention ?? {}) as Record<string, any>;
+      return {
+        conversationsMonths: Number(r.conversationsMonths ?? 0), // 0 = indefinido
+        transcriptionsMonths: Number(r.transcriptionsMonths ?? 0),
+        lastPurgeAt: r.lastPurgeAt ?? null,
+      };
+    });
+  }
+
+  @Put("data")
+  updateDataPolicy(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    // 0 = indefinido; opciones razonables 6/12/24 meses.
+    const opt = z.union([z.literal(0), z.literal(6), z.literal(12), z.literal(24)]);
+    const parsed = z.object({ conversationsMonths: opt.optional(), transcriptionsMonths: opt.optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Política de retención inválida (usa 0, 6, 12 o 24 meses).");
+    return this.mergeSettings(ctx.organizationId, ctx.userId, "retention", parsed.data, "settings.retention_update");
+  }
+
   // ------------------------- IA (por tenant) -------------------------
 
   /** Modelo/tope/rondas: SOLO LECTURA (los administra TuBot según el plan). */

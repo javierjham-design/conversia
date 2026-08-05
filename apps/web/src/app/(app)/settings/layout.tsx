@@ -68,6 +68,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     pages: [
       { href: "/settings/import", label: "Importar contactos", keywords: "importar csv excel contactos migracion", perm: "contacts:write", ready: true },
       { href: "/settings/export", label: "Exportar datos", keywords: "exportar descargar csv conversaciones citas respaldo", perm: "settings:write", ready: true },
+      { href: "/settings/data", label: "Retención y privacidad", keywords: "retencion borrado privacidad datos conservar purga gdpr eliminar conversaciones transcripciones", perm: "settings:write", ready: true },
       { href: "/settings/audit", label: "Registro de auditoría", keywords: "auditoria logs seguridad quien hizo que", perm: "settings:write", ready: true },
     ],
   },
