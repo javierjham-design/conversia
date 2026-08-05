@@ -126,7 +126,8 @@ export async function syncMetaAds(organizationId: string): Promise<SyncResult> {
   const accounts = await withTenant(organizationId, (tx) =>
     tx.metaAsset.findMany({ where: { kind: "ad_account", enabled: true }, select: { externalId: true } }),
   );
-  if (accounts.length === 0) return await fail(organizationId, "no_accounts", "Sin cuentas publicitarias habilitadas.");
+  // Sin cuentas publicitarias no es un error operativo: no se alerta (solo se omite).
+  if (accounts.length === 0) return { ok: false, reason: "no_accounts", message: "Sin cuentas publicitarias habilitadas." };
 
   const fields =
     "id,name,status,adset{id,name},campaign{id,name,objective},creative{object_story_spec}";
@@ -240,9 +241,14 @@ export async function enqueueMetaAdsSync(organizationId: string): Promise<void> 
   );
 }
 
-/** Diario: abanica un sync por cada tenant con conexión Meta CONNECTED. */
+/** Diario: abanica un sync por cada tenant con conexión Meta REAL (no MOCK). */
 export async function fanOutMetaAdsSync(): Promise<void> {
   const prisma = getAdminPrisma();
-  const conns = await prisma.metaBusinessConnection.findMany({ where: { status: "CONNECTED" }, select: { organizationId: true } });
+  // Excluye conexiones MOCK: sus cuentas (p. ej. act_demo1) no existen en Graph
+  // y solo generan errores de alerta.
+  const conns = await prisma.metaBusinessConnection.findMany({
+    where: { status: "CONNECTED", mode: { not: "MOCK" } },
+    select: { organizationId: true },
+  });
   for (const c of conns) await enqueueMetaAdsSync(c.organizationId);
 }
