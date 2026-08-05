@@ -17,6 +17,7 @@ import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
+import { verifyAppToken, verifyMfaToken } from "./jwt";
 import { AuthService } from "./auth.service";
 
 const registerSchema = z.object({
@@ -76,6 +77,105 @@ export class AuthController {
     return this.auth.login(input);
   }
 
+  // --------------------------- MFA (TOTP) ---------------------------
+  // Rutas públicas (/auth/mfa): la identidad se resuelve por token explícito
+  // (Bearer de sesión para autoservicio, o mfaToken corto para el 2.º factor /
+  // enrolamiento forzado). Nunca dan acceso a la app por sí solas.
+
+  /** Resuelve el usuario actor: sesión (Bearer) o mfaToken de propósito `setup`. */
+  private actorId(req: Request, mfaToken?: string): string {
+    const h = req.headers.authorization;
+    if (h?.startsWith("Bearer ")) {
+      try {
+        return verifyAppToken(h.slice(7)).sub;
+      } catch {
+        /* cae al mfaToken */
+      }
+    }
+    if (mfaToken) {
+      try {
+        return verifyMfaToken(mfaToken, "setup").sub;
+      } catch {
+        /* no válido */
+      }
+    }
+    throw new UnauthorizedException("No autenticado");
+  }
+
+  /** 2.º factor en el login: verifica el código y emite la sesión completa. */
+  @Post("mfa/verify")
+  async mfaVerify(@Body() body: unknown) {
+    const input = parse(z.object({ mfaToken: z.string(), code: z.string().min(6).max(20) }), body);
+    let userId: string;
+    try {
+      userId = verifyMfaToken(input.mfaToken, "verify").sub;
+    } catch {
+      throw new UnauthorizedException("La sesión de verificación expiró. Inicia sesión de nuevo.");
+    }
+    const rl = await this.rateLimit.login(`mfa:${userId}`);
+    if (!rl.allowed) throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    return this.auth.verifyMfaLogin(userId, input.code.trim());
+  }
+
+  /** Genera el secreto TOTP y devuelve el URI para el QR (autoservicio o forzado). */
+  @Post("mfa/setup")
+  async mfaSetup(@Req() req: Request, @Body() body: unknown) {
+    const input = parse(z.object({ mfaToken: z.string().optional() }), body ?? {});
+    return this.auth.beginMfaSetup(this.actorId(req, input.mfaToken));
+  }
+
+  /** Confirma el código, activa MFA y devuelve los códigos de recuperación (una vez) + sesión. */
+  @Post("mfa/enable")
+  async mfaEnable(@Req() req: Request, @Body() body: unknown) {
+    const input = parse(z.object({ code: z.string().min(6).max(10), mfaToken: z.string().optional() }), body);
+    return this.auth.enableMfa(this.actorId(req, input.mfaToken), input.code.trim());
+  }
+
+  /** Desactiva MFA (requiere sesión + un código válido). */
+  @Post("mfa/disable")
+  async mfaDisable(@Req() req: Request, @Body() body: unknown) {
+    const input = parse(z.object({ code: z.string().min(6).max(20) }), body);
+    return this.auth.disableMfa(this.actorId(req), input.code.trim());
+  }
+
+  /** Estado MFA del usuario + si la organización lo exige a admins. */
+  @Get("mfa/status")
+  async mfaStatus(@Req() req: Request) {
+    const claims = this.claimsFromBearer(req);
+    const [user, org] = await Promise.all([
+      this.prisma.admin.user.findUnique({ where: { id: claims.sub }, select: { mfaEnabled: true } }),
+      this.prisma.admin.organization.findUnique({ where: { id: claims.orgId }, select: { settings: true } }),
+    ]);
+    return {
+      enabled: user?.mfaEnabled ?? false,
+      role: claims.role,
+      requireMfaForAdmins: (org?.settings as any)?.security?.requireMfaForAdmins === true,
+    };
+  }
+
+  /** Owner: exigir MFA a owner/admin de la organización (org.settings.security). */
+  @Post("mfa/org-require")
+  async mfaOrgRequire(@Req() req: Request, @Body() body: unknown) {
+    const claims = this.claimsFromBearer(req);
+    if (claims.role !== "owner") throw new UnauthorizedException("Solo el propietario puede cambiar esta política.");
+    const input = parse(z.object({ enabled: z.boolean() }), body);
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: claims.orgId }, select: { settings: true } });
+    const settings = { ...((org?.settings as Record<string, any>) ?? {}) };
+    settings.security = { ...(settings.security ?? {}), requireMfaForAdmins: input.enabled };
+    await this.prisma.admin.organization.update({ where: { id: claims.orgId }, data: { settings: settings as object } });
+    return { ok: true, requireMfaForAdmins: input.enabled };
+  }
+
+  private claimsFromBearer(req: Request) {
+    const h = req.headers.authorization;
+    if (!h?.startsWith("Bearer ")) throw new UnauthorizedException("No autenticado");
+    try {
+      return verifyAppToken(h.slice(7));
+    } catch {
+      throw new UnauthorizedException("Token inválido o expirado");
+    }
+  }
+
   /** Config pública para el botón de Google en el login (client id no es secreto). */
   @Get("google-config")
   googleConfig() {
@@ -105,7 +205,7 @@ export class AuthController {
     const [user, org] = await Promise.all([
       this.prisma.admin.user.findUnique({
         where: { id: ctx.userId },
-        select: { id: true, email: true, name: true },
+        select: { id: true, email: true, name: true, mfaEnabled: true },
       }),
       this.prisma.withTenant(ctx.organizationId, (tx) =>
         tx.organization.findUnique({

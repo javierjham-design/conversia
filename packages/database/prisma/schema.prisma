@@ -338,6 +338,11 @@ model User {
   phone        String?
   locale       String             @default("es")
   lastLoginAt  DateTime?          @map("last_login_at")
+  // MFA (TOTP): secreto cifrado AES-256-GCM, códigos de recuperación hasheados.
+  mfaEnabled       Boolean   @default(false) @map("mfa_enabled")
+  mfaSecret        String?   @map("mfa_secret")
+  mfaRecoveryCodes Json      @default("[]") @map("mfa_recovery_codes")
+  mfaEnrolledAt    DateTime? @map("mfa_enrolled_at")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")
   memberships  OrganizationUser[]

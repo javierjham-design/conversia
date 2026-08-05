@@ -3,7 +3,9 @@ import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
-import { signAppToken } from "./jwt";
+import { signAppToken, signMfaToken } from "./jwt";
+import { encryptSecret, decryptSecret } from "../common/crypto";
+import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
 
 const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 /** Costo bcrypt (ASVS 2.4): 12 es el mínimo recomendado actual. */
@@ -186,10 +188,79 @@ export class AuthService {
     }
     const membership = user.memberships[0];
     if (!membership) throw new UnauthorizedException("El usuario no pertenece a ninguna organización");
+
+    // 2.º factor activo → desafío (no se emite sesión hasta verificar el código).
+    if (user.mfaEnabled) {
+      return { mfaRequired: true as const, mfaToken: signMfaToken(user.id, "verify") };
+    }
+    // La organización exige MFA a owner/admin y este no está enrolado → forzar enrolamiento.
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
-    const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
+    const roleCode = role?.code ?? "viewer";
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: membership.organizationId }, select: { settings: true } });
+    if ((org?.settings as any)?.security?.requireMfaForAdmins === true && (roleCode === "owner" || roleCode === "admin")) {
+      return { mfaSetupRequired: true as const, mfaToken: signMfaToken(user.id, "setup") };
+    }
+    const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
+    await this.touchLastLogin(user.id);
+    return this.issueTokens(user.id, membership.organizationId, roleCode, perms);
+  }
+
+  /** Emite la sesión completa de un usuario ya validado (2.º factor o Google). */
+  private async issueForUser(userId: string) {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, include: { memberships: { where: { active: true } } } });
+    const membership = user?.memberships[0];
+    if (!user || !membership) throw new UnauthorizedException("Sesión inválida");
+    const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
+    const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     await this.touchLastLogin(user.id);
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
+  }
+
+  /** Verifica el 2.º factor (TOTP o código de recuperación) y emite la sesión. */
+  async verifyMfaLogin(userId: string, code: string) {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
+    if (!user?.mfaEnabled || !user.mfaSecret) throw new UnauthorizedException("MFA no está activo");
+    if (verifyTotp(decryptSecret(user.mfaSecret), code)) return this.issueForUser(userId);
+    const remaining = consumeRecoveryCode(code, (user.mfaRecoveryCodes as string[]) ?? []);
+    if (remaining) {
+      await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaRecoveryCodes: remaining } });
+      return this.issueForUser(userId);
+    }
+    throw new UnauthorizedException("Código de verificación inválido");
+  }
+
+  /** Genera un secreto TOTP (aún NO activo) y devuelve el URI para el QR. */
+  async beginMfaSetup(userId: string) {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException("Usuario inválido");
+    const secret = generateTotpSecret();
+    await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaSecret: encryptSecret(secret) } });
+    return { secret, otpauthUri: otpauthUri(secret, user.email) };
+  }
+
+  /** Confirma el código y ACTIVA MFA; devuelve los códigos de recuperación (una vez) + sesión. */
+  async enableMfa(userId: string, code: string) {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
+    if (!user?.mfaSecret) throw new BadRequestException("Primero genera el código QR de configuración.");
+    if (!verifyTotp(decryptSecret(user.mfaSecret), code)) throw new BadRequestException("El código no es correcto. Revisa la hora de tu teléfono e inténtalo de nuevo.");
+    const recoveryCodes = generateRecoveryCodes(8);
+    await this.prisma.admin.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: true, mfaEnrolledAt: new Date(), mfaRecoveryCodes: recoveryCodes.map(hashRecoveryCode) },
+    });
+    const session = await this.issueForUser(userId);
+    return { recoveryCodes, ...session };
+  }
+
+  /** Desactiva MFA tras validar un código (TOTP o de recuperación). */
+  async disableMfa(userId: string, code: string) {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
+    if (!user?.mfaEnabled) return { ok: true };
+    const totpOk = user.mfaSecret ? verifyTotp(decryptSecret(user.mfaSecret), code) : false;
+    const recoveryOk = consumeRecoveryCode(code, (user.mfaRecoveryCodes as string[]) ?? []) !== null;
+    if (!totpOk && !recoveryOk) throw new BadRequestException("Código incorrecto.");
+    await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecret: null, mfaRecoveryCodes: [], mfaEnrolledAt: null } });
+    return { ok: true };
   }
 
   /**
