@@ -45,7 +45,8 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
           from: m.from,
           profileName,
           type: m.type ?? "unknown",
-          text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title,
+          // Incluye el pie de foto/leyenda de imágenes, documentos y videos como texto.
+          text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.image?.caption ?? m.document?.caption ?? m.video?.caption,
           referral: m.referral,
           payload: m,
         });
@@ -214,7 +215,12 @@ export async function processInbound(job: InboundJob): Promise<void> {
           organizationId,
           conversationId: conversation.id,
           direction: "INBOUND",
-          type: msg.type === "audio" || msg.type === "voice" ? "AUDIO" : "TEXT",
+          type:
+            msg.type === "audio" || msg.type === "voice" ? "AUDIO"
+            : msg.type === "image" ? "IMAGE"
+            : msg.type === "document" ? "DOCUMENT"
+            : msg.type === "video" ? "VIDEO"
+            : "TEXT",
           body: text ?? `[${msg.type}]`,
           payload: (transcribed ? { ...(msg.payload as object), transcribed: true } : msg.payload) as object,
           externalId: msg.externalId,

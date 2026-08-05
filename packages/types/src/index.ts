@@ -190,9 +190,17 @@ export interface AIToolSpec {
 
 export type AIChatRole = "user" | "assistant";
 
+/** Imagen adjunta a un mensaje (visión): base64 + mime, para modelos multimodales. */
+export interface AIImageBlock {
+  mimeType: string;
+  dataBase64: string;
+}
+
 export interface AIChatMessage {
   role: AIChatRole;
   content: string;
+  /** Imágenes que el modelo debe "ver" junto al texto (opcional). */
+  images?: AIImageBlock[];
 }
 
 export interface AIToolCall {

@@ -174,10 +174,45 @@ export async function runAgentTurn(opts: {
   }
 
   // 2. Historial ventaneado (el primer mensaje debe ser del usuario)
-  const history: AIChatMessage[] = rawMessages.map((m) => ({
-    role: m.direction === "INBOUND" ? ("user" as const) : ("assistant" as const),
-    content: m.body ?? `[${m.type.toLowerCase()}]`,
-  }));
+  // Visión: el agente "ve" las imágenes recientes que envió el contacto. Se
+  // descargan de Meta y se adjuntan al mensaje (modelos multimodales). Toggle por
+  // tenant (org.settings.vision.enabled, activado por defecto).
+  const visionOn = orgSettings.vision !== false; // activada por defecto
+  let visionToken: string | null = null;
+  if (visionOn && rawMessages.some((m) => m.type === "IMAGE" && m.direction === "INBOUND")) {
+    try {
+      const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
+      visionToken = auth.accessToken ?? null;
+    } catch {
+      /* sin token → sin visión */
+    }
+  }
+
+  const IMAGE_WINDOW = 6; // solo imágenes de los últimos N mensajes
+  const MAX_IMAGES = 3;
+  let imagesUsed = 0;
+  const history: AIChatMessage[] = [];
+  for (let i = 0; i < rawMessages.length; i++) {
+    const m = rawMessages[i];
+    const msg: AIChatMessage = {
+      role: m.direction === "INBOUND" ? "user" : "assistant",
+      content: m.body ?? `[${m.type.toLowerCase()}]`,
+    };
+    const recent = i >= rawMessages.length - IMAGE_WINDOW;
+    if (visionToken && m.type === "IMAGE" && m.direction === "INBOUND" && recent && imagesUsed < MAX_IMAGES) {
+      const mediaId = (m.payload as any)?.image?.id ?? (m.payload as any)?.id;
+      if (mediaId) {
+        const { downloadWhatsappImage } = await import("./media.js");
+        const img = await downloadWhatsappImage(String(mediaId), visionToken);
+        if (img) {
+          msg.images = [{ mimeType: img.mimeType, dataBase64: img.dataBase64 }];
+          if (!m.body) msg.content = "[el contacto envió una imagen]";
+          imagesUsed++;
+        }
+      }
+    }
+    history.push(msg);
+  }
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return;
 

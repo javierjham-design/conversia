@@ -9,6 +9,7 @@ import { Button, ConfirmDialog, Modal, Skeleton, cn, useToast } from "@/componen
 interface IaSettings {
   managed: { model: string; maxTokens: number; maxToolRounds: number; dailyTokenBudget: number };
   transcription: boolean;
+  vision: boolean;
   assistantLanguage: string;
 }
 interface PromptTpl {
@@ -63,7 +64,7 @@ export default function IaSettingsPage() {
     [templates, typeFilter, agentFilter],
   );
 
-  async function saveToggles(patch: { transcription?: boolean; assistantLanguage?: string }) {
+  async function saveToggles(patch: { transcription?: boolean; vision?: boolean; assistantLanguage?: string }) {
     setBusy(true);
     try {
       await api("/settings/ia", { method: "PUT", body: JSON.stringify(patch) });
@@ -104,6 +105,13 @@ export default function IaSettingsPage() {
             <span className="block text-xs text-ink-subtle">Convierte los audios entrantes a texto (Bandeja + agentes).</span>
           </span>
           <input type="checkbox" checked={data.transcription} disabled={busy} onChange={(e) => void saveToggles({ transcription: e.target.checked })} />
+        </label>
+        <label className="flex items-center justify-between border-t border-line pt-3 text-sm">
+          <span>
+            <span className="font-medium">Análisis de imágenes (visión)</span>
+            <span className="block text-xs text-ink-subtle">El agente "ve" las imágenes que envía el contacto y responde según su contenido.</span>
+          </span>
+          <input type="checkbox" checked={data.vision} disabled={busy} onChange={(e) => void saveToggles({ vision: e.target.checked })} />
         </label>
         <label className="flex items-center justify-between border-t border-line pt-3 text-sm">
           <span>

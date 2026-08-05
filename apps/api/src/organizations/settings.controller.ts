@@ -259,6 +259,7 @@ export class SettingsController {
           dailyTokenBudget: limits.aiTokensDaily ?? getEnv().AI_DAILY_TOKEN_BUDGET_PER_ORG,
         },
         transcription: settings.transcription !== false,
+        vision: settings.vision !== false,
         assistantLanguage: String(settings.assistantLanguage ?? org?.locale ?? "es"),
       };
     });
@@ -268,7 +269,7 @@ export class SettingsController {
   updateIa(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
     const parsed = z
-      .object({ transcription: z.boolean().optional(), assistantLanguage: z.enum(["es", "en", "pt"]).optional() })
+      .object({ transcription: z.boolean().optional(), vision: z.boolean().optional(), assistantLanguage: z.enum(["es", "en", "pt"]).optional() })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Ajustes inválidos");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -280,6 +281,7 @@ export class SettingsController {
           settings: {
             ...settings,
             ...(parsed.data.transcription !== undefined ? { transcription: parsed.data.transcription } : {}),
+            ...(parsed.data.vision !== undefined ? { vision: parsed.data.vision } : {}),
             ...(parsed.data.assistantLanguage ? { assistantLanguage: parsed.data.assistantLanguage } : {}),
           } as object,
         },
