@@ -21,6 +21,15 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
   );
 
   for (const account of accounts) {
+    // Salta cuentas sin ningún canal ACTIVO (canal eliminado/desactivado): evita
+    // seguir golpeando Graph con un número/token muerto y ensuciar las alertas.
+    const chIds = account.phoneNumbers.map((n) => n.channelConnectionId).filter(Boolean) as string[];
+    if (chIds.length) {
+      const active = await withTenant(organizationId, (tx) =>
+        tx.channelConnection.count({ where: { id: { in: chIds }, status: "active" } }),
+      );
+      if (active === 0) continue;
+    }
     // Token por-WABA (fallback global) — mismo criterio que el envío.
     let token = env.META_ACCESS_TOKEN || "";
     if (account.credentialId) {

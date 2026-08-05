@@ -109,6 +109,16 @@ export default function ChannelsPage() {
     await load();
   }
 
+  async function removeChannel(id: string, name: string) {
+    if (!confirm(`¿Eliminar el canal "${name}"? Se borra el número y su token. Las conversaciones históricas se conservan. Esta acción no se puede deshacer.`)) return;
+    try {
+      await api(`/channels/${id}`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
   // -------- Embedded Signup (conexión self-service tipo Respond) --------
   useEffect(() => {
     api<{ appId: string; configId: string; graphVersion: string }>("/channels/meta/embedded-config")
@@ -343,6 +353,13 @@ export default function ChannelsPage() {
                     {templatesOpen[c.id] ? "Ocultar plantillas" : "Plantillas"}
                   </button>
                 )}
+                <button
+                  onClick={() => void removeChannel(c.id, c.name)}
+                  className="rounded-lg border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10"
+                  title="Eliminar este canal"
+                >
+                  Eliminar
+                </button>
               </div>
             </div>
             {c.status === "error" && (
