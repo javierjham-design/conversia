@@ -45,8 +45,15 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
       );
       json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        await withTenant(organizationId, (tx) =>
-          tx.integrationEvent.create({
+        // Anti-spam: no repetir el MISMO error de sync más de una vez al día por
+        // tenant (un token vencido dispararía uno cada 6 h si no).
+        await withTenant(organizationId, async (tx) => {
+          const recent = await tx.integrationEvent.findFirst({
+            where: { provider: "whatsapp", type: "templates.sync_error", createdAt: { gt: new Date(Date.now() - 20 * 60 * 60 * 1000) } },
+            select: { id: true },
+          });
+          if (recent) return;
+          await tx.integrationEvent.create({
             data: {
               organizationId,
               provider: "whatsapp",
@@ -54,8 +61,8 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
               status: "error",
               message: `Sync de plantillas (${account.name}): ${json?.error?.message ?? res.status}`,
             },
-          }),
-        );
+          });
+        });
         continue;
       }
     } catch (err) {
