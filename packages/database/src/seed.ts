@@ -312,7 +312,9 @@ const PLANS = [
     priceUsd: 0,
     order: 0,
     limits: { users: 2, clinics: 1, channels: 1, agents: 2, workflows: 3, aiTokensDaily: 200_000 },
-    features: { whiteLabel: false, api: false },
+    // templateMessages = mensajes de plantilla incluidos/mes (-1 = ilimitado);
+    // templateOverageUsd = precio por mensaje excedente (con tu margen).
+    features: { whiteLabel: false, api: false, templateMessages: 0, templateOverageUsd: 0.1 },
   },
   {
     code: "starter",
@@ -321,7 +323,7 @@ const PLANS = [
     priceUsd: 39,
     order: 1,
     limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensDaily: 1_000_000 },
-    features: { whiteLabel: false, api: true },
+    features: { whiteLabel: false, api: true, templateMessages: 250, templateOverageUsd: 0.08 },
   },
   {
     code: "pro",
@@ -330,7 +332,7 @@ const PLANS = [
     priceUsd: 99,
     order: 2,
     limits: { users: 20, clinics: 5, channels: 3, agents: 20, workflows: 50, aiTokensDaily: 5_000_000 },
-    features: { whiteLabel: true, api: true },
+    features: { whiteLabel: true, api: true, templateMessages: 1000, templateOverageUsd: 0.06 },
   },
   {
     code: "enterprise",
@@ -340,7 +342,7 @@ const PLANS = [
     order: 3,
     isPublic: false,
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = ilimitado
-    features: { whiteLabel: true, api: true, sso: true },
+    features: { whiteLabel: true, api: true, sso: true, templateMessages: -1, templateOverageUsd: 0.05 },
   },
 ];
 

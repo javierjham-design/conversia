@@ -5,6 +5,7 @@ import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { getTemplateUsage } from "../common/plan-limits";
 import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStripeSignature } from "./payment-provider";
 import { PaymentSettingsService } from "./payment-settings.service";
 
@@ -68,6 +69,8 @@ export class BillingController {
           users: { used: users, limit: limits.users ?? null },
           aiTokensToday: { used: Number(aiToday._sum.quantity ?? 0), limit: aiBudget },
         },
+        // Mensajes de plantilla (los que Meta cobra): cupo incluido + excedente.
+        templates: await getTemplateUsage(tx),
         invoices,
         paymentMethod: paymentMethod
           ? { provider: paymentMethod.provider, brand: paymentMethod.brand, last4: paymentMethod.last4 }
@@ -283,6 +286,27 @@ export class BillingController {
     periodEnd.setMonth(periodEnd.getMonth() + (plan.interval === "yearly" ? 12 : 1));
 
     const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" } });
+
+    // Excedente de mensajes de plantilla del PERÍODO QUE TERMINA (solo en renovación):
+    // mensajes facturables por encima del cupo incluido del plan actual × precio.
+    const lines: Array<{ concept: string; amount: number }> = [{ concept: `Plan ${plan.name} (${plan.interval})`, amount }];
+    if (existing?.periodStart) {
+      const prevPlan = await this.prisma.admin.plan.findUnique({ where: { id: existing.planId } });
+      const feats = (prevPlan?.features as Record<string, any>) ?? {};
+      const included = typeof feats.templateMessages === "number" ? feats.templateMessages : 0;
+      const overageUsd = typeof feats.templateOverageUsd === "number" ? feats.templateOverageUsd : 0;
+      if (included >= 0 && overageUsd > 0) {
+        const used = await this.prisma.admin.usageEvent.count({ where: { organizationId, type: "whatsapp_message", occurredAt: { gte: existing.periodStart } } });
+        const over = Math.max(0, used - included);
+        if (over > 0) {
+          // USD_TO_CLP aproximado para la factura en CLP (ajústalo si cambia el cambio).
+          const USD_TO_CLP = 950;
+          const overageAmount = currency === "CLP" ? Math.round(over * overageUsd * USD_TO_CLP) : Number((over * overageUsd).toFixed(2));
+          lines.push({ concept: `Excedente ${over} mensajes de plantilla (WhatsApp)`, amount: overageAmount });
+        }
+      }
+    }
+
     if (existing) {
       await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
     } else {
@@ -290,7 +314,8 @@ export class BillingController {
     }
     await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id } });
 
-    if (amount > 0) {
+    const totalDue = lines.reduce((a, l) => a + l.amount, 0);
+    if (totalDue > 0) {
       const count = await this.prisma.admin.invoice.count();
       await this.prisma.admin.invoice.create({
         data: {
@@ -298,8 +323,8 @@ export class BillingController {
           number: `CONV-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`,
           status: "PAID",
           currency,
-          amountDue: amount,
-          lines: [{ concept: `Plan ${plan.name} (${plan.interval})`, amount }],
+          amountDue: totalDue,
+          lines,
           paidAt: new Date(),
           provider,
           providerRef: providerRef ?? null,
