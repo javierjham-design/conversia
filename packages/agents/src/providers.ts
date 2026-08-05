@@ -1,7 +1,24 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import type { AIChatRequest, AIChatResponse, AIProvider, AIToolCall, AIUsage } from "@conversia/types";
+import type { AIChatMessage, AIChatRequest, AIChatResponse, AIProvider, AIToolCall, AIUsage } from "@conversia/types";
 import { computeCostUsd } from "./pricing.js";
+
+/**
+ * Contenido de un mensaje para el proveedor: string si es solo texto, o bloques
+ * multimodales (texto + imágenes) si el mensaje trae imágenes (visión). Pura.
+ */
+export function toMultimodalContent(m: AIChatMessage, format: "anthropic" | "openai"): unknown {
+  if (!m.images?.length) return m.content;
+  const parts: unknown[] = m.content ? [{ type: "text", text: m.content }] : [];
+  for (const img of m.images) {
+    parts.push(
+      format === "anthropic"
+        ? { type: "image", source: { type: "base64", media_type: img.mimeType, data: img.dataBase64 } }
+        : { type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` } },
+    );
+  }
+  return parts;
+}
 
 /**
  * Proveedor Anthropic (API oficial, SDK @anthropic-ai/sdk).
@@ -19,7 +36,7 @@ export class AnthropicProvider implements AIProvider {
   async chat(req: AIChatRequest): Promise<AIChatResponse> {
     const started = Date.now();
 
-    const messages: any[] = req.messages.map((m) => ({ role: m.role, content: m.content }));
+    const messages: any[] = req.messages.map((m) => ({ role: m.role, content: toMultimodalContent(m, "anthropic") }));
     for (const entry of req.toolTranscript ?? []) {
       if (entry.kind === "assistant_tool_calls") {
         const content: any[] = [];
@@ -113,7 +130,7 @@ export class OpenAIProvider implements AIProvider {
 
     const messages: any[] = [];
     if (req.system) messages.push({ role: "system", content: req.system });
-    for (const m of req.messages) messages.push({ role: m.role, content: m.content });
+    for (const m of req.messages) messages.push({ role: m.role, content: toMultimodalContent(m, "openai") });
     for (const entry of req.toolTranscript ?? []) {
       if (entry.kind === "assistant_tool_calls") {
         messages.push({
