@@ -783,20 +783,34 @@ export class ChannelsController {
     return { ok: true };
   }
 
+  /**
+   * Elimina un canal por completo: borra sus números de WhatsApp, la WABA y su
+   * credencial cifrada SI no le quedan números (no toca una WABA compartida), y
+   * el propio canal. Las conversaciones históricas se conservan (la referencia al
+   * canal es laxa). Así el sync de plantillas deja de tocar un número/token muerto.
+   */
   @Delete(":id")
   remove(@Param("id") id: string) {
     const ctx = requirePermission("channels:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.channelConnection.update({ where: { id }, data: { status: "inactive" } });
+      const channel = await tx.channelConnection.findFirst({ where: { id } });
+      if (!channel) throw new NotFoundException("Canal no encontrado");
+      const phones = await tx.whatsappPhoneNumber.findMany({ where: { channelConnectionId: id }, select: { accountId: true } });
+      const accountIds = [...new Set(phones.map((p) => p.accountId))];
+      if (phones.length) await tx.whatsappPhoneNumber.deleteMany({ where: { channelConnectionId: id } });
+      // Borra la WABA + credencial solo si ya no le quedan números (evita romper
+      // otro canal que comparta la misma WABA).
+      for (const accId of accountIds) {
+        const remaining = await tx.whatsappPhoneNumber.count({ where: { accountId: accId } });
+        if (remaining === 0) {
+          const acc = await tx.whatsappAccount.findUnique({ where: { id: accId }, select: { credentialId: true } });
+          await tx.whatsappAccount.delete({ where: { id: accId } });
+          if (acc?.credentialId) await tx.integrationCredential.deleteMany({ where: { id: acc.credentialId } });
+        }
+      }
+      await tx.channelConnection.delete({ where: { id } });
       await tx.auditLog.create({
-        data: {
-          organizationId: ctx.organizationId,
-          actorType: "user",
-          actorId: ctx.userId,
-          action: "channel.deactivate",
-          entityType: "channel_connection",
-          entityId: id,
-        },
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "channel.delete", entityType: "channel_connection", entityId: id, after: { name: channel.name } },
       });
       return { ok: true };
     });
