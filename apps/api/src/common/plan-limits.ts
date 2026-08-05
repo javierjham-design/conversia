@@ -5,11 +5,15 @@ import { getContext } from "../tenancy/context";
 /**
  * MOTOR DE ENTITLEMENTS (Fase B) — punto ÚNICO de verdad de los límites y
  * funciones de cada tenant, resuelto server-side dentro de `withTenant` (RLS).
- * Reglas: sin suscripción activa o límite 0 → ilimitado (no romper tenants sin
- * plan). Nunca confiar en el frontend. Los controladores llaman a `enforceLimit`
- * antes de crear un recurso; las rutas de features llaman a `canUseFeature`.
+ * Reglas: sin suscripción activa → límites del **plan GRATUITO** (nunca ilimitado);
+ * límite 0 dentro de un plan = ilimitado por convención. Nunca confiar en el
+ * frontend. Los controladores llaman a `enforceLimit` antes de crear un recurso;
+ * las rutas de features llaman a `canUseFeature`.
  */
 export type LimitedResource = "agents" | "channels" | "workflows" | "users" | "clinics";
+
+/** Límites de respaldo si el plan `free` no existe en el catálogo (conservadores). */
+const FREE_FALLBACK_LIMITS: Record<string, number> = { agents: 2, channels: 1, workflows: 3, users: 2, clinics: 1 };
 
 const LABELS: Record<string, string> = {
   agents: "agentes",
@@ -51,12 +55,15 @@ export async function getEntitlements(tx: TenantTx): Promise<Entitlements> {
   const validUntil = typeof settings.validUntil === "string" ? settings.validUntil : null;
   const expired = validUntil ? new Date(validUntil).getTime() < Date.now() : false;
 
-  const plan = sub ? await tx.plan.findUnique({ where: { id: sub.planId } }) : null;
-  const planLimits = (plan?.limits as Record<string, number>) ?? {};
+  // Con suscripción → su plan. Sin suscripción → plan GRATUITO (nunca ilimitado).
+  const plan = sub
+    ? await tx.plan.findUnique({ where: { id: sub.planId } })
+    : await tx.plan.findUnique({ where: { code: "free" } });
+  const planLimits = (plan?.limits as Record<string, number>) ?? (sub ? {} : FREE_FALLBACK_LIMITS);
   return {
     hasSubscription: !!sub,
     status: sub?.status ?? null,
-    planCode: plan?.code ?? null,
+    planCode: plan?.code ?? (sub ? null : "free"),
     limits: { ...planLimits, ...override }, // el override por-tenant tiene prioridad
     features: (plan?.features as Record<string, unknown>) ?? {},
     validUntil,
@@ -71,10 +78,9 @@ export async function getFeatureLimit(tx: TenantTx, resource: string): Promise<n
   return typeof v === "number" ? v : null;
 }
 
-/** ¿La feature está habilitada por el plan? Sin plan → no se restringen features. */
+/** ¿La feature está habilitada por el plan? Sin plan → features del plan gratuito. */
 export async function canUseFeature(tx: TenantTx, feature: string): Promise<boolean> {
   const ent = await getEntitlements(tx);
-  if (!ent.hasSubscription) return true;
   return ent.features[feature] === true;
 }
 

@@ -45,8 +45,18 @@ export class BillingController {
       const limits = (plan?.limits ?? {}) as Record<string, number>;
       const aiBudget = limits.aiTokensDaily ?? getEnv().AI_DAILY_TOKEN_BUDGET_PER_ORG;
 
+      // Estado de cobro para el aviso en la UI (gracia / suspensión).
+      const billingSettings = ((org?.settings as Record<string, any>)?.billing ?? {}) as { state?: string; graceEndsAt?: string };
+      const billingState =
+        org?.status === "SUSPENDED" || org?.status === "CANCELLED"
+          ? "suspended"
+          : sub?.status === "PAST_DUE"
+            ? "grace"
+            : "ok";
+
       return {
         organization: { name: org?.name, status: org?.status, currency: org?.currency },
+        billing: { state: billingState, graceEndsAt: billingSettings.graceEndsAt ?? null },
         plan: plan
           ? { code: plan.code, name: plan.name, priceClp: Number(plan.priceClp), priceUsd: Number(plan.priceUsd), interval: plan.interval }
           : null,

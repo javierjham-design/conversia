@@ -35,9 +35,27 @@ es privado / a medida.
 - `enforceLimit(tx, resource, currentCount)` → **403** al alcanzar el tope.
   `enforcePlanLimit` es alias (compatibilidad con los controladores existentes).
 
-**Regla de seguridad de negocio:** sin suscripción activa o límite `0` ⇒ ilimitado,
-para no romper tenants sin plan (p. ej. el tenant semilla). El endurecimiento (negar
-por defecto sin plan) se hará junto con el onboarding obligatorio de plan.
+**Regla de seguridad de negocio (2026-08-04):** sin suscripción activa ⇒ **límites del
+plan `free`** (nunca ilimitado); si el plan `free` no existe en el catálogo, se cae a
+`FREE_FALLBACK_LIMITS` (agents 2, channels 1, workflows 3, users 2, clinics 1). Un
+límite `0` **dentro de un plan contratado** sí significa ilimitado (Enterprise). Nota:
+un tenant sin plan que hoy exceda esos límites conserva lo que tiene, pero no puede
+crear más hasta contratar (incluye el tenant semilla → asignarle un plan si necesita
+más).
+
+### Suspensión por impago (dunning)
+- **Período de gracia: 7 días** (`BILLING_GRACE_DAYS`). Al vencer `periodEnd` sin
+  renovar: la suscripción pasa a `PAST_DUE`, el servicio **sigue operando** y se avisa
+  al admin (evento `billing.past_due` + banner). Agotada la gracia, la organización
+  pasa a `SUSPENDED`.
+- **Al suspender:** el **bot deja de responder** (corte de IA en `agent-turn`) y los
+  **flujos se detienen** (`dispatchEvent` no inicia runs si la org no opera). El
+  **panel queda en solo lectura**: `BillingSuspensionGuard` (global) bloquea toda
+  escritura con **402**, salvo `/billing`, `/auth`, `/platform`. **NADA se borra.**
+- **Al pagar:** `activate()` repone `status ACTIVE` + suscripción `ACTIVE` + nuevo
+  `periodEnd`; todo vuelve sin pérdida de datos.
+- Lógica pura + tick en `apps/worker/src/billing-dunning.ts` (tick horario), con
+  tests (`billing-dunning.test.ts`).
 
 ### Dónde se aplica
 `agents`, `channels`, `workflows`, `users` llaman a `enforcePlanLimit` **dentro de la
