@@ -1,5 +1,7 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
+import { computeWhatsappCostUsd } from "@conversia/agents";
+import { geoFromPhone } from "./phone-geo";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { runAgentTurn } from "./agent-turn";
 import { transcribeWhatsappAudio } from "./audio";
@@ -26,6 +28,9 @@ interface ParsedStatus {
   phoneNumberId: string;
   externalId: string;
   status: string;
+  recipientId?: string;
+  // Info de precio de Meta (modelo per-message): categoría + si es facturable.
+  pricing?: { billable?: boolean; category?: string; pricingModel?: string; conversationId?: string };
 }
 
 /** Normaliza el payload del webhook de Meta (o del simulador, mismo formato). */
@@ -52,7 +57,15 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
         });
       }
       for (const s of value?.statuses ?? []) {
-        statuses.push({ phoneNumberId, externalId: s.id, status: s.status });
+        statuses.push({
+          phoneNumberId,
+          externalId: s.id,
+          status: s.status,
+          recipientId: s.recipient_id,
+          pricing: s.pricing
+            ? { billable: s.pricing.billable, category: s.pricing.category, pricingModel: s.pricing.pricing_model, conversationId: s.conversation?.id }
+            : undefined,
+        });
       }
     }
   }
@@ -121,6 +134,37 @@ export async function processInbound(job: InboundJob): Promise<void> {
         },
       }),
     );
+
+    // Costo que cobra Meta por el mensaje (modelo per-message). Meta manda el
+    // objeto `pricing` en el estado; registramos UN usage_event por mensaje
+    // facturable, con la categoría y el país para poder recalcular si cambian
+    // las tarifas. Dedupe por externalId.
+    if (status.pricing?.billable && status.pricing.category) {
+      await withTenant(tenant.organizationId, async (tx) => {
+        const already = await tx.usageEvent.findFirst({
+          where: { type: "whatsapp_message", meta: { path: ["externalId"], equals: status.externalId } },
+          select: { id: true },
+        });
+        if (already) return;
+        const country = geoFromPhone(String(status.recipientId ?? "")).country;
+        const costUsd = computeWhatsappCostUsd(status.pricing!.category, country);
+        await tx.usageEvent.create({
+          data: {
+            organizationId: tenant.organizationId,
+            type: "whatsapp_message",
+            quantity: 1,
+            costUsd,
+            meta: {
+              externalId: status.externalId,
+              category: status.pricing!.category,
+              pricingModel: status.pricing!.pricingModel ?? null,
+              country,
+              conversationId: status.pricing!.conversationId ?? null,
+            },
+          },
+        });
+      });
+    }
   }
 
   for (const msg of messages) {
