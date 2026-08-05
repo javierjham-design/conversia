@@ -7,6 +7,7 @@ import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { validateUploadedImage } from "../common/images";
+import { BASE_VOCAB, INDUSTRIES, resolvePersonalization } from "../common/industries";
 
 const generalSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -190,6 +191,53 @@ export class SettingsController {
     const parsed = z.object({ conversationsMonths: opt.optional(), transcriptionsMonths: opt.optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Política de retención inválida (usa 0, 6, 12 o 24 meses).");
     return this.mergeSettings(ctx.organizationId, ctx.userId, "retention", parsed.data, "settings.retention_update");
+  }
+
+  // ------------------------- Rubro y personalización -------------------------
+
+  /** Catálogo de rubros + personalización efectiva (vocabulario + módulos). */
+  @Get("personalization")
+  personalization() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const resolved = resolvePersonalization(settings);
+      return {
+        ...resolved,
+        base: BASE_VOCAB,
+        overrides: (settings.vocabulary ?? {}) as Record<string, string>,
+        industries: INDUSTRIES.map((i) => ({ code: i.code, label: i.label })),
+      };
+    });
+  }
+
+  @Put("personalization")
+  updatePersonalization(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    const parsed = z
+      .object({
+        industry: z.string().max(40).optional(),
+        vocabulary: z.record(z.string(), z.string().max(40)).optional(),
+        modules: z.record(z.string(), z.boolean()).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Personalización inválida");
+    const input = parsed.data;
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      if (input.industry !== undefined) {
+        settings.general = { ...(settings.general ?? {}), industry: input.industry };
+      }
+      if (input.vocabulary !== undefined) settings.vocabulary = input.vocabulary;
+      if (input.modules !== undefined) settings.modules = { ...(settings.modules ?? {}), ...input.modules };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: settings as object } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "settings.personalization_update", entityType: "organization", after: input as object },
+      });
+      return { ok: true, ...resolvePersonalization(settings) };
+    });
   }
 
   // ------------------------- IA (por tenant) -------------------------
