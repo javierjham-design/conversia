@@ -35,6 +35,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     title: "Ajustes generales",
     pages: [
       { href: "/settings/general", label: "Información general", keywords: "nombre negocio logo rubro zona horaria moneda idioma empresa", perm: "settings:write", ready: true },
+      { href: "/settings/personalization", label: "Rubro y personalización", keywords: "rubro industria vocabulario terminos etiquetas modulos plantillas paciente cliente alumno agenda", perm: "settings:write", ready: true },
       { href: "/settings/hours", label: "Horario de atención", keywords: "horario dias feriados atencion apertura", perm: "settings:write", ready: true },
       { href: "/settings/plan", label: "Plan y uso", keywords: "plan consumo tokens mensajes facturacion límites uso", perm: "settings:write", ready: true },
     ],

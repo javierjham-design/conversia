@@ -18,6 +18,7 @@ import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
 import { verifyAppToken, verifyMfaToken } from "./jwt";
+import { resolvePersonalization } from "../common/industries";
 import { AuthService } from "./auth.service";
 
 const registerSchema = z.object({
@@ -210,11 +211,13 @@ export class AuthController {
       this.prisma.withTenant(ctx.organizationId, (tx) =>
         tx.organization.findUnique({
           where: { id: ctx.organizationId },
-          select: { id: true, name: true, slug: true, timezone: true, currency: true },
+          select: { id: true, name: true, slug: true, timezone: true, currency: true, settings: true },
         }),
       ),
     ]);
-    return { user, organization: org, role: ctx.roleCode, permissions: ctx.permissions };
+    const { settings, ...organization } = (org ?? {}) as Record<string, any>;
+    const personalization = resolvePersonalization(settings);
+    return { user, organization, role: ctx.roleCode, permissions: ctx.permissions, personalization };
   }
 
   /** Mi perfil: actualizar el nombre propio (cualquier rol). */

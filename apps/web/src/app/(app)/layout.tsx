@@ -32,11 +32,22 @@ interface Me {
   organization: { id: string; name: string; slug: string } | null;
   role: string;
   permissions: string[];
+  personalization?: {
+    industry: string;
+    vocabulary: Record<string, string>;
+    modules: Record<string, boolean>;
+  };
 }
 
 const MeContext = createContext<Me | null>(null);
 export function useMe() {
   return useContext(MeContext);
+}
+/** Etiqueta traducida por rubro: `useTerm()("contacts")` → "Pacientes"/"Clientes"… */
+export function useTerm() {
+  const me = useContext(MeContext);
+  const vocab = me?.personalization?.vocabulary;
+  return (key: string, fallback: string) => (vocab && vocab[key]) || fallback;
 }
 
 /** Campana: incidencias de integraciones (token vencido, sync fallida, CAPI…). */
@@ -122,14 +133,16 @@ const NAV_GROUPS: Array<{
     icon: React.ComponentType<{ size?: number | string; className?: string }>;
     soon?: boolean;
     perm?: string; // permiso requerido para ver el módulo (undefined = visible para todos)
+    term?: string; // clave de vocabulario por rubro (reemplaza label)
+    moduleKey?: string; // si el módulo está desactivado por rubro, se oculta
   }>;
 }> = [
   {
     label: "Operación",
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
-      { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read" },
-      { label: "Agenda", icon: CalendarDays, soon: true },
+      { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read", term: "contacts" },
+      { label: "Agenda", icon: CalendarDays, soon: true, moduleKey: "agenda" },
     ],
   },
   {
@@ -263,8 +276,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Grupos */}
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {NAV_GROUPS.map((group) => {
-                const items = group.items.filter((item) => canSee(item.perm));
+                const modules = me?.personalization?.modules ?? {};
+                const vocab = me?.personalization?.vocabulary ?? {};
+                const items = group.items.filter(
+                  (item) => canSee(item.perm) && (!item.moduleKey || modules[item.moduleKey] !== false),
+                );
                 if (items.length === 0) return null;
+                const labelOf = (item: (typeof group.items)[number]) => (item.term && vocab[item.term]) || item.label;
                 return (
                 <div key={group.label} className="mb-1.5">
                   {!collapsed && (
@@ -310,7 +328,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         )}
                       >
                         <Icon size={17} className={active ? "text-accent-400" : ""} />
-                        {!collapsed && item.label}
+                        {!collapsed && labelOf(item)}
                       </Link>
                     );
                   })}
