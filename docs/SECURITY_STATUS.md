@@ -58,7 +58,7 @@ Leyenda: ✅ implementado y probado · 🟡 implementado (sin prueba automatizad
 | | IaC scan | ➖ | sin IaC (Railway gestionado) |
 | | SBOM (CycloneDX) | ✅ | `security.yml` artefacto |
 | **Backups/DR** | Backups cifrados automáticos | 🟡 | Railway gestionado (transferido) |
-| | Prueba de restauración | ⛔ | roadmap 30d |
+| | Prueba de restauración | ✅ | **Probada 2026-08-05** (restore a base aislada + verificación RLS); RTO ~5 min, RPO ≤24 h. Runbook `docs/DISASTER_RECOVERY.md` |
 | **Monitoreo** | Alertas de seguridad / centro de seguridad | 🟡 | `integration_events` + `system_alerts` (esquema); panel pendiente |
 | **DAST** | ZAP contra staging | 🔬 | pendiente entorno staging |
 | **Pentest** | Externo independiente | 🔬 | recomendado antes de uso masivo con datos reales |
