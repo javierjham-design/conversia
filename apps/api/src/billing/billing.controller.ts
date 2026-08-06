@@ -299,8 +299,9 @@ export class BillingController {
         const used = await this.prisma.admin.usageEvent.count({ where: { organizationId, type: "whatsapp_message", occurredAt: { gte: existing.periodStart } } });
         const over = Math.max(0, used - included);
         if (over > 0) {
-          // USD_TO_CLP aproximado para la factura en CLP (ajústalo si cambia el cambio).
-          const USD_TO_CLP = 950;
+          // Tipo de cambio editable desde el Super Admin (platform_settings.usdToClp).
+          const fxRow = await this.prisma.admin.platformSetting.findUnique({ where: { key: "usdToClp" } });
+          const USD_TO_CLP = fxRow ? Number(fxRow.value) || 950 : 950;
           const overageAmount = currency === "CLP" ? Math.round(over * overageUsd * USD_TO_CLP) : Number((over * overageUsd).toFixed(2));
           lines.push({ concept: `Excedente ${over} mensajes de plantilla (WhatsApp)`, amount: overageAmount });
         }

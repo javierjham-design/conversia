@@ -504,10 +504,49 @@ export class PlatformController {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
   }
 
-  /** Tarifas (IA por token + WhatsApp por mensaje) — insumo de la calculadora de costos. */
+  /** Tarifas EFECTIVAS (IA por token + WhatsApp por mensaje, con overrides) + tipo de cambio. */
   @Get("cost-model")
-  costModel() {
-    return { models: MODEL_PRICING, whatsapp: WHATSAPP_PRICING };
+  async costModel() {
+    const { rates, usdToClp } = await this.readCostSettings();
+    return { models: MODEL_PRICING, whatsapp: { ...WHATSAPP_PRICING, ...rates }, usdToClp };
+  }
+
+  /** Guarda tarifas de Meta por país y/o el tipo de cambio (editable desde el panel). */
+  @Patch("cost-settings")
+  async updateCostSettings(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({
+        usdToClp: z.number().positive().max(100_000).optional(),
+        whatsappRates: z
+          .record(z.string(), z.object({ marketing: z.number().min(0), utility: z.number().min(0), authentication: z.number().min(0), service: z.number().min(0) }))
+          .optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    if (parsed.data.usdToClp !== undefined) {
+      await this.prisma.admin.platformSetting.upsert({ where: { key: "usdToClp" }, update: { value: String(parsed.data.usdToClp) }, create: { key: "usdToClp", value: String(parsed.data.usdToClp) } });
+    }
+    if (parsed.data.whatsappRates) {
+      const cur = await this.readCostSettings();
+      const merged = { ...cur.rates, ...parsed.data.whatsappRates };
+      await this.prisma.admin.platformSetting.upsert({ where: { key: "whatsappRates" }, update: { value: JSON.stringify(merged) }, create: { key: "whatsappRates", value: JSON.stringify(merged) } });
+    }
+    await this.audit(req, "platform.cost_settings_update", "platform_setting", "cost", parsed.data as object);
+    return this.costModel();
+  }
+
+  /** Lee overrides de tarifas + tipo de cambio de platform_settings. */
+  private async readCostSettings(): Promise<{ rates: Record<string, { marketing: number; utility: number; authentication: number; service: number }>; usdToClp: number }> {
+    const rows = await this.prisma.admin.platformSetting.findMany({ where: { key: { in: ["whatsappRates", "usdToClp"] } } });
+    const ratesRow = rows.find((r) => r.key === "whatsappRates");
+    const fxRow = rows.find((r) => r.key === "usdToClp");
+    let rates: Record<string, any> = {};
+    try {
+      rates = ratesRow ? JSON.parse(ratesRow.value) : {};
+    } catch {
+      rates = {};
+    }
+    return { rates, usdToClp: fxRow ? Number(fxRow.value) || 950 : 950 };
   }
 
   /** Prueba rápida de IA: manda un prompt al modelo y devuelve la respuesta + uso.

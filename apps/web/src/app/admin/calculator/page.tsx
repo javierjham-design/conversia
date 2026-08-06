@@ -7,23 +7,26 @@
  * Todo se calcula en el navegador con las tarifas reales del backend.
  */
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader, Skeleton } from "@/components/ui";
+import { PageHeader, Skeleton, useToast } from "@/components/ui";
 import { padmin } from "@/lib/platform-api";
 
 interface ModelPricing { inputPerMTok: number; outputPerMTok: number }
 interface WaRates { marketing: number; utility: number; authentication: number; service: number }
-interface CostModel { models: Record<string, ModelPricing>; whatsapp: Record<string, WaRates> }
+interface CostModel { models: Record<string, ModelPricing>; whatsapp: Record<string, WaRates>; usdToClp?: number }
 interface PlanRow { code: string; name: string; priceClp: number; priceUsd: number; features: Record<string, any> }
 
 const money = (n: number) => `US$${n.toFixed(2)}`;
 
 export default function CalculatorPage() {
+  const toast = useToast();
   const [cost, setCost] = useState<CostModel | null>(null);
   const [plans, setPlans] = useState<PlanRow[]>([]);
+  const [savingRates, setSavingRates] = useState(false);
+  const [editRates, setEditRates] = useState<WaRates>({ marketing: 0, utility: 0, authentication: 0, service: 0 });
 
   // Escenario
   const [country, setCountry] = useState("CL");
-  const [fx, setFx] = useState(950); // USD→CLP
+  const [fx, setFx] = useState(950); // USD→CLP (editable/persistente)
   // IA
   const [model, setModel] = useState("claude-haiku-4-5");
   const [convos, setConvos] = useState(500);
@@ -41,10 +44,34 @@ export default function CalculatorPage() {
   const [priceUsd, setPriceUsd] = useState(39);
   const [targetMargin, setTargetMargin] = useState(70);
 
+  const loadCost = () =>
+    padmin<CostModel>("/platform/cost-model").then((c) => {
+      setCost(c);
+      if (c.usdToClp) setFx(c.usdToClp);
+    });
   useEffect(() => {
-    void padmin<CostModel>("/platform/cost-model").then(setCost).catch(() => setCost({ models: {}, whatsapp: {} }));
+    void loadCost().catch(() => setCost({ models: {}, whatsapp: {} }));
     void padmin<PlanRow[]>("/platform/plans").then(setPlans).catch(() => setPlans([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Al elegir país, precarga sus tarifas efectivas en el editor.
+  useEffect(() => {
+    if (cost) setEditRates({ ...(cost.whatsapp[country] ?? cost.whatsapp.default ?? { marketing: 0, utility: 0, authentication: 0, service: 0 }) });
+  }, [cost, country]);
+
+  async function saveRates() {
+    setSavingRates(true);
+    try {
+      await padmin("/platform/cost-settings", { method: "PATCH", body: JSON.stringify({ usdToClp: fx, whatsappRates: { [country]: editRates } }) });
+      await loadCost();
+      toast.push("Tarifas y tipo de cambio guardados ✔", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSavingRates(false);
+    }
+  }
 
   const calc = useMemo(() => {
     if (!cost) return null;
@@ -163,9 +190,34 @@ export default function CalculatorPage() {
         </div>
       </div>
 
+      {/* Editor persistente de tarifas de Meta + tipo de cambio */}
+      <div className={`${card} mt-4`}>
+        <h2 className="font-semibold text-navy-900">⚙ Tarifas de Meta y tipo de cambio (se guardan)</h2>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Estos valores afectan la <b>facturación real</b> (costo Meta por tenant y el excedente en CLP), no solo el
+          escenario. Editas la tarifa del país seleccionado (<b>{country}</b>) y el tipo de cambio.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-5">
+          {(["marketing", "utility", "authentication"] as const).map((k) => (
+            <label key={k} className="capitalize">{k} (USD)
+              <input type="number" step="0.001" value={editRates[k]} onChange={(e) => setEditRates({ ...editRates, [k]: Number(e.target.value) })} className={input} />
+            </label>
+          ))}
+          <label>Tipo de cambio USD→CLP
+            <input type="number" value={fx} onChange={(e) => setFx(Number(e.target.value))} className={input} />
+          </label>
+          <div className="flex items-end">
+            <button onClick={() => void saveRates()} disabled={savingRates} className="w-full rounded-lg bg-navy-900 px-3 py-2 text-xs font-semibold text-white hover:bg-navy-800 disabled:opacity-50">
+              {savingRates ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] text-slate-400">Servicio (dentro de 24 h) siempre es gratis. Los tenants de países sin tarifa cargada usan el fallback «default».</p>
+      </div>
+
       <p className="mt-3 text-[11px] text-slate-400">
-        Tarifas: IA por token (lista de modelos) y Meta por mensaje según país — ambas aproximadas y configurables. El
-        gasto en Meta Ads es del cliente salvo que marques que lo pagas tú. Cálculo referencial para fijar precios.
+        Tarifas: IA por token (lista de modelos) y Meta por mensaje según país. El gasto en Meta Ads es del cliente salvo
+        que marques que lo pagas tú. Cálculo referencial para fijar precios.
       </p>
     </div>
   );
