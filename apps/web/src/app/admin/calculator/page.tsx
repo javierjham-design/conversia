@@ -22,7 +22,10 @@ export default function CalculatorPage() {
   const [cost, setCost] = useState<CostModel | null>(null);
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [savingRates, setSavingRates] = useState(false);
-  const [editRates, setEditRates] = useState<WaRates>({ marketing: 0, utility: 0, authentication: 0, service: 0 });
+  // Editor masivo de tarifas: todos los países a la vez.
+  const [allRates, setAllRates] = useState<Record<string, WaRates>>({});
+  const [newCountry, setNewCountry] = useState("");
+  const [importText, setImportText] = useState("");
 
   // Escenario
   const [country, setCountry] = useState("CL");
@@ -48,6 +51,8 @@ export default function CalculatorPage() {
     padmin<CostModel>("/platform/cost-model").then((c) => {
       setCost(c);
       if (c.usdToClp) setFx(c.usdToClp);
+      // Precarga TODAS las tarifas efectivas en el editor masivo.
+      setAllRates(JSON.parse(JSON.stringify(c.whatsapp ?? {})));
     });
   useEffect(() => {
     void loadCost().catch(() => setCost({ models: {}, whatsapp: {} }));
@@ -55,15 +60,41 @@ export default function CalculatorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Al elegir país, precarga sus tarifas efectivas en el editor.
-  useEffect(() => {
-    if (cost) setEditRates({ ...(cost.whatsapp[country] ?? cost.whatsapp.default ?? { marketing: 0, utility: 0, authentication: 0, service: 0 }) });
-  }, [cost, country]);
+  function setRate(cc: string, key: keyof WaRates, val: number) {
+    setAllRates((prev) => ({ ...prev, [cc]: { ...(prev[cc] ?? { marketing: 0, utility: 0, authentication: 0, service: 0 }), [key]: val } }));
+  }
+  function addCountry() {
+    const cc = newCountry.trim().toUpperCase();
+    if (!cc || allRates[cc]) return;
+    setAllRates((prev) => ({ ...prev, [cc]: { marketing: 0, utility: 0, authentication: 0, service: 0 } }));
+    setNewCountry("");
+  }
+  function applyImport() {
+    try {
+      const parsed = JSON.parse(importText);
+      if (typeof parsed !== "object" || !parsed) throw new Error("no es un objeto");
+      // Normaliza: acepta { CL: { marketing, utility, authentication } , ... }.
+      const merged: Record<string, WaRates> = { ...allRates };
+      for (const [cc, r] of Object.entries(parsed as Record<string, any>)) {
+        merged[cc.toUpperCase()] = {
+          marketing: Number(r.marketing ?? 0),
+          utility: Number(r.utility ?? 0),
+          authentication: Number(r.authentication ?? r.auth ?? 0),
+          service: Number(r.service ?? 0),
+        };
+      }
+      setAllRates(merged);
+      setImportText("");
+      toast.push(`Importados ${Object.keys(parsed).length} país(es) ✔ (revisa y guarda)`, "ok");
+    } catch (e) {
+      toast.push(`JSON inválido: ${(e as Error).message}`, "error");
+    }
+  }
 
-  async function saveRates() {
+  async function saveAllRates() {
     setSavingRates(true);
     try {
-      await padmin("/platform/cost-settings", { method: "PATCH", body: JSON.stringify({ usdToClp: fx, whatsappRates: { [country]: editRates } }) });
+      await padmin("/platform/cost-settings", { method: "PATCH", body: JSON.stringify({ usdToClp: fx, whatsappRates: allRates }) });
       await loadCost();
       toast.push("Tarifas y tipo de cambio guardados ✔", "ok");
     } catch (e) {
@@ -190,29 +221,62 @@ export default function CalculatorPage() {
         </div>
       </div>
 
-      {/* Editor persistente de tarifas de Meta + tipo de cambio */}
+      {/* Editor MASIVO de tarifas de Meta + tipo de cambio (se guardan) */}
       <div className={`${card} mt-4`}>
-        <h2 className="font-semibold text-navy-900">⚙ Tarifas de Meta y tipo de cambio (se guardan)</h2>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Estos valores afectan la <b>facturación real</b> (costo Meta por tenant y el excedente en CLP), no solo el
-          escenario. Editas la tarifa del país seleccionado (<b>{country}</b>) y el tipo de cambio.
-        </p>
-        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-5">
-          {(["marketing", "utility", "authentication"] as const).map((k) => (
-            <label key={k} className="capitalize">{k} (USD)
-              <input type="number" step="0.001" value={editRates[k]} onChange={(e) => setEditRates({ ...editRates, [k]: Number(e.target.value) })} className={input} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold text-navy-900">⚙ Tarifas de Meta y tipo de cambio (se guardan)</h2>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-600">USD→CLP
+              <input type="number" value={fx} onChange={(e) => setFx(Number(e.target.value))} className="ml-1 w-24 rounded border border-slate-300 px-2 py-1 text-sm" />
             </label>
-          ))}
-          <label>Tipo de cambio USD→CLP
-            <input type="number" value={fx} onChange={(e) => setFx(Number(e.target.value))} className={input} />
-          </label>
-          <div className="flex items-end">
-            <button onClick={() => void saveRates()} disabled={savingRates} className="w-full rounded-lg bg-navy-900 px-3 py-2 text-xs font-semibold text-white hover:bg-navy-800 disabled:opacity-50">
-              {savingRates ? "Guardando…" : "Guardar"}
+            <button onClick={() => void saveAllRates()} disabled={savingRates} className="rounded-lg bg-navy-900 px-3 py-2 text-xs font-semibold text-white hover:bg-navy-800 disabled:opacity-50">
+              {savingRates ? "Guardando…" : "Guardar todo"}
             </button>
           </div>
         </div>
-        <p className="mt-1 text-[10px] text-slate-400">Servicio (dentro de 24 h) siempre es gratis. Los tenants de países sin tarifa cargada usan el fallback «default».</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Afectan la <b>facturación real</b> (costo Meta por tenant + excedente en CLP). Precio por mensaje en USD. Edita
+          varios países a la vez o pégalos en bloque. <b>Servicio dentro de 24 h = gratis; «default» = fallback.</b>
+        </p>
+
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="py-1 pr-2">País</th>
+                <th className="py-1 pr-2">Marketing</th>
+                <th className="py-1 pr-2">Utilidad</th>
+                <th className="py-1 pr-2">Autenticación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.keys(allRates).sort().map((cc) => (
+                <tr key={cc} className="border-t border-slate-100">
+                  <td className="py-1 pr-2 font-mono font-medium text-navy-900">{cc}</td>
+                  {(["marketing", "utility", "authentication"] as const).map((k) => (
+                    <td key={k} className="py-1 pr-2">
+                      <input type="number" step="0.001" value={allRates[cc][k]} onChange={(e) => setRate(cc, k, Number(e.target.value))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input value={newCountry} onChange={(e) => setNewCountry(e.target.value)} placeholder="Agregar país (ISO, ej: BR)" maxLength={3} className="w-40 rounded border border-slate-300 px-2 py-1 text-sm uppercase" />
+          <button onClick={addCountry} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">Agregar país</button>
+        </div>
+
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-medium text-slate-600">Pegar / importar rate card (JSON) — carga rápida de muchos países</summary>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Pega un objeto tipo <span className="font-mono">{`{ "CL": { "marketing": 0.06, "utility": 0.018, "authentication": 0.03 }, "BR": { ... } }`}</span>. Se fusiona con lo actual; luego «Guardar todo».
+          </p>
+          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={4} placeholder='{ "CL": { "marketing": 0.06, "utility": 0.018, "authentication": 0.03 } }' className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs" />
+          <button onClick={applyImport} disabled={!importText.trim()} className="mt-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50">Aplicar al editor</button>
+        </details>
       </div>
 
       <p className="mt-3 text-[11px] text-slate-400">
