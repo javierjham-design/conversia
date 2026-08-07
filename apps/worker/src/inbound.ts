@@ -2,6 +2,7 @@ import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
 import { computeWhatsappCostUsd } from "@conversia/agents";
 import { geoFromPhone } from "./phone-geo";
+import { getWhatsappRatesOverride } from "./cost-settings";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { runAgentTurn } from "./agent-turn";
 import { transcribeWhatsappAudio } from "./audio";
@@ -147,7 +148,8 @@ export async function processInbound(job: InboundJob): Promise<void> {
         });
         if (already) return;
         const country = geoFromPhone(String(status.recipientId ?? "")).country;
-        const costUsd = computeWhatsappCostUsd(status.pricing!.category, country);
+        const overrides = await getWhatsappRatesOverride();
+        const costUsd = computeWhatsappCostUsd(status.pricing!.category, country, overrides);
         await tx.usageEvent.create({
           data: {
             organizationId: tenant.organizationId,
