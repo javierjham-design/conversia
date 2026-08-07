@@ -42,12 +42,26 @@ export interface WhatsappRates {
   service: number;
 }
 
+// Valores de REFERENCIA (aprox., por editar con tu rate card oficial/factura de
+// Meta). Grilla amplia para no tener que teclear país por país; corrige los que uses.
 export const WHATSAPP_PRICING: Record<string, WhatsappRates> = {
   CL: { marketing: 0.0592, utility: 0.0175, authentication: 0.0303, service: 0 },
   MX: { marketing: 0.0436, utility: 0.0119, authentication: 0.0239, service: 0 },
   PE: { marketing: 0.0703, utility: 0.024, authentication: 0.031, service: 0 },
   AR: { marketing: 0.0618, utility: 0.0344, authentication: 0.0367, service: 0 },
   CO: { marketing: 0.0125, utility: 0.0009, authentication: 0.0077, service: 0 },
+  BR: { marketing: 0.0625, utility: 0.008, authentication: 0.0315, service: 0 },
+  EC: { marketing: 0.06, utility: 0.02, authentication: 0.03, service: 0 },
+  BO: { marketing: 0.06, utility: 0.02, authentication: 0.03, service: 0 },
+  PY: { marketing: 0.06, utility: 0.02, authentication: 0.03, service: 0 },
+  UY: { marketing: 0.06, utility: 0.02, authentication: 0.03, service: 0 },
+  VE: { marketing: 0.06, utility: 0.02, authentication: 0.03, service: 0 },
+  GT: { marketing: 0.045, utility: 0.012, authentication: 0.024, service: 0 },
+  CR: { marketing: 0.045, utility: 0.012, authentication: 0.024, service: 0 },
+  PA: { marketing: 0.045, utility: 0.012, authentication: 0.024, service: 0 },
+  DO: { marketing: 0.045, utility: 0.012, authentication: 0.024, service: 0 },
+  US: { marketing: 0.025, utility: 0.004, authentication: 0.0135, service: 0 },
+  ES: { marketing: 0.0615, utility: 0.005, authentication: 0.0189, service: 0 },
   // Fallback conservador para países sin tarifa cargada.
   default: { marketing: 0.05, utility: 0.02, authentication: 0.03, service: 0 },
 };
