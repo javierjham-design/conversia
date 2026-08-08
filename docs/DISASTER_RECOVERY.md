@@ -94,18 +94,22 @@ que RLS aísle (SIN `app.org_id` → 0 filas; CON una org → solo sus filas).
    bandeja carga, un flujo publicado se lee.
 8. **Post-mortem**: registrar causa, RTO real y datos perdidos (ventana de RPO).
 
-## D) Recomendación de frecuencia y retención (acción pendiente)
-El RPO de 24 h es demasiado para conversaciones con clientes pagando. Recomiendo:
-1. **Verificar/activar los backups automáticos de Railway** (diarios, retención
-   ≥ 7 días) — baseline, RPO ≤ 24 h.
-2. **Añadir un `pg_dump` programado cada 6 h** a **almacenamiento fuera de Railway**
-   (p. ej. un bucket S3/R2) → RPO ≤ 6 h **y** una copia fuera del proveedor (protege
-   ante compromiso de la cuenta de Railway, que R-17 marca como riesgo alto).
-3. **Probar la restauración una vez al mes** con el paso **B** (está automatizable).
+## D) Frecuencia y retención
+El RPO de 24 h es demasiado para conversaciones con clientes pagando. Estado:
+1. **Backups automáticos de Railway** (diarios, retención ≥ 7 días) — baseline,
+   RPO ≤ 24 h. Se gestiona en el panel de Railway.
+2. ✅ **`pg_dump` cada 6 h a almacenamiento fuera de Railway** (bucket S3/R2) →
+   RPO ≤ 6 h **y** copia fuera del proveedor (protege ante compromiso de la cuenta
+   de Railway, R-17). Implementado en [`.github/workflows/db-backup.yml`](../.github/workflows/db-backup.yml);
+   cada corrida **verifica el restore desde el storage**. Costo ≈ $0/mes. Setup y
+   costos en [`docs/BACKUPS.md`](./BACKUPS.md). *Falta cargar los secrets del bucket.*
+3. **Probar la restauración**: ahora es automática en cada backup (paso 2). El paso
+   **B** de abajo queda para validaciones manuales.
 4. Cuando el volumen crezca, evaluar **PITR** (point-in-time recovery) del proveedor
    para RPO de minutos.
 
 ## Estado tras la prueba
 - ✅ El respaldo de prod **es restaurable** y conserva datos + RLS (probado 2026-08-05).
 - ✅ RTO medido ~5 min (tamaño actual); ⚠️ crece con el volumen.
-- ⚠️ **RPO hasta 24 h** hasta aplicar la recomendación **D** (pendiente de decisión/infra).
+- ✅ **Copia off-Railway cada 6 h con restore verificado** (workflow D.2). RPO ≤ 6 h
+  una vez cargados los secrets del bucket (ver [`docs/BACKUPS.md`](./BACKUPS.md)).
