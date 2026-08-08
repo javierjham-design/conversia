@@ -17,7 +17,7 @@ Leyenda: ✅ implementado y probado · 🟡 implementado (sin prueba automatizad
 | | Rate limit login (por email) + registro | ✅ | `common/rate-limit.ts`, `test/rate-limit.spec.ts` |
 | | Anti-enumeración de usuarios | ✅ | login/registro con mensaje genérico |
 | | MFA (TOTP) por usuario + exigible a owner/admin del tenant | ✅ | `auth/totp.ts` (6 tests), enrolamiento/verificación/recovery, `settings.security.requireMfaForAdmins` |
-| | MFA obligatorio admin PLATAFORMA (Super Admin) | ⛔ | pendiente (el MFA de tenant ya existe) |
+| | MFA obligatorio admin PLATAFORMA (Super Admin) | ✅ | `SUPER_ADMIN_REQUIRE_MFA` (default on): el guard bloquea todo `/platform/*` salvo `/platform/auth/*` hasta activar MFA; el panel redirige a `/admin/security` a enrolarlo |
 | | Verificación de correo | ⛔ | roadmap 30d |
 | | Revocación de sesión / logout global | ⛔ | roadmap 60d (tokenVersion) |
 | **AuthZ** | RBAC por permiso `modulo:accion` | 🟡 | `tenancy/permissions.ts`, `hasPermission` |
