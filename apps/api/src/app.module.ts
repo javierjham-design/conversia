@@ -22,6 +22,7 @@ import { MetaController } from "./integrations/meta.controller";
 import { OAuthController } from "./integrations/oauth.controller";
 import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
+import { OnboardingController } from "./organizations/onboarding.controller";
 import { SettingsController } from "./organizations/settings.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
@@ -45,6 +46,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     HealthController,
     AuthController,
     OrganizationsController,
+    OnboardingController, // checklist de activación del cliente nuevo
     SettingsController, // Centro de Configuración del tenant (/settings)
     AgentsController,
     ConversationsController,

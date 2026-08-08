@@ -17,6 +17,7 @@ import {
   Menu,
   MessageSquare,
   Plug,
+  Rocket,
   Settings,
   Smartphone,
   Users,
@@ -26,6 +27,7 @@ import { api, clearToken, getToken } from "@/lib/api";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
 import { BillingBanner } from "@/components/BillingBanner";
+import { OnboardingBanner } from "@/components/OnboardingBanner";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -138,6 +140,10 @@ const NAV_GROUPS: Array<{
   }>;
 }> = [
   {
+    label: "Inicio",
+    items: [{ href: "/onboarding", label: "Primeros pasos", icon: Rocket }],
+  },
+  {
     label: "Operación",
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
@@ -169,6 +175,8 @@ const NAV_GROUPS: Array<{
 ];
 
 const BREADCRUMBS: Record<string, string[]> = {
+  "/onboarding": ["Inicio", "Primeros pasos"],
+  "/onboarding/plantillas": ["Inicio", "Primeros pasos", "Plantillas"],
   "/inbox": ["Operación", "Bandeja"],
   "/contacts": ["Operación", "Contactos"],
   "/agents": ["Automatización", "Agentes IA"],
@@ -414,6 +422,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </header>
 
             <BillingBanner />
+            <OnboardingBanner />
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
         </div>
