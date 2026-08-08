@@ -149,7 +149,10 @@ export default function SecurityPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">Aún no tienes MFA. Recomendado para una cuenta con acceso total a la plataforma.</p>
+            <p className="text-sm text-slate-600">
+              El MFA es <b>obligatorio</b> para operar la plataforma. Actívalo ahora para
+              desbloquear el panel; una cuenta con acceso total no puede quedar solo con contraseña.
+            </p>
             <Button disabled={busy} onClick={() => void startEnroll()}>Activar MFA</Button>
           </div>
         )}

@@ -72,6 +72,9 @@ const envSchema = z.object({
   SUPER_ADMIN_SESSION_SECRET: z.string().optional().default(""), // separa del JWT_SECRET de tenant
   SUPER_ADMIN_ALLOWED_IPS: z.string().optional().default(""), // CSV; vacío = sin allowlist
   SUPER_ADMIN_MFA_ISSUER: z.string().default("TuBot.cl"),
+  // MFA obligatorio para admins de plataforma: sin él, solo se puede llegar a
+  // /platform/auth/* (login + enrolar MFA); el resto del panel queda bloqueado.
+  SUPER_ADMIN_REQUIRE_MFA: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
   SUPER_ADMIN_SESSION_HOURS: z.coerce.number().default(4),
   PUBLIC_PRICING_CACHE_TTL: z.coerce.number().default(300),
 
