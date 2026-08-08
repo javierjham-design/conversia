@@ -12,8 +12,10 @@ import {
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { z } from "zod";
+import { getEnv } from "@conversia/config";
 import { PERMISSION_CATALOG, isAssignablePermission } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
+import { signInviteToken } from "../auth/jwt";
 import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -230,7 +232,11 @@ export class UsersController {
           after: { email: input.email, role: input.roleCode },
         },
       });
-      return { ok: true, email: input.email, tempPassword };
+      // Link copiable: el invitado abre /accept-invite y fija su contraseña (o,
+      // si ya tenía cuenta, va al login). `fresh` = cuenta recién creada.
+      const token = signInviteToken(user.id, tempPassword !== null);
+      const inviteUrl = `${getEnv().WEB_URL.replace(/\/$/, "")}/accept-invite?token=${token}`;
+      return { ok: true, email: input.email, tempPassword, inviteUrl };
     });
   }
 

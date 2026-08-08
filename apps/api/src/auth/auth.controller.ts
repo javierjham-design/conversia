@@ -17,7 +17,7 @@ import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
-import { verifyAppToken, verifyMfaToken } from "./jwt";
+import { verifyAppToken, verifyInviteToken, verifyMfaToken } from "./jwt";
 import { resolvePersonalization } from "../common/industries";
 import { AuthService } from "./auth.service";
 
@@ -76,6 +76,61 @@ export class AuthController {
       );
     }
     return this.auth.login(input);
+  }
+
+  // --------------------------- Invitaciones ---------------------------
+
+  /** Datos del invitado a partir del token del link (público). */
+  @Get("invite/:token")
+  async inviteInfo(@Req() req: Request) {
+    const token = (req.params as { token: string }).token;
+    let claims: { sub: string; fresh: boolean };
+    try {
+      claims = verifyInviteToken(token);
+    } catch {
+      throw new BadRequestException("El enlace de invitación no es válido o expiró.");
+    }
+    const user = await this.prisma.admin.user.findUnique({
+      where: { id: claims.sub },
+      select: { email: true, name: true },
+    });
+    if (!user) throw new BadRequestException("La invitación ya no está disponible.");
+    return { email: user.email, name: user.name, needsPassword: claims.fresh };
+  }
+
+  /** Acepta la invitación fijando la contraseña (público, solo para cuentas nuevas). */
+  @Post("accept-invite")
+  async acceptInvite(@Body() body: unknown, @Req() req: Request) {
+    const input = parse(
+      z.object({
+        token: z.string().min(10),
+        password: z.string().min(10, "La contraseña debe tener al menos 10 caracteres").max(200),
+      }),
+      body,
+    );
+    const rl = await this.rateLimit.register(clientIp(req));
+    if (!rl.allowed) throw new HttpException("Demasiados intentos. Intenta más tarde.", HttpStatus.TOO_MANY_REQUESTS);
+    let claims: { sub: string; fresh: boolean };
+    try {
+      claims = verifyInviteToken(input.token);
+    } catch {
+      throw new BadRequestException("El enlace de invitación no es válido o expiró.");
+    }
+    if (!claims.fresh) {
+      throw new BadRequestException("Ya tienes una cuenta. Inicia sesión con tu contraseña.");
+    }
+    const user = await this.prisma.admin.user.findUnique({ where: { id: claims.sub } });
+    if (!user) throw new BadRequestException("La invitación ya no está disponible.");
+    // El link solo sirve para el primer ingreso: si la cuenta ya inició sesión,
+    // no puede reusarse para resetear la contraseña.
+    if (user.lastLoginAt) {
+      throw new BadRequestException("Esta invitación ya fue usada. Inicia sesión con tu contraseña.");
+    }
+    await this.prisma.admin.user.update({
+      where: { id: user.id },
+      data: { passwordHash: bcrypt.hashSync(input.password, 12) },
+    });
+    return { ok: true, email: user.email };
   }
 
   // --------------------------- MFA (TOTP) ---------------------------

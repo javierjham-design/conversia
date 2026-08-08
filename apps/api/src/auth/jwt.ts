@@ -60,6 +60,33 @@ export function verifyMfaToken(token: string, purpose: "verify" | "setup"): { su
   return { sub: String(decoded.sub) };
 }
 
+/**
+ * Token de INVITACIÓN: audiencia propia (`${AUD}:invite`) → no sirve para entrar
+ * a la app, solo para que el invitado fije su contraseña vía link. `fresh` marca
+ * si la cuenta se creó recién (necesita contraseña) o ya existía. Vida 7 días.
+ */
+export function signInviteToken(userId: string, fresh: boolean): string {
+  const env = getEnv();
+  return jwt.sign({ sub: userId, fresh, purpose: "invite", jti: randomUUID() }, env.JWT_SECRET, {
+    algorithm: ALGO,
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:invite`,
+    expiresIn: "7d",
+  } as jwt.SignOptions);
+}
+
+export function verifyInviteToken(token: string): { sub: string; fresh: boolean } {
+  const env = getEnv();
+  const decoded = jwt.verify(token, env.JWT_SECRET, {
+    algorithms: [ALGO],
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:invite`,
+    clockTolerance: 5,
+  }) as jwt.JwtPayload;
+  if (!decoded.sub || decoded.purpose !== "invite") throw new Error("Token de invitación inválido");
+  return { sub: String(decoded.sub), fresh: decoded.fresh === true };
+}
+
 export function verifyAppToken(token: string): AppTokenClaims {
   const env = getEnv();
   const decoded = jwt.verify(token, env.JWT_SECRET, {

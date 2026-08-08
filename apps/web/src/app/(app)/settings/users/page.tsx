@@ -61,6 +61,8 @@ export default function UsersPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [invite, setInvite] = useState({ email: "", name: "", roleCode: "operator" });
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [invitedEmail, setInvitedEmail] = useState<string>("");
   const [draft, setDraft] = useState<RoleDraft | null>(null);
   // Panel de edición de un usuario (click en la fila)
   const [selected, setSelected] = useState<Member | null>(null);
@@ -127,9 +129,12 @@ export default function UsersPage() {
     e.preventDefault();
     setMsg(null);
     setTempPassword(null);
+    setInviteUrl(null);
     try {
-      const r = await api<{ tempPassword: string | null }>("/users", { method: "POST", body: JSON.stringify(invite) });
+      const r = await api<{ tempPassword: string | null; inviteUrl: string | null }>("/users", { method: "POST", body: JSON.stringify(invite) });
       setTempPassword(r.tempPassword);
+      setInviteUrl(r.inviteUrl);
+      setInvitedEmail(invite.email);
       setInvite({ email: "", name: "", roleCode: "operator" });
       await load();
       setMsg(r.tempPassword ? null : "Usuario existente agregado a la organización ✔");
@@ -195,24 +200,45 @@ export default function UsersPage() {
       </p>
 
       {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{msg}</p>}
-      {tempPassword && (
-        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-          <p>Usuario creado. Contraseña temporal (se muestra solo una vez): <b className="font-mono">{tempPassword}</b></p>
+      {inviteUrl && (
+        <div className="mb-4 space-y-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <p className="font-medium">Invitación creada ✔ Comparte este enlace para que active su cuenta:</p>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={inviteUrl}
+              onFocus={(e) => e.currentTarget.select()}
+              className="min-w-0 flex-1 rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs text-navy-900 dark:border-emerald-500/40 dark:bg-navy-900 dark:text-emerald-100"
+            />
+            <button
+              onClick={() => {
+                void navigator.clipboard.writeText(inviteUrl);
+                setMsg("Enlace de invitación copiado ✔");
+              }}
+              className="shrink-0 rounded-lg border border-emerald-300 px-2 py-1.5 text-xs font-medium hover:bg-emerald-100 dark:border-emerald-500/40"
+            >
+              📋 Copiar enlace
+            </button>
+          </div>
           <button
             onClick={() => {
               void navigator.clipboard.writeText(
-                `Hola! Te invité al panel de nuestro equipo en TuBot.
-Entra en https://www.tubot.cl/login
-Usuario: ${invite.email}
-Clave temporal: ${tempPassword}
-(cámbiala al entrar en Configuración → Mi perfil)`,
+                `¡Hola! Te sumé a nuestro equipo en TuBot. Activa tu cuenta y define tu contraseña aquí:
+${inviteUrl}
+(El enlace vence en 7 días.)`,
               );
               setMsg("Mensaje de invitación copiado — pégalo en WhatsApp o correo ✔");
             }}
-            className="mt-1 rounded-lg border border-amber-300 px-2 py-1 text-xs font-medium hover:bg-amber-100 dark:border-amber-500/40"
+            className="rounded-lg border border-emerald-300 px-2 py-1 text-xs font-medium hover:bg-emerald-100 dark:border-emerald-500/40"
           >
-            📋 Copiar mensaje de invitación (para WhatsApp)
+            📋 Copiar mensaje para WhatsApp
           </button>
+          {tempPassword && (
+            <p className="text-xs text-emerald-700/80 dark:text-emerald-300/70">
+              Alternativa sin enlace — clave temporal para <b>{invitedEmail}</b>:{" "}
+              <b className="font-mono">{tempPassword}</b> (cámbiala al entrar).
+            </p>
+          )}
         </div>
       )}
 
