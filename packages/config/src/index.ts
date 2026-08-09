@@ -46,6 +46,8 @@ const envSchema = z.object({
   // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
   RESEND_API_KEY: z.string().optional().default(""),
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
+  // Destinatario de los avisos de soporte in-app (vacío = sin correo, solo panel).
+  SUPPORT_NOTIFY_EMAIL: z.string().optional().default(""),
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)

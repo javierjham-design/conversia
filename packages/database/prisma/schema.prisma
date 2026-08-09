@@ -371,6 +371,24 @@ model Organization {
   @@map("organizations")
 }
 
+// Tickets de soporte in-app: el tenant reporta un problema y el Super Admin lo ve.
+model SupportTicket {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  userId         String?   @map("user_id") // quién reportó (puede ser null)
+  email          String? // correo de contacto para responder
+  subject        String?
+  message        String
+  url            String? // página desde donde se reportó
+  status         String    @default("open") // open | resolved
+  createdAt      DateTime  @default(now()) @map("created_at")
+  resolvedAt     DateTime? @map("resolved_at")
+
+  @@index([organizationId])
+  @@index([status, createdAt])
+  @@map("support_tickets")
+}
+
 model OrganizationDomain {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
