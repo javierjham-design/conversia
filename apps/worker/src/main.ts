@@ -19,6 +19,8 @@ import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhoo
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
+import { processNotificationJob } from "./notifications/dispatch";
+import type { NotifJob } from "@conversia/notifications";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
@@ -76,6 +78,12 @@ async function main() {
     async (job) => processSyncJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Notificaciones: despacha cada evento a los canales habilitados por usuario.
+  const notificationsWorker = new Worker<NotifJob>(
+    QUEUE_NAMES.notifications,
+    async (job) => processNotificationJob(job.data),
+    { connection, concurrency: 4 },
+  );
   // Sincronización diaria (05:00) del catálogo de anuncios de Meta: un job
   // repetible que abanica un sync por cada tenant con Meta conectado.
   void getSyncQueue()
@@ -117,7 +125,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -158,6 +166,7 @@ async function main() {
       importsWorker.close(),
       emailsWorker.close(),
       syncWorker.close(),
+      notificationsWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

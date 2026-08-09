@@ -13,6 +13,7 @@
     "@conversia/agents": "workspace:*",
     "@conversia/config": "workspace:*",
     "@conversia/database": "workspace:*",
+    "@conversia/notifications": "workspace:*",
     "@conversia/scheduling": "workspace:*",
     "@conversia/types": "workspace:*",
     "@conversia/workflows": "workspace:*",

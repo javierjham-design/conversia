@@ -1634,6 +1634,46 @@ model Notification {
   @@map("notifications")
 }
 
+// Dispositivos de push por usuario. GENÉRICA: soporta Web Push (endpoint+claves)
+// y push nativo (token APNs/FCM) sin migración futura — el nativo solo llena
+// identifier+platform+kind. Un usuario puede tener varios; todos reciben.
+model PushDevice {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  platform       String // web | ios | android | desktop
+  kind           String // web_push | apns | fcm
+  identifier     String // endpoint de Web Push  ó  token nativo
+  keys           Json     @default("{}") // { p256dh, auth } en Web Push; vacío en nativo
+  label          String? // "Chrome en Windows", "iPhone de Javier"
+  active         Boolean  @default(true)
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, identifier])
+  @@index([organizationId, userId, active])
+  @@map("push_devices")
+}
+
+// Registro de entregas: una fila por (evento, destinatario, canal, dispositivo).
+// Para soporte: "no me llegó el aviso" se responde con datos, no teorías.
+model NotificationDelivery {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  eventKey       String   @map("event_key")
+  channel        String // in_app | web_push | email | native_push | whatsapp
+  deviceId       String?  @map("device_id")
+  status         String // queued | sent | failed | skipped
+  error          String?
+  meta           Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, userId, createdAt])
+  @@map("notification_deliveries")
+}
+
 // Exports de datos en background (BullMQ). El archivo expira a los 7 días y
 // la descarga requiere permiso de Datos; queda registro de quién exportó.
 model ExportJob {

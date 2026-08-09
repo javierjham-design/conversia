@@ -414,6 +414,7 @@ export const QUEUE_NAMES = {
   imports: "contact-imports",
   emails: "tenant-emails",
   sync: "integration-sync",
+  notifications: "notifications",
 } as const;
 
 /** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
