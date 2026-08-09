@@ -372,17 +372,23 @@ model Organization {
 }
 
 // Tickets de soporte in-app: el tenant reporta un problema y el Super Admin lo ve.
+// Estructura pensada para, a futuro, ENRUTAR los tickets a la bandeja de TuBot
+// (cuando TuBot sea tenant de sí mismo): guarda el tenant de origen, el usuario
+// que reporta, el contacto asociado si aplica y a qué conversación aterrizó.
 model SupportTicket {
-  id             String    @id @default(cuid())
-  organizationId String    @map("organization_id")
-  userId         String?   @map("user_id") // quién reportó (puede ser null)
-  email          String? // correo de contacto para responder
-  subject        String?
-  message        String
-  url            String? // página desde donde se reportó
-  status         String    @default("open") // open | resolved
-  createdAt      DateTime  @default(now()) @map("created_at")
-  resolvedAt     DateTime? @map("resolved_at")
+  id                   String    @id @default(cuid())
+  organizationId       String    @map("organization_id") // tenant de origen
+  userId               String?   @map("user_id") // usuario que reportó (puede ser null)
+  contactId            String?   @map("contact_id") // contacto asociado, si aplica
+  email                String? // correo de contacto para responder
+  subject              String?
+  message              String
+  url                  String? // página desde donde se reportó
+  status               String    @default("open") // open | resolved
+  // Conversación donde se atendió el ticket (futuro: bandeja de TuBot-tenant).
+  routedConversationId String?   @map("routed_conversation_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  resolvedAt           DateTime? @map("resolved_at")
 
   @@index([organizationId])
   @@index([status, createdAt])
