@@ -420,6 +420,53 @@ export class PlatformController {
     }));
   }
 
+  // --------------------------- Soporte in-app ---------------------------
+
+  /** Bandeja de soporte: tickets que reportan los tenants (cross-tenant). */
+  @Get("support")
+  async support(@Query("status") status?: string) {
+    const where = status === "resolved" ? { status: "resolved" } : status === "all" ? {} : { status: "open" };
+    const [tickets, openCount] = await Promise.all([
+      this.prisma.admin.supportTicket.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 }),
+      this.prisma.admin.supportTicket.count({ where: { status: "open" } }),
+    ]);
+    const orgIds = [...new Set(tickets.map((t) => t.organizationId))];
+    const userIds = tickets.map((t) => t.userId).filter(Boolean) as string[];
+    const [orgs, users] = await Promise.all([
+      this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } }),
+      userIds.length ? this.prisma.admin.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [],
+    ]);
+    const orgName = new Map(orgs.map((o) => [o.id, o.name]));
+    const userName = new Map(users.map((u) => [u.id, u.name]));
+    return {
+      openCount,
+      tickets: tickets.map((t) => ({
+        id: t.id,
+        org: orgName.get(t.organizationId) ?? t.organizationId,
+        user: t.userId ? userName.get(t.userId) ?? null : null,
+        email: t.email,
+        subject: t.subject,
+        message: t.message,
+        url: t.url,
+        status: t.status,
+        createdAt: t.createdAt,
+        resolvedAt: t.resolvedAt,
+      })),
+    };
+  }
+
+  /** Marca un ticket como resuelto (o lo reabre). */
+  @Patch("support/:id")
+  async updateSupport(@Param("id") id: string, @Body() body: unknown) {
+    const parsed = z.object({ status: z.enum(["open", "resolved"]) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Estado inválido");
+    const t = await this.prisma.admin.supportTicket.update({
+      where: { id },
+      data: { status: parsed.data.status, resolvedAt: parsed.data.status === "resolved" ? new Date() : null },
+    });
+    return { ok: true, status: t.status };
+  }
+
   // --------------------------- Demos / CRM ---------------------------
 
   /** CRM de prospectos/demos, con días en la plataforma y estado de IA si ya se provisionó. */

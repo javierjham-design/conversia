@@ -28,6 +28,7 @@ import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
 import { BillingBanner } from "@/components/BillingBanner";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
+import { SupportWidget } from "@/components/SupportWidget";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -425,6 +426,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <OnboardingBanner />
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
+          <SupportWidget />
         </div>
       </MeContext.Provider>
     </ToastProvider>
