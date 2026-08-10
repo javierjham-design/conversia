@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { CLP_PER_USD_REF, computeWhatsappCostUsd } from "@conversia/agents";
@@ -119,6 +119,37 @@ export class NotificationsController {
       const all = (settings.notifPrefs ?? {}) as Record<string, any>;
       all[ctx.userId!] = { ...(all[ctx.userId!] ?? {}), ...parsed.data };
       await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifPrefs: all } as object } });
+      return { ok: true };
+    });
+  }
+
+  /**
+   * Plantilla HSM de escalamiento por WhatsApp — POR TENANT. Cada tenant conecta
+   * SU propia plantilla aprobada en SU WABA. Solo owner/admin la configuran.
+   */
+  @Get("whatsapp-template")
+  getWhatsappTemplate() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const t = (((org?.settings ?? {}) as any).notifications?.whatsappEscalationTemplate ?? {}) as { name?: string; language?: string };
+      return { name: t.name ?? "", language: t.language ?? "es", canEdit: ctx.roleCode === "owner" || ctx.roleCode === "admin" };
+    });
+  }
+
+  @Post("whatsapp-template")
+  setWhatsappTemplate(@Body() body: unknown) {
+    const ctx = requireContext();
+    if (ctx.roleCode !== "owner" && ctx.roleCode !== "admin") throw new ForbiddenException("Solo un administrador puede configurar la plantilla.");
+    const parsed = z
+      .object({ name: z.string().trim().max(120), language: z.string().trim().max(10).default("es") })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const notifications = { ...(settings.notifications ?? {}), whatsappEscalationTemplate: { name: parsed.data.name, language: parsed.data.language } };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifications } as object } });
       return { ok: true };
     });
   }
