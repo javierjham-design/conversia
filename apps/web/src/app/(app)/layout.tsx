@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -24,6 +24,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { api, clearToken, getToken } from "@/lib/api";
+import { disablePush, enablePush, permissionState, pushSupport, registerServiceWorker } from "@/lib/push";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
 import { BillingBanner } from "@/components/BillingBanner";
@@ -53,36 +54,71 @@ export function useTerm() {
   return (key: string, fallback: string) => (vocab && vocab[key]) || fallback;
 }
 
-/** Campana: incidencias de integraciones (token vencido, sync fallida, CAPI…). */
+interface NotifItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** Campana unificada: eventos del sistema (asignaciones, escalamientos, citas…). */
 function NotificationsBell() {
-  const [events, setEvents] = useState<{ id: string; provider: string; status: string; message: string | null; createdAt: string }[]>([]);
+  const router = useRouter();
+  const [items, setItems] = useState<NotifItem[]>([]);
+  const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
-  const [seenAt, setSeenAt] = useState<number>(() => Number(typeof window !== "undefined" ? localStorage.getItem("notifSeenAt") ?? 0 : 0));
+  const [pushCta, setPushCta] = useState<"hidden" | "offer" | "ios-install">("hidden");
+
+  const load = useCallback(
+    () =>
+      api<{ unread: number; items: NotifItem[] }>("/notifications")
+        .then((r) => {
+          setItems(r.items);
+          setUnread(r.unread);
+        })
+        .catch(() => undefined),
+    [],
+  );
 
   useEffect(() => {
-    const load = () =>
-      api<{ events: { id: string; provider: string; status: string; message: string | null; createdAt: string }[] }>("/integrations/notifications")
-        .then((r) => setEvents(r.events))
-        .catch(() => undefined);
+    void registerServiceWorker();
     void load();
     const t = setInterval(() => void load(), 60_000);
+    // ¿Ofrecer activar push? Solo si el permiso está en "default" y no lo descartó.
+    const dismissed = localStorage.getItem("pushCtaDismissed") === "1";
+    const support = pushSupport();
+    if (!dismissed && permissionState() === "default") {
+      setPushCta(support.supported ? "offer" : support.reason === "ios-needs-install" ? "ios-install" : "hidden");
+    }
     return () => clearInterval(t);
-  }, []);
+  }, [load]);
 
-  const unread = events.filter((e) => new Date(e.createdAt).getTime() > seenAt).length;
+  async function openBell() {
+    setOpen((o) => !o);
+    if (!open && unread > 0) {
+      await api("/notifications/read", { method: "POST", body: JSON.stringify({}) }).catch(() => {});
+      setUnread(0);
+      setItems((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
+    }
+  }
+
+  async function activatePush() {
+    const toast = (window as any);
+    const res = await enablePush();
+    if (res === "granted") setPushCta("hidden");
+    else if (res === "denied") {
+      setPushCta("hidden");
+      localStorage.setItem("pushCtaDismissed", "1");
+    }
+    void toast;
+  }
 
   return (
     <div className="relative">
-      <button
-        onClick={() => {
-          setOpen(!open);
-          const now = Date.now();
-          setSeenAt(now);
-          localStorage.setItem("notifSeenAt", String(now));
-        }}
-        aria-label="Notificaciones"
-        className="relative text-ink-muted hover:text-ink"
-      >
+      <button onClick={() => void openBell()} aria-label="Notificaciones" className="relative text-ink-muted hover:text-ink">
         <Bell size={17} />
         {unread > 0 && (
           <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
@@ -94,18 +130,53 @@ function NotificationsBell() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-8 z-50 w-80 rounded-xl border border-line bg-panel p-2 shadow-xl">
-            <p className="px-2 py-1 text-xs font-medium text-ink-muted">Incidencias de integraciones</p>
-            {events.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-ink-subtle">Sin incidencias recientes ✔</p>
+            {pushCta !== "hidden" && (
+              <div className="mb-1 rounded-lg border border-line bg-app p-2 text-[11px]">
+                {pushCta === "offer" ? (
+                  <>
+                    <p className="mb-1.5 text-ink-muted">Recibe avisos aunque no tengas el panel abierto (asignaciones, escalamientos…).</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => void activatePush()} className="rounded-md bg-brand-600 px-2 py-1 font-medium text-white hover:bg-brand-700">
+                        Activar notificaciones
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPushCta("hidden");
+                          localStorage.setItem("pushCtaDismissed", "1");
+                        }}
+                        className="px-2 py-1 text-ink-subtle hover:text-ink"
+                      >
+                        Ahora no
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-ink-muted">
+                    Para recibir avisos en iPhone, instala TuBot: <b>Compartir → Agregar a inicio</b>.
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="px-2 py-1 text-xs font-medium text-ink-muted">Notificaciones</p>
+            {items.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-ink-subtle">Sin notificaciones ✔</p>
             ) : (
               <ul className="max-h-80 overflow-y-auto">
-                {events.map((e) => (
-                  <li key={e.id} className="rounded-lg px-2 py-1.5 text-xs hover:bg-app">
-                    <span className={e.status === "error" ? "text-red-500" : "text-amber-500"}>●</span>{" "}
-                    <span className="text-ink-muted">{e.message ?? e.provider}</span>
-                    <span className="block pl-3 text-[10px] text-ink-subtle">
-                      {e.provider} · {new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}
-                    </span>
+                {items.map((n) => (
+                  <li key={n.id}>
+                    <button
+                      onClick={() => {
+                        setOpen(false);
+                        if (n.link) router.push(n.link);
+                      }}
+                      className={cn("block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-app", !n.readAt && "bg-brand-600/5")}
+                    >
+                      <span className="font-medium text-ink">{n.title}</span>
+                      {n.body && <span className="block text-ink-muted">{n.body}</span>}
+                      <span className="block text-[10px] text-ink-subtle">
+                        {new Date(n.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -375,7 +446,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   </a>
                 )}
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    await disablePush().catch(() => {});
                     clearToken();
                     window.location.href = "/login";
                   }}

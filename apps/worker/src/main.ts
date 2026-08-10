@@ -19,7 +19,8 @@ import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhoo
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
-import { processNotificationJob } from "./notifications/dispatch";
+import { processNotificationJob, registerChannel } from "./notifications/dispatch";
+import { webPushChannel } from "./notifications/web-push";
 import type { NotifJob } from "@conversia/notifications";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
@@ -78,6 +79,8 @@ async function main() {
     async (job) => processSyncJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Canal Web Push (VAPID). El stub nativo se registra el día de Capacitor.
+  registerChannel(webPushChannel);
   // Notificaciones: despacha cada evento a los canales habilitados por usuario.
   const notificationsWorker = new Worker<NotifJob>(
     QUEUE_NAMES.notifications,

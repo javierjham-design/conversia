@@ -48,6 +48,11 @@ const envSchema = z.object({
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
   // Destinatario de los avisos de soporte in-app (vacío = sin correo, solo panel).
   SUPPORT_NOTIFY_EMAIL: z.string().optional().default(""),
+  // Web Push (VAPID). Generar una vez con `npx web-push generate-vapid-keys`.
+  // Vacío = Web Push desactivado (in_app/email siguen funcionando).
+  VAPID_PUBLIC_KEY: z.string().optional().default(""),
+  VAPID_PRIVATE_KEY: z.string().optional().default(""),
+  VAPID_SUBJECT: z.string().default("mailto:soporte@tubot.cl"),
   EMBEDDINGS_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional().default(""),
   // Inicio de sesión con Google (ID token verificado server-side; el client id es público)
