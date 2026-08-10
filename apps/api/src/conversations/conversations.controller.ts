@@ -943,23 +943,22 @@ export class ConversationsController {
 
   /** Correo «te asignaron una conversación» respetando la preferencia personal. */
   private async notifyAssignment(organizationId: string, userId: string, conversationId: string): Promise<void> {
-    const info = await this.prisma.withTenant(organizationId, async (tx) => {
-      const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true, name: true } });
-      const prefs = ((((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, any>)[userId] ?? {};
-      if (prefs.assignedToMe === false) return null;
-      const member = await tx.organizationUser.findUnique({
-        where: { organizationId_userId: { organizationId, userId } },
-        include: { user: { select: { email: true, name: true } } },
+    // Unificado: el despachador resuelve preferencias y canales (in-app, correo,
+    // web push…). Aquí solo emitimos el evento con su contexto.
+    const contactName = await this.prisma.withTenant(organizationId, async (tx) => {
+      const conv = await tx.conversation.findUnique({
+        where: { id: conversationId },
+        select: { contact: { select: { firstName: true, lastName: true } } },
       });
-      return member ? { email: member.user.email, name: member.user.name, orgName: org?.name ?? "TuBot" } : null;
+      const c = conv?.contact;
+      return [c?.firstName, c?.lastName].filter(Boolean).join(" ").trim() || "Contacto";
     });
-    if (!info) return;
-    await this.queues.emails.add("assignment", {
+    await this.queues.notify({
+      eventKey: "conversation.assigned",
       organizationId,
-      kind: "alert",
-      to: [info.email],
-      subject: `Te asignaron una conversación en ${info.orgName}`,
-      html: `<p>Hola ${info.name}: te asignaron una conversación en la Bandeja.</p><p><a href="https://www.tubot.cl/inbox">Abrir la Bandeja</a> (conversación ${conversationId.slice(0, 8)}…)</p>`,
+      userIds: [userId],
+      conversationId,
+      data: { contactName, conversationId },
     });
   }
 

@@ -19,6 +19,10 @@ import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhoo
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
+import { processNotificationJob, registerChannel } from "./notifications/dispatch";
+import { webPushChannel } from "./notifications/web-push";
+import { processWhatsappEscalation, type WaEscalationJob } from "./notifications/whatsapp-escalation";
+import type { NotifJob } from "@conversia/notifications";
 import { processOutbound } from "./outbound";
 import { emitPlatformEvent } from "./platform-events";
 import { startScheduler } from "./scheduler";
@@ -76,6 +80,20 @@ async function main() {
     async (job) => processSyncJob(job.data),
     { connection, concurrency: 2 },
   );
+  // Canal Web Push (VAPID). El stub nativo se registra el día de Capacitor.
+  registerChannel(webPushChannel);
+  // Notificaciones: despacha cada evento a los canales habilitados por usuario.
+  const notificationsWorker = new Worker<NotifJob>(
+    QUEUE_NAMES.notifications,
+    async (job) => processNotificationJob(job.data),
+    { connection, concurrency: 4 },
+  );
+  // Escalera de WhatsApp: avisos con retraso que se cancelan solos si se atiende.
+  const waEscalationWorker = new Worker<WaEscalationJob>(
+    QUEUE_NAMES.whatsappEscalation,
+    async (job) => processWhatsappEscalation(job.data),
+    { connection, concurrency: 2 },
+  );
   // Sincronización diaria (05:00) del catálogo de anuncios de Meta: un job
   // repetible que abanica un sync por cada tenant con Meta conectado.
   void getSyncQueue()
@@ -117,7 +135,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -158,6 +176,8 @@ async function main() {
       importsWorker.close(),
       emailsWorker.close(),
       syncWorker.close(),
+      notificationsWorker.close(),
+      waEscalationWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

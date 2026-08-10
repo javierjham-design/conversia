@@ -13,6 +13,7 @@ import {
   type SyncJob,
   type WebhookDeliveryJob,
 } from "@conversia/types";
+import type { NotifJob } from "@conversia/notifications";
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
@@ -26,6 +27,17 @@ export class QueueService implements OnModuleDestroy {
   readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
   readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
   readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
+  readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
+
+  /** Emite un evento de notificación (la audiencia se resuelve en el worker). */
+  async notify(job: NotifJob): Promise<void> {
+    await this.notifications.add("notify", job, {
+      attempts: 4,
+      backoff: { type: "exponential", delay: 15_000 },
+      removeOnComplete: 1000,
+      removeOnFail: 2000,
+    });
+  }
 
   async onModuleDestroy() {
     await Promise.all([
@@ -37,6 +49,7 @@ export class QueueService implements OnModuleDestroy {
       this.imports.close(),
       this.sync.close(),
       this.emails.close(),
+      this.notifications.close(),
     ]);
     this.connection.disconnect();
   }

@@ -414,6 +414,8 @@ export const QUEUE_NAMES = {
   imports: "contact-imports",
   emails: "tenant-emails",
   sync: "integration-sync",
+  notifications: "notifications",
+  whatsappEscalation: "whatsapp-escalation",
 } as const;
 
 /** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
