@@ -285,17 +285,56 @@ de lo que ya te pagó** + el fusible global como red de última instancia.
 
 ---
 
-## 6. Mitigación puente (si quieres contención HOY, antes de la bolsa)
-Barato y rápido, sin migración, para acotar el peor caso mientras se construye el
-Eje 1.2 (requiere tu OK; es código):
-1. **Fusible global** por Redis: contador de plantillas enviadas por día a nivel
-   plataforma; al pasar un techo configurable, el punto de envío rechaza nuevas
-   plantillas y alerta. ~½ día de trabajo, corta el desastre no anticipado.
-2. **Tope duro diario por tenant** en el punto de envío (constante por plan) hasta
-   tener la bolsa: rechaza el envío nº N+1 del día. ~½ día.
-3. **Demo en TRIAL: bloquear envío de plantillas** (una condición en el punto de
-   envío). ~2 h. Cierra C2 en su mayor parte de inmediato.
+## 6. Mitigación puente — IMPLEMENTADA (2026-08-10)
 
-Estas tres, aplicadas en el **único punto de envío** (encolado del outbound),
-reducen la exposición de "ilimitada" a "acotada" en cuestión de horas, sin
-esperar el modelo completo. **No las implemento sin tu confirmación.**
+Contención inmediata, sin migración, aplicada en el **único punto de envío de
+plantillas** (`apps/worker/src/messaging-guard.ts`, invocado por `outbound.ts` y
+`workflow-runtime.ts` que cubren bandeja, flujos y recordatorios). **Corta solo
+plantillas** (las que cuestan); las respuestas dentro de 24 h (servicio, gratis)
+**no se tocan nunca**.
+
+### Datos que fijaron los topes (prod, últimos 30 días)
+Consulta de `usage_events` (plantillas facturables, `cost_usd > 0`):
+- **Total plantillas 30 d: 0 · Tenants que enviaron: 0 · Pico por tenant/día: 0 ·
+  Pico plataforma/día: 0.**
+- Interpretación honesta: la plataforma es **pre-primer-cliente**; no hay envío
+  real todavía. Con pico histórico = 0, "3× pico" daría 0 (bloquearía todo), así
+  que fijo **defaults conservadores con piso**, ajustables sin redeploy.
+
+### Topes activos (ajustables)
+| Tope | Valor por defecto | Peor caso $/día | Dónde ajustar |
+|---|---|---|---|
+| **Por tenant / día** | **500** plantillas | ~$8.830 (util.) a ~$39.245 (mkt.) CLP por tenant | `platform_settings.messagingCapPerTenantDay` o env `MSG_CAP_PER_TENANT_DAY`; override por tenant en `org.settings.messaging.dailyCap` |
+| **Fusible global / día** | **1.500** plantillas | ~$26.490 a ~$117.735 CLP plataforma | `platform_settings.messagingCapGlobalDay` o env `MSG_CAP_GLOBAL_DAY` |
+
+> Recomendación: **recalcular a 3× el pico real** apenas haya datos (p. ej. tras el
+> primer mes con clientes). Mientras, 500/1.500 acota el desastre sin estorbar un
+> arranque normal (un consultorio enviando recordatorios rara vez pasa de decenas/
+> día). Si un tenant legítimo topa, lo verás por la alerta y lo subes en un campo.
+
+### Comportamiento
+- **Demo (TRIAL)**: bloqueo total de plantillas. Todo lo demás (agentes, flujos,
+  simulador, responder en 24 h) funciona.
+- **Gracia por impago (suscripción `PAST_DUE`) y suspensión**: sin plantillas; el
+  panel sigue accesible. (Cierra H1.)
+- **Tope por tenant**: rechaza el envío nº N+1 del día de ESE tenant.
+- **Fusible global**: al superar el techo agregado, **corta plantillas de todos**,
+  marca el estado y **alerta**: `GET /health/fuse` devuelve **503** (para un
+  monitor de BetterStack que te llama al teléfono) y, si `OPS_ALERT_WEBHOOK_URL`
+  está configurado, hace POST inmediato al webhook. Se auto-resetea al día siguiente.
+- **Visibilidad al tenant**: el mensaje bloqueado queda **FAILED** con el motivo y
+  se agrega una **nota de sistema en la conversación** explicando por qué no salió.
+- **WABA huérfana** (`orphan-waba-check.ts`, cada 6 h): alerta si una WABA sigue
+  registrada con su tenant SUSPENDIDO/ELIMINADO. (Contención parcial de H2.)
+
+### Config externa que debes hacer tú
+1. **BetterStack**: crear un **Monitor** HTTP a `https://<api>/health/fuse` con
+   escalado a **llamada telefónica** (como los otros monitores de `docs/MONITORING.md`).
+   Cuando el fusible corte, el monitor lo verá "caído" y te llama.
+2. (Opcional, para alerta *instantánea*) cargar `OPS_ALERT_WEBHOOK_URL` con un
+   *incoming webhook* de BetterStack/Slack.
+3. Ajustar los topes cuando tengas datos reales (campos de arriba).
+
+**Falla abierta** ante errores de infraestructura (no rompe la operación por un
+fallo transitorio de Redis); los bloqueos de negocio (demo/gracia) sí cierran.
+Esto NO reemplaza la bolsa prepagada (Eje 1.2) — es la red mientras se construye.

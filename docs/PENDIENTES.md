@@ -7,6 +7,19 @@ aplicadas) — no se listan como abiertas.
 
 Leyenda esfuerzo: S (horas) · M (1-2 días) · L (>2 días) · ⏳ (depende de terceros).
 
+## 0. Seguridad (post-auditoría 2026-08-10 — ver docs/SECURITY_AUDIT.md)
+Bloque grande pendiente: **bolsa de mensajes prepagada** (Eje 1.2, requiere
+migración a OK del dueño) — la protección estructural definitiva. La mitigación
+puente (fusible global + topes por tenant + demo/gracia sin plantillas + alerta de
+WABA huérfana) YA está desplegada.
+Medios agendados (endurecimiento, no bloqueantes):
+| # | Ítem | Ref | Esfuerzo |
+|---|------|-----|----------|
+| S-1 | Revocación de sesiones de tenant al cambiar clave/rol (jti denylist / tokenVersion) | M2 | S |
+| S-2 | `audit_logs` inmutable a nivel de motor (`REVOKE UPDATE,DELETE` + trigger) | M3 | S (migración corta) |
+| S-3 | Allowlist de IP para el Super Admin (`SUPER_ADMIN_ALLOWED_IPS`) | M4 | S (config) |
+| S-4 | Validar monto == precio de plan en el webhook de pago | M5 | S |
+
 ## A. Go-live de Meta / WhatsApp (lo que condiciona el lanzamiento)
 | # | Ítem | Estado | ¿Sigue? | Esfuerzo |
 |---|------|--------|---------|----------|

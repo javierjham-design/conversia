@@ -48,6 +48,12 @@ const envSchema = z.object({
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
   // Destinatario de los avisos de soporte in-app (vacío = sin correo, solo panel).
   SUPPORT_NOTIFY_EMAIL: z.string().optional().default(""),
+  // Fusible de mensajería: URL de alerta inmediata (BetterStack incoming webhook,
+  // Slack, etc.) que se llama al cortar el fusible. Vacío = solo /health/fuse + log.
+  OPS_ALERT_WEBHOOK_URL: z.string().optional().default(""),
+  // Topes puente de mensajería (defaults; ajustables en platform_settings).
+  MSG_CAP_PER_TENANT_DAY: z.coerce.number().default(500),
+  MSG_CAP_GLOBAL_DAY: z.coerce.number().default(1500),
   // Web Push (VAPID). Generar una vez con `npx web-push generate-vapid-keys`.
   // Vacío = Web Push desactivado (in_app/email siguen funcionando).
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
