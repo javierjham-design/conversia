@@ -1,5 +1,33 @@
 # Registro de progreso
 
+## 2026-08-09 — Sistema de notificaciones (3 capas) + PWA instalable (rama `feature/pwa-push`)
+
+Notificaciones rediseñadas de raíz, pensando en que el push nativo (Capacitor)
+entre después como un adaptador más, sin migrar datos. Ver [`docs/MOBILE.md`](./MOBILE.md).
+
+- **Capa 1 — Catálogo** (`@conversia/notifications`): registro único de 13 eventos
+  (asignación, sin responder, IA→humano, mención, citas, integración, import/export,
+  facturación, tope de tokens). Agregar un evento = una entrada. 9 tests.
+- **Capa 2 — Canales** tras interfaz común: `in_app` (tabla `notifications`, con
+  agrupación), `email` (reusa `sendTenantEmail`), `web_push` (VAPID, limpia
+  caducados), `native_push` (**stub** con TODO para Capacitor), y **escalera de
+  WhatsApp** (no canal paralelo: push→si no se atiende en X min→HSM del tenant,
+  se cancela al abrir/tomar la conversación, opt-in, throttle, costo estimado en UI).
+- **Capa 3 — Dispositivos**: tabla `push_devices` **genérica** (web/ios/android),
+  y `notification_deliveries` (registro para soporte). *Migraciones aplicadas a prod.*
+- **Despachador** (worker): resuelve audiencia→usuarios, preferencias (matriz
+  evento×canal + bloqueos + horario silencioso), dedup por conversación en vista,
+  registra entregas; un canal caído no frena a los demás. Cola BullMQ.
+- **Preferencias**: página con matriz evento×canal, horario silencioso y opt-in
+  WhatsApp con costo/proyección. Campana unificada + botón de activar push.
+- **PWA**: manifest, íconos, `apple-web-app`, safe areas; service worker (armazón
+  en caché, **datos siempre frescos**, offline.html, aviso de actualización sin
+  romper el compositor); banner de instalación + guía iOS. Bandeja ya responsive
+  por niveles; editor de flujos con estado honesto en móvil.
+- **Pendiente (polish, no bloquea)**: cargar claves VAPID en prod, Lighthouse ≥90
+  con íconos de tamaños dedicados + screenshots, prueba en dispositivo real, y el
+  registro de entregas visible en el panel del tenant (backend listo).
+
 ## 2026-08-04 (3) — AGENDA-2: respuestas del recordatorio (Confirmar/Reagendar)
 
 `apps/worker/src/appointment-responses.ts`: cuando el paciente toca "Confirmar"/"Reagendar" en el recordatorio (el inbound ya lo entrega como texto), se interpreta y se actúa REAL sobre la **próxima cita** del contacto (PENDING/CONFIRMED más cercana):

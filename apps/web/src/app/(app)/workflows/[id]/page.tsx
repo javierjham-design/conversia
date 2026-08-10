@@ -22,7 +22,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
-  Pencil, Plus, Redo2, Search, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, XCircle, Zap,
+  Pencil, Plus, Redo2, Search, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -731,6 +731,32 @@ function Editor() {
 }
 
 export default function WorkflowEditorPage() {
+  // El canvas de flujos necesita pantalla grande. En móvil damos un estado honesto
+  // (no una experiencia rota) y no montamos ReactFlow.
+  const [large, setLarge] = useState<boolean | null>(null);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const upd = () => setLarge(mq.matches);
+    upd();
+    mq.addEventListener("change", upd);
+    return () => mq.removeEventListener("change", upd);
+  }, []);
+
+  if (large === false) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+        <Workflow size={36} className="text-ink-subtle" />
+        <h2 className="text-base font-semibold text-ink">El editor de flujos necesita una pantalla más grande</h2>
+        <p className="max-w-xs text-sm text-ink-muted">
+          Ábrelo desde un computador o tablet en horizontal para armar el flujo. Desde el teléfono puedes ver y gestionar el resto del panel.
+        </p>
+        <a href="/workflows" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+          Volver a Flujos
+        </a>
+      </div>
+    );
+  }
+
   return (
     <ReactFlowProvider>
       <Editor />

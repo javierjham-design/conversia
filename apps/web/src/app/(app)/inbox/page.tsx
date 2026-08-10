@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Search, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
+import { reportViewing } from "@/lib/push";
 import { EmptyState, Modal, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
 import { InboxSidebar } from "./sidebar";
@@ -124,6 +125,15 @@ export default function InboxPage() {
     void loadList();
     void loadCounters();
   }, [selectedId, loadMessages, loadContext, loadList, loadCounters]);
+
+  // Presencia: avisa qué conversación miras (dedup de push + cancela la escalera
+  // de WhatsApp de esa conversación). Al cerrar/cambiar, libera.
+  useEffect(() => {
+    void reportViewing(selectedId);
+    return () => {
+      if (selectedId) void reportViewing(null);
+    };
+  }, [selectedId]);
 
   // Catálogos (una vez)
   useEffect(() => {

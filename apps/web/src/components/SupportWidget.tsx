@@ -49,7 +49,8 @@ export function SupportWidget() {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Soporte"
-        className="fixed bottom-4 right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
+        style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        className="fixed right-4 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition hover:bg-brand-700"
         title="¿Necesitas ayuda?"
       >
         {open ? <X size={20} /> : <LifeBuoy size={22} />}
