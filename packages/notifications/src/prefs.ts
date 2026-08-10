@@ -7,7 +7,7 @@ export interface UserNotifPrefs {
   /** Horario silencioso: silencia canales intrusivos salvo eventos críticos. */
   quietHours?: { enabled: boolean; start: string; end: string }; // "HH:MM"
   /** Escalera de WhatsApp (opt-in, apagada por defecto). */
-  whatsapp?: { enabled: boolean; throttlePerHour: number };
+  whatsapp?: { enabled: boolean; throttlePerHour: number; delayMinutes?: number };
 }
 
 /** Canales que interrumpen (los silencia el horario silencioso si no es crítico). */

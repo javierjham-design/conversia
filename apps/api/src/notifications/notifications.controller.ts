@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
+import { CLP_PER_USD_REF, computeWhatsappCostUsd } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
@@ -109,6 +110,28 @@ export class NotificationsController {
   }
 
   /**
+   * Estimación de costo de la escalera de WhatsApp: cuántos escalamientos hubo en
+   * los últimos 30 días (proxy de avisos) y el costo por plantilla + proyección
+   * mensual, para que nadie active la escalera sin saber lo que gasta.
+   */
+  @Get("whatsapp/estimate")
+  whatsappEstimate() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { country: true } });
+      const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const escalations30d = await tx.humanHandoff.count({ where: { createdAt: { gte: since } } }).catch(() => 0);
+      const perNoticeClp = Math.round(computeWhatsappCostUsd("utility", org?.country ?? "CL") * CLP_PER_USD_REF);
+      return {
+        escalations30d,
+        perNoticeClp,
+        monthlyClp: escalations30d * perNoticeClp,
+        note: "Estimación: cada aviso consume una plantilla de utilidad de tu WhatsApp. Se envía solo si nadie atiende a tiempo, así que el gasto real suele ser menor.",
+      };
+    });
+  }
+
+  /**
    * Presencia: marca qué conversación mira el usuario (TTL 60 s). El despachador
    * la lee para no mandar push de una conversación que ya está abierta.
    */
@@ -120,6 +143,9 @@ export class NotificationsController {
     const key = `notif:viewing:${ctx.userId}`;
     if (parsed.data.conversationId) {
       await this.queues.connection.set(key, parsed.data.conversationId, "EX", 60);
+      // Atender la conversación cancela la escalera de WhatsApp pendiente de esa
+      // conversación (flag que el worker respeta al disparar el aviso).
+      await this.queues.connection.set(`wa:attended:${parsed.data.conversationId}`, "1", "EX", 1800);
     } else {
       await this.queues.connection.del(key);
     }

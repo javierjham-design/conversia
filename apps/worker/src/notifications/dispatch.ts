@@ -4,6 +4,7 @@ import { getAdminPrisma } from "@conversia/database";
 import {
   applyQuietHours,
   getEvent,
+  isCritical,
   render,
   resolveEnabledChannels,
   type NotifChannel,
@@ -14,6 +15,7 @@ import {
   type UserNotifPrefs,
 } from "@conversia/notifications";
 import { emailChannel, inAppChannel } from "./channels";
+import { scheduleWhatsappEscalation } from "./whatsapp-escalation";
 
 /**
  * Registro de canales. Bloque 2: in_app + email. web_push, native_push y whatsapp
@@ -77,8 +79,24 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
     let channels = applyQuietHours(resolveEnabledChannels(event, prefs), event, prefs, now, tz);
 
     // Dedup: si ya está mirando esa conversación, nada de push (in_app/email sí).
-    if (await isViewing(user.id, job.conversationId)) {
-      channels = channels.filter((c) => !INTRUSIVE.includes(c) && c !== "whatsapp");
+    const viewing = await isViewing(user.id, job.conversationId);
+    if (viewing) channels = channels.filter((c) => !INTRUSIVE.includes(c) && c !== "whatsapp");
+
+    // WhatsApp NO es canal inmediato: es una ESCALERA. Si el evento es crítico y
+    // el usuario la activó, se agenda con retraso; se cancela sola si atiende.
+    channels = channels.filter((c) => c !== "whatsapp");
+    if (isCritical(event.key) && event.channels.includes("whatsapp") && prefs.whatsapp?.enabled === true && job.conversationId && !viewing) {
+      await scheduleWhatsappEscalation(
+        {
+          organizationId: job.organizationId,
+          userId: user.id,
+          eventKey: event.key,
+          conversationId: job.conversationId,
+          throttlePerHour: prefs.whatsapp.throttlePerHour ?? 4,
+          contactName: String(job.data.contactName ?? "un cliente"),
+        },
+        prefs.whatsapp.delayMinutes ?? 5,
+      ).catch(() => undefined);
     }
 
     const title = render(event.title, job.data);
