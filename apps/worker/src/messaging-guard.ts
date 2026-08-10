@@ -1,6 +1,7 @@
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
+import { debitForMessage, refundForMessage } from "./wallet";
 
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
@@ -27,10 +28,6 @@ function conn(): IORedis {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-interface Caps {
-  perTenant: number;
-  global: number;
-}
 let capCache: { at: number; global: number; perTenantDefault: number } | null = null;
 
 /** Lee los topes de platform_settings (cache 60 s), con defaults de env. */
@@ -56,59 +53,97 @@ async function readGlobalCaps(): Promise<{ global: number; perTenantDefault: num
   return capCache;
 }
 
-/**
- * Comprueba si el tenant puede enviar UNA plantilla ahora. Incrementa los
- * contadores diarios (por intento). Devuelve el motivo + un mensaje claro para
- * mostrar en la bandeja si se bloquea.
- */
-export async function guardTemplateSend(organizationId: string): Promise<SendGate> {
+/** Bloqueo de negocio (demo / suspensión / gracia). null = puede enviar. */
+async function businessBlock(organizationId: string): Promise<SendGate | null> {
   const prisma = getAdminPrisma();
-
-  // 1-2. Estado de negocio (demo / suspensión / gracia). Fail-open si no se lee.
-  try {
-    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true, settings: true } });
-    if (org?.status === "TRIAL") {
-      return block("demo", "En modo demo no se envían plantillas de WhatsApp. Activa un plan para habilitarlas. Puedes seguir probando agentes, flujos y responder dentro de las 24 h.");
-    }
-    if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
-      return block("suspended", "Cuenta suspendida por falta de pago: los envíos de plantilla están en pausa. Regulariza tu plan para reactivarlos.");
-    }
-    const sub = await prisma.subscription.findFirst({ where: { organizationId }, select: { status: true }, orderBy: { createdAt: "desc" } });
-    if (sub?.status === "PAST_DUE") {
-      return block("grace", "Tu pago está pendiente: los envíos de plantilla se reanudan al regularizar el plan. El resto del panel sigue disponible.");
-    }
-
-    // 3-4. Topes. Fail-open si Redis falla.
-    const caps = await resolveCaps(organizationId, (org?.settings ?? {}) as Record<string, any>);
-    try {
-      const d = today();
-      const tKey = `msgcap:t:${organizationId}:${d}`;
-      const tN = await conn().incr(tKey);
-      if (tN === 1) await conn().expire(tKey, 172_800);
-      if (tN > caps.perTenant) {
-        return block("tenant_cap", "Alcanzaste el límite diario de envíos de plantilla de tu cuenta. Se reanuda mañana; si necesitas más, escríbenos por Soporte para ampliarlo.");
-      }
-      const gKey = `msgcap:g:${d}`;
-      const gN = await conn().incr(gKey);
-      if (gN === 1) await conn().expire(gKey, 172_800);
-      if (gN > caps.global) {
-        await tripFuse(d, gN, caps.global);
-        return block("global_fuse", "Los envíos de plantilla están en pausa temporal por una medida de seguridad de la plataforma. Ya estamos revisándolo; tu conversación no se pierde.");
-      }
-    } catch {
-      /* Redis caído → no bloqueamos la operación por el contador. */
-    }
-  } catch {
-    /* No se pudo leer estado → fail open (igual que hoy, sin guard). */
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
+  if (org?.status === "TRIAL") {
+    return block("demo", "En modo demo no se envían plantillas de WhatsApp. Activa un plan para habilitarlas. Puedes seguir probando agentes, flujos y responder dentro de las 24 h.");
   }
-  return { blocked: false };
+  if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
+    return block("suspended", "Cuenta suspendida por falta de pago: los envíos de plantilla están en pausa. Regulariza tu plan para reactivarlos.");
+  }
+  const sub = await prisma.subscription.findFirst({ where: { organizationId }, select: { status: true }, orderBy: { createdAt: "desc" } });
+  if (sub?.status === "PAST_DUE") {
+    return block("grace", "Tu pago está pendiente: los envíos de plantilla se reanudan al regularizar el plan. El resto del panel sigue disponible.");
+  }
+  return null;
 }
 
-async function resolveCaps(organizationId: string, settings: Record<string, any>): Promise<Caps> {
-  const g = await readGlobalCaps();
-  const override = Number(settings?.messaging?.dailyCap);
-  const perTenant = Number.isFinite(override) && override > 0 ? override : g.perTenantDefault;
-  return { perTenant, global: g.global };
+/** Tope diario por tenant (rate-limit): evita vaciar toda la bolsa en un día. */
+async function perTenantCapBlock(organizationId: string): Promise<SendGate | null> {
+  try {
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const { perTenantDefault } = await readGlobalCaps();
+    const override = Number((org?.settings as any)?.messaging?.dailyCap);
+    const cap = Number.isFinite(override) && override > 0 ? override : perTenantDefault;
+    const key = `msgcap:t:${organizationId}:${today()}`;
+    const n = await conn().incr(key);
+    if (n === 1) await conn().expire(key, 172_800);
+    if (n > cap) {
+      return block("tenant_cap", "Alcanzaste el límite diario de envíos de plantilla de tu cuenta. Se reanuda mañana; si necesitas más, escríbenos por Soporte para ampliarlo.");
+    }
+  } catch {
+    /* Redis caído → no bloqueamos por el contador. */
+  }
+  return null;
+}
+
+/** Incrementa el fusible global del día; corta (y alerta) si supera el techo. */
+async function globalFuseBlock(): Promise<SendGate | null> {
+  try {
+    const d = today();
+    const { global } = await readGlobalCaps();
+    const gKey = `msgcap:g:${d}`;
+    const gN = await conn().incr(gKey);
+    if (gN === 1) await conn().expire(gKey, 172_800);
+    if (gN > global) {
+      await tripFuse(d, gN, global);
+      return block("global_fuse", "Los envíos de plantilla están en pausa temporal por una medida de seguridad de la plataforma. Ya estamos revisándolo; tu conversación no se pierde.");
+    }
+  } catch {
+    /* Redis caído → no bloqueamos por el contador. */
+  }
+  return null;
+}
+
+/**
+ * Cobro de UN envío de plantilla: (1) estado de negocio, (2) débito ATÓMICO de la
+ * bolsa prepagada (idempotente por messageId; sin saldo → bloquea), (3) fusible
+ * global (red de plataforma; si corta tras debitar, devuelve el crédito). Corta
+ * solo plantillas; el servicio (24 h) nunca llama a esto. Falla ABIERTO ante
+ * errores de infraestructura, pero los bloqueos de negocio/saldo cierran.
+ */
+export async function chargeTemplateSend(
+  organizationId: string,
+  messageId: string,
+  category: string | null | undefined,
+  costUsd?: number,
+): Promise<SendGate> {
+  try {
+    const biz = await businessBlock(organizationId);
+    if (biz) return biz;
+
+    // Rate-limit diario por tenant (antes de tocar la bolsa).
+    const cap = await perTenantCapBlock(organizationId);
+    if (cap) return cap;
+
+    // Débito de bolsa (previo al envío). Sin saldo → no sale.
+    const debit = await debitForMessage(organizationId, messageId, category, costUsd);
+    if (!debit.ok) {
+      return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h sin costo.");
+    }
+
+    // Fusible global (última red). Si corta tras debitar, se devuelve el crédito.
+    const fuse = await globalFuseBlock();
+    if (fuse) {
+      await refundForMessage(organizationId, messageId).catch(() => undefined);
+      return fuse;
+    }
+  } catch {
+    /* No se pudo verificar → fail open (no romper la operación por un fallo). */
+  }
+  return { blocked: false };
 }
 
 function block(reason: string, userMessage: string): SendGate {

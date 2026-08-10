@@ -3,7 +3,7 @@ import type { OutboundJob } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
-import { guardTemplateSend } from "./messaging-guard";
+import { chargeTemplateSend } from "./messaging-guard";
 
 /** Envía mensajes salientes creados desde el panel (autor humano). */
 export async function processOutbound(job: OutboundJob): Promise<void> {
@@ -26,6 +26,7 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
   // Plantilla HSM (fuera de la ventana de 24 h): parámetros resueltos con los
   // datos reales del contacto según el mapeo posición→campo de la plantilla.
   let outbound: import("@conversia/types").OutboundMessage;
+  let templateCategory: string | null = null;
   if (data.message.type === "TEMPLATE") {
     const payload = (data.message.payload as Record<string, any>) ?? {};
     const template = await withTenant(organizationId, (tx) =>
@@ -44,6 +45,7 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
     );
     const params = await resolveTemplateParams(organizationId, conversation?.contactId ?? null, fields);
     const rendered = renderTemplateBody(body.components ?? [], params);
+    templateCategory = template.category;
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { body: rendered || data.message.body } }),
     );
@@ -70,9 +72,9 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
 
   const { publishRealtime } = await import("./realtime.js");
 
-  // Fusible/topes de exposición financiera: solo plantillas (las que cuestan).
+  // Bolsa + fusible/topes de exposición financiera: solo plantillas (las que cuestan).
   if (outbound.type === "template") {
-    const gate = await guardTemplateSend(organizationId);
+    const gate = await chargeTemplateSend(organizationId, data.message.id, templateCategory);
     if (gate.blocked) {
       await withTenant(organizationId, async (tx) => {
         await tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: gate.userMessage } });

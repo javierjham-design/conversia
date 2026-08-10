@@ -12,8 +12,54 @@ interface OrgMessaging {
   today: number;
   clpPerMsg: { marketing: number; utility: number };
 }
+interface OrgWallet {
+  balance: number;
+  included: number;
+  ledger: { delta: number; reason: string; balanceAfter: number; category: string | null; createdAt: string }[];
+}
 
 const clp = (n: number) => `$${Math.round(n).toLocaleString("es-CL")}`;
+
+/** Saldo de la bolsa prepagada + ajuste manual (regalar/quitar créditos). */
+function WalletBlock({ orgId }: { orgId: string }) {
+  const toast = useToast();
+  const [w, setW] = useState<OrgWallet | null>(null);
+  const [delta, setDelta] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => setW(await padmin<OrgWallet>(`/platform/organizations/${orgId}/wallet`)), [orgId]);
+  useEffect(() => {
+    void load().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+  async function adjust() {
+    const n = Number(delta);
+    if (!Number.isFinite(n) || n === 0) return;
+    setBusy(true);
+    try {
+      await padmin(`/platform/organizations/${orgId}/wallet-adjust`, { method: "POST", body: JSON.stringify({ delta: n, reason: "ajuste manual" }) });
+      setDelta("");
+      await load();
+      toast.push("Saldo ajustado ✔", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!w) return null;
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-3">
+      <p className="text-sm font-medium text-navy-900">Bolsa prepagada</p>
+      <p className="mt-0.5 text-sm text-slate-600">
+        Saldo: <b>{w.balance.toLocaleString("es-CL")}</b>{w.included > 0 && <span className="text-slate-400"> / {w.included.toLocaleString("es-CL")} del período</span>}
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <input type="number" value={delta} onChange={(e) => setDelta(e.target.value)} placeholder="+/− créditos" className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        <Button variant="secondary" disabled={busy || !delta} onClick={() => void adjust()}>Ajustar saldo</Button>
+      </div>
+    </div>
+  );
+}
 
 /** Tope de mensajería propio del tenant (override del default de plataforma). */
 export function MessagingCapCard({ orgId }: { orgId: string }) {
@@ -91,6 +137,8 @@ export function MessagingCapCard({ orgId }: { orgId: string }) {
           ≈ {clp(n * d.clpPerMsg.utility)}/día (utilidad) · hasta <b>{clp(n * d.clpPerMsg.marketing)}/día</b> (marketing).
         </p>
       )}
+
+      <WalletBlock orgId={orgId} />
     </div>
   );
 }

@@ -660,6 +660,74 @@ export class PlatformController {
     return { ok: true };
   }
 
+  // ---------------------- Bolsa prepagada (pesos + saldo por tenant) ----------------------
+
+  /** Pesos por categoría (A: 1/1/1 por cantidad · B: marketing>1 ponderado). */
+  @Get("wallet-weights")
+  async walletWeights() {
+    return this.readWalletWeights();
+  }
+
+  @Patch("wallet-weights")
+  async setWalletWeights(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({ utility: z.number().int().min(1).max(100), authentication: z.number().int().min(1).max(100), marketing: z.number().int().min(1).max(100) })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Pesos inválidos (enteros ≥ 1)");
+    await this.prisma.admin.platformSetting.upsert({ where: { key: "walletWeights" }, update: { value: JSON.stringify(parsed.data) }, create: { key: "walletWeights", value: JSON.stringify(parsed.data) } });
+    await this.audit(req, "platform.wallet_weights_update", "platform_setting", "walletWeights", parsed.data);
+    return parsed.data;
+  }
+
+  /** Saldo y últimos movimientos de la bolsa de un tenant. */
+  @Get("organizations/:id/wallet")
+  async orgWallet(@Param("id") id: string) {
+    const [wallet, ledger] = await Promise.all([
+      this.prisma.admin.messageWallet.findUnique({ where: { organizationId: id } }),
+      this.prisma.admin.walletLedger.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 15 }),
+    ]);
+    return {
+      balance: wallet?.balance ?? 0,
+      included: wallet?.includedPerPeriod ?? 0,
+      periodStart: wallet?.periodStart ?? null,
+      ledger: ledger.map((l) => ({ delta: l.delta, reason: l.reason, balanceAfter: l.balanceAfter, category: l.category, createdAt: l.createdAt })),
+    };
+  }
+
+  /** Ajuste manual de saldo (regalar/quitar créditos), auditado. */
+  @Post("organizations/:id/wallet-adjust")
+  async adjustWallet(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ delta: z.number().int().refine((n) => n !== 0, "delta ≠ 0"), reason: z.string().max(200).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Ajuste inválido");
+    const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId: id } });
+    const base = w?.balance ?? 0;
+    const balance = Math.max(0, base + parsed.data.delta);
+    await this.prisma.admin.messageWallet.upsert({
+      where: { organizationId: id },
+      create: { organizationId: id, balance, includedPerPeriod: 0, carryoverCap: 0 },
+      update: { balance },
+    });
+    await this.prisma.admin.walletLedger.create({
+      data: { organizationId: id, delta: balance - base, reason: "admin_adjust", balanceAfter: balance, refType: "admin", refId: parsed.data.reason ?? null, createdById: req.platformAdmin?.sub },
+    });
+    await this.audit(req, "platform.wallet_adjust", "organization", id, { delta: parsed.data.delta, reason: parsed.data.reason });
+    return { ok: true, balance };
+  }
+
+  private async readWalletWeights(): Promise<{ utility: number; authentication: number; marketing: number }> {
+    const def = { utility: 1, authentication: 1, marketing: 1 };
+    try {
+      const row = await this.prisma.admin.platformSetting.findUnique({ where: { key: "walletWeights" } });
+      if (row) {
+        const p = JSON.parse(row.value);
+        return { utility: Number(p.utility) || 1, authentication: Number(p.authentication) || 1, marketing: Number(p.marketing) || 1 };
+      }
+    } catch {
+      /* defaults */
+    }
+    return def;
+  }
+
   private async readMessagingCaps(): Promise<{ global: number; perTenantDefault: number }> {
     const env = getEnv();
     const rows = await this.prisma.admin.platformSetting.findMany({ where: { key: { in: ["messagingCapGlobalDay", "messagingCapPerTenantDay"] } } });

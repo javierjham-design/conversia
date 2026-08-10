@@ -54,6 +54,8 @@ const envSchema = z.object({
   // Topes puente de mensajería (defaults; ajustables en platform_settings).
   MSG_CAP_PER_TENANT_DAY: z.coerce.number().default(500),
   MSG_CAP_GLOBAL_DAY: z.coerce.number().default(1500),
+  // Cupo de bolsa por defecto si el plan no define messageQuota (mínimo seguro).
+  WALLET_DEFAULT_QUOTA: z.coerce.number().default(100),
   // Web Push (VAPID). Generar una vez con `npx web-push generate-vapid-keys`.
   // Vacío = Web Push desactivado (in_app/email siguen funcionando).
   VAPID_PUBLIC_KEY: z.string().optional().default(""),

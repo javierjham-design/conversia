@@ -26,11 +26,18 @@ function ClpHint({ n, rate }: { n: number; rate: { marketing: number; utility: n
   );
 }
 
+interface Weights {
+  utility: number;
+  authentication: number;
+  marketing: number;
+}
+
 export default function MessagingLimitsPage() {
   const toast = useToast();
   const [data, setData] = useState<Limits | null>(null);
   const [global, setGlobal] = useState(0);
   const [perTenant, setPerTenant] = useState(0);
+  const [weights, setWeights] = useState<Weights | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -42,8 +49,22 @@ export default function MessagingLimitsPage() {
 
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
+    void padmin<Weights>("/platform/wallet-weights").then(setWeights).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function saveWeights() {
+    if (!weights) return;
+    setBusy(true);
+    try {
+      await padmin("/platform/wallet-weights", { method: "PATCH", body: JSON.stringify(weights) });
+      toast.push("Pesos guardados ✔", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -112,6 +133,25 @@ export default function MessagingLimitsPage() {
           />
           <ClpHint n={perTenant} rate={rate} />
         </div>
+
+        {/* Bolsa prepagada: pesos por categoría (A=1/1/1 por cantidad · B=marketing>1) */}
+        {weights && (
+          <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+            <label className="block text-sm font-medium text-navy-900">Peso por categoría en la bolsa</label>
+            <p className="mb-2 text-xs text-slate-500">
+              Cuántos créditos descuenta cada mensaje. <b>1/1/1</b> = por cantidad (modo A). Sube <b>marketing</b> (p. ej. 4) para proteger margen (modo B), ya que marketing cuesta ~4× una utilidad.
+            </p>
+            <div className="flex flex-wrap gap-3 text-sm">
+              {(["utility", "authentication", "marketing"] as const).map((k) => (
+                <label key={k} className="flex items-center gap-1.5">
+                  <span className="text-slate-600">{k === "utility" ? "Utilidad" : k === "authentication" ? "Auth" : "Marketing"}</span>
+                  <input type="number" min={1} max={100} value={weights[k]} onChange={(e) => setWeights({ ...weights, [k]: Number(e.target.value) })} className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm" />
+                </label>
+              ))}
+              <Button variant="secondary" disabled={busy} onClick={() => void saveWeights()}>Guardar pesos</Button>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <Button disabled={busy || global < 1 || perTenant < 1} onClick={() => void save()}>
