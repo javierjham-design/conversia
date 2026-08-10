@@ -34,6 +34,7 @@ import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
 import { startRetentionPurge } from "./retention-purge";
+import { startOrphanWabaCheck } from "./orphan-waba-check";
 
 async function main() {
   const env = getEnv();
@@ -145,6 +146,7 @@ async function main() {
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
   const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
+  const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
   // La API lo lee en /health/status; si envejece, el worker está caído/atascado.
@@ -164,6 +166,7 @@ async function main() {
     clearInterval(heartbeat);
     stopBillingDunning();
     stopRetentionPurge();
+    stopOrphanWaba();
     stopScheduler();
     stopTemplateSync();
     stopDailyDigests();

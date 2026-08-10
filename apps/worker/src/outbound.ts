@@ -3,6 +3,7 @@ import type { OutboundJob } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
+import { guardTemplateSend } from "./messaging-guard";
 
 /** Envía mensajes salientes creados desde el panel (autor humano). */
 export async function processOutbound(job: OutboundJob): Promise<void> {
@@ -68,6 +69,31 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
   }
 
   const { publishRealtime } = await import("./realtime.js");
+
+  // Fusible/topes de exposición financiera: solo plantillas (las que cuestan).
+  if (outbound.type === "template") {
+    const gate = await guardTemplateSend(organizationId);
+    if (gate.blocked) {
+      await withTenant(organizationId, async (tx) => {
+        await tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: gate.userMessage } });
+        await tx.message.create({
+          data: {
+            organizationId,
+            conversationId: data.message.conversationId,
+            direction: "OUTBOUND",
+            type: "SYSTEM",
+            body: `⚠ Envío no realizado: ${gate.userMessage}`,
+            authorType: "SYSTEM",
+            status: "SENT",
+            visibility: "PUBLIC",
+          },
+        });
+      });
+      await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
+      return; // no se envía ni se reintenta
+    }
+  }
+
   try {
     const sent = await getChannelProvider().send(auth.phoneNumberId, outbound, { accessToken: auth.accessToken });
     await withTenant(organizationId, (tx) =>

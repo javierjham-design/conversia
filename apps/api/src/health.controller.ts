@@ -20,6 +20,27 @@ export class HealthController {
   }
 
   /**
+   * Estado del FUSIBLE de mensajería para un monitor de BetterStack: devuelve
+   * **503** cuando el fusible global está cortado hoy (gasto de plantillas superó
+   * el techo) → el monitor lo ve "caído" y te llama al teléfono. 200 si todo ok.
+   */
+  @Get("fuse")
+  @Header("cache-control", "no-store")
+  async fuse() {
+    const date = new Date().toISOString().slice(0, 10);
+    let tripped = false;
+    try {
+      tripped = (await this.queues.connection.get(`msgcap:fuse:${date}`)) === "1";
+    } catch {
+      /* redis caído → no afirmamos que el fusible cortó */
+    }
+    if (tripped) {
+      throw new ServiceUnavailableException({ ok: false, fuse: "tripped", message: "Fusible de mensajería cortado: envíos de plantilla en pausa." });
+    }
+    return { ok: true, fuse: "ok" };
+  }
+
+  /**
    * Health PROFUNDO para el monitor externo (BetterStack/UptimeRobot): comprueba
    * DB, Redis, latido del worker y backlog de colas. Devuelve **503** si algo
    * crítico falla → el monitor lo detecta como caída y avisa al teléfono.
