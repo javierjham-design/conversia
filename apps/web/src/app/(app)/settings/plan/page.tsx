@@ -10,7 +10,7 @@ import { WalletCard } from "./wallet-card";
 interface BillingOverview {
   plan: { code: string; name: string; priceClp: number; priceUsd: number; interval: string } | null;
   usage: Record<string, { used: number; limit: number | null }>;
-  templates?: { used: number; included: number; overageCount: number; overagePriceUsd: number; overageEstimateUsd: number };
+  templates?: { used: number; included: number };
 }
 
 const USAGE_LABELS: Record<string, string> = {
@@ -98,12 +98,6 @@ export default function PlanSettingsPage() {
                   <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-app">
                     <div className={`h-full ${pct > 90 ? "bg-red-400" : pct > 70 ? "bg-amber-400" : "bg-cyan-500"}`} style={{ width: `${pct}%` }} />
                   </div>
-                )}
-                {t.overageCount > 0 && (
-                  <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
-                    Excedente: <b>{t.overageCount.toLocaleString("es-CL")}</b> mensajes × US${t.overagePriceUsd} ={" "}
-                    <b>US${t.overageEstimateUsd.toFixed(2)}</b> — se cobra aparte en tu próxima factura.
-                  </p>
                 )}
               </div>
             );

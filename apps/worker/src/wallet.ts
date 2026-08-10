@@ -1,5 +1,21 @@
+import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
+import { enqueueNotification } from "./notifications/queue";
+
+let redis: IORedis | undefined;
+function conn(): IORedis {
+  if (!redis) redis = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
+  return redis;
+}
+/** SETNX con expiración: true si el aviso aún no se había enviado este período. */
+async function firstTime(key: string): Promise<boolean> {
+  try {
+    return (await conn().set(key, "1", "EX", 40 * 24 * 3600, "NX")) === "OK";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Bolsa de mensajes prepagada (docs/PREPAID_WALLET_DESIGN.md). Débito ATÓMICO y
@@ -123,6 +139,44 @@ export async function debitForMessage(
     })
     .catch(() => undefined);
   return { ok: true, balance };
+}
+
+/**
+ * Avisos de bolsa: al 80% consumido (queda ≤20%) y al 100% (vacía). Dedupe por
+ * período. En vacía, además avisa a operaciones (OPS_ALERT_WEBHOOK_URL). El aviso
+ * al tenant va por el catálogo de notificaciones (in-app/correo/push).
+ */
+export async function notifyWalletThresholds(organizationId: string, balance: number): Promise<void> {
+  try {
+    const w = await getAdminPrisma().messageWallet.findUnique({
+      where: { organizationId },
+      select: { includedPerPeriod: true, periodStart: true },
+    });
+    if (!w || w.includedPerPeriod <= 0) return;
+    const period = w.periodStart.toISOString().slice(0, 10);
+    const pct = Math.max(0, Math.round((balance / w.includedPerPeriod) * 100));
+
+    if (balance <= 0) {
+      if (await firstTime(`wallet:alerted:empty:${organizationId}:${period}`)) {
+        await enqueueNotification({ eventKey: "wallet.empty", organizationId, data: { balance: 0, pct: 0 } });
+        const url = getEnv().OPS_ALERT_WEBHOOK_URL;
+        if (url) {
+          const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { name: true } });
+          await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ summary: `TuBot: bolsa agotada — ${org?.name ?? organizationId}`, description: `El tenant "${org?.name ?? organizationId}" agotó su bolsa de mensajes de plantilla. Dejó de poder enviar plantillas hasta comprar un paquete o subir de plan.`, severity: "warning" }),
+          }).catch(() => undefined);
+        }
+      }
+    } else if (pct <= 20) {
+      if (await firstTime(`wallet:alerted:low:${organizationId}:${period}`)) {
+        await enqueueNotification({ eventKey: "wallet.low", organizationId, data: { balance, pct } });
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** Devuelve a la bolsa un débito de un mensaje (p. ej. si el fusible cortó luego). */

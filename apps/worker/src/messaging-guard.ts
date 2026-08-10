@@ -1,7 +1,7 @@
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
-import { debitForMessage, refundForMessage } from "./wallet";
+import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
 
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
@@ -131,8 +131,10 @@ export async function chargeTemplateSend(
     // Débito de bolsa (previo al envío). Sin saldo → no sale.
     const debit = await debitForMessage(organizationId, messageId, category, costUsd);
     if (!debit.ok) {
+      void notifyWalletThresholds(organizationId, 0);
       return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h sin costo.");
     }
+    if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
 
     // Fusible global (última red). Si corta tras debitar, se devuelve el crédito.
     const fuse = await globalFuseBlock();

@@ -157,15 +157,14 @@ export class PlatformController {
     const orgRoles = await db.role.findMany({ where: { organizationId: id }, select: { id: true, code: true } });
     const ownerRoleIds = new Set(orgRoles.filter((r) => r.code === "owner").map((r) => r.id));
     const adminMember = members.find((m) => ownerRoleIds.has(m.roleId) && m.active) ?? members.find((m) => m.active) ?? members[0];
-    // Mensajes de plantilla facturables del período (cupo incluido + excedente).
+    // Mensajes de plantilla facturables del período (informativo; el cobro es
+    // prepago por la bolsa, sin excedente post-pago).
     const now = new Date();
     const tmplPeriodStart = sub?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
     const tmplAgg = await db.usageEvent.aggregate({ where: { organizationId: id, type: "whatsapp_message", occurredAt: { gte: tmplPeriodStart } }, _count: { _all: true }, _sum: { costUsd: true } });
     const planFeatures = (plan?.features as Record<string, any>) ?? {};
     const tmplIncluded = typeof planFeatures.templateMessages === "number" ? planFeatures.templateMessages : 0;
-    const tmplOveragePrice = typeof planFeatures.templateOverageUsd === "number" ? planFeatures.templateOverageUsd : 0;
     const tmplUsed = tmplAgg._count._all;
-    const tmplOverageCount = tmplIncluded < 0 ? 0 : Math.max(0, tmplUsed - tmplIncluded);
     return {
       organization: { id: org.id, name: org.name, slug: org.slug, status: org.status, country: org.country, createdAt: org.createdAt, settings: org.settings },
       adminEmail: adminMember?.user.email ?? null,
@@ -187,9 +186,6 @@ export class PlatformController {
       templates: {
         used: tmplUsed,
         included: tmplIncluded,
-        overageCount: tmplOverageCount,
-        overagePriceUsd: tmplOveragePrice,
-        overageEstimateUsd: Number((tmplOverageCount * tmplOveragePrice).toFixed(4)),
         metaCostUsd: Number(tmplAgg._sum.costUsd ?? 0),
       },
       invoices,
