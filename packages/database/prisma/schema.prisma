@@ -1674,6 +1674,54 @@ model NotificationDelivery {
   @@map("notification_deliveries")
 }
 
+// Bolsa de mensajes prepagada por organización. La exposición máxima por cliente
+// = su saldo (lo que ya pagó). Débito atómico y previo al envío. Ver
+// docs/PREPAID_WALLET_DESIGN.md.
+model MessageWallet {
+  id                String   @id @default(cuid())
+  organizationId    String   @unique @map("organization_id")
+  balance           Int      @default(0) // créditos disponibles
+  includedPerPeriod Int      @default(0) @map("included_per_period") // snapshot del plan al renovar
+  carryoverCap      Int      @default(0) @map("carryover_cap") // tope de acumulación (= 1 mes)
+  periodStart       DateTime @default(now()) @map("period_start")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("message_wallets")
+}
+
+// Libro de movimientos de la bolsa: append-only, fuente de verdad auditable.
+model WalletLedger {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  delta          Int // + acredita, − descuenta
+  reason         String // plan_renewal | package_purchase | send_debit | refund | admin_adjust
+  balanceAfter   Int      @map("balance_after")
+  category       String? // utility | marketing | authentication (en send_debit)
+  costUsd        Decimal? @map("cost_usd") @db.Decimal(12, 6) // costo real Meta del envío (margen)
+  refType        String?  @map("ref_type") // message | invoice | package | admin
+  refId          String?  @map("ref_id")
+  createdById    String?  @map("created_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, refType, refId])
+  @@map("wallet_ledger")
+}
+
+// Catálogo de paquetes adicionales — editable desde el Super Admin, sin redeploy.
+model MessagePackage {
+  id       String  @id @default(cuid())
+  code     String  @unique
+  name     String
+  credits  Int
+  priceClp Int     @map("price_clp")
+  priceUsd Decimal @map("price_usd") @db.Decimal(10, 2)
+  active   Boolean @default(true)
+  order    Int     @default(0)
+
+  @@map("message_packages")
+}
+
 // Exports de datos en background (BullMQ). El archivo expira a los 7 días y
 // la descarga requiere permiso de Datos; queda registro de quién exportó.
 model ExportJob {

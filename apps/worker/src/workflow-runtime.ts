@@ -21,7 +21,7 @@ import { resolveApiPreset } from "./api-presets";
 import { ga4ClientId, getSyncQueue } from "./ga4";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
-import { guardTemplateSend } from "./messaging-guard";
+import { chargeTemplateSend } from "./messaging-guard";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 import { planAppointmentReminder, type BusinessHoursConfig } from "./appointment-reminders";
 
@@ -406,8 +406,8 @@ function makeDeps(): EngineDeps {
         return msg;
       });
 
-      // Fusible/topes de exposición financiera: solo plantillas (las que cuestan).
-      const gate = await guardTemplateSend(ctx.organizationId);
+      // Bolsa + fusible/topes de exposición financiera: solo plantillas (las que cuestan).
+      const gate = await chargeTemplateSend(ctx.organizationId, message.id, (data.template as any)?.category);
       if (gate.blocked) {
         await withTenant(ctx.organizationId, async (tx) => {
           await tx.message.update({ where: { id: message.id }, data: { status: "FAILED", error: gate.userMessage } });

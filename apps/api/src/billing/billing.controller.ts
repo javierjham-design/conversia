@@ -315,6 +315,10 @@ export class BillingController {
     }
     await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id } });
 
+    // Bolsa prepagada: el período pagado recarga el cupo del plan, acumulando el
+    // saldo no usado hasta 1 mes de bolsa (docs/PREPAID_WALLET_DESIGN.md).
+    await this.topUpWallet(organizationId, plan).catch(() => undefined);
+
     const totalDue = lines.reduce((a, l) => a + l.amount, 0);
     if (totalDue > 0) {
       const count = await this.prisma.admin.invoice.count();
@@ -332,5 +336,23 @@ export class BillingController {
         },
       });
     }
+  }
+
+  /** Recarga la bolsa al renovar: balance = min(saldo, cupo) + cupo (carryover 1 mes). */
+  private async topUpWallet(organizationId: string, plan: { features: unknown }): Promise<void> {
+    const feats = (plan.features as Record<string, any>) ?? {};
+    const q = Number(feats.messageQuota);
+    const included = Number.isFinite(q) && q >= 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
+    const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
+    const keep = w ? Math.min(w.balance, included) : 0; // carryover tope = 1 mes de bolsa
+    const balance = keep + included;
+    await this.prisma.admin.messageWallet.upsert({
+      where: { organizationId },
+      create: { organizationId, balance, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
+      update: { balance, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
+    });
+    await this.prisma.admin.walletLedger.create({
+      data: { organizationId, delta: balance - (w?.balance ?? 0), reason: "plan_renewal", balanceAfter: balance, refType: "invoice" },
+    });
   }
 }
