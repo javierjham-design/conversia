@@ -1,16 +1,76 @@
-/* Service Worker de TuBot.
- * Bloque 3: Web Push (recibir y abrir). El caché de armazón/offline y el aviso de
- * actualización se agregan en el bloque PWA (block 4). Mantener este archivo apto
- * para ambas responsabilidades.
+/* Service Worker de TuBot — PWA + Web Push.
+ * Principio: ARMAZÓN y estáticos en caché; DATOS SIEMPRE FRESCOS desde la red
+ * (nunca se cachea /backend). Página offline decente. Actualización avisada, sin
+ * romper lo que el usuario esté haciendo (no hace skipWaiting automático).
  */
+const CACHE = "tubot-shell-v1";
+const OFFLINE_URL = "/offline.html";
+const PRECACHE = [OFFLINE_URL, "/brand/tubot-icon.png"];
 
-self.addEventListener("install", () => {
-  // Activa de inmediato la versión nueva (el aviso de update se maneja en block 4).
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).catch(() => undefined));
+  // NO skipWaiting: la versión nueva espera y el cliente avisa "actualización disponible".
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })(),
+  );
+});
+
+// El cliente pide activar la versión nueva (tras avisar al usuario).
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
+});
+
+function isStatic(url) {
+  return url.pathname.startsWith("/_next/static") || url.pathname.startsWith("/brand/") || url.pathname === "/manifest.webmanifest";
+}
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+
+  // DATOS: nunca cachear el API — siempre red (una bandeja vieja es peor que nada).
+  if (url.pathname.startsWith("/backend")) return;
+
+  // NAVEGACIÓN: red primero, cae a caché, y por último a la página offline.
+  if (req.mode === "navigate") {
+    event.respondWith(
+      (async () => {
+        try {
+          const fresh = await fetch(req);
+          const cache = await caches.open(CACHE);
+          cache.put(req, fresh.clone()).catch(() => undefined);
+          return fresh;
+        } catch (_) {
+          return (await caches.match(req)) || (await caches.match(OFFLINE_URL)) || Response.error();
+        }
+      })(),
+    );
+    return;
+  }
+
+  // ESTÁTICOS del armazón: cache-first con refresco en segundo plano.
+  if (url.origin === self.location.origin && isStatic(url)) {
+    event.respondWith(
+      (async () => {
+        const cached = await caches.match(req);
+        const network = fetch(req)
+          .then((res) => {
+            caches.open(CACHE).then((c) => c.put(req, res.clone())).catch(() => undefined);
+            return res;
+          })
+          .catch(() => cached);
+        return cached || network;
+      })(),
+    );
+  }
 });
 
 // ---- Web Push ----
@@ -21,25 +81,21 @@ self.addEventListener("push", (event) => {
   } catch (_) {
     data = { title: "TuBot", body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "TuBot";
   const options = {
     body: data.body || "",
     icon: "/brand/tubot-icon.png",
-    // tag por conversación → el SO reemplaza en vez de apilar (agrupación).
     tag: data.tag || undefined,
     renotify: Boolean(data.tag),
     data: { link: data.link || "/", eventKey: data.eventKey || null },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(self.registration.showNotification(data.title || "TuBot", options));
 });
 
-// ---- Clic en la notificación: abrir/enfocar la conversación exacta ----
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const link = (event.notification.data && event.notification.data.link) || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      // Si ya hay una ventana del panel abierta, navégala y enfócala.
       for (const client of clients) {
         if ("focus" in client) {
           client.navigate?.(link);

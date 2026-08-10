@@ -1,0 +1,22 @@
+{
+  "name": "TuBot",
+  "short_name": "TuBot",
+  "description": "Atención conversacional con agentes de IA — Bandeja, contactos y flujos.",
+  "start_url": "/inbox",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#0ea5e9",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/brand/tubot-icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/tubot-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/tubot-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Bandeja", "short_name": "Bandeja", "url": "/inbox", "icons": [{ "src": "/brand/tubot-icon.png", "sizes": "192x192" }] },
+    { "name": "Contactos", "short_name": "Contactos", "url": "/contacts", "icons": [{ "src": "/brand/tubot-icon.png", "sizes": "192x192" }] }
+  ]
+}

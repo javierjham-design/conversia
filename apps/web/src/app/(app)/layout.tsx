@@ -30,6 +30,7 @@ import { ThemeToggle } from "@/components/theme";
 import { BillingBanner } from "@/components/BillingBanner";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
 import { SupportWidget } from "@/components/SupportWidget";
+import { PwaManager } from "@/components/PwaManager";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -499,6 +500,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
           <SupportWidget />
+          <PwaManager />
         </div>
       </MeContext.Provider>
     </ToastProvider>
