@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Post, Query } from 
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { CLP_PER_USD_REF, computeWhatsappCostUsd } from "@conversia/agents";
+import { listEvents } from "@conversia/notifications";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
@@ -62,6 +63,62 @@ export class NotificationsController {
         where: { userId: ctx.userId, readAt: null, ...(parsed.data.id ? { id: parsed.data.id } : {}) },
         data: { readAt: new Date() },
       });
+      return { ok: true };
+    });
+  }
+
+  /** Catálogo de eventos para pintar la matriz de preferencias. */
+  @Get("catalog")
+  catalog() {
+    requireContext();
+    return {
+      events: listEvents().map((e) => ({
+        key: e.key,
+        title: e.title,
+        urgency: e.urgency,
+        channels: e.channels,
+        defaultChannels: e.defaultChannels,
+        lockedChannels: e.lockedChannels ?? [],
+      })),
+    };
+  }
+
+  /** Preferencias del usuario (matriz evento×canal + horario silencioso + WhatsApp). */
+  @Get("preferences")
+  getPreferences() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const all = (((org?.settings ?? {}) as any).notifPrefs ?? {}) as Record<string, any>;
+      const p = all[ctx.userId!] ?? {};
+      return {
+        matrix: p.matrix ?? {},
+        quietHours: p.quietHours ?? { enabled: false, start: "22:00", end: "08:00" },
+        whatsapp: p.whatsapp ?? { enabled: false, throttlePerHour: 4, delayMinutes: 5 },
+      };
+    });
+  }
+
+  /** Guarda las preferencias del usuario. */
+  @Post("preferences")
+  savePreferences(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z
+      .object({
+        matrix: z.record(z.record(z.boolean())).optional(),
+        quietHours: z.object({ enabled: z.boolean(), start: z.string(), end: z.string() }).optional(),
+        whatsapp: z
+          .object({ enabled: z.boolean(), throttlePerHour: z.number().int().min(1).max(20), delayMinutes: z.number().int().min(1).max(60) })
+          .optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Preferencias inválidas");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const all = (settings.notifPrefs ?? {}) as Record<string, any>;
+      all[ctx.userId!] = { ...(all[ctx.userId!] ?? {}), ...parsed.data };
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, notifPrefs: all } as object } });
       return { ok: true };
     });
   }
