@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 import { Skeleton } from "@/components/ui";
+import { WalletCard } from "./wallet-card";
 
 interface BillingOverview {
   plan: { code: string; name: string; priceClp: number; priceUsd: number; interval: string } | null;
@@ -37,6 +38,8 @@ export default function PlanSettingsPage() {
         Consumo del espacio según lo que registra la plataforma. Para cambiar de plan o ver pagos ve a{" "}
         <a href="/billing" className="inline-flex items-center gap-0.5 text-cyan-700 underline dark:text-cyan-300">Plan y facturación <ExternalLink size={10} /></a>.
       </p>
+
+      <WalletCard />
 
       <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <p className="text-sm font-medium">Plan actual</p>

@@ -43,15 +43,22 @@ function normalizeCategory(category: string | null | undefined): WalletCategory 
   return "utility";
 }
 
-/** Cupo del plan del tenant (features.messageQuota) o el mínimo seguro por defecto. */
+/** Cupo prepago que da un valor de "Incluidos / mes" del plan (−1 = ilimitado). */
+export function quotaFromPlanIncluded(templateMessages: unknown): number {
+  const q = Number(templateMessages);
+  if (q === -1) return 1_000_000; // "ilimitado" práctico (sigue registrando consumo)
+  if (Number.isFinite(q) && q > 0) return Math.round(q);
+  return getEnv().WALLET_DEFAULT_QUOTA; // 0 / sin definir → mínimo seguro
+}
+
+/** Cupo del plan del tenant (features.templateMessages) o el mínimo seguro. */
 async function planQuota(organizationId: string): Promise<number> {
   const prisma = getAdminPrisma();
   try {
     const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { planId: true } });
     if (org?.planId) {
       const plan = await prisma.plan.findUnique({ where: { id: org.planId }, select: { features: true } });
-      const q = Number((plan?.features as any)?.messageQuota);
-      if (Number.isFinite(q) && q >= 0) return Math.round(q);
+      return quotaFromPlanIncluded((plan?.features as any)?.templateMessages);
     }
   } catch {
     /* cae al default */

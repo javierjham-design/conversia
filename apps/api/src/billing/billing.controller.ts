@@ -92,6 +92,25 @@ export class BillingController {
       .sort((a, b) => a.priceClp - b.priceClp);
   }
 
+  /** Bolsa de mensajes del tenant: saldo, incluido y paquetes disponibles. */
+  @Get("wallet")
+  async wallet() {
+    const ctx = requireContext();
+    const [wallet, packages] = await Promise.all([
+      this.prisma.withTenant(ctx.organizationId, (tx) => tx.messageWallet.findUnique({ where: { organizationId: ctx.organizationId } })),
+      this.prisma.admin.messagePackage.findMany({ where: { active: true }, orderBy: { order: "asc" } }),
+    ]);
+    const balance = wallet?.balance ?? 0;
+    const included = wallet?.includedPerPeriod ?? 0;
+    return {
+      balance,
+      included,
+      // % restante sobre el incluido del período (para la barra y los avisos 80/100).
+      remainingPct: included > 0 ? Math.max(0, Math.round((balance / included) * 100)) : null,
+      packages: packages.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: Number(p.priceUsd) })),
+    };
+  }
+
   /** Inicia el checkout de cambio de plan (mock en dev, Stripe en prod). */
   @Post("checkout")
   async checkout(@Body() body: unknown) {
@@ -341,8 +360,9 @@ export class BillingController {
   /** Recarga la bolsa al renovar: balance = min(saldo, cupo) + cupo (carryover 1 mes). */
   private async topUpWallet(organizationId: string, plan: { features: unknown }): Promise<void> {
     const feats = (plan.features as Record<string, any>) ?? {};
-    const q = Number(feats.messageQuota);
-    const included = Number.isFinite(q) && q >= 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
+    const q = Number(feats.templateMessages);
+    // −1 = ilimitado (práctico); 0/sin definir = mínimo seguro; >0 = ese cupo.
+    const included = q === -1 ? 1_000_000 : Number.isFinite(q) && q > 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
     const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
     const keep = w ? Math.min(w.balance, included) : 0; // carryover tope = 1 mes de bolsa
     const balance = keep + included;
