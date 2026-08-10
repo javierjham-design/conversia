@@ -130,6 +130,27 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/billing",
   },
   {
+    key: "wallet.low",
+    title: "Tu bolsa de mensajes está por agotarse",
+    body: "Te quedan {balance} mensajes de plantilla ({pct}% del plan). Compra un paquete para no dejar de avisarle a tus clientes.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "info",
+    channels: ["in_app", "web_push", "email"],
+    defaultChannels: ["in_app", "email"],
+    link: "/settings/plan",
+  },
+  {
+    key: "wallet.empty",
+    title: "Se agotó tu bolsa de mensajes",
+    body: "Tu bolsa de mensajes de plantilla llegó a 0. Compra un paquete o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h sin costo.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email"],
+    defaultChannels: ["in_app", "email"],
+    lockedChannels: ["in_app"], // el aviso de bolsa vacía no se apaga
+    link: "/settings/plan",
+  },
+  {
     key: "ai.token_cap",
     title: "Tope de tokens de IA alcanzado",
     body: "Se alcanzó el tope diario de tokens de IA. La IA queda en pausa.",

@@ -306,26 +306,10 @@ export class BillingController {
 
     const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" } });
 
-    // Excedente de mensajes de plantilla del PERÍODO QUE TERMINA (solo en renovación):
-    // mensajes facturables por encima del cupo incluido del plan actual × precio.
+    // Modelo PREPAGO: el plan es la única línea. Los mensajes de plantilla se pagan
+    // por adelantado con la bolsa (message_wallets) + paquetes; no hay excedente
+    // post-pago. (Overage legacy eliminado — docs/PREPAID_WALLET_DESIGN.md.)
     const lines: Array<{ concept: string; amount: number }> = [{ concept: `Plan ${plan.name} (${plan.interval})`, amount }];
-    if (existing?.periodStart) {
-      const prevPlan = await this.prisma.admin.plan.findUnique({ where: { id: existing.planId } });
-      const feats = (prevPlan?.features as Record<string, any>) ?? {};
-      const included = typeof feats.templateMessages === "number" ? feats.templateMessages : 0;
-      const overageUsd = typeof feats.templateOverageUsd === "number" ? feats.templateOverageUsd : 0;
-      if (included >= 0 && overageUsd > 0) {
-        const used = await this.prisma.admin.usageEvent.count({ where: { organizationId, type: "whatsapp_message", occurredAt: { gte: existing.periodStart } } });
-        const over = Math.max(0, used - included);
-        if (over > 0) {
-          // Tipo de cambio editable desde el Super Admin (platform_settings.usdToClp).
-          const fxRow = await this.prisma.admin.platformSetting.findUnique({ where: { key: "usdToClp" } });
-          const USD_TO_CLP = fxRow ? Number(fxRow.value) || 950 : 950;
-          const overageAmount = currency === "CLP" ? Math.round(over * overageUsd * USD_TO_CLP) : Number((over * overageUsd).toFixed(2));
-          lines.push({ concept: `Excedente ${over} mensajes de plantilla (WhatsApp)`, amount: overageAmount });
-        }
-      }
-    }
 
     if (existing) {
       await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });

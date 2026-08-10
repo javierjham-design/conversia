@@ -312,11 +312,6 @@ export default function OrgDetailPage() {
                   {d.templates.used.toLocaleString("es-CL")}{d.templates.included < 0 ? " (ilimitado)" : ` / ${d.templates.included.toLocaleString("es-CL")} incluidos`}
                 </span>
               </div>
-              {d.templates.overageCount > 0 && (
-                <p className="mt-1 text-amber-700">
-                  Excedente cobrable: <b>{d.templates.overageCount.toLocaleString("es-CL")}</b> × US${d.templates.overagePriceUsd} = <b>US${d.templates.overageEstimateUsd.toFixed(2)}</b>
-                </p>
-              )}
               <p className="mt-1 text-slate-400">Costo que cobra Meta este período: US${(d.templates.metaCostUsd ?? 0).toFixed(2)}.</p>
             </div>
           )}

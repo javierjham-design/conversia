@@ -17,7 +17,7 @@ interface Plan {
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number; templateOverageUsd: number };
+type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -72,7 +72,6 @@ export default function PlansPage() {
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
         lsVariantId: String((plan.features as any)?.lsVariantId ?? ""),
         templateMessages: Number((plan.features as any)?.templateMessages ?? 0),
-        templateOverageUsd: Number((plan.features as any)?.templateOverageUsd ?? 0),
       };
     }
     setDrafts(d);
@@ -92,7 +91,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages, templateOverageUsd: d.templateOverageUsd } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -210,15 +209,12 @@ export default function PlansPage() {
                 </div>
 
                 <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2">
-                  <p className="text-[11px] font-medium text-slate-600">Mensajes de plantilla (WhatsApp) — los que Meta cobra</p>
+                  <p className="text-[11px] font-medium text-slate-600">Bolsa de mensajes de plantilla (prepago)</p>
                   <label className="flex items-center justify-between text-xs text-slate-600">
                     <span>Incluidos / mes (−1 = ilimitado)</span>
                     <input type="number" value={d.templateMessages} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, templateMessages: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
                   </label>
-                  <label className="flex items-center justify-between text-xs text-slate-600">
-                    <span>Precio excedente (USD/mensaje)</span>
-                    <input type="number" step="0.01" value={d.templateOverageUsd} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, templateOverageUsd: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
-                  </label>
+                  <p className="text-[10px] text-slate-400">Recarga la bolsa del tenant al renovar. El excedente se compra por paquetes prepago (no hay cobro post-pago).</p>
                 </div>
 
                 <div className="mt-2 flex gap-3">
