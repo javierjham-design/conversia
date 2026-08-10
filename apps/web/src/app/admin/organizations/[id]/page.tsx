@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { padmin } from "@/lib/platform-api";
 import { Button, PageHeader, Skeleton, StatusBadge, useToast, type StatusKind } from "@/components/ui";
+import { MessagingCapCard } from "./messaging-cap-card";
 
 const LIMIT_FIELDS: { key: string; label: string }[] = [
   { key: "aiTokensDaily", label: "Tokens IA / día" },
@@ -153,6 +154,9 @@ export default function OrgDetailPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        {/* Límite de mensajería propio del tenant */}
+        <MessagingCapCard orgId={id} />
+
         {/* Vigencia */}
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
           <h2 className="mb-1 font-semibold text-navy-900">Vigencia del servicio</h2>

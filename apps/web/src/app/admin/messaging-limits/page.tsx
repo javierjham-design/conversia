@@ -1,0 +1,127 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Gauge, ShieldAlert } from "lucide-react";
+import { padmin } from "@/lib/platform-api";
+import { Button, PageHeader, Skeleton, useToast } from "@/components/ui";
+
+interface Limits {
+  global: number;
+  perTenantDefault: number;
+  todayGlobal: number;
+  fuseTripped: boolean;
+  clpPerMsg: { marketing: number; utility: number };
+}
+
+const clp = (n: number) => `$${Math.round(n).toLocaleString("es-CL")}`;
+
+/** Muestra la equivalencia en pesos de un tope (rango utilidad→marketing). */
+function ClpHint({ n, rate }: { n: number; rate: { marketing: number; utility: number } }) {
+  if (!n || n <= 0) return null;
+  return (
+    <p className="mt-1 text-xs text-slate-500">
+      ≈ {clp(n * rate.utility)}/día si todo es <b>utilidad</b> · hasta{" "}
+      <b>{clp(n * rate.marketing)}/día</b> si todo es <b>marketing</b>
+    </p>
+  );
+}
+
+export default function MessagingLimitsPage() {
+  const toast = useToast();
+  const [data, setData] = useState<Limits | null>(null);
+  const [global, setGlobal] = useState(0);
+  const [perTenant, setPerTenant] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const d = await padmin<Limits>("/platform/messaging-limits");
+    setData(d);
+    setGlobal(d.global);
+    setPerTenant(d.perTenantDefault);
+  }, []);
+
+  useEffect(() => {
+    void load().catch((e) => toast.push((e as Error).message, "error"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await padmin("/platform/messaging-limits", { method: "PATCH", body: JSON.stringify({ global, perTenantDefault: perTenant }) });
+      toast.push("Límites actualizados ✔", "ok");
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!data) return <div className="mx-auto max-w-2xl px-6 py-6"><Skeleton className="h-64" /></div>;
+
+  const rate = data.clpPerMsg;
+
+  return (
+    <div className="mx-auto max-w-2xl px-6 py-6 lg:px-8">
+      <PageHeader
+        title="Límites de mensajería"
+        description="Fusible global y tope por defecto por tenant. Solo afectan a mensajes de plantilla (los que cuestan); las respuestas dentro de 24 h nunca se tocan."
+      />
+
+      {/* Estado del fusible + consumo del día */}
+      <div className={`mb-5 flex items-center gap-3 rounded-card border p-4 ${data.fuseTripped ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"}`}>
+        {data.fuseTripped ? <ShieldAlert size={22} className="text-red-500" /> : <Gauge size={22} className="text-brand-600" />}
+        <div className="flex-1">
+          <p className="text-sm font-medium text-navy-900">
+            Consumo global de hoy: <b>{data.todayGlobal.toLocaleString("es-CL")}</b> / {data.global.toLocaleString("es-CL")} plantillas
+          </p>
+          <p className="text-xs text-slate-500">
+            {data.fuseTripped
+              ? "⚠ Fusible CORTADO: los envíos de plantilla están en pausa para todos. Sube el tope global y se reanudan."
+              : `Equivale hoy a ~${clp(data.todayGlobal * rate.utility)}–${clp(data.todayGlobal * rate.marketing)} CLP.`}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5">
+        {/* Fusible global */}
+        <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+          <label className="block text-sm font-medium text-navy-900">Fusible global (plantillas/día, toda la plataforma)</label>
+          <p className="mb-2 text-xs text-slate-500">Al superarlo, se cortan los envíos de plantilla de todos los tenants y te llega alerta. Es la red contra un bug o abuso masivo.</p>
+          <input
+            type="number"
+            min={1}
+            value={global}
+            onChange={(e) => setGlobal(Number(e.target.value))}
+            className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <ClpHint n={global} rate={rate} />
+        </div>
+
+        {/* Tope por defecto por tenant */}
+        <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+          <label className="block text-sm font-medium text-navy-900">Tope por defecto por tenant (plantillas/día)</label>
+          <p className="mb-2 text-xs text-slate-500">Se aplica a cada tenant que no tenga un tope propio. El tope propio se fija en la ficha de cada organización.</p>
+          <input
+            type="number"
+            min={1}
+            value={perTenant}
+            onChange={(e) => setPerTenant(Number(e.target.value))}
+            className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <ClpHint n={perTenant} rate={rate} />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button disabled={busy || global < 1 || perTenant < 1} onClick={() => void save()}>
+            {busy ? "Guardando…" : "Guardar límites"}
+          </Button>
+          <span className="flex items-center gap-1.5 text-xs text-slate-500">
+            <AlertTriangle size={13} /> Tarifa de referencia (Chile): utilidad {clp(rate.utility)} · marketing {clp(rate.marketing)} por mensaje.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

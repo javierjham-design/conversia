@@ -16,6 +16,8 @@ import { z } from "zod";
 import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
+import { computeWhatsappCostUsd } from "@conversia/agents";
 import { AuthService } from "../auth/auth.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
 import { sendEmail } from "../common/email";
@@ -34,6 +36,7 @@ export class PlatformController {
     private prisma: PrismaService,
     private auth: AuthService,
     private paymentSettings: PaymentSettingsService,
+    private queues: QueueService,
   ) {}
 
   private audit(req: PlatformRequest, action: string, entityType: string, entityId: string, after?: object) {
@@ -580,6 +583,100 @@ export class PlatformController {
     }
     await this.audit(req, "platform.cost_settings_update", "platform_setting", "cost", parsed.data as object);
     return this.costModel();
+  }
+
+  // ---------------------- Límites de mensajería (fusible + topes) ----------------------
+
+  /** Topes globales + tope por defecto por tenant, con consumo del día y equivalencia en CLP. */
+  @Get("messaging-limits")
+  async messagingLimits() {
+    const caps = await this.readMessagingCaps();
+    const { usdToClp } = await this.readCostSettings();
+    const date = new Date().toISOString().slice(0, 10);
+    let todayGlobal = 0;
+    let fuseTripped = false;
+    try {
+      todayGlobal = Number(await this.queues.connection.get(`msgcap:g:${date}`)) || 0;
+      fuseTripped = (await this.queues.connection.get(`msgcap:fuse:${date}`)) === "1";
+    } catch {
+      /* redis caído → 0 */
+    }
+    return { ...caps, todayGlobal, fuseTripped, clpPerMsg: this.clpPerMsg(usdToClp, "CL") };
+  }
+
+  /** Ajusta el tope global y/o el default por tenant (auditado). */
+  @Patch("messaging-limits")
+  async setMessagingLimits(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({ global: z.number().int().min(1).max(10_000_000).optional(), perTenantDefault: z.number().int().min(1).max(10_000_000).optional() })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Valores inválidos");
+    if (parsed.data.global !== undefined) {
+      await this.prisma.admin.platformSetting.upsert({ where: { key: "messagingCapGlobalDay" }, update: { value: String(parsed.data.global) }, create: { key: "messagingCapGlobalDay", value: String(parsed.data.global) } });
+    }
+    if (parsed.data.perTenantDefault !== undefined) {
+      await this.prisma.admin.platformSetting.upsert({ where: { key: "messagingCapPerTenantDay" }, update: { value: String(parsed.data.perTenantDefault) }, create: { key: "messagingCapPerTenantDay", value: String(parsed.data.perTenantDefault) } });
+    }
+    await this.audit(req, "platform.messaging_limits_update", "platform_setting", "messaging", parsed.data as object);
+    return this.messagingLimits();
+  }
+
+  /** Tope propio de un tenant (override del default) + consumo del día. */
+  @Get("organizations/:id/messaging")
+  async orgMessaging(@Param("id") id: string) {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true, country: true } });
+    const override = Number((org?.settings as any)?.messaging?.dailyCap);
+    const hasOverride = Number.isFinite(override) && override > 0;
+    const { perTenantDefault } = await this.readMessagingCaps();
+    const { usdToClp } = await this.readCostSettings();
+    const date = new Date().toISOString().slice(0, 10);
+    let today = 0;
+    try {
+      today = Number(await this.queues.connection.get(`msgcap:t:${id}:${date}`)) || 0;
+    } catch {
+      /* redis caído → 0 */
+    }
+    return {
+      override: hasOverride ? override : null,
+      default: perTenantDefault,
+      effective: hasOverride ? override : perTenantDefault,
+      today,
+      clpPerMsg: this.clpPerMsg(usdToClp, org?.country ?? "CL"),
+    };
+  }
+
+  /** Fija/limpia el tope propio de un tenant (null = usar el default). Auditado. */
+  @Patch("organizations/:id/messaging-cap")
+  async setOrgMessagingCap(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ dailyCap: z.number().int().min(1).max(10_000_000).nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Valor inválido");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const settings = (org?.settings ?? {}) as Record<string, any>;
+    const messaging = { ...(settings.messaging ?? {}) };
+    if (parsed.data.dailyCap === null) delete messaging.dailyCap;
+    else messaging.dailyCap = parsed.data.dailyCap;
+    await this.prisma.admin.organization.update({ where: { id }, data: { settings: { ...settings, messaging } as object } });
+    await this.audit(req, "platform.org_messaging_cap_update", "organization", id, { dailyCap: parsed.data.dailyCap });
+    return { ok: true };
+  }
+
+  private async readMessagingCaps(): Promise<{ global: number; perTenantDefault: number }> {
+    const env = getEnv();
+    const rows = await this.prisma.admin.platformSetting.findMany({ where: { key: { in: ["messagingCapGlobalDay", "messagingCapPerTenantDay"] } } });
+    const g = rows.find((r) => r.key === "messagingCapGlobalDay");
+    const t = rows.find((r) => r.key === "messagingCapPerTenantDay");
+    return {
+      global: g && Number(g.value) > 0 ? Number(g.value) : env.MSG_CAP_GLOBAL_DAY,
+      perTenantDefault: t && Number(t.value) > 0 ? Number(t.value) : env.MSG_CAP_PER_TENANT_DAY,
+    };
+  }
+
+  /** Costo por mensaje en CLP (marketing y utilidad) para mostrar equivalencias. */
+  private clpPerMsg(usdToClp: number, country: string): { marketing: number; utility: number } {
+    return {
+      marketing: Math.round(computeWhatsappCostUsd("marketing", country) * usdToClp),
+      utility: Math.round(computeWhatsappCostUsd("utility", country) * usdToClp),
+    };
   }
 
   /** Lee overrides de tarifas + tipo de cambio de platform_settings. */
