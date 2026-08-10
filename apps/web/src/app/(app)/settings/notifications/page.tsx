@@ -32,11 +32,18 @@ const CHANNELS: { key: Channel; label: string }[] = [
   { key: "email", label: "Correo" },
 ];
 
+interface WaTemplate {
+  name: string;
+  language: string;
+  canEdit: boolean;
+}
+
 export default function NotificationsSettingsPage() {
   const toast = useToast();
   const [events, setEvents] = useState<EventDef[] | null>(null);
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [waTpl, setWaTpl] = useState<WaTemplate | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -50,8 +57,22 @@ export default function NotificationsSettingsPage() {
       })
       .catch((e) => toast.push((e as Error).message, "error"));
     void api<Estimate>("/notifications/whatsapp/estimate").then(setEstimate).catch(() => undefined);
+    void api<WaTemplate>("/notifications/whatsapp-template").then(setWaTpl).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function saveWaTemplate() {
+    if (!waTpl) return;
+    setBusy(true);
+    try {
+      await api("/notifications/whatsapp-template", { method: "POST", body: JSON.stringify({ name: waTpl.name, language: waTpl.language }) });
+      toast.push("Plantilla conectada ✔", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function isOn(ev: EventDef, ch: Channel): boolean {
     if (ev.lockedChannels.includes(ch)) return true;
@@ -183,7 +204,35 @@ export default function NotificationsSettingsPage() {
             </label>
           </div>
         )}
-        <p className="mt-2 text-[11px] text-ink-subtle">Requiere una plantilla HSM aprobada en tu WhatsApp. Si no la tienes, créala en Meta (WhatsApp Manager → Plantillas) y avísanos por Soporte para conectarla.</p>
+        {/* Config POR TENANT: cada tenant conecta SU propia plantilla HSM. */}
+        {waTpl?.canEdit ? (
+          <div className="mt-3 rounded-lg border border-line bg-app p-3">
+            <p className="mb-1.5 text-xs font-medium text-ink">Plantilla HSM de tu WhatsApp (para el equipo)</p>
+            <p className="mb-2 text-[11px] text-ink-subtle">
+              Crea una plantilla de <b>utilidad</b> en Meta (WhatsApp Manager → Plantillas) con un texto tipo
+              “Tienes una conversación sin atender: {"{{1}}"}”. Cuando Meta la apruebe, pega su nombre aquí.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={waTpl.name}
+                onChange={(e) => setWaTpl({ ...waTpl, name: e.target.value })}
+                placeholder="nombre_de_la_plantilla"
+                className="min-w-0 flex-1 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm"
+              />
+              <input
+                value={waTpl.language}
+                onChange={(e) => setWaTpl({ ...waTpl, language: e.target.value })}
+                placeholder="es"
+                className="w-16 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm"
+              />
+              <button onClick={() => void saveWaTemplate()} disabled={busy} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+                Conectar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] text-ink-subtle">Requiere una plantilla HSM aprobada en el WhatsApp de tu negocio. Pídele a un administrador que la conecte.</p>
+        )}
       </div>
     </div>
   );
