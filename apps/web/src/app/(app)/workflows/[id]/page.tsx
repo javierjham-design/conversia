@@ -769,15 +769,17 @@ export default function WorkflowEditorPage() {
 // ---------------------------------------------------------------------------
 
 /** Variables del flujo disponibles para {{...}} (mismas que resuelve el motor). */
-const FLOW_VARIABLES: { key: string; label: string }[] = [
-  { key: "contact.firstName", label: "Nombre del contacto" },
+// `primary` = variables más usadas: se muestran siempre como botones.
+// El resto queda plegado bajo "Otras variables".
+const FLOW_VARIABLES: { key: string; label: string; primary?: boolean }[] = [
+  { key: "contact.firstName", label: "Nombre del contacto", primary: true },
   { key: "contact.lastName", label: "Apellido del contacto" },
   { key: "contact.phone", label: "Teléfono del contacto" },
-  { key: "organization.name", label: "Nombre del negocio" },
+  { key: "organization.name", label: "Nombre del negocio", primary: true },
   { key: "clinic.name", label: "Nombre de la clínica" },
   { key: "clinic.address", label: "Dirección de la clínica" },
-  { key: "appointment.date", label: "Fecha de la cita" },
-  { key: "appointment.time", label: "Hora de la cita" },
+  { key: "appointment.date", label: "Fecha de la cita", primary: true },
+  { key: "appointment.time", label: "Hora de la cita", primary: true },
   { key: "appointment.service", label: "Servicio de la cita" },
   { key: "appointment.professional", label: "Profesional" },
 ];
@@ -801,6 +803,7 @@ function VarField({
 }) {
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const [menu, setMenu] = useState<{ open: boolean; query: string; start: number; index: number }>({ open: false, query: "", start: 0, index: 0 });
+  const [showOthers, setShowOthers] = useState(false);
   const matches = useMemo(
     () => (menu.open ? FLOW_VARIABLES.filter((v) => `${v.key} ${v.label}`.toLowerCase().includes(menu.query.toLowerCase())) : []),
     [menu.open, menu.query],
@@ -861,18 +864,50 @@ function VarField({
       {multiline ? <textarea {...common} rows={rows ?? 3} /> : <input {...common} />}
       {chips && (
         <div className="mt-1.5 flex flex-wrap gap-1">
-          {FLOW_VARIABLES.map((v) => (
+          {/* Más usadas: siempre visibles. Se insertan donde esté el cursor del mensaje. */}
+          {FLOW_VARIABLES.filter((v) => v.primary).map((v) => (
             <button
               key={v.key}
               type="button"
               // onMouseDown + preventDefault: conserva el cursor del campo al hacer clic.
               onMouseDown={(e) => { e.preventDefault(); insertAtCaret(v.key); }}
               title={`{{${v.key}}}`}
-              className="rounded-full border border-line bg-app px-2 py-0.5 text-[11px] text-ink-muted transition-colors hover:border-brand-300 hover:bg-brand-soft hover:text-brand-700 dark:hover:text-brand-300"
+              className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-800 transition-colors hover:bg-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300"
             >
               + {v.label}
             </button>
           ))}
+          {/* Resto: se despliegan bajo "Otras variables". */}
+          {!showOthers ? (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); setShowOthers(true); }}
+              className="rounded-full border border-line-strong bg-app px-2 py-0.5 text-[11px] font-medium text-ink-muted transition-colors hover:border-brand-300 hover:text-ink"
+            >
+              Otras variables ▾
+            </button>
+          ) : (
+            <>
+              {FLOW_VARIABLES.filter((v) => !v.primary).map((v) => (
+                <button
+                  key={v.key}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); insertAtCaret(v.key); }}
+                  title={`{{${v.key}}}`}
+                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-800 transition-colors hover:bg-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300"
+                >
+                  + {v.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); setShowOthers(false); }}
+                className="rounded-full border border-line-strong bg-app px-2 py-0.5 text-[11px] font-medium text-ink-muted transition-colors hover:border-brand-300 hover:text-ink"
+              >
+                Menos ▴
+              </button>
+            </>
+          )}
         </div>
       )}
       {menu.open && matches.length > 0 && (
