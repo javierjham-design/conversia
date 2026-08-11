@@ -63,8 +63,8 @@ function normalizeCategory(category: string | null | undefined): WalletCategory 
 export function quotaFromPlanIncluded(templateMessages: unknown): number {
   const q = Number(templateMessages);
   if (q === -1) return 1_000_000; // "ilimitado" práctico (sigue registrando consumo)
-  if (Number.isFinite(q) && q > 0) return Math.round(q);
-  return getEnv().WALLET_DEFAULT_QUOTA; // 0 / sin definir → mínimo seguro
+  if (Number.isFinite(q) && q >= 0) return Math.round(q); // 0 = plan sin cupo (p. ej. Free)
+  return getEnv().WALLET_DEFAULT_QUOTA; // solo sin definir (NaN) → mínimo seguro
 }
 
 /** Cupo del plan del tenant (features.templateMessages) o el mínimo seguro. */

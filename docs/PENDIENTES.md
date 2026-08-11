@@ -20,6 +20,18 @@ Medios agendados (endurecimiento, no bloqueantes):
 | S-3 | Allowlist de IP para el Super Admin (`SUPER_ADMIN_ALLOWED_IPS`) | M4 | S (config) |
 | S-4 | Validar monto == precio de plan en el webhook de pago | M5 | S |
 
+## 0-bis. Bolsa prepagada — follow-ups (bloque 2 cerrado 2026-08-10)
+La bolsa está desplegada y funcionando (débito atómico, avisos 80/100%, compra de
+paquete Flow/mock, márgenes, CRUD de paquetes). La **recarga ocurre también al
+renovar el período** (billing.activate → topUpWallet, con carryover de 1 mes), no
+solo en el primer pago. Bolsas de tenants activos cargadas (Digital Dent/TuBot 4000,
+Clínica Demo 0). Pendientes menores:
+| # | Ítem | Nota | Esfuerzo |
+|---|------|------|----------|
+| W-1 | **Prueba e2e real de la bolsa** con **número de producción** | Digital Dent está en el número de PRUEBA de Meta (no cobra, no valida /admin/margins). Hacer un envío real que valide las 5 capas el día que la WABA de producción esté viva (App Review). | S |
+| W-2 | **Refund al fallar el envío** | Hoy se debita ANTES de enviar; si Meta rechaza el mensaje de forma terminal (tras reintentos), el crédito queda consumido sin envío. Devolver el crédito en fallo terminal (cuidando idempotencia con los reintentos). | S |
+| W-3 | **Compra de paquete por Lemon Squeezy (USD)** | Requiere un producto de pago único en LS (distinto de la suscripción) + manejo de `order_created`. Hoy: Flow (CLP) + mock. | M |
+
 ## A. Go-live de Meta / WhatsApp (lo que condiciona el lanzamiento)
 | # | Ítem | Estado | ¿Sigue? | Esfuerzo |
 |---|------|--------|---------|----------|

@@ -420,8 +420,8 @@ export class BillingController {
   private async topUpWallet(organizationId: string, plan: { features: unknown }): Promise<void> {
     const feats = (plan.features as Record<string, any>) ?? {};
     const q = Number(feats.templateMessages);
-    // −1 = ilimitado (práctico); 0/sin definir = mínimo seguro; >0 = ese cupo.
-    const included = q === -1 ? 1_000_000 : Number.isFinite(q) && q > 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
+    // −1 = ilimitado (práctico); 0 = plan sin cupo (Free); sin definir = mínimo seguro.
+    const included = q === -1 ? 1_000_000 : Number.isFinite(q) && q >= 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
     const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
     const keep = w ? Math.min(w.balance, included) : 0; // carryover tope = 1 mes de bolsa
     const balance = keep + included;
