@@ -21,6 +21,65 @@ export class ChannelAuthError extends Error {
   readonly kind = "channel_auth";
 }
 
+/**
+ * Error de CONFIGURACIÓN del canal en Meta (no de token): el número necesita algo
+ * del lado de Meta antes de poder enviar (nombre para mostrar, registro, pago…).
+ * Reintentar no lo arregla; se marca el canal y se muestra un aviso claro.
+ */
+export class ChannelConfigError extends Error {
+  readonly kind = "channel_config";
+  constructor(
+    message: string,
+    readonly userMessage: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Traduce un error 400 de Meta a un aviso claro para el tenant (o null si no aplica). */
+export function channelConfigNotice(text: string): string | null {
+  if (text.includes('"code":131037') || text.toLowerCase().includes("display name"))
+    return "Tu número de WhatsApp necesita que Meta apruebe su Nombre para mostrar antes de poder enviar mensajes. Configúralo en WhatsApp Manager → tu número → Nombre para mostrar.";
+  if (text.includes('"code":131045'))
+    return "Tu número de WhatsApp no está registrado en la plataforma de WhatsApp (Cloud API). Debe completarse el registro del número antes de enviar.";
+  if (text.includes('"code":131042'))
+    return "Tu cuenta de WhatsApp Business tiene un problema de método de pago o elegibilidad en Meta. Revísalo en Meta Business Manager.";
+  if (text.includes('"code":131031'))
+    return "Tu cuenta de WhatsApp Business está bloqueada o restringida en Meta. Revísalo en Meta Business Manager.";
+  return null;
+}
+
+/**
+ * Aviso de configuración de canal en Meta. NO cambia el estado del canal (el token
+ * y la conexión están OK): solo registra una incidencia clara (campana) + alerta,
+ * deduplicada para no spamear. El mensaje fallido ya muestra el motivo claro.
+ */
+export async function markChannelConfigError(
+  organizationId: string,
+  _channelConnectionId: string | null,
+  userMessage: string,
+): Promise<void> {
+  try {
+    // Dedupe: una incidencia de config por día como máximo.
+    const recent = await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.findFirst({
+        where: { provider: "whatsapp", type: "channel.config_error", createdAt: { gt: new Date(Date.now() - 20 * 3600 * 1000) } },
+        select: { id: true },
+      }),
+    );
+    if (recent) return;
+    await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: { organizationId, provider: "whatsapp", type: "channel.config_error", status: "error", message: userMessage.slice(0, 300) },
+      }),
+    );
+    const { enqueueIntegrationAlert } = await import("./mailer.js");
+    await enqueueIntegrationAlert(organizationId, "⚠ WhatsApp requiere configuración en Meta — TuBot", `<p>${userMessage}</p><p>Los mensajes salientes están fallando hasta resolverlo (la conexión del canal está bien).</p>`);
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function resolveChannelAuth(
   organizationId: string,
   opts: { channelConnectionId?: string | null; phoneNumberId?: string | null },

@@ -1,6 +1,6 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import type { ChannelProvider, ChannelSendOptions, ChannelSendResult, OutboundMessage } from "@conversia/types";
-import { ChannelAuthError } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, channelConfigNotice } from "./channel-auth";
 
 /** Mock: imprime el mensaje saliente. Permite E2E sin credenciales de Meta. */
 export class MockChannelProvider implements ChannelProvider {
@@ -65,6 +65,10 @@ export class MetaChannelProvider implements ChannelProvider {
       if (res.status === 401 || text.includes('"code":190')) {
         throw new ChannelAuthError(`Meta send ${res.status}: ${text.slice(0, 300)}`);
       }
+      // Errores de configuración del canal en Meta (nombre para mostrar, registro,
+      // pago…): reintentar no ayuda; se marca el canal con un aviso claro.
+      const notice = channelConfigNotice(text);
+      if (notice) throw new ChannelConfigError(`Meta send ${res.status}: ${text.slice(0, 300)}`, notice);
       throw new Error(`Meta send ${res.status}: ${text.slice(0, 500)}`);
     }
     const data: any = await res.json();
