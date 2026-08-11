@@ -152,6 +152,37 @@ export class BillingController {
     return { ...session, mock: session.provider === "mock", listAmount, amount, couponCode: applied.coupon?.code ?? null };
   }
 
+  /** Compra de un PAQUETE de mensajes: checkout por el precio del paquete. */
+  @Post("buy-package")
+  async buyPackage(@Body() body: unknown) {
+    const ctx = requirePermission("billing:write");
+    const parsed = z.object({ code: z.string().max(60) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("code requerido");
+    const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: parsed.data.code } });
+    if (!pkg || !pkg.active) throw new BadRequestException("Paquete no disponible");
+    const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
+    const currency = org?.currency ?? "CLP";
+    const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
+    const settings = await this.paymentSettings.get();
+    const preferred = (org?.settings as any)?.paymentProvider as string | undefined;
+    const provider = createPaymentProvider(settings, currency, preferred);
+    const session = await provider.createCheckout({
+      organizationId: ctx.organizationId,
+      planCode: `pkg:${pkg.code}`, // el webhook detecta el prefijo y acredita el paquete
+      amount,
+      currency,
+      email: user?.email,
+      interval: "monthly",
+      successUrl: `${getEnv().WEB_URL}/settings/plan`,
+      cancelUrl: `${getEnv().WEB_URL}/settings/plan`,
+    });
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.buy_package", entityType: "package", entityId: pkg.code, after: { amount, provider: session.provider } } }),
+    );
+    return { ...session, mock: session.provider === "mock", amount, code: pkg.code };
+  }
+
   /** Valida un cupón y calcula el monto con descuento. No incrementa la redención. */
   private async applyCoupon(code: string | undefined, amount: number, currency: string) {
     if (!code) return { amount, coupon: null as null | { id: string; code: string } };
@@ -193,7 +224,7 @@ export class BillingController {
     if (getEnv().NODE_ENV === "production" && getEnv().STRIPE_SECRET_KEY) {
       throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
     }
-    await this.activate(ctx.organizationId, parsed.data.planCode, "mock");
+    await this.activateOrCredit(ctx.organizationId, parsed.data.planCode, "mock");
     return { ok: true, planCode: parsed.data.planCode, note: "Pago simulado (dev). En producción lo confirma el webhook de la pasarela." };
   }
 
@@ -217,7 +248,7 @@ export class BillingController {
       const meta = obj.metadata ?? {};
       const organizationId = meta.organizationId ?? obj.client_reference_id;
       if (organizationId && meta.planCode) {
-        await this.activate(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id);
+        await this.activateOrCredit(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id);
       }
     }
     return { received: true };
@@ -248,7 +279,7 @@ export class BillingController {
         if (await this.alreadyProcessed("flow", token, "flow.payment")) {
           return { received: true, deduped: true };
         }
-        await this.activate(meta.organizationId, meta.planCode, "flow", token);
+        await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token);
       }
     }
     return { received: true };
@@ -283,10 +314,54 @@ export class BillingController {
     ) {
       const status = event?.data?.attributes?.status; // active | on_trial | past_due | cancelled | expired | unpaid
       if (status === "active" || status === "on_trial" || eventName === "subscription_payment_success") {
-        await this.activate(organizationId, planCode, "lemonsqueezy", subId);
+        await this.activateOrCredit(organizationId, planCode, "lemonsqueezy", subId);
       }
     }
     return { received: true };
+  }
+
+  /** Enruta el pago confirmado: `pkg:<code>` acredita un paquete; si no, activa plan. */
+  private async activateOrCredit(organizationId: string, planCode: string, provider: string, providerRef?: string) {
+    if (planCode.startsWith("pkg:")) return this.creditPackage(organizationId, planCode.slice(4), provider, providerRef);
+    return this.activate(organizationId, planCode, provider, providerRef);
+  }
+
+  /**
+   * Acredita un PAQUETE de mensajes a la bolsa (compra prepago adicional) y emite
+   * la factura. Idempotencia garantizada por el dedup de webhooks del llamador.
+   * Nota: los créditos comprados quedan en el saldo y, como todo saldo, están
+   * sujetos al tope de acumulación de 1 mes en la renovación.
+   */
+  private async creditPackage(organizationId: string, code: string, provider: string, providerRef?: string) {
+    const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code } });
+    if (!pkg || !pkg.active) return;
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
+    const currency = org?.currency ?? "CLP";
+    const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
+    const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
+    const balance = (w?.balance ?? 0) + pkg.credits;
+    await this.prisma.admin.messageWallet.upsert({
+      where: { organizationId },
+      create: { organizationId, balance, includedPerPeriod: 0, carryoverCap: 0 },
+      update: { balance },
+    });
+    await this.prisma.admin.walletLedger.create({
+      data: { organizationId, delta: pkg.credits, reason: "package_purchase", balanceAfter: balance, refType: "package", refId: pkg.code },
+    });
+    const count = await this.prisma.admin.invoice.count();
+    await this.prisma.admin.invoice.create({
+      data: {
+        organizationId,
+        number: `CONV-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`,
+        status: "PAID",
+        currency,
+        amountDue: amount,
+        lines: [{ concept: `Paquete ${pkg.name} (${pkg.credits.toLocaleString("es-CL")} mensajes)`, amount }],
+        paidAt: new Date(),
+        provider,
+        providerRef: providerRef ?? null,
+      },
+    });
   }
 
   /**
