@@ -31,6 +31,7 @@ import { BillingBanner } from "@/components/BillingBanner";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
 
 interface Me {
   user: { id: string; email: string; name: string } | null;
@@ -341,18 +342,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
-            {/* Tenant activo */}
-            {!collapsed && me?.organization && (
-              <div className="mx-3 mb-2 rounded-lg bg-navy-800 px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <Building2 size={14} className="shrink-0 text-accent-400" />
-                  <div className="min-w-0 leading-tight">
-                    <p className="truncate text-[13px] font-medium text-white">{me.organization.name}</p>
-                    <p className="text-[10px] uppercase tracking-wide text-navy-300">Entorno piloto</p>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Tenant activo + selector (si el usuario pertenece a varias orgs) */}
+            {!collapsed && me?.organization && <OrgSwitcher currentName={me.organization.name} />}
 
             {/* Grupos */}
             <div className="flex-1 overflow-y-auto px-2 pb-2">

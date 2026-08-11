@@ -255,6 +255,23 @@ export class AuthController {
     return this.auth.loginWithGoogle(String(info.email).toLowerCase());
   }
 
+  /** Organizaciones del usuario actual + cuál está activa (selector de tenant). */
+  @Get("organizations")
+  async organizations() {
+    const ctx = requireContext();
+    const organizations = await this.auth.listOrganizations(ctx.userId!);
+    return { organizations, current: ctx.organizationId };
+  }
+
+  /** Cambia la organización activa y devuelve un token nuevo para ese tenant. */
+  @Post("switch")
+  async switch(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ organizationId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("organizationId requerido");
+    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId);
+  }
+
   @Get("me")
   async me() {
     const ctx = requireContext();

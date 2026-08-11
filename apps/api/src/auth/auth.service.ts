@@ -283,6 +283,38 @@ export class AuthService {
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
   }
 
+  /** Organizaciones a las que pertenece el usuario (para el selector de tenant). */
+  async listOrganizations(userId: string) {
+    const memberships = await this.prisma.admin.organizationUser.findMany({ where: { userId, active: true } });
+    if (!memberships.length) return [];
+    const [orgs, roles] = await Promise.all([
+      this.prisma.admin.organization.findMany({ where: { id: { in: memberships.map((m) => m.organizationId) }, deletedAt: null }, select: { id: true, name: true, slug: true, status: true } }),
+      this.prisma.admin.role.findMany({ where: { id: { in: memberships.map((m) => m.roleId) } }, select: { id: true, code: true } }),
+    ]);
+    const orgById = new Map(orgs.map((o) => [o.id, o]));
+    const roleById = new Map(roles.map((r) => [r.id, r.code]));
+    return memberships
+      .map((m) => {
+        const org = orgById.get(m.organizationId);
+        return org ? { id: org.id, name: org.name, slug: org.slug, status: org.status, roleCode: roleById.get(m.roleId) ?? "viewer" } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Cambia la organización activa: valida la membresía y emite un token nuevo. */
+  async switchOrg(userId: string, organizationId: string) {
+    const membership = await this.prisma.admin.organizationUser.findUnique({
+      where: { organizationId_userId: { organizationId, userId } },
+    });
+    if (!membership || !membership.active) throw new UnauthorizedException("No perteneces a esa organización");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { deletedAt: true } });
+    if (!org || org.deletedAt) throw new UnauthorizedException("Organización no disponible");
+    const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
+    const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
+    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms);
+  }
+
   /** Marca la última conexión — best-effort, jamás bloquea el login. */
   private async touchLastLogin(userId: string) {
     try {
