@@ -710,6 +710,93 @@ export class PlatformController {
     return { ok: true, balance };
   }
 
+  // ---------------------- Margen por cliente + catálogo de paquetes ----------------------
+
+  /** Margen real por tenant del mes: ingreso cobrado − costo Meta − costo IA (en CLP). */
+  @Get("margins")
+  async margins() {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const { usdToClp } = await this.readCostSettings();
+    const [orgs, invoices, usage] = await Promise.all([
+      this.prisma.admin.organization.findMany({ where: { deletedAt: null }, select: { id: true, name: true, currency: true } }),
+      this.prisma.admin.invoice.groupBy({ by: ["organizationId"], where: { status: "PAID", paidAt: { gte: monthStart } }, _sum: { amountDue: true } }),
+      this.prisma.admin.usageEvent.groupBy({ by: ["organizationId", "type"], where: { occurredAt: { gte: monthStart } }, _sum: { costUsd: true } }),
+    ]);
+    const revById = new Map(invoices.map((i) => [i.organizationId, Number(i._sum.amountDue ?? 0)]));
+    const metaById = new Map<string, number>();
+    const aiById = new Map<string, number>();
+    for (const u of usage) {
+      const usd = Number(u._sum.costUsd ?? 0);
+      if (u.type === "whatsapp_message") metaById.set(u.organizationId, usd);
+      else if (u.type === "ai_tokens") aiById.set(u.organizationId, (aiById.get(u.organizationId) ?? 0) + usd);
+    }
+    const rows = orgs.map((o) => {
+      // Ingreso: la factura ya está en la moneda del tenant → normalizamos a CLP.
+      const revenueClp = o.currency === "CLP" ? (revById.get(o.id) ?? 0) : (revById.get(o.id) ?? 0) * usdToClp;
+      const metaCostClp = (metaById.get(o.id) ?? 0) * usdToClp;
+      const aiCostClp = (aiById.get(o.id) ?? 0) * usdToClp;
+      const marginClp = revenueClp - metaCostClp - aiCostClp;
+      return {
+        id: o.id,
+        name: o.name,
+        revenueClp: Math.round(revenueClp),
+        metaCostClp: Math.round(metaCostClp),
+        aiCostClp: Math.round(aiCostClp),
+        marginClp: Math.round(marginClp),
+        marginPct: revenueClp > 0 ? Math.round((marginClp / revenueClp) * 100) : null,
+      };
+    });
+    // Los que pierden plata primero (margen negativo arriba).
+    rows.sort((a, b) => a.marginClp - b.marginClp);
+    return { month: monthStart.toISOString().slice(0, 7), rows };
+  }
+
+  /** Catálogo de paquetes (para el CRUD del Super Admin). */
+  @Get("packages")
+  packages() {
+    return this.prisma.admin.messagePackage.findMany({ orderBy: { order: "asc" } });
+  }
+
+  @Post("packages")
+  async createPackage(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const d = this.parsePackage(body);
+    const pkg = await this.prisma.admin.messagePackage.create({ data: d });
+    await this.audit(req, "platform.package_create", "package", pkg.id, d);
+    return pkg;
+  }
+
+  @Patch("packages/:id")
+  async updatePackage(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const d = this.parsePackage(body, true);
+    const pkg = await this.prisma.admin.messagePackage.update({ where: { id }, data: d });
+    await this.audit(req, "platform.package_update", "package", id, d);
+    return pkg;
+  }
+
+  @Delete("packages/:id")
+  async deletePackage(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.prisma.admin.messagePackage.delete({ where: { id } });
+    await this.audit(req, "platform.package_delete", "package", id);
+    return { ok: true };
+  }
+
+  private parsePackage(body: unknown, partial = false) {
+    const schema = z.object({
+      code: z.string().regex(/^[a-z0-9_]+$/, "código: minúsculas/números/_"),
+      name: z.string().min(2).max(60),
+      credits: z.number().int().min(1),
+      priceClp: z.number().int().min(0),
+      priceUsd: z.number().min(0),
+      active: z.boolean().default(true),
+      order: z.number().int().default(0),
+    });
+    const r = (partial ? schema.partial() : schema).safeParse(body);
+    if (!r.success) throw new BadRequestException(r.error.issues.map((i) => i.message).join("; "));
+    return r.data as any;
+  }
+
   private async readWalletWeights(): Promise<{ utility: number; authentication: number; marketing: number }> {
     const def = { utility: 1, authentication: 1, marketing: 1 };
     try {
