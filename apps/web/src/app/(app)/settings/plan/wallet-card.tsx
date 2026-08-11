@@ -14,10 +14,29 @@ interface WalletData {
 /** Bolsa de mensajes de plantilla del tenant: saldo, barra y paquetes. */
 export function WalletCard() {
   const [d, setD] = useState<WalletData | null>(null);
+  const [buying, setBuying] = useState<string | null>(null);
 
   useEffect(() => {
     void api<WalletData>("/billing/wallet").then(setD).catch(() => undefined);
   }, []);
+
+  async function buy(code: string) {
+    setBuying(code);
+    try {
+      const s = await api<{ mock: boolean; url?: string }>("/billing/buy-package", { method: "POST", body: JSON.stringify({ code }) });
+      if (s.mock) {
+        // Dev/sin pasarela real: confirma directo y refresca el saldo.
+        await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode: `pkg:${code}` }) });
+        setD(await api<WalletData>("/billing/wallet"));
+      } else if (s.url) {
+        window.location.href = s.url; // redirige al checkout de la pasarela
+      }
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBuying(null);
+    }
+  }
 
   if (!d) return null;
   const pct = d.remainingPct ?? 100;
@@ -49,13 +68,18 @@ export function WalletCard() {
           <p className="mb-1.5 text-xs font-medium text-ink">Paquetes adicionales</p>
           <div className="flex flex-wrap gap-2">
             {d.packages.map((p) => (
-              <div key={p.code} className="rounded-lg border border-line bg-app px-3 py-2 text-sm">
-                <span className="font-medium text-ink">{p.credits.toLocaleString("es-CL")}</span>
-                <span className="text-ink-muted"> · ${p.priceClp.toLocaleString("es-CL")} CLP</span>
-              </div>
+              <button
+                key={p.code}
+                onClick={() => void buy(p.code)}
+                disabled={buying !== null}
+                className="rounded-lg border border-line bg-app px-3 py-2 text-left text-sm transition hover:border-brand-400 disabled:opacity-50"
+              >
+                <span className="font-medium text-ink">{p.credits.toLocaleString("es-CL")} mensajes</span>
+                <span className="block text-ink-muted">${p.priceClp.toLocaleString("es-CL")} CLP · {buying === p.code ? "abriendo…" : "comprar"}</span>
+              </button>
             ))}
           </div>
-          <p className="mt-1.5 text-[11px] text-ink-subtle">La compra en 2 clics se habilita junto con la pasarela. Por ahora, escríbenos por Soporte para cargar un paquete.</p>
+          <p className="mt-1.5 text-[11px] text-ink-subtle">Compra en 2 clics: elige el paquete y confirma el pago. El saldo se acredita al instante.</p>
         </div>
       )}
     </div>
