@@ -788,7 +788,7 @@ const FLOW_VARIABLES: { key: string; label: string }[] = [
  * insertan `{{clave}}`. Funciona en claro y oscuro (tokens del sistema).
  */
 function VarField({
-  value, onChange, multiline, className, rows, placeholder,
+  value, onChange, multiline, className, rows, placeholder, chips,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -796,6 +796,8 @@ function VarField({
   className?: string;
   rows?: number;
   placeholder?: string;
+  /** Muestra botones para insertar cada variable en la posición del cursor. */
+  chips?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const [menu, setMenu] = useState<{ open: boolean; query: string; start: number; index: number }>({ open: false, query: "", start: 0, index: 0 });
@@ -822,6 +824,18 @@ function VarField({
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
   }
 
+  /** Inserta `{{clave}}` en la posición del cursor (o al final si no hay foco). */
+  function insertAtCaret(key: string) {
+    const token = `{{${key}}}`;
+    const el = ref.current;
+    if (!el) { onChange(value + token); return; }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? start;
+    onChange(value.slice(0, start) + token + value.slice(end));
+    const caret = start + token.length;
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(caret, caret); });
+  }
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (!menu.open || matches.length === 0) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setMenu((s) => ({ ...s, index: (s.index + 1) % matches.length })); }
@@ -845,6 +859,22 @@ function VarField({
   return (
     <div className="relative">
       {multiline ? <textarea {...common} rows={rows ?? 3} /> : <input {...common} />}
+      {chips && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {FLOW_VARIABLES.map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              // onMouseDown + preventDefault: conserva el cursor del campo al hacer clic.
+              onMouseDown={(e) => { e.preventDefault(); insertAtCaret(v.key); }}
+              title={`{{${v.key}}}`}
+              className="rounded-full border border-line bg-app px-2 py-0.5 text-[11px] text-ink-muted transition-colors hover:border-brand-300 hover:bg-brand-soft hover:text-brand-700 dark:hover:text-brand-300"
+            >
+              + {v.label}
+            </button>
+          ))}
+        </div>
+      )}
       {menu.open && matches.length > 0 && (
         <div className="absolute left-0 z-30 mt-1 max-h-52 w-72 overflow-y-auto rounded-lg border border-line bg-panel p-1 text-sm shadow-pop">
           <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-ink-subtle">Variables del flujo</p>
@@ -1354,13 +1384,14 @@ function NodePanel({
           <span className="text-xs text-ink-muted">Mensaje</span>
           <VarField
             multiline
+            chips
             value={String(config.text ?? "")}
             onChange={(v) => onChange({ text: v })}
             rows={4}
             placeholder="Hola {{contact.firstName}} 👋"
             className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm"
           />
-          <span className="mt-1 block text-[10px] text-ink-subtle">Escribe <code>{"{{"}</code> para insertar variables.</span>
+          <span className="mt-1 block text-[10px] text-ink-subtle">Toca una variable para insertarla, o escribe <code>{"{{"}</code>.</span>
         </label>
       )}
 
@@ -1391,7 +1422,7 @@ function NodePanel({
       {type === "add_note" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Comentario interno (el cliente NO lo ve)</span>
-          <VarField multiline value={String(config.text ?? "")} onChange={(v) => onChange({ text: v })} rows={3} placeholder="p. ej. Lead de campaña {{contact.firstName}}" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+          <VarField multiline chips value={String(config.text ?? "")} onChange={(v) => onChange({ text: v })} rows={3} placeholder="p. ej. Lead de campaña {{contact.firstName}}" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
       )}
 
@@ -1425,7 +1456,7 @@ function NodePanel({
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Objetivo</span>
-            <VarField multiline value={String(config.objective ?? "")} onChange={(v) => onChange({ objective: v })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+            <VarField multiline chips value={String(config.objective ?? "")} onChange={(v) => onChange({ objective: v })} rows={2} placeholder="p. ej. Confirmar asistencia a la cita" className="mt-1 block w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-sm">
@@ -1532,6 +1563,7 @@ function NodePanel({
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Asunto</span>
             <VarField
+              chips
               value={String(config.subject ?? "")}
               onChange={(v) => onChange({ subject: v })}
               placeholder="Nuevo lead: {{contact.firstName}}"
@@ -1542,6 +1574,7 @@ function NodePanel({
             <span className="text-xs text-ink-muted">Cuerpo (admite variables {"{{contact.firstName}}"}…)</span>
             <VarField
               multiline
+              chips
               value={String(config.body ?? "")}
               onChange={(v) => onChange({ body: v })}
               rows={3}
