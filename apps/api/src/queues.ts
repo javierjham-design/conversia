@@ -4,6 +4,7 @@ import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import {
   QUEUE_NAMES,
+  type AgentTurnJob,
   type CapiJob,
   type ContactImportJob,
   type EmailJob,
@@ -28,6 +29,20 @@ export class QueueService implements OnModuleDestroy {
   readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
   readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
   readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
+  readonly agentTurn = new Queue<AgentTurnJob>(QUEUE_NAMES.agentTurn, { connection: this.connection });
+
+  /** Corre un turno del agente de IA para una conversación (p. ej. tras una indicación). */
+  async enqueueAgentTurn(job: AgentTurnJob): Promise<void> {
+    // jobId por conversación: coalesce disparos casi simultáneos (asignar + indicar)
+    // para no responder dos veces. Al completar se remueve, así un turno posterior sí corre.
+    await this.agentTurn.add("turn", job, {
+      jobId: `turn:${job.conversationId}`,
+      attempts: 2,
+      backoff: { type: "fixed", delay: 3000 },
+      removeOnComplete: true,
+      removeOnFail: 500,
+    });
+  }
 
   /** Emite un evento de notificación (la audiencia se resuelve en el worker). */
   async notify(job: NotifJob): Promise<void> {
@@ -50,6 +65,7 @@ export class QueueService implements OnModuleDestroy {
       this.sync.close(),
       this.emails.close(),
       this.notifications.close(),
+      this.agentTurn.close(),
     ]);
     this.connection.disconnect();
   }

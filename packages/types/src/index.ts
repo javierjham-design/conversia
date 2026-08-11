@@ -416,7 +416,14 @@ export const QUEUE_NAMES = {
   sync: "integration-sync",
   notifications: "notifications",
   whatsappEscalation: "whatsapp-escalation",
+  agentTurn: "agent-turn",
 } as const;
+
+/** Correr un turno del agente de IA para una conversación (sin mensaje entrante nuevo). */
+export interface AgentTurnJob {
+  organizationId: string;
+  conversationId: string;
+}
 
 /** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
 export interface SyncJob {

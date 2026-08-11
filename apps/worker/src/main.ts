@@ -5,6 +5,7 @@ import { getPrisma } from "@conversia/database";
 import {
   QUEUE_NAMES,
   TRIGGER_TYPES,
+  type AgentTurnJob,
   type CapiJob,
   type ContactImportJob,
   type EmailJob,
@@ -19,6 +20,7 @@ import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhoo
 import { processContactImport } from "./contact-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
+import { runAgentTurn } from "./agent-turn";
 import { processNotificationJob, registerChannel } from "./notifications/dispatch";
 import { webPushChannel } from "./notifications/web-push";
 import { processWhatsappEscalation, type WaEscalationJob } from "./notifications/whatsapp-escalation";
@@ -89,6 +91,12 @@ async function main() {
     async (job) => processNotificationJob(job.data),
     { connection, concurrency: 4 },
   );
+  // Turno del agente a demanda (p. ej. tras agregar una indicación en la bandeja).
+  const agentTurnWorker = new Worker<AgentTurnJob>(
+    QUEUE_NAMES.agentTurn,
+    async (job) => runAgentTurn(job.data),
+    { connection, concurrency: 4 },
+  );
   // Escalera de WhatsApp: avisos con retraso que se cancelan solos si se atiende.
   const waEscalationWorker = new Worker<WaEscalationJob>(
     QUEUE_NAMES.whatsappEscalation,
@@ -136,7 +144,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -181,6 +189,7 @@ async function main() {
       syncWorker.close(),
       notificationsWorker.close(),
       waEscalationWorker.close(),
+      agentTurnWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

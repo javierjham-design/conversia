@@ -784,6 +784,9 @@ export class ConversationsController {
       return { ok: true, aiEnabled: true };
     });
     await this.publish(ctx.organizationId, id);
+    // Al devolver el control a la IA, si hay un mensaje del contacto sin responder,
+    // el agente retoma y responde.
+    await this.maybeTriggerAgentTurn(ctx.organizationId, id).catch(() => undefined);
     return r;
   }
 
@@ -822,6 +825,9 @@ export class ConversationsController {
       return { ok: true, activeAgentId: agentId, aiEnabled: !!agentId };
     });
     await this.publish(ctx.organizationId, id);
+    // Al poner un agente a cargo, si el contacto escribió y quedó sin responder,
+    // el agente responde ahora.
+    await this.maybeTriggerAgentTurn(ctx.organizationId, id).catch(() => undefined);
     return r;
   }
 
@@ -846,22 +852,45 @@ export class ConversationsController {
 
   /** Crea una indicación para la IA en ESTA conversación (se inyecta al prompt). */
   @Post(":id/ai-notes")
-  createAiNote(@Param("id") id: string, @Body() body: unknown) {
+  async createAiNote(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requireContext();
     const parsed = z.object({ body: z.string().min(2).max(1000) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Texto de la indicación requerido (2-1000)");
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const note = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conversation = await tx.conversation.findUnique({ where: { id } });
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
-      const note = await tx.conversationAiNote.create({
+      const created = await tx.conversationAiNote.create({
         data: { organizationId: ctx.organizationId, conversationId: id, body: parsed.data.body.trim(), createdById: ctx.userId },
       });
       await this.systemMessage(tx, ctx.organizationId, id, `💡 Indicación para la IA agregada por ${await this.userName(tx, ctx.userId)}`);
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "conversation.ai_note_create", entityType: "conversation", entityId: id },
       });
-      return note;
+      return created;
     });
+    // Si la IA está a cargo y el último mensaje del contacto quedó sin responder,
+    // la indicación hace que el agente responda ahora (siguiéndola).
+    await this.maybeTriggerAgentTurn(ctx.organizationId, id).catch(() => undefined);
+    return note;
+  }
+
+  /**
+   * Encola un turno del agente si: la IA está activa, hay agente a cargo, y el
+   * último mensaje real (no de sistema) es del CONTACTO sin responder. Evita que
+   * el bot hable solo si el último mensaje ya era suyo.
+   */
+  private async maybeTriggerAgentTurn(organizationId: string, conversationId: string): Promise<void> {
+    const should = await this.prisma.withTenant(organizationId, async (tx) => {
+      const conv = await tx.conversation.findUnique({ where: { id: conversationId }, select: { aiEnabled: true, activeAgentId: true } });
+      if (!conv?.aiEnabled || !conv.activeAgentId) return false;
+      const last = await tx.message.findFirst({
+        where: { conversationId, type: { notIn: ["SYSTEM", "NOTE"] } },
+        orderBy: { createdAt: "desc" },
+        select: { direction: true },
+      });
+      return last?.direction === "INBOUND";
+    });
+    if (should) await this.queues.enqueueAgentTurn({ organizationId, conversationId });
   }
 
   /** Activa/desactiva una indicación (queda en el historial). */
