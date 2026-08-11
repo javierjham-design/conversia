@@ -1,6 +1,6 @@
 import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
-import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend } from "./messaging-guard";
@@ -106,17 +106,20 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
     );
     await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
   } catch (err) {
+    // En errores de config del canal, guarda el mensaje CLARO (no el 400 crudo).
+    const failText = err instanceof ChannelConfigError ? err.userMessage : (err as Error).message.slice(0, 500);
     await withTenant(organizationId, (tx) =>
-      tx.message.update({
-        where: { id: data.message.id },
-        data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
-      }),
+      tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
     await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
-    // Error de auth: marcar el canal (banner Reautorizar) y NO reintentar en
-    // bucle — el token no se arregla solo. Otros errores sí reintentan.
+    // Auth (token) o configuración (nombre para mostrar, registro, pago…): marcar
+    // el canal con un aviso y NO reintentar en bucle — no se arreglan solos.
     if (err instanceof ChannelAuthError) {
       await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+      return;
+    }
+    if (err instanceof ChannelConfigError) {
+      await markChannelConfigError(organizationId, auth.channelConnectionId, err.userMessage);
       return;
     }
     throw err; // BullMQ reintenta según la política del worker

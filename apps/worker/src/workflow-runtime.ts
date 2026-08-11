@@ -14,7 +14,7 @@ import { isOrgOperational } from "./billing-dunning";
 import { createAIRouter } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { runAgentTurn } from "./agent-turn";
-import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth } from "./channel-auth";
 import { callHttp, type HttpNodeConfig } from "./http-node";
 import { getChannelProvider } from "./channel-providers";
 import { resolveApiPreset } from "./api-presets";
@@ -440,11 +440,16 @@ function makeDeps(): EngineDeps {
           tx.message.update({ where: { id: message.id }, data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() } }),
         );
       } catch (err) {
+        const failText = err instanceof ChannelConfigError ? err.userMessage : (err as Error).message.slice(0, 500);
         await withTenant(ctx.organizationId, (tx) =>
-          tx.message.update({ where: { id: message.id }, data: { status: "FAILED", error: (err as Error).message.slice(0, 500) } }),
+          tx.message.update({ where: { id: message.id }, data: { status: "FAILED", error: failText } }),
         );
         if (err instanceof ChannelAuthError) {
           await markChannelAuthError(ctx.organizationId, auth.channelConnectionId, err.message);
+          return;
+        }
+        if (err instanceof ChannelConfigError) {
+          await markChannelConfigError(ctx.organizationId, auth.channelConnectionId, err.userMessage);
           return;
         }
         throw err;
