@@ -49,7 +49,8 @@ Clínica Demo 0). Pendientes menores:
 | B1 | **Onboarding guiado** para no-técnicos (qué es un "flujo", tour) | No existe (solo checklist + ayuda por sección) | Sí — reduce soporte y abandono | M |
 | B2 | **Canal de soporte in-app** (el cliente reporta, tú lo ves) | No existe | Sí | S-M |
 | B3 | **Guía de plantillas de WhatsApp** con textos sugeridos por rubro | Parcial (panel con estado de sync; falta la guía) | Sí | M (se cruza con Bloque 8) |
-| B4 | **Plantilla `recordatorio_cita` en Meta + publicar flujo corregido** | Pendiente tuyo (crear la plantilla HSM en Meta) | Solo si usas recordatorios fuera de 24 h | S (tú) |
+| B4 | **Publicar flujo de recordatorio corregido** | La plantilla `recordatorio_cita` YA existe APROBADA en Meta (verificado 2026-08-12, sync automático al día); el flujo publicado usa `send_text` (no entrega fuera de 24 h). Se deja el flujo corregido a `send_template` (Versión B, 3 params) listo para publicar al cerrar la pasada del canvas. | Sí | S (tú aprietas Publicar) |
+| B7 | **Mapeo de plantilla por WABA (clientes multi-número)** | Hoy el nodo `send_template` guarda UN `templateId` con UN mapeo de variables, pero la plantilla se envía por NOMBRE a la WABA de la conversación. Si un tenant tiene varias WABAs con la misma plantilla pero distinto nº de parámetros, un envío por la WABA "equivocada" lo rechaza Meta. Mejora futura: resolver el `templateId`/mapeo por la WABA de envío (o validar consistencia de params entre WABAs al publicar). Digital Dent tiene 2 WABAs de prueba con `recordatorio_cita` 5 vs 3 params — se dejan tal cual (ya cumplieron su función con Meta). | Solo multi-número | M |
 | B5 | Invitación de usuario **por token con expiración** (hoy es mensaje copiable) | Brecha anotada | Sí, menor | S |
 | B6 | **Reagendar** cita desde el recordatorio = auto-reprogramar (hoy deriva a humano) | Por diseño v1 (handoff) | Opcional; el handoff funciona | M |
 
