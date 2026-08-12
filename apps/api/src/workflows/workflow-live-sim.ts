@@ -56,6 +56,8 @@ export interface SimWaiting {
   label: string;
   dueAtMs: number;
   cancelOnReply: boolean;
+  /** "wait_reply": responder sigue por «Sí», adelantar el tiempo por «No». */
+  kind?: "wait" | "wait_reply";
 }
 
 export interface SimObjective {
@@ -420,11 +422,20 @@ function applyResult(def: WorkflowDefinition, state: LiveSimState, result: Engin
       state.waiting = null;
       state.status = "agent_chat";
       state.log.push({ kind: "info", text: `🎯 El agente quedó trabajando el objetivo: “${state.objective.objective}”. Responde como contacto para avanzar.` });
+    } else if (node?.type === "wait_reply") {
+      const label = describeWait((node.config ?? {}) as Record<string, any>);
+      state.waiting = { nodeId, label, dueAtMs: state.waiting?.dueAtMs ?? Date.now(), cancelOnReply: false, kind: "wait_reply" };
+      state.status = "waiting";
+      state.log.push({
+        kind: "wait",
+        text: `⏳ Esperando la respuesta del contacto (hasta ${label}). Responde para seguir por «Sí, respondió», o adelanta el tiempo para «No respondió».`,
+      });
     } else {
       const cfg = (node?.config ?? {}) as Record<string, any>;
       const label = describeWait(cfg);
       if (state.waiting) state.waiting.label = label;
       else state.waiting = { nodeId, label, dueAtMs: Date.now(), cancelOnReply: cfg.cancelOn === "contact_reply" };
+      state.waiting.kind = "wait";
       state.status = "waiting";
       state.log.push({
         kind: "wait",
@@ -537,9 +548,11 @@ export async function stepWorkflowSim(
   if (action.type === "advance") {
     if (state.status === "waiting" && state.waiting) {
       const nodeId = state.waiting.nodeId;
-      state.log.push({ kind: "info", text: "⏭️ Adelantaste el tiempo de espera." });
+      const isWaitReply = state.waiting.kind === "wait_reply";
+      state.log.push({ kind: "info", text: isWaitReply ? "⏭️ Adelantaste el tiempo — el contacto no respondió → rama «No respondió»." : "⏭️ Adelantaste el tiempo de espera." });
       state.waiting = null;
-      await runEngine(orgId, def, state, { kind: "wait", nodeId });
+      if (isWaitReply) await runEngine(orgId, def, state, { kind: "branch", nodeId, branch: "no_reply" });
+      else await runEngine(orgId, def, state, { kind: "wait", nodeId });
     } else if (state.status === "agent_chat" && state.objective) {
       const nodeId = state.objective.nodeId;
       state.objective = null;
@@ -575,6 +588,12 @@ export async function stepWorkflowSim(
           await runEngine(orgId, def, state, { kind: "branch", nodeId, branch: "unmet" });
         }
       }
+    } else if (state.status === "waiting" && state.waiting && state.waiting.kind === "wait_reply") {
+      // "¿El contacto respondió?": la respuesta continúa por la rama «Sí».
+      const nodeId = state.waiting.nodeId;
+      state.waiting = null;
+      state.log.push({ kind: "info", text: "✅ El contacto respondió → continúa por la rama «Sí, respondió»." });
+      await runEngine(orgId, def, state, { kind: "branch", nodeId, branch: "replied" });
     } else if (state.status === "waiting" && state.waiting) {
       if (state.waiting.cancelOnReply) {
         state.log.push({ kind: "info", text: "✋ La espera se canceló porque el contacto respondió." });

@@ -328,7 +328,8 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
         else if (workflowNames.size && !workflowNames.has(name)) push(n.id, "workflow_missing", `El flujo «${name}» ya no existe.`);
         break;
       }
-      case "wait": {
+      case "wait":
+      case "wait_reply": {
         const total = Number(c.minutes ?? 0) + Number(c.hours ?? 0) + Number(c.days ?? 0);
         if (!(total > 0)) push(n.id, "wait_zero", "La espera es de 0: no pausa nada.");
         break;
@@ -472,6 +473,11 @@ async function executeNode(
       // "Próximamente": sin integración aún. No-op registrado (no se finge).
       return {};
     case "wait":
+      return { wait: computeWaitDue(cfg, deps.now()) };
+    case "wait_reply":
+      // Espera una respuesta del contacto hasta el timeout. El runtime reanuda por
+      // "replied" (si responde) o "no_reply" (si vence). NO usa cancelOn: la
+      // respuesta no cancela el run, lo continúa por la rama "replied".
       return { wait: computeWaitDue(cfg, deps.now()) };
     case "condition": {
       const result = await deps.evaluateCondition(ctx, cfg);

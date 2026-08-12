@@ -57,6 +57,14 @@ export function simulateWorkflow(
         detail = `Pausaría ${v} ${UNIT[u]}${cfg.cancelOn === "contact_reply" ? " (se cancela si el contacto responde)" : ""}`;
         break;
       }
+      case "wait_reply": {
+        label = "¿El contacto respondió?";
+        const v = cfg.days ?? cfg.hours ?? cfg.minutes ?? 0;
+        const u = cfg.days ? "days" : cfg.hours ? "hours" : "minutes";
+        branch = assumeNoReply ? "no_reply" : "replied";
+        detail = `Esperaría la respuesta hasta ${v} ${UNIT[u]} → sigue por «${assumeNoReply ? "No respondió" : "Sí, respondió"}» (simulado)`;
+        break;
+      }
       case "condition":
         label = "Condición";
         branch = assumeNoReply ? "true" : "false";
