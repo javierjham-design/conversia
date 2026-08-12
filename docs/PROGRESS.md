@@ -1,5 +1,24 @@
 # Registro de progreso
 
+## 2026-08-12 — Flujos: Bloque 4 (observabilidad de ejecuciones)
+
+Responder "¿por qué no se ejecutó mi flujo?" con datos. **Sin migración** (usa
+`workflow_runs` + `workflow_run_steps` que ya existían).
+
+- **API**: `GET :id/runs` con filtros (errores/estado, fechas, contacto) +
+  contacto, disparador, duración y camino; `GET :id/runs/:runId` (detalle con
+  definición para dibujar el recorrido, pasos con input/output/error/duración,
+  variables); `GET :id/metrics` (ejecuciones del período, tasa de finalización,
+  paso de mayor caída, duración media, conversiones CAPI); `POST
+  :id/runs/:runId/retry` (reintento desde el paso que falló, efectos reales).
+- **Worker**: `retryRun` re-ejecuta desde `currentNodeId`; nueva cola de
+  reintento (`QUEUE_NAMES.workflow`, antes libre) + worker.
+- **Web**: página `/workflows/[id]/runs` — tarjetas de métricas, filtros,
+  historial, y **detalle con el recorrido dibujado sobre un canvas de solo
+  lectura** (nodos visitados/fallido resaltados, camino iluminado) + pasos +
+  variables + botón de reintento con confirmación de efectos reales. Enlace
+  "Ejecuciones" en la cabecera del editor.
+
 ## 2026-08-12 — Flujos: Bloque 1 (inventario + arnés de prueba funcional real)
 
 Primer bloque del endurecimiento de Flujos para salir al mercado. Objetivo:

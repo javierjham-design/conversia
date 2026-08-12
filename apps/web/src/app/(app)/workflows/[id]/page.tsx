@@ -742,6 +742,7 @@ function Editor() {
             <button onClick={undo} disabled={!history.current.past.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Deshacer"><Undo2 size={16} /></button>
             <button onClick={redo} disabled={!history.current.future.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Rehacer"><Redo2 size={16} /></button>
             <span className="mx-1 h-5 w-px bg-line" />
+            <Button variant="secondary" onClick={() => router.push(`/workflows/${id}/runs`)} disabled={busy}>Ejecuciones</Button>
             <Button variant="secondary" onClick={() => { setSimState(null); setReplyText(""); setTestOpen(true); }} disabled={busy}>Probar</Button>
             <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy}>Guardar</Button>
             <Button onClick={() => void publish()} disabled={busy}>Publicar</Button>

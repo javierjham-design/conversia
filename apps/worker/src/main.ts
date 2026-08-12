@@ -14,6 +14,7 @@ import {
   type OutboundJob,
   type SyncJob,
   type WebhookDeliveryJob,
+  type WorkflowRetryJob,
 } from "@conversia/types";
 import { processCapiJob } from "./capi";
 import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
@@ -32,7 +33,7 @@ import { processSyncJob } from "./sync-worker";
 import { getSyncQueue } from "./ga4";
 import { startTemplateSync } from "./template-sync";
 import { processWebhookDelivery } from "./webhook-sender";
-import { dispatchEvent, startWorkflowById } from "./workflow-runtime";
+import { dispatchEvent, retryRun, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
 import { startRetentionPurge } from "./retention-purge";
@@ -97,6 +98,12 @@ async function main() {
     async (job) => runAgentTurn(job.data),
     { connection, concurrency: 4 },
   );
+  // Reintento manual de una ejecución fallida desde el paso que falló (Observabilidad).
+  const workflowRetryWorker = new Worker<WorkflowRetryJob>(
+    QUEUE_NAMES.workflow,
+    async (job) => retryRun(job.data.organizationId, job.data.runId),
+    { connection, concurrency: 2 },
+  );
   // Escalera de WhatsApp: avisos con retraso que se cancelan solos si se atiende.
   const waEscalationWorker = new Worker<WaEscalationJob>(
     QUEUE_NAMES.whatsappEscalation,
@@ -144,7 +151,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -190,6 +197,7 @@ async function main() {
       notificationsWorker.close(),
       waEscalationWorker.close(),
       agentTurnWorker.close(),
+      workflowRetryWorker.close(),
     ]);
     await getPrisma().$disconnect();
     connection.disconnect();

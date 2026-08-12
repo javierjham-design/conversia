@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
@@ -390,26 +391,171 @@ export class WorkflowsController {
     });
   }
 
+  /** Historial de ejecuciones del flujo con filtros (errores, fechas, contacto). */
   @Get(":id/runs")
-  runs(@Param("id") id: string) {
+  runs(@Param("id") id: string, @Query("status") status?: string, @Query("from") from?: string, @Query("to") to?: string, @Query("contactId") contactId?: string, @Query("take") take?: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const limit = Math.min(Math.max(Number(take) || 30, 1), 100);
+      const where: any = { workflowId: id };
+      if (status === "errors") where.status = "FAILED";
+      else if (status && ["RUNNING", "WAITING", "COMPLETED", "FAILED", "CANCELLED"].includes(status)) where.status = status;
+      if (contactId) where.contactId = contactId;
+      const startedAt: any = {};
+      if (from) startedAt.gte = new Date(from);
+      if (to) startedAt.lte = new Date(`${to}T23:59:59`);
+      if (from || to) where.startedAt = startedAt;
+
       const runs = await tx.workflowRun.findMany({
-        where: { workflowId: id },
+        where,
         orderBy: { startedAt: "desc" },
-        take: 25,
+        take: limit + 1,
+        include: { steps: { orderBy: { startedAt: "asc" }, select: { nodeId: true, nodeType: true, status: true } } },
+      });
+      const hasMore = runs.length > limit;
+      const page = runs.slice(0, limit);
+      // Nombres de contacto (batch) y etiqueta del disparador por versión.
+      const contactIds = [...new Set(page.map((r) => r.contactId).filter(Boolean) as string[])];
+      const versionIds = [...new Set(page.map((r) => r.versionId))];
+      const [contacts, versions] = await Promise.all([
+        contactIds.length ? tx.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, firstName: true, lastName: true, phone: true } }) : Promise.resolve([]),
+        tx.workflowVersion.findMany({ where: { id: { in: versionIds } }, select: { id: true, definition: true } }),
+      ]);
+      const contactById = new Map(contacts.map((c) => [c.id, c]));
+      const triggerByVersion = new Map(versions.map((v) => [v.id, String((v.definition as any)?.trigger?.type ?? "")]));
+      return {
+        runs: page.map((r) => {
+          const c = r.contactId ? contactById.get(r.contactId) : null;
+          const triggerType = triggerByVersion.get(r.versionId) ?? "";
+          return {
+            id: r.id,
+            status: r.status,
+            startedAt: r.startedAt,
+            finishedAt: r.finishedAt,
+            durationMs: r.finishedAt ? r.finishedAt.getTime() - r.startedAt.getTime() : null,
+            error: r.error,
+            currentNodeId: r.currentNodeId,
+            contact: c ? { id: c.id, name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.phone || "Contacto", phone: c.phone } : null,
+            triggerType,
+            triggerLabel: TRIGGER_CATALOG.find((t) => t.type === triggerType)?.label ?? triggerType,
+            stepCount: r.steps.length,
+            path: r.steps.map((s) => s.nodeId),
+          };
+        }),
+        hasMore,
+      };
+    });
+  }
+
+  /** Detalle de una ejecución: recorrido + pasos + definición para dibujar en el canvas. */
+  @Get(":id/runs/:runId")
+  runDetail(@Param("id") id: string, @Param("runId") runId: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const run = await tx.workflowRun.findFirst({
+        where: { id: runId, workflowId: id },
         include: { steps: { orderBy: { startedAt: "asc" } } },
       });
-      return runs.map((r) => ({
-        id: r.id,
-        status: r.status,
-        startedAt: r.startedAt,
-        finishedAt: r.finishedAt,
-        error: r.error,
-        currentNodeId: r.currentNodeId,
-        steps: r.steps.map((s) => ({ nodeId: s.nodeId, nodeType: s.nodeType, status: s.status, error: s.error })),
-      }));
+      if (!run) throw new NotFoundException("Ejecución no encontrada");
+      const [version, contact] = await Promise.all([
+        tx.workflowVersion.findUnique({ where: { id: run.versionId }, select: { definition: true, version: true } }),
+        run.contactId ? tx.contact.findUnique({ where: { id: run.contactId }, select: { id: true, firstName: true, lastName: true, phone: true } }) : Promise.resolve(null),
+      ]);
+      const triggerType = String((version?.definition as any)?.trigger?.type ?? "");
+      return {
+        run: {
+          id: run.id,
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          durationMs: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
+          error: run.error,
+          currentNodeId: run.currentNodeId,
+          variables: run.variables,
+          triggerEvent: run.triggerEvent,
+          triggerType,
+          triggerLabel: TRIGGER_CATALOG.find((t) => t.type === triggerType)?.label ?? triggerType,
+        },
+        contact: contact ? { id: contact.id, name: [contact.firstName, contact.lastName].filter(Boolean).join(" ") || contact.phone || "Contacto", phone: contact.phone } : null,
+        definition: version?.definition ?? null,
+        version: version?.version ?? null,
+        steps: run.steps.map((s) => ({
+          nodeId: s.nodeId,
+          nodeType: s.nodeType,
+          status: s.status,
+          attempt: s.attempt,
+          error: s.error,
+          startedAt: s.startedAt,
+          finishedAt: s.finishedAt,
+          durationMs: s.finishedAt ? s.finishedAt.getTime() - s.startedAt.getTime() : null,
+          output: s.output,
+        })),
+        path: run.steps.map((s) => s.nodeId),
+      };
     });
+  }
+
+  /** Métricas del flujo en el período: ejecuciones, tasa de finalización, dónde se cae, conversiones. */
+  @Get(":id/metrics")
+  metrics(@Param("id") id: string, @Query("days") days?: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const period = Math.min(Math.max(Number(days) || 30, 1), 365);
+      const since = new Date(Date.now() - period * 24 * 3600 * 1000);
+      const runs = await tx.workflowRun.findMany({
+        where: { workflowId: id, startedAt: { gte: since } },
+        select: { id: true, status: true, currentNodeId: true, startedAt: true, finishedAt: true },
+      });
+      const total = runs.length;
+      const byStatus: Record<string, number> = { RUNNING: 0, WAITING: 0, COMPLETED: 0, FAILED: 0, CANCELLED: 0 };
+      let durSum = 0, durN = 0;
+      const dropoff = new Map<string, number>();
+      for (const r of runs) {
+        byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+        if (r.finishedAt) { durSum += r.finishedAt.getTime() - r.startedAt.getTime(); durN++; }
+        if (r.status === "FAILED" && r.currentNodeId) dropoff.set(r.currentNodeId, (dropoff.get(r.currentNodeId) ?? 0) + 1);
+      }
+      const topDrop = [...dropoff.entries()].sort((a, b) => b[1] - a[1])[0];
+      // Tipo del nodo de mayor caída (para etiquetarlo en la UI).
+      let dropoffNodeType: string | null = null;
+      if (topDrop) {
+        const latest = await tx.workflowVersion.findFirst({ where: { workflowId: id }, orderBy: { version: "desc" }, select: { definition: true } });
+        const nodes = ((latest?.definition as any)?.nodes ?? []) as { id: string; type: string }[];
+        dropoffNodeType = nodes.find((n) => n.id === topDrop[0])?.type ?? null;
+      }
+      // Conversiones: ejecuciones que enviaron un evento CAPI (paso send_capi COMPLETED) en el período.
+      const capiRuns = await tx.workflowRunStep.findMany({
+        where: { nodeType: "send_capi", status: "COMPLETED", run: { workflowId: id, startedAt: { gte: since } } },
+        select: { runId: true },
+        distinct: ["runId"],
+      });
+      const finished = byStatus.COMPLETED + byStatus.FAILED + byStatus.CANCELLED;
+      return {
+        periodDays: period,
+        total,
+        byStatus,
+        completionRate: finished > 0 ? Math.round((byStatus.COMPLETED / finished) * 100) : null,
+        avgDurationMs: durN > 0 ? Math.round(durSum / durN) : null,
+        dropoffNodeId: topDrop?.[0] ?? null,
+        dropoffNodeType,
+        dropoffCount: topDrop?.[1] ?? 0,
+        conversions: capiRuns.length,
+      };
+    });
+  }
+
+  /** Reintenta una ejecución fallida desde el paso que falló (ENVÍA cosas reales). */
+  @Post(":id/runs/:runId/retry")
+  async retryRun(@Param("id") id: string, @Param("runId") runId: string) {
+    const ctx = requirePermission("workflows:write");
+    const run = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.workflowRun.findFirst({ where: { id: runId, workflowId: id }, select: { id: true, status: true, currentNodeId: true } }),
+    );
+    if (!run) throw new NotFoundException("Ejecución no encontrada");
+    if (run.status !== "FAILED") throw new BadRequestException("Solo se pueden reintentar ejecuciones con error.");
+    if (!run.currentNodeId) throw new BadRequestException("No hay un paso donde reintentar.");
+    await this.queues.enqueueWorkflowRetry({ organizationId: ctx.organizationId, runId });
+    return { ok: true };
   }
 
   /**
