@@ -90,6 +90,17 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
             visibility: "PUBLIC",
           },
         });
+        // Traza para el Super Admin (panel "últimos rechazados"): qué condición bloqueó.
+        await tx.integrationEvent.create({
+          data: {
+            organizationId,
+            provider: "messaging",
+            type: "template.blocked",
+            status: "warning",
+            message: gate.userMessage,
+            payload: { reason: gate.reason, conversationId: data.message.conversationId, messageId: data.message.id },
+          },
+        });
       });
       await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
       return; // no se envía ni se reintenta

@@ -423,6 +423,17 @@ function makeDeps(): EngineDeps {
               visibility: "PUBLIC",
             },
           });
+          // Traza para el Super Admin (panel "últimos rechazados"): qué condición bloqueó.
+          await tx.integrationEvent.create({
+            data: {
+              organizationId: ctx.organizationId,
+              provider: "messaging",
+              type: "template.blocked",
+              status: "warning",
+              message: gate.userMessage,
+              payload: { reason: gate.reason, conversationId: ctx.conversationId, messageId: message.id },
+            },
+          });
         });
         return; // no se envía ni se reintenta
       }

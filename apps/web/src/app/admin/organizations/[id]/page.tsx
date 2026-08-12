@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { padmin } from "@/lib/platform-api";
 import { Button, PageHeader, Skeleton, StatusBadge, useToast, type StatusKind } from "@/components/ui";
-import { MessagingCapCard } from "./messaging-cap-card";
+import { MessagingPanel } from "./messaging-panel";
 
 const LIMIT_FIELDS: { key: string; label: string }[] = [
   { key: "aiTokensDaily", label: "Tokens IA / día" },
@@ -154,8 +154,8 @@ export default function OrgDetailPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Límite de mensajería propio del tenant */}
-        <MessagingCapCard orgId={id} />
+        {/* Panel ÚNICO de mensajería: seis condiciones + ¿puede enviar? + rechazados */}
+        <MessagingPanel orgId={id} onChanged={() => void load()} />
 
         {/* Vigencia */}
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
@@ -231,36 +231,6 @@ export default function OrgDetailPage() {
             <Button disabled={saving} onClick={() => void saveConfig({ limits })}>Guardar límites</Button>
             <span className="text-xs text-slate-400">Los cambios aplican de inmediato (API y worker).</span>
           </div>
-        </section>
-
-        {/* Mensajes de plantilla de WhatsApp — capacidad por cliente (vendible) */}
-        <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
-          <h2 className="mb-1 font-semibold text-navy-900">Mensajes de plantilla de WhatsApp</h2>
-          <p className="mb-3 text-xs text-slate-500">
-            Permite escribir fuera de la ventana de 24 h (recordatorios, confirmaciones, reactivaciones). Es una
-            capacidad que se contrata: enciéndela cuando el cliente la pague. El envío también exige que el plan la
-            incluya, saldo en la bolsa, tope diario y el fusible global.
-          </p>
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-navy-900">
-              <input
-                type="checkbox"
-                checked={d.templates_switch?.switchOn ?? false}
-                disabled={saving || !(d.templates_switch?.planAllows ?? false)}
-                onChange={(e) => void saveConfig({ templatesEnabled: e.target.checked })}
-              />
-              Activar mensajes de plantilla para este cliente
-            </label>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] ${d.templates_switch?.planAllows ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
-              {d.templates_switch?.planAllows ? "Incluido en el plan" : "No incluido en el plan"}
-            </span>
-          </div>
-          {!(d.templates_switch?.planAllows ?? false) && (
-            <p className="mt-2 text-xs text-amber-600">
-              El plan actual no incluye plantillas: aunque enciendas el switch, no se enviarán. Cambia el plan o
-              habilita la capacidad del plan en <a href="/admin/plans" className="underline">Planes</a>.
-            </p>
-          )}
         </section>
 
         {/* Modelo de IA del cliente — aplica a TODA su plataforma */}
