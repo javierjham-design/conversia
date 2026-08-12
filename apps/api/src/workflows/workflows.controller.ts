@@ -14,7 +14,7 @@ import {
 import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { workflowDefinitionSchema, type WorkflowDefinition } from "@conversia/types";
-import { validateWorkflowDefinition, type WorkflowValidationContext } from "@conversia/workflows";
+import { validateWorkflowDefinition, triggersMayOverlap, type WorkflowValidationContext } from "@conversia/workflows";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { canUseFeature, enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
@@ -85,6 +85,33 @@ export class WorkflowsController {
       leadStatusCodes: statuses.map((s: { code: string }) => s.code),
       workflowNames: workflows.map((w: { name: string }) => w.name),
     };
+  }
+
+  /**
+   * Otros flujos PUBLICADOS y activos cuyo disparador podría reaccionar al mismo
+   * evento que `trigger`. Se usa para avisar de conflictos al publicar (dos flujos
+   * que responden a lo mismo = comportamiento sorpresa). No bloquea: informa.
+   */
+  private async triggerConflicts(
+    tx: any,
+    selfId: string,
+    trigger: { type: string; config?: Record<string, unknown> },
+  ): Promise<{ id: string; name: string }[]> {
+    const others = await tx.workflow.findMany({
+      where: { id: { not: selfId }, active: true, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1, select: { definition: true } },
+      },
+    });
+    const out: { id: string; name: string }[] = [];
+    for (const w of others) {
+      const other = (w.versions[0]?.definition as any)?.trigger as { type?: string; config?: Record<string, unknown> } | undefined;
+      if (!other?.type) continue;
+      if (triggersMayOverlap(trigger, { type: other.type, config: other.config ?? {} })) out.push({ id: w.id, name: w.name });
+    }
+    return out;
   }
 
   /** Valida una definición (transversal) devolviendo TODOS los problemas. */
@@ -740,6 +767,23 @@ export class WorkflowsController {
     });
   }
 
+  /**
+   * Conflictos del disparador ACTUAL (sin publicar): otros flujos activos que
+   * reaccionarían al mismo evento. Lo consulta el editor en vivo para avisar
+   * antes de publicar.
+   */
+  @Post(":id/trigger-conflicts")
+  triggerConflictsEndpoint(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("workflows:read");
+    const input = parse(
+      z.object({ trigger: z.object({ type: z.string(), config: z.record(z.unknown()).default({}) }) }),
+      body,
+    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => ({
+      conflicts: await this.triggerConflicts(tx, id, input.trigger),
+    }));
+  }
+
   @Post(":id/publish")
   publish(@Param("id") id: string) {
     const ctx = requirePermission("workflows:write");
@@ -859,7 +903,9 @@ export class WorkflowsController {
           after: { version: published.version },
         },
       });
-      return { ok: true, publishedVersion: published.version };
+      // Aviso (no bloqueante): otros flujos activos que reaccionan al mismo evento.
+      const conflicts = await this.triggerConflicts(tx, id, parsedDef.data.trigger);
+      return { ok: true, publishedVersion: published.version, conflicts };
     });
   }
 

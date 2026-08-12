@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, resumeAfterWait, resumeWithBranch, stepNode, type EngineDeps, type RunCtx } from "./index.js";
+import { executeFrom, findStartNode, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, type EngineDeps, type RunCtx } from "./index.js";
 
 /** Deps de grabación: apunta cada efecto y sus datos; configurable por escenario. */
 function makeDeps(overrides: Partial<EngineDeps> & { objective?: "met" | "unmet" | "pending"; httpVars?: Record<string, string> } = {}) {
@@ -450,5 +450,49 @@ describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
     const escala = makeDeps({ objective: "unmet" });
     await executeFrom(escala.deps, ctx(), flow, "a");
     expect(escala.calls).toEqual(["agent:recepcion", "objective:resolver la duda", "human:requiere humano"]);
+  });
+});
+
+describe("Conflictos de disparadores (aviso al publicar)", () => {
+  const T = (type: string, config: Record<string, unknown> = {}) => ({ type, config });
+
+  it("distinto tipo no choca", () => {
+    expect(triggersMayOverlap(T("conversation_started"), T("conversation_closed"))).toBe(false);
+  });
+  it("mismo evento sin discriminante sí choca", () => {
+    expect(triggersMayOverlap(T("conversation_started"), T("conversation_started"))).toBe(true);
+  });
+  it("mensaje: sin palabras (cualquiera) choca con cualquiera", () => {
+    expect(triggersMayOverlap(T("message_received"), T("message_received", { keywords: ["hola"] }))).toBe(true);
+  });
+  it("mensaje: palabras disjuntas no chocan", () => {
+    expect(triggersMayOverlap(T("message_received", { keywords: ["hora"] }), T("message_received", { keywords: ["precio"] }))).toBe(false);
+  });
+  it("mensaje: palabra compartida choca", () => {
+    expect(triggersMayOverlap(T("message_received", { keywords: ["hora", "agenda"] }), T("message_received", { keywords: ["AGENDA"] }))).toBe(true);
+  });
+  it("mensaje: canales distintos no chocan", () => {
+    expect(triggersMayOverlap(T("message_received", { channel: "whatsapp" }), T("message_received", { channel: "instagram" }))).toBe(false);
+  });
+  it("keyword legado choca con message_received equivalente", () => {
+    expect(triggersMayOverlap(T("keyword", { keyword: "hora" }), T("message_received", { keywords: ["hora"] }))).toBe(true);
+  });
+  it("recordatorio: distinta antelación no choca", () => {
+    expect(triggersMayOverlap(T("appointment_upcoming", { hoursBefore: 24 }), T("appointment_upcoming", { hoursBefore: 2 }))).toBe(false);
+  });
+  it("recordatorio: misma antelación con filtros disjuntos no choca", () => {
+    expect(triggersMayOverlap(T("appointment_upcoming", { hoursBefore: 24, serviceIds: ["a"] }), T("appointment_upcoming", { hoursBefore: 24, serviceIds: ["b"] }))).toBe(false);
+  });
+  it("etapa: destino distinto no choca", () => {
+    expect(triggersMayOverlap(T("lead_status_changed", { toStatus: "won" }), T("lead_status_changed", { toStatus: "lost" }))).toBe(false);
+  });
+  it("etiqueta: una específica y otra cualquiera chocan", () => {
+    expect(triggersMayOverlap(T("tag_added", { tag: "vip" }), T("tag_added"))).toBe(true);
+  });
+  it("click-to-chat: uno 'Todos' choca con selección", () => {
+    expect(triggersMayOverlap(T("click_to_chat", {}), T("click_to_chat", { mode: "selected", adIds: ["1"] }))).toBe(true);
+  });
+  it("click-to-chat: selecciones disjuntas no chocan", () => {
+    expect(triggersMayOverlap(T("click_to_chat", { mode: "selected", adIds: ["1"] }), T("click_to_chat", { mode: "selected", adIds: ["2"] }))).toBe(false);
   });
 });

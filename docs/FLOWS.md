@@ -24,6 +24,15 @@ cancelada/no-show (filtros servicio/profesional/sede) · Recordatorio de cita
 (X h antes, respeta horario) · Disparo manual. **Próximamente** (no
 seleccionables): Llamada perdida, Anuncios TikTok.
 
+**Ayudas del panel (Bloque 3):** vista previa en lenguaje natural («Se activará
+cuando…») derivada de la config; **probar el disparador** de mensaje (escribes un
+texto y dice si dispararía, refleja `matchesKeywords`); **detección de conflictos**
+en vivo y al publicar: si otro flujo activo reacciona al mismo evento, se avisa con
+la lista (no bloquea). La lógica de solape es `triggersMayOverlap` en
+`@conversia/workflows` (conservadora: ante la duda, avisa) — ver
+`apps/api …/workflows.controller.ts` (endpoint `:id/trigger-conflicts` + retorno de
+`publish`).
+
 ## Pasos por categoría
 - **Mensajes**: Enviar mensaje (variables `{{...}}`), Enviar plantilla WhatsApp (HSM).
 - **Contacto**: Cambiar etapa, Agregar/Quitar etiqueta, Actualizar datos.

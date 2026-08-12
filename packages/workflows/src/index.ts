@@ -209,6 +209,80 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
   return true;
 }
 
+/** Disparadores con filtros por servicio/profesional/sede (incluye el recordatorio). */
+const APPT_FILTERABLE_TRIGGERS = new Set([...APPOINTMENT_EVENT_TRIGGERS, "appointment_upcoming"]);
+const APPT_FILTER_KEYS = ["serviceIds", "professionalIds", "clinicIds"] as const;
+
+function normList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x).trim().toLowerCase()).filter(Boolean) : [];
+}
+/** Dos conjuntos "vacío = todos": compatibles si alguno es vacío o si intersectan. */
+function listsCompatible(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return true;
+  return a.some((x) => b.includes(x));
+}
+function apptFiltersOverlap(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return APPT_FILTER_KEYS.every((k) => listsCompatible(normList(a[k]), normList(b[k])));
+}
+function keywordSet(cfg: Record<string, unknown>): string[] {
+  return [
+    ...normList(cfg.keywords),
+    ...(typeof cfg.keyword === "string" && cfg.keyword.trim() ? [cfg.keyword.trim().toLowerCase()] : []),
+  ];
+}
+
+/**
+ * ¿Estos dos disparadores PODRÍAN dispararse con un mismo evento? Se usa para
+ * avisar de conflictos al publicar (dos flujos activos que reaccionan a lo mismo
+ * → comportamiento sorpresa en producción). Es conservador: ante la duda, dice
+ * que sí (mejor avisar de más que callar un choque real). Puro y testeable.
+ */
+export function triggersMayOverlap(
+  a: { type: string; config?: Record<string, unknown> },
+  b: { type: string; config?: Record<string, unknown> },
+): boolean {
+  const ca = (a.config ?? {}) as Record<string, unknown>;
+  const cb = (b.config ?? {}) as Record<string, unknown>;
+  // Familia "mensaje entrante": keyword (legado) y message_received consumen el mismo evento.
+  const msgFamily = (t: string) => t === "message_received" || t === "keyword";
+  if (msgFamily(a.type) && msgFamily(b.type)) {
+    const chA = typeof ca.channel === "string" ? ca.channel : "";
+    const chB = typeof cb.channel === "string" ? cb.channel : "";
+    if (chA && chB && chA !== chB) return false; // canales distintos → no chocan
+    return listsCompatible(keywordSet(ca), keywordSet(cb)); // sin palabras = cualquier mensaje
+  }
+  if (a.type !== b.type) return false;
+  const t = a.type;
+  if (t === "click_to_chat") {
+    if (ca.mode !== "selected" || cb.mode !== "selected") return true; // alguno "Todos" → choca
+    const adsA = [...normList(ca.adIds), ...(typeof ca.adId === "string" && ca.adId.trim() ? [ca.adId.trim().toLowerCase()] : [])];
+    const adsB = [...normList(cb.adIds), ...(typeof cb.adId === "string" && cb.adId.trim() ? [cb.adId.trim().toLowerCase()] : [])];
+    return adsA.some((x) => adsB.includes(x)) || normList(ca.campaignIds).some((x) => normList(cb.campaignIds).includes(x));
+  }
+  if (t === "lead_status_changed") {
+    const compat = (k: string) => {
+      const va = typeof ca[k] === "string" ? (ca[k] as string) : "";
+      const vb = typeof cb[k] === "string" ? (cb[k] as string) : "";
+      return !va || !vb || va === vb;
+    };
+    return compat("toStatus") && compat("fromStatus");
+  }
+  if (t === "tag_added") {
+    const ta = typeof ca.tag === "string" ? ca.tag.trim().toLowerCase() : "";
+    const tb = typeof cb.tag === "string" ? cb.tag.trim().toLowerCase() : "";
+    return !ta || !tb || ta === tb;
+  }
+  if (t === "appointment_upcoming") {
+    // Distinta antelación (24 h vs 2 h) = recordatorios intencionales, no chocan.
+    const ha = Number(ca.hoursBefore), hb = Number(cb.hoursBefore);
+    if (Number.isFinite(ha) && Number.isFinite(hb) && ha !== hb) return false;
+    return apptFiltersOverlap(ca, cb);
+  }
+  if (APPT_FILTERABLE_TRIGGERS.has(t)) return apptFiltersOverlap(ca, cb);
+  // conversation_started/closed, manual, etc.: mismo evento, sin discriminante → chocan.
+  return true;
+}
+
 export function findStartNode(def: WorkflowDefinition): WorkflowNode | undefined {
   const withIncoming = new Set(def.edges.map((e: WorkflowEdge) => e.to));
   return def.nodes.find((n) => !withIncoming.has(n.id)) ?? def.nodes[0];
