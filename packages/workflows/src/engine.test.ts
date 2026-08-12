@@ -198,6 +198,31 @@ describe("motor de workflows v0", () => {
     expect(issues.some((i) => i.target === "n2" && i.code === "text_required")).toBe(true);
   });
 
+  it("detecta la rama «Respondió» muerta tras un «Esperar (cancela si responde)»", () => {
+    const trap: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} },
+      variables: {},
+      nodes: [
+        { id: "w", type: "wait", config: { minutes: 5, cancelOn: "contact_reply" } },
+        { id: "c", type: "condition", config: { kind: "no_reply" } },
+        { id: "nudge", type: "send_text", config: { text: "¿Sigues ahí?" } },
+        { id: "agent", type: "run_agent", config: { agentSlug: "ventas" } },
+      ],
+      // rama true (sin respuesta) → nudge; rama false (respondió) → agente = MUERTA
+      edges: [
+        { from: "w", to: "c" },
+        { from: "c", to: "nudge", when: "true" },
+        { from: "c", to: "agent", when: "false" },
+      ],
+    };
+    const issues = validateWorkflowDefinition(trap, { ...ctx, agentSlugs: ["ventas"] });
+    expect(issues.some((i) => i.target === "c" && i.code === "unreachable_replied_branch")).toBe(true);
+
+    // Sin la rama «Respondió» cableada (patrón de recordatorio) NO se marca.
+    const ok: WorkflowDefinition = { ...trap, edges: [{ from: "w", to: "c" }, { from: "c", to: "nudge", when: "true" }], nodes: trap.nodes.filter((n) => n.id !== "agent") };
+    expect(validateWorkflowDefinition(ok, ctx).some((i) => i.code === "unreachable_replied_branch")).toBe(false);
+  });
+
   it("ejecuta hasta la espera y programa el timer", async () => {
     const { deps, calls } = makeDeps();
     const result = await executeFrom(deps, ctx, def, findStartNode(def)!.id);

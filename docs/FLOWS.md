@@ -95,6 +95,23 @@ BORRADOR listo para editar. Ninguna usa integraciones que bloqueen (sin
 Un test (`workflow-templates.test.ts`) garantiza que cada plantilla tenga un único
 nodo de inicio, ids/aristas coherentes y disparador/pasos soportados.
 
+## Esperas y ramificación por respuesta (evitar el pie común)
+- **«Esperar» con «cancelar si el contacto responde»** (`wait`, `cancelOn:
+  contact_reply`): si el contacto responde, **el run se CANCELA**
+  (`cancelTimersOnReply` lo pone en `CANCELLED`). Todo lo que venga después NO se
+  ejecuta. Sirve para *nudges* ("si NO responde, insiste"), no para reaccionar a la
+  respuesta.
+- **Para ramificar según la respuesta** usa **«¿El contacto respondió?»**
+  (`wait_reply`): reanuda por «Sí respondió» al recibir mensaje (`handleWaitReply`)
+  o por «No respondió» al vencer.
+- **Guard**: `validateWorkflowDefinition` **bloquea** publicar un `wait(cancelOn:
+  contact_reply) → condition(no_reply)` con la rama «Respondió» (`when:"false"`)
+  cableada, porque esa rama es **inalcanzable** (`unreachable_replied_branch`). El
+  probador lo explica en vivo en vez de decir sólo «Fin del flujo».
+- **IA en pausa**: un paso «Ejecutar agente IA» **no responde** si la IA está en
+  pausa (`Pausar IA` o derivación a humano) — ni en producción ni en el simulador
+  (alineados). Reactívala con «Reanudar IA» o «Cambiar agente IA» antes del paso.
+
 ## Validación al publicar
 `validateWorkflowDefinition` bloquea publicar con: nodos sin conectar, campos
 requeridos vacíos (mensaje, etiqueta, agente, etapa, flujo…), referencias rotas

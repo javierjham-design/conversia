@@ -430,6 +430,28 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
       }
     }
   }
+
+  // Rama muerta: «Esperar (cancela si responde)» → «¿Sigue sin responder?» con una
+  // rama «Respondió» cableada. Como la respuesta CANCELA el run en ese punto, esa
+  // rama nunca se ejecuta. Es un pie común (el usuario quiere reaccionar a la
+  // respuesta): se bloquea y se apunta al nodo correcto «¿El contacto respondió?».
+  const nodeById = new Map(def.nodes.map((n) => [n.id, n]));
+  for (const e of def.edges) {
+    const from = nodeById.get(e.from);
+    const to = nodeById.get(e.to);
+    if (!from || !to) continue;
+    const fromCancels = from.type === "wait" && (from.config as any)?.cancelOn === "contact_reply";
+    const toIsNoReply = to.type === "condition" && (to.config as any)?.kind === "no_reply";
+    if (!fromCancels || !toIsNoReply) continue;
+    const hasRepliedBranch = def.edges.some((x) => x.from === to.id && x.when === "false");
+    if (hasRepliedBranch) {
+      push(
+        to.id,
+        "unreachable_replied_branch",
+        "La rama «Respondió» nunca se ejecuta: el paso «Esperar» anterior está en «cancelar si el contacto responde», así que la respuesta detiene el flujo antes de llegar aquí. Para reaccionar a la respuesta, reemplaza «Esperar» + «¿Sigue sin responder?» por el paso «¿El contacto respondió?» (ramas Sí/No).",
+      );
+    }
+  }
   return issues;
 }
 
