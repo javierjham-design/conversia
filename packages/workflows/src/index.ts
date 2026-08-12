@@ -167,6 +167,16 @@ export function matchesTrigger(def: WorkflowDefinition, event: PlatformEvent): b
     return matchesKeywords(cfg, String(data.text ?? ""));
   }
 
+  // "link_scan": enlace/QR con mensaje predefinido que incluye un código único.
+  // La persona escanea/pincha → WhatsApp abre con el texto → al enviarlo llega un
+  // message_received cuyo texto contiene el código, y ahí dispara el flujo.
+  if (t === "link_scan") {
+    if (event.type !== "message_received") return false;
+    const code = String(cfg.code ?? "").trim().toLowerCase();
+    if (!code) return false;
+    return String(data.text ?? "").toLowerCase().includes(code);
+  }
+
   if (t !== event.type) return false;
 
   // Condiciones opcionales del mensaje entrante: canal, primer mensaje y
@@ -253,6 +263,12 @@ export function triggersMayOverlap(
   }
   if (a.type !== b.type) return false;
   const t = a.type;
+  if (t === "link_scan") {
+    // Solo chocan dos enlaces con el MISMO código (el marcador es único por enlace).
+    const codeA = typeof ca.code === "string" ? ca.code.trim().toLowerCase() : "";
+    const codeB = typeof cb.code === "string" ? cb.code.trim().toLowerCase() : "";
+    return Boolean(codeA) && codeA === codeB;
+  }
   if (t === "click_to_chat") {
     if (ca.mode !== "selected" || cb.mode !== "selected") return true; // alguno "Todos" → choca
     const adsA = [...normList(ca.adIds), ...(typeof ca.adId === "string" && ca.adId.trim() ? [ca.adId.trim().toLowerCase()] : [])];
@@ -326,6 +342,9 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
   if (t === "keyword") {
     const hasKw = String(tc.keyword ?? "").trim() || (Array.isArray(tc.keywords) && tc.keywords.some((w) => String(w).trim()));
     if (!hasKw) push("trigger", "keyword_required", "El disparador «Palabra clave» necesita una palabra o frase.");
+  }
+  if (t === "link_scan" && !String(tc.code ?? "").trim()) {
+    push("trigger", "link_code_required", "El disparador «Enlace / Código QR» necesita un código. Genéralo en el panel del disparador.");
   }
   if (t === "click_to_chat" && tc.mode === "selected") {
     const adIds = Array.isArray(tc.adIds) ? tc.adIds : [];

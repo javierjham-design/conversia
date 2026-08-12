@@ -21,8 +21,18 @@ cualquiera/todas · primer mensaje) · Conversación cerrada · Anuncios
 Click-to-Chat (Meta; por anuncio o campaña) · Etapa del ciclo de vida
 (origen→destino) · Etiqueta añadida · Cita creada/confirmada/reprogramada/
 cancelada/no-show (filtros servicio/profesional/sede) · Recordatorio de cita
-(X h antes, respeta horario) · Disparo manual. **Próximamente** (no
-seleccionables): Llamada perdida, Anuncios TikTok.
+(X h antes, respeta horario) · Disparo manual · **Enlace / Código QR**
+(`link_scan`). **Próximamente** (no seleccionables): Llamada perdida, Anuncios
+TikTok.
+
+**Enlace / Código QR (`link_scan`):** el editor genera un enlace `wa.me/<número>?text=…`
+(y su QR) con un mensaje predefinido que lleva un **código único** al final
+(`[código]`). Para carteles, redes o el local. Al **enviar** ese mensaje entra un
+`message_received` cuyo texto contiene el código → dispara el flujo (mismo camino
+que `keyword`; el worker evalúa `matchesTrigger` sobre todos los flujos activos).
+Nota real de WhatsApp: arranca cuando la persona **envía** (no al escanear), que es
+cuando se conoce su número. El número sale del catálogo (`waPhone`, primer número
+activo del tenant); multi-número queda como mejora futura (ver PENDIENTES B7-WABA).
 
 **Ayudas del panel (Bloque 3):** vista previa en lenguaje natural («Se activará
 cuando…») derivada de la config; **probar el disparador** de mensaje (escribes un

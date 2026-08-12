@@ -35,6 +35,7 @@ import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
 import { triggerPreview, messageWouldTrigger } from "@/lib/workflow-trigger-preview";
+import { QRCodeCanvas } from "qrcode.react";
 import { CATEGORIES, NODE_DEF, NODE_DEFS, categoryMeta, type Category, type NodeDef } from "@/lib/workflow-catalog";
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,8 @@ interface Catalog {
   googleConnected?: boolean;
   templatesEnabled?: boolean;
   templatesPlanAllows?: boolean;
+  /** Número de WhatsApp del tenant, para armar el enlace/QR del disparador link_scan. */
+  waPhone?: string | null;
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -1435,6 +1438,104 @@ const MSG_CHANNELS = [
 ];
 
 /** Condiciones del disparador «Mensaje recibido»: canal, palabras, contiene/exacto. */
+/** Sanea un código de enlace: minúsculas, sin espacios ni símbolos raros. */
+function sanitizeLinkCode(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // quita tildes
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32);
+}
+
+/**
+ * Disparador «Enlace / Código QR». Genera un enlace wa.me con un mensaje
+ * predefinido que incluye un código único; al ENVIARLO, el mensaje entrante
+ * contiene el código y arranca este flujo. El QR es el mismo enlace.
+ */
+function LinkScanConfig({ waPhone, trigger, onChange }: { waPhone: string | null; trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
+  const cfg = trigger.config;
+  const code = String(cfg.code ?? "");
+  const message = String(cfg.linkMessage ?? "¡Hola! Quiero más información 🙌");
+  const set = (patch: Record<string, unknown>) => onChange({ ...trigger, config: { ...cfg, ...patch } });
+
+  // El texto que la persona termina enviando: su mensaje + el marcador con el código.
+  const fullText = code ? `${message} [${code}]` : message;
+  const phoneDigits = (waPhone ?? "").replace(/[^0-9]/g, "");
+  const link = phoneDigits && code ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(fullText)}` : "";
+  const qrRef = useRef<HTMLDivElement>(null);
+
+  function downloadQR() {
+    const canvas = qrRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = `qr-${code || "flujo"}.png`;
+    a.click();
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-line p-3">
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Código del enlace (único)</span>
+        <div className="mt-1 flex gap-2">
+          <input
+            value={code}
+            onChange={(e) => set({ code: sanitizeLinkCode(e.target.value) })}
+            placeholder="p. ej. promo-implantes"
+            className="block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => set({ code: `promo-${Math.random().toString(36).slice(2, 7)}` })}
+            className="shrink-0 rounded-lg border border-line-strong px-3 text-xs font-medium text-ink-muted hover:bg-app"
+          >
+            Generar
+          </button>
+        </div>
+      </label>
+
+      <label className="block text-sm">
+        <span className="text-xs text-ink-muted">Mensaje predefinido (lo que la persona enviará)</span>
+        <textarea
+          value={message}
+          onChange={(e) => set({ linkMessage: e.target.value })}
+          rows={2}
+          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+        />
+        <span className="mt-1 block text-[10px] text-ink-subtle">Le agregamos <code>[{code || "código"}]</code> al final para reconocerlo. No lo borres.</span>
+      </label>
+
+      {!waPhone ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+          Conecta tu número de WhatsApp en <b>Canales</b> para generar el enlace y el QR.
+        </p>
+      ) : !code ? (
+        <p className="text-[11px] text-ink-subtle">Genera un código para ver el enlace y el QR.</p>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 rounded-lg border border-line bg-app/40 p-3">
+            <div ref={qrRef} className="shrink-0 rounded-md bg-white p-1.5">
+              <QRCodeCanvas value={link} size={104} marginSize={2} />
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[11px] text-ink-subtle">Enlace para carteles, redes o el local:</p>
+              <p className="truncate rounded bg-panel px-2 py-1 font-mono text-[10px] text-ink-muted" title={link}>{link}</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(link)} className="rounded-md border border-line-strong px-2 py-1 text-[11px] font-medium text-ink-muted hover:bg-app">Copiar enlace</button>
+                <button type="button" onClick={downloadQR} className="rounded-md border border-line-strong px-2 py-1 text-[11px] font-medium text-ink-muted hover:bg-app">Descargar QR</button>
+              </div>
+            </div>
+          </div>
+          <p className="text-[10px] text-ink-subtle">Ojo: el flujo arranca cuando la persona <b>envía</b> el mensaje (toca enviar en WhatsApp), no al escanear. Es propio de WhatsApp: recién ahí sabemos quién es.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageReceivedConditions({ trigger, onChange }: { trigger: DefTrigger; onChange: (t: DefTrigger) => void }) {
   const cfg = trigger.config;
   const words: string[] = Array.isArray(cfg.keywords) ? (cfg.keywords as string[]) : cfg.keyword ? [String(cfg.keyword)] : [];
@@ -1639,6 +1740,8 @@ function TriggerPanel({ wfId, catalog, trigger, onChange, issues = [] }: { wfId:
       )}
 
       {trigger.type === "message_received" && <MessageReceivedConditions trigger={trigger} onChange={onChange} />}
+
+      {trigger.type === "link_scan" && <LinkScanConfig waPhone={catalog.waPhone ?? null} trigger={trigger} onChange={onChange} />}
 
       {catalog.triggers.find((t) => t.type === trigger.type)?.soon && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">

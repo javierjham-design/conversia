@@ -90,6 +90,12 @@ export function triggerPreview(type: string, config: Cfg = {}, look: PreviewLook
       return "se cancela una cita.";
     case "no_show":
       return "un paciente no asiste a su cita (no-show).";
+    case "link_scan": {
+      const code = typeof cfg.code === "string" ? cfg.code.trim() : "";
+      return code
+        ? `alguien abre tu enlace/QR (código «${code}») y envía el mensaje predefinido por WhatsApp.`
+        : "alguien abre tu enlace/QR y envía el mensaje predefinido (falta generar el código).";
+    }
     case "manual":
       return "lo lanzas manualmente (o desde otro flujo / acción masiva).";
     default:
