@@ -74,6 +74,17 @@ Reservados en el modelo pero **no ofrecidos** (no aparecen en el menú):
   tenant por fallos repetidos de un flujo publicado.
 Estas quedan documentadas y marcadas; ver `docs/FLOWS_TEST_MATRIX.md` §7.
 
+## Galería de plantillas (Bloque 7)
+Al crear un flujo (y en el estado vacío del módulo) se ofrece una **galería por
+rubro** (`apps/web/src/lib/workflow-templates.ts`): **Dental** (recordatorio de
+cita, confirmación al agendar, reactivación de pacientes, recuperación de no-show)
+y **General** (bienvenida, seguimiento sin respuesta, palabra clave, encuesta).
+Cada plantilla es un `WorkflowDefinition` válido con posiciones; se crea como
+BORRADOR listo para editar. Ninguna usa integraciones que bloqueen (sin
+`send_template`/Sheets/CAPI) para poder probarla y publicarla sin config externa.
+Un test (`workflow-templates.test.ts`) garantiza que cada plantilla tenga un único
+nodo de inicio, ids/aristas coherentes y disparador/pasos soportados.
+
 ## Validación al publicar
 `validateWorkflowDefinition` bloquea publicar con: nodos sin conectar, campos
 requeridos vacíos (mensaje, etiqueta, agente, etapa, flujo…), referencias rotas
