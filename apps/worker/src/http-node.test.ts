@@ -47,3 +47,70 @@ describe("guard SSRF de la Petición HTTP", () => {
     expect(seen?.redirect).toBe("error");
   });
 });
+
+/** Respuesta fetch mínima simulada. */
+function fakeRes(status: number, bodyText: string) {
+  return { status, ok: status >= 200 && status < 300, text: async () => bodyText } as unknown as Response;
+}
+
+describe("Petición HTTP — éxito, 4xx, 5xx, timeout, mapeo de variables", () => {
+  const URL_OK = "http://93.184.216.34/api"; // IP pública → pasa el guard SSRF sin DNS
+  function withFetch(fn: (u: string, opts: any) => Promise<Response> | Promise<never>) {
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (u: unknown, opts: any) => fn(String(u), opts)) as unknown as typeof fetch;
+    return () => { globalThis.fetch = orig; };
+  }
+
+  it("200 con éxito: __http_ok=true, __http_status=200 y mapea la respuesta JSON a variables", async () => {
+    const restore = withFetch(async () => fakeRes(200, JSON.stringify({ data: { token: "abc123", nested: { n: 7 } } })));
+    try {
+      const out = await callHttp({ method: "GET", url: URL_OK, responseMapping: { miToken: "data.token", num: "data.nested.n" } }, {});
+      expect(out.__http_ok).toBe("true");
+      expect(out.__http_status).toBe("200");
+      expect(out.miToken).toBe("abc123");
+      expect(out.num).toBe("7");
+    } finally { restore(); }
+  });
+
+  it("4xx: __http_ok=false y __http_status=404, sin lanzar (permite ramificar)", async () => {
+    const restore = withFetch(async () => fakeRes(404, "not found"));
+    try {
+      const out = await callHttp({ method: "POST", url: URL_OK, body: '{"x":1}' }, {});
+      expect(out.__http_ok).toBe("false");
+      expect(out.__http_status).toBe("404");
+      expect(out.__http_error).toBeUndefined();
+    } finally { restore(); }
+  });
+
+  it("5xx: __http_ok=false y __http_status=500", async () => {
+    const restore = withFetch(async () => fakeRes(500, "boom"));
+    try {
+      const out = await callHttp({ method: "GET", url: URL_OK }, {});
+      expect(out.__http_ok).toBe("false");
+      expect(out.__http_status).toBe("500");
+    } finally { restore(); }
+  });
+
+  it("timeout / error de red: __http_ok=false y __http_error, sin lanzar", async () => {
+    const restore = withFetch(async () => { throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" }); });
+    try {
+      const out = await callHttp({ method: "GET", url: URL_OK, timeoutMs: 50 }, {});
+      expect(out.__http_ok).toBe("false");
+      expect(out.__http_error).toMatch(/abort/i);
+    } finally { restore(); }
+  });
+
+  it("renderiza variables en url, headers y body antes de llamar", async () => {
+    let seen: any = null;
+    const restore = withFetch(async (u, opts) => { seen = { u, opts }; return fakeRes(200, "{}"); });
+    try {
+      await callHttp(
+        { method: "POST", url: "http://93.184.216.34/u/{{contact.id}}", headers: { "X-Tok": "{{tok}}" }, body: '{"n":"{{contact.firstName}}"}' },
+        { "contact.id": "42", tok: "secreto", "contact.firstName": "Ana" },
+      );
+      expect(seen.u).toBe("http://93.184.216.34/u/42");
+      expect(seen.opts.headers["X-Tok"]).toBe("secreto");
+      expect(seen.opts.body).toBe('{"n":"Ana"}');
+    } finally { restore(); }
+  });
+});
