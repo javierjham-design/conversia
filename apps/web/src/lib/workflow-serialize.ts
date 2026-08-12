@@ -13,7 +13,8 @@ export interface DefTrigger {
 
 export function edgeStyle(when?: string) {
   const label = when === "true" ? "sin respuesta" : when === "false" ? "respondió" : undefined;
-  return { label, animated: false, style: { stroke: "#94a3b8" }, labelStyle: { fontSize: 10, fill: "#64748b" } };
+  // type "deletable": edge con botón "×" para borrar una sola conexión (ver page.tsx).
+  return { type: "deletable", label, animated: false, style: { stroke: "#94a3b8" }, labelStyle: { fontSize: 10, fill: "#64748b" } };
 }
 
 export function defToFlow(def: any): { nodes: Node[]; edges: Edge[]; trigger: DefTrigger } {
@@ -47,7 +48,8 @@ export function defToFlow(def: any): { nodes: Node[]; edges: Edge[]; trigger: De
     ...edgeStyle(e.when),
   }));
   if (startId) {
-    edges.unshift({ id: `trigger->${startId}`, source: TRIGGER_NODE_ID, target: startId, ...edgeStyle() });
+    // Arista del disparador → primer paso: estructural, no se elimina ni reconecta.
+    edges.unshift({ id: `trigger->${startId}`, source: TRIGGER_NODE_ID, target: startId, selectable: false, deletable: false, reconnectable: false, ...edgeStyle() });
   }
   return { nodes, edges, trigger };
 }
