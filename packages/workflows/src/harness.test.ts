@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, resumeAfterWait, resumeWithBranch, type EngineDeps, type RunCtx } from "./index.js";
+import { executeFrom, findStartNode, resumeAfterWait, resumeWithBranch, stepNode, type EngineDeps, type RunCtx } from "./index.js";
 
 /** Deps de grabación: apunta cada efecto y sus datos; configurable por escenario. */
 function makeDeps(overrides: Partial<EngineDeps> & { objective?: "met" | "unmet" | "pending"; httpVars?: Record<string, string> } = {}) {
@@ -196,6 +196,42 @@ describe("Bloque 1 — control de flujo y ramas", () => {
     const fuera = makeDeps({ getBusinessHoursDefault: async () => ({ timezone: "UTC", hours: { wed: [{ from: "09:00", to: "12:00" }] }, holidays: [] }) });
     await executeFrom(fuera.deps, ctx(), flow, "h");
     expect(fuera.calls).toEqual(["send:Te contactamos en horario"]);
+  });
+});
+
+// ───────────────────────────── Paso a paso (probador) ─────────────────────────────
+describe("Bloque 2 — stepNode: ejecución nodo a nodo con rama y siguiente", () => {
+  it("ejecuta un nodo y devuelve el siguiente; en condición devuelve la rama tomada", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} }, variables: {},
+      nodes: [
+        { id: "a", type: "send_text", config: { text: "Hola {{contact.firstName}}" } },
+        { id: "q", type: "condition", config: { kind: "no_reply" } },
+        { id: "t", type: "add_tag", config: { tag: "sin-respuesta" } },
+        { id: "f", type: "run_agent", config: { agentSlug: "ventas" } },
+      ],
+      edges: [{ from: "a", to: "q" }, { from: "q", to: "t", when: "true" }, { from: "q", to: "f", when: "false" }],
+    };
+    const c = ctx();
+    const s1 = makeDeps();
+    const r1 = await stepNode(s1.deps, c, flow, "a");
+    expect(r1).toEqual({ status: "continue", branch: undefined, nextNodeId: "q" });
+    expect(s1.calls).toEqual(["send:Hola Ana"]);
+    // La condición devuelve la rama tomada + su siguiente nodo.
+    const s2 = makeDeps({ evaluateCondition: async () => true });
+    const r2 = await stepNode(s2.deps, c, flow, "q");
+    expect(r2).toEqual({ status: "continue", branch: "true", nextNodeId: "t" });
+  });
+
+  it("stepNode: wait → waiting; stop → completed; nodo inexistente → failed", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} }, variables: {},
+      nodes: [{ id: "w", type: "wait", config: { minutes: 5 } }, { id: "s", type: "stop", config: {} }],
+      edges: [{ from: "w", to: "s" }],
+    };
+    expect(await stepNode(makeDeps().deps, ctx(), flow, "w")).toEqual({ status: "waiting", nodeId: "w" });
+    expect(await stepNode(makeDeps().deps, ctx(), flow, "s")).toEqual({ status: "completed" });
+    expect((await stepNode(makeDeps().deps, ctx(), flow, "zzz") as any).status).toBe("failed");
   });
 });
 
