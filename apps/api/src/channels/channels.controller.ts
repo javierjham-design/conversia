@@ -14,7 +14,7 @@ import { getEnv, withAppSecretProof } from "@conversia/config";
 import { TEMPLATE_FIELD_IDS } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
-import { enforcePlanLimit } from "../common/plan-limits";
+import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
 
@@ -656,6 +656,28 @@ export class ChannelsController {
   }
 
   /** Lista las plantillas de la WABA del canal (estado, categoría, idioma, contenido). */
+  /**
+   * Estado del interruptor de mensajes de plantilla para el tenant (panel de
+   * Plantillas). Incluye el precio de activación (platform_setting) para el CTA
+   * de contratación cuando la función no está incluida.
+   */
+  @Get("templates/entitlement")
+  async templatesEntitlement() {
+    const ctx = requireContext();
+    const ent = await this.prisma.withTenant(ctx.organizationId, (tx) => getTemplatesEntitlement(tx));
+    const priceRow = await this.prisma.admin.platformSetting.findUnique({ where: { key: "templatesActivation" } });
+    let activation: { priceClp: number | null; priceUsd: number | null } = { priceClp: null, priceUsd: null };
+    if (priceRow?.value) {
+      try {
+        const p = JSON.parse(priceRow.value);
+        activation = { priceClp: typeof p.priceClp === "number" ? p.priceClp : null, priceUsd: typeof p.priceUsd === "number" ? p.priceUsd : null };
+      } catch {
+        /* valor corrupto → sin precio */
+      }
+    }
+    return { ...ent, activation };
+  }
+
   @Get(":id/templates")
   async listTemplates(@Param("id") id: string) {
     const ctx = requireContext();

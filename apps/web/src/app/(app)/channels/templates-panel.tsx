@@ -111,6 +111,10 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
   const [saving, setSaving] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  // Entitlement de mensajes de plantilla (plan + switch del tenant). Si no está
+  // habilitado, se muestra el estado "no incluido" con CTA para contratarlo.
+  const [ent, setEnt] = useState<{ planAllows: boolean; switchOn: boolean; enabled: boolean; activation: { priceClp: number | null; priceUsd: number | null } } | null>(null);
+
   const [form, setForm] = useState({
     name: "",
     category: "UTILITY",
@@ -147,8 +151,16 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
   }, [channelId]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void api<{ planAllows: boolean; switchOn: boolean; enabled: boolean; activation: { priceClp: number | null; priceUsd: number | null } }>(`/channels/templates/entitlement`)
+      .then(setEnt)
+      .catch(() => setEnt(null));
+  }, []);
+
+  // Solo cargamos las plantillas de Meta si la función está habilitada (evita
+  // llamadas a Graph cuando no aplica).
+  useEffect(() => {
+    if (ent?.enabled) void load();
+  }, [ent?.enabled, load]);
 
   /** Inserta {{Etiqueta del campo}} en la posición del cursor del cuerpo. */
   function insertField(label: string) {
@@ -240,19 +252,54 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
           Plantillas de mensaje{" "}
           <span className="font-normal text-ink-subtle">— necesarias para escribir fuera de la ventana de 24 h</span>
         </p>
-        <div className="flex items-center gap-2">
-          <button onClick={() => void load()} className="rounded-lg border border-line-strong bg-panel px-2.5 py-1 text-xs hover:bg-app">
-            Actualizar
-          </button>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700"
-          >
-            {showForm ? "Cancelar" : "Nueva plantilla"}
-          </button>
-        </div>
+        {ent?.enabled && (
+          <div className="flex items-center gap-2">
+            <button onClick={() => void load()} className="rounded-lg border border-line-strong bg-panel px-2.5 py-1 text-xs hover:bg-app">
+              Actualizar
+            </button>
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="rounded-lg bg-brand-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-brand-700"
+            >
+              {showForm ? "Cancelar" : "Nueva plantilla"}
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Función no incluida: estado claro con CTA (no oculta ni rota). */}
+      {ent && !ent.enabled && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-center dark:border-amber-500/40 dark:bg-amber-500/10">
+          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+            {ent.planAllows ? "Mensajes de plantilla no activados" : "Función no incluida en tu plan"}
+          </p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-amber-800 dark:text-amber-300/90">
+            {ent.planAllows
+              ? "Tu plan incluye los mensajes de plantilla de WhatsApp, pero aún no están activados en tu cuenta. Actívalos para escribir a tus contactos fuera de la ventana de 24 h (recordatorios, confirmaciones, reactivaciones)."
+              : "Los mensajes de plantilla de WhatsApp te permiten escribir fuera de la ventana de 24 h (recordatorios de cita, confirmaciones, reactivaciones). Esta capacidad no está incluida en tu plan actual."}
+            {(ent.activation.priceClp || ent.activation.priceUsd) ? (
+              <>
+                {" "}Activación:{" "}
+                <b>
+                  {ent.activation.priceClp ? `$${ent.activation.priceClp.toLocaleString("es-CL")} CLP` : ""}
+                  {ent.activation.priceClp && ent.activation.priceUsd ? " / " : ""}
+                  {ent.activation.priceUsd ? `US$${ent.activation.priceUsd}` : ""}
+                </b>
+                .
+              </>
+            ) : null}
+          </p>
+          <a
+            href="/settings/plan"
+            className="mt-3 inline-flex rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+          >
+            {ent.planAllows ? "Contratar activación" : "Ver planes"}
+          </a>
+        </div>
+      )}
+
+      {ent && !ent.enabled ? null : (
+      <>
       {notice && <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p>}
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
 
@@ -427,6 +474,8 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
             </tbody>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   );

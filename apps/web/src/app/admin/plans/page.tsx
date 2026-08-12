@@ -33,6 +33,7 @@ const LIMIT_FIELDS: { key: string; label: string }[] = [
 const FEATURE_FIELDS: { key: string; label: string }[] = [
   { key: "api", label: "API" },
   { key: "whiteLabel", label: "Marca blanca" },
+  { key: "whatsappTemplates", label: "Plantillas WhatsApp" },
 ];
 
 export default function PlansPage() {

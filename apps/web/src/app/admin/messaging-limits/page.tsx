@@ -38,6 +38,7 @@ export default function MessagingLimitsPage() {
   const [global, setGlobal] = useState(0);
   const [perTenant, setPerTenant] = useState(0);
   const [weights, setWeights] = useState<Weights | null>(null);
+  const [pricing, setPricing] = useState<{ priceClp: number | null; priceUsd: number | null }>({ priceClp: null, priceUsd: null });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -50,8 +51,21 @@ export default function MessagingLimitsPage() {
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
     void padmin<Weights>("/platform/wallet-weights").then(setWeights).catch(() => undefined);
+    void padmin<{ priceClp: number | null; priceUsd: number | null }>("/platform/templates-pricing").then(setPricing).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function savePricing() {
+    setBusy(true);
+    try {
+      await padmin("/platform/templates-pricing", { method: "PATCH", body: JSON.stringify(pricing) });
+      toast.push("Precio de activación guardado ✔", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveWeights() {
     if (!weights) return;
@@ -152,6 +166,38 @@ export default function MessagingLimitsPage() {
             </div>
           </div>
         )}
+
+        {/* Precio de activación de mensajes de plantilla (servicio adicional) */}
+        <div className="rounded-card border border-slate-200 bg-white p-5 shadow-card">
+          <label className="block text-sm font-medium text-navy-900">Precio de activación de mensajes de plantilla</label>
+          <p className="mb-2 text-xs text-slate-500">
+            Precio de referencia para cobrar la activación de la capacidad de plantillas por cliente (servicio adicional).
+            Se muestra en el panel del cliente cuando la función no está incluida. Déjalo vacío si va incluida en el plan.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <label className="flex items-center gap-1.5">
+              <span className="text-slate-600">CLP</span>
+              <input
+                type="number"
+                min={0}
+                value={pricing.priceClp ?? ""}
+                onChange={(e) => setPricing((p) => ({ ...p, priceClp: e.target.value === "" ? null : Number(e.target.value) }))}
+                className="w-32 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+              />
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-slate-600">USD</span>
+              <input
+                type="number"
+                min={0}
+                value={pricing.priceUsd ?? ""}
+                onChange={(e) => setPricing((p) => ({ ...p, priceUsd: e.target.value === "" ? null : Number(e.target.value) }))}
+                className="w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm"
+              />
+            </label>
+            <Button variant="secondary" disabled={busy} onClick={() => void savePricing()}>Guardar precio</Button>
+          </div>
+        </div>
 
         <div className="flex items-center gap-3">
           <Button disabled={busy || global < 1 || perTenant < 1} onClick={() => void save()}>

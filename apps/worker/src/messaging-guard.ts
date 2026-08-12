@@ -53,6 +53,35 @@ async function readGlobalCaps(): Promise<{ global: number; perTenantDefault: num
   return capCache;
 }
 
+/**
+ * Capacidad de plantillas del tenant: (1) el PLAN debe incluirla
+ * (features.whatsappTemplates) — los planes básicos NO, independiente del switch;
+ * (2) el INTERRUPTOR por-tenant debe estar encendido (settings.messaging.templatesEnabled),
+ * que enciende el Super Admin al contratar la capacidad. Es una condición MÁS del
+ * gate (no reemplaza bolsa/tope/fusible). null = puede enviar.
+ */
+async function templatesCapabilityBlock(organizationId: string): Promise<SendGate | null> {
+  const prisma = getAdminPrisma();
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+  const switchOn = ((org?.settings as any)?.messaging?.templatesEnabled) === true;
+  const sub = await prisma.subscription.findFirst({
+    where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } },
+    orderBy: { createdAt: "desc" },
+    select: { planId: true },
+  });
+  const plan = sub
+    ? await prisma.plan.findUnique({ where: { id: sub.planId }, select: { features: true } })
+    : await prisma.plan.findUnique({ where: { code: "free" }, select: { features: true } });
+  const planAllows = ((plan?.features as any)?.whatsappTemplates) === true;
+  if (!planAllows) {
+    return block("plan_no_templates", "Tu plan no incluye mensajes de plantilla de WhatsApp. Sube de plan para habilitarlos. Puedes seguir respondiendo dentro de las 24 h sin costo.");
+  }
+  if (!switchOn) {
+    return block("templates_switch_off", "Los mensajes de plantilla de WhatsApp no están activados para tu cuenta. Escríbenos por Soporte para habilitarlos.");
+  }
+  return null;
+}
+
 /** Bloqueo de negocio (demo / suspensión / gracia). null = puede enviar. */
 async function businessBlock(organizationId: string): Promise<SendGate | null> {
   const prisma = getAdminPrisma();
@@ -121,6 +150,11 @@ export async function chargeTemplateSend(
   costUsd?: number,
 ): Promise<SendGate> {
   try {
+    // Capacidad de plantillas (plan + interruptor por-tenant): condición previa a
+    // todo — si el plan no la incluye o el switch está apagado, no se envía.
+    const capability = await templatesCapabilityBlock(organizationId);
+    if (capability) return capability;
+
     const biz = await businessBlock(organizationId);
     if (biz) return biz;
 

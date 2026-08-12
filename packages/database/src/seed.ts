@@ -314,7 +314,9 @@ const PLANS = [
     limits: { users: 2, clinics: 1, channels: 1, agents: 2, workflows: 3, aiTokensDaily: 200_000 },
     // templateMessages = cupo de la bolsa prepagada/mes (-1 = ilimitado). El
     // excedente se compra por paquetes prepago (no hay cobro post-pago).
-    features: { whiteLabel: false, api: false, templateMessages: 0 },
+    // whatsappTemplates = capacidad de mensajes de plantilla: los planes básicos
+    // (Free) NO la incluyen, independiente del switch por-tenant.
+    features: { whiteLabel: false, api: false, templateMessages: 0, whatsappTemplates: false },
   },
   {
     code: "starter",
@@ -323,7 +325,7 @@ const PLANS = [
     priceUsd: 39,
     order: 1,
     limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensDaily: 1_000_000 },
-    features: { whiteLabel: false, api: true, templateMessages: 1000 },
+    features: { whiteLabel: false, api: true, templateMessages: 1000, whatsappTemplates: true },
   },
   {
     code: "pro",
@@ -332,7 +334,7 @@ const PLANS = [
     priceUsd: 99,
     order: 2,
     limits: { users: 20, clinics: 5, channels: 3, agents: 20, workflows: 50, aiTokensDaily: 5_000_000 },
-    features: { whiteLabel: true, api: true, templateMessages: 1500 },
+    features: { whiteLabel: true, api: true, templateMessages: 1500, whatsappTemplates: true },
   },
   {
     code: "enterprise",
@@ -342,7 +344,7 @@ const PLANS = [
     order: 3,
     isPublic: false,
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = ilimitado
-    features: { whiteLabel: true, api: true, sso: true, templateMessages: 4000 },
+    features: { whiteLabel: true, api: true, sso: true, templateMessages: 4000, whatsappTemplates: true },
   },
 ];
 

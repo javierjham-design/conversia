@@ -84,6 +84,26 @@ export async function canUseFeature(tx: TenantTx, feature: string): Promise<bool
   return ent.features[feature] === true;
 }
 
+/**
+ * Estado del interruptor de MENSAJES DE PLANTILLA de WhatsApp del tenant.
+ * Dos condiciones independientes:
+ *  - `planAllows`: el plan incluye la capacidad (features.whatsappTemplates === true).
+ *    Los planes básicos (p. ej. Free) NO la incluyen aunque el switch esté encendido.
+ *  - `switchOn`: el Super Admin la activó para este tenant (settings.messaging.templatesEnabled).
+ * `enabled` = ambas. Es una condición MÁS del gate de envío (no reemplaza bolsa,
+ * tope diario ni fusible). Ver chargeTemplateSend en el worker.
+ */
+export async function getTemplatesEntitlement(
+  tx: TenantTx,
+): Promise<{ planAllows: boolean; switchOn: boolean; enabled: boolean }> {
+  const ent = await getEntitlements(tx);
+  const planAllows = ent.features.whatsappTemplates === true;
+  const orgId = getContext()?.organizationId;
+  const org = orgId ? await tx.organization.findUnique({ where: { id: orgId }, select: { settings: true } }) : null;
+  const switchOn = ((org?.settings as any)?.messaging?.templatesEnabled) === true;
+  return { planAllows, switchOn, enabled: planAllows && switchOn };
+}
+
 export async function getSubscriptionStatus(tx: TenantTx): Promise<string | null> {
   return (await getEntitlements(tx)).status;
 }
