@@ -1,5 +1,29 @@
 # Registro de progreso
 
+## 2026-08-12 — Flujos: Bloque 1 (inventario + arnés de prueba funcional real)
+
+Primer bloque del endurecimiento de Flujos para salir al mercado. Objetivo:
+saber **con evidencia** que todo funciona, no solo que compila.
+
+- **Inventario completo** de disparadores (13, con 2 «Próximamente») y pasos (24
+  ofrecidos + `pause_ai`/`resume_ai` que ejecuta el motor pero no se ofrecen +
+  12 nombres reservados sin ejecutor) en `docs/FLOWS.md`.
+- **Arnés funcional** que ejecuta el motor de verdad en sandbox:
+  `packages/workflows/src/harness.test.ts` (19 casos) — cada paso con datos
+  válidos/vacíos/inválidos, `wait_reply` (nodo nuevo) en ambas ramas, casos
+  borde (nodo inexistente, paso que falla, tope de nodos, condición sin arista,
+  variable/contacto sin datos) y **6 flujos e2e realistas**. Suite workflows:
+  **38 verdes** (19 previos + 19).
+- **Petición HTTP** con cobertura de **200/4xx/5xx/timeout/redirección/SSRF** y
+  render de variables: +5 casos en `apps/worker/src/http-node.test.ts` (10 total).
+  Suite worker: **82 verdes**.
+- **Matriz** disparador/paso × escenario × resultado con evidencia y brechas
+  honestas en `docs/FLOWS_TEST_MATRIX.md`. Hallazgos corregidos y brechas
+  marcadas para los bloques 2–7 (probador paso a paso, observabilidad, política
+  de errores por paso, estética del canvas, galería de plantillas).
+- El motor demostró ser **robusto**: el único bug encontrado fue en un test
+  propio (feriado/día de semana), no en el motor. Sin migraciones.
+
 ## 2026-08-09 — Sistema de notificaciones (3 capas) + PWA instalable (rama `feature/pwa-push`)
 
 Notificaciones rediseñadas de raíz, pensando en que el push nativo (Capacitor)
