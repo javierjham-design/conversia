@@ -27,7 +27,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FastForward, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
-  Pencil, Play, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
+  Pause, Pencil, Play, PlayCircle, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -70,6 +70,8 @@ const NODE_DEFS: NodeDef[] = [
   { type: "assign_user", label: "Asignar a usuario", description: "Asigna a una persona (pausa la IA)", category: "Conversación", icon: <UserRound size={15} />, defaultConfig: { userId: "" } },
   { type: "assign_team", label: "Asignar a equipo", description: "Asigna a un equipo (pausa la IA)", category: "Conversación", icon: <Users size={15} />, defaultConfig: { teamId: "" } },
   { type: "transfer_human", label: "Escalar a humano", description: "Pausa la IA y notifica al equipo", category: "Conversación", icon: <UserRound size={15} />, defaultConfig: { reason: "" } },
+  { type: "pause_ai", label: "Pausar IA", description: "Detiene las respuestas automáticas del agente en esta conversación (p. ej. durante una derivación a humano)", category: "Conversación", icon: <Pause size={15} />, defaultConfig: {} },
+  { type: "resume_ai", label: "Reanudar IA", description: "Vuelve a activar las respuestas automáticas del agente", category: "Conversación", icon: <PlayCircle size={15} />, defaultConfig: {} },
   { type: "close_conversation", label: "Cerrar conversación", description: "Marca la conversación como cerrada", category: "Conversación", icon: <XCircle size={15} />, defaultConfig: {} },
   // Control de flujo
   { type: "wait", label: "Esperar", description: "Pausa el flujo; opcional cancelar si el contacto responde", category: "Control de flujo", icon: <Clock size={15} />, defaultConfig: { minutes: 5, cancelOn: "contact_reply" } },
@@ -112,7 +114,6 @@ const NODE_DEF = (type: string) => NODE_DEFS.find((n) => n.type === type);
 
 interface Catalog {
   triggers: { type: string; label: string; description: string; config?: string[]; conditions?: string[]; soon?: boolean; hidden?: boolean }[];
-  nodes: { type: string; label: string; description: string }[];
   leadStatuses: { code: string; name: string; emoji?: string | null }[];
   appointmentFilters?: {
     services: { id: string; name: string }[];
@@ -301,6 +302,8 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "switch_agent": return config.agentSlug ? `Agente: ${config.agentSlug}` : "(elige agente)";
     case "start_workflow": return config.workflowName ? `→ ${config.workflowName}` : "(elige flujo)";
     case "transfer_human": return config.reason || "Escalar al equipo humano";
+    case "pause_ai": return "Detiene las respuestas del agente";
+    case "resume_ai": return "Reactiva las respuestas del agente";
     case "open_conversation": return "Abre/reutiliza una conversación del contacto";
     case "add_note": return config.text ? `📝 ${String(config.text).slice(0, 40)}` : "(sin comentario)";
     case "goto": return config.targetNodeId ? "Salta a otro paso del flujo" : "(elige el paso destino)";
