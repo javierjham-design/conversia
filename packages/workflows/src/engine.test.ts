@@ -198,6 +198,25 @@ describe("motor de workflows v0", () => {
     expect(issues.some((i) => i.target === "n2" && i.code === "text_required")).toBe(true);
   });
 
+  it("reporta endReason: rama sin conectar («end» + nodeId + branch) vs «Terminar» («stop»)", async () => {
+    // Condición cuya rama tomada (false) no tiene arista → end + branch "false".
+    const dead: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} }, variables: {},
+      nodes: [{ id: "c", type: "condition", config: { kind: "no_reply" } }],
+      edges: [{ from: "c", to: "c", when: "true" }],
+    };
+    const r1 = await executeFrom(makeDeps({ evaluateCondition: async () => false }).deps, ctx, dead, "c");
+    expect(r1).toMatchObject({ status: "completed", endReason: "end", nodeId: "c", branch: "false" });
+
+    const stopFlow: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} }, variables: {},
+      nodes: [{ id: "s", type: "stop", config: {} }],
+      edges: [],
+    };
+    const r2 = await executeFrom(makeDeps().deps, ctx, stopFlow, "s");
+    expect(r2).toMatchObject({ status: "completed", endReason: "stop", nodeId: "s" });
+  });
+
   it("detecta la rama «Respondió» muerta tras un «Esperar (cancela si responde)»", () => {
     const trap: WorkflowDefinition = {
       trigger: { type: "conversation_started", config: {} },
@@ -233,14 +252,14 @@ describe("motor de workflows v0", () => {
   it("reanuda tras el timer, evalúa condición y renderiza variables", async () => {
     const { deps, calls } = makeDeps();
     const result = await resumeAfterWait(deps, ctx, def, "n3");
-    expect(result).toEqual({ status: "completed" });
+    expect(result).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["send:Hola Javier"]);
   });
 
   it("toma la rama false y termina si no hay arista", async () => {
     const { deps, calls } = makeDeps({ evaluateCondition: async () => false });
     const result = await resumeAfterWait(deps, ctx, def, "n3");
-    expect(result).toEqual({ status: "completed" });
+    expect(result).toMatchObject({ status: "completed" });
     expect(calls).toEqual([]);
   });
 
@@ -266,7 +285,7 @@ describe("motor de workflows v0", () => {
       ],
     };
     const result = await executeFrom(deps, ctx, flow, "a");
-    expect(result).toEqual({ status: "completed" });
+    expect(result).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["untag:frio", "contact:firstName", "team:t1", "switch:ventas", "start:Bienvenida"]);
   });
 });
@@ -286,7 +305,7 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
       edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
     };
     const r = await executeFrom(deps, c2, flow, "a");
-    expect(r).toEqual({ status: "completed" });
+    expect(r).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["open", "note:Contacto desde flujo"]);
     expect(c2.conversationId).toBe("conv-new");
   });
@@ -306,7 +325,7 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
       edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }, { from: "d", to: "e" }],
     };
     const r = await executeFrom(deps, ctx, flow, "a");
-    expect(r).toEqual({ status: "completed" });
+    expect(r).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["tag:ini", "tag:destino"]);
   });
 
@@ -345,7 +364,7 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
       edges: [{ from: "a", to: "b" }, { from: "b", to: "c" }],
     };
     const r = await executeFrom(deps, ctx, flow, "a");
-    expect(r).toEqual({ status: "completed" });
+    expect(r).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["capi:Schedule", "tag:capi-ok"]);
   });
 
@@ -361,7 +380,7 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
       edges: [{ from: "a", to: "ok", when: "met" }, { from: "a", to: "no", when: "unmet" }],
     };
     const met = makeDeps();
-    expect(await executeFrom(met.deps, ctx, flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(met.deps, ctx, flow, "a")).toMatchObject({ status: "completed" });
     expect(met.calls).toEqual(["objective:confirmar", "tag:confirmado"]);
 
     const unmet = makeDeps({ runAgentWithObjective: async () => "unmet" });
@@ -387,7 +406,7 @@ describe("Categoría 2 — Conversación + Control de flujo", () => {
 
     // Reanudación con rama explícita (respuesta del contacto la resolvió)
     const resumed = makeDeps();
-    expect(await resumeWithBranch(resumed.deps, ctx, flow, "a", "met")).toEqual({ status: "completed" });
+    expect(await resumeWithBranch(resumed.deps, ctx, flow, "a", "met")).toMatchObject({ status: "completed" });
     expect(resumed.calls).toEqual(["tag:confirmado"]);
     const timedOut = makeDeps();
     await resumeWithBranch(timedOut.deps, ctx, flow, "a", "unmet");

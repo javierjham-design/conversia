@@ -115,6 +115,16 @@ function describeWait(cfg: Record<string, any>): string {
   return parts.join(" ") || "un instante";
 }
 
+/** Nombre legible de una salida/rama de un nodo, para explicar dónde se corta el flujo. */
+function branchLabel(nodeType: string | undefined, branch: string): string {
+  if (branch === "error") return "Si falla";
+  if (nodeType === "wait_reply") return branch === "replied" ? "Sí, respondió" : "No respondió";
+  if (nodeType === "condition") return branch === "false" ? "Respondió" : "Sin respuesta";
+  if (nodeType === "ai_objective") return branch === "met" ? "Cumplido" : "No cumplido";
+  if (nodeType === "business_hours") return branch === "in" ? "Dentro de horario" : "Fuera de horario";
+  return `«${branch}»`;
+}
+
 // ---- Ejecución de un turno del agente con IA REAL (sandbox) ----------------
 
 async function runSimAgentTurn(
@@ -483,12 +493,20 @@ function applyResult(def: WorkflowDefinition, state: LiveSimState, result: Engin
   }
   // completed
   state.waiting = null;
+  // Explica POR QUÉ terminó: si una salida quedó SIN CONECTAR, avísalo (pie común).
+  if (result.endReason === "end" && result.nodeId && result.branch !== undefined) {
+    const node = def.nodes.find((n) => n.id === result.nodeId);
+    state.log.push({
+      kind: "info",
+      text: `⚠ El flujo se detuvo: la salida «${branchLabel(node?.type, result.branch)}» de este paso no lleva a ningún paso siguiente. Conéctala a un paso, o agrega «Terminar» si es a propósito.`,
+    });
+  }
   if (state.activeAgentSlug && state.aiEnabled) {
     state.status = "agent_chat";
     state.log.push({ kind: "end", text: "✅ El flujo terminó. El agente activo queda a cargo — puedes seguir conversando como contacto." });
   } else {
     state.status = "done";
-    state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+    state.log.push({ kind: "end", text: result.endReason === "stop" ? "✅ Fin del flujo (llegó a un paso «Terminar»)." : "✅ Fin del flujo." });
   }
 }
 
@@ -627,11 +645,17 @@ export async function stepWorkflowSim(
       } else if (result.status === "completed") {
         state.status = "done";
         state.cursor = null;
-        state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+        state.log.push({ kind: "end", text: result.endReason === "stop" ? "✅ Fin del flujo (llegó a un paso «Terminar»)." : "✅ Fin del flujo." });
       } else {
         state.cursor = result.nextNodeId ?? null;
         state.status = state.cursor ? "stepping" : "done";
-        if (!state.cursor) state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+        if (!state.cursor) {
+          // Se cortó aquí: si fue por una rama sin conectar, dilo (asistencia).
+          if (result.branch !== undefined) {
+            state.log.push({ kind: "info", text: `⚠ La salida «${branchLabel(node?.type, result.branch)}» de este paso no lleva a ningún paso siguiente. Conéctala a un paso, o agrega «Terminar» si es a propósito.` });
+          }
+          state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+        }
       }
     } else if (action.type === "advance" && state.status === "waiting" && state.waiting) {
       const w = state.waiting;
