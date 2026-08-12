@@ -12,7 +12,10 @@ export interface DefTrigger {
 }
 
 export function edgeStyle(when?: string) {
-  const label = when === "true" ? "sin respuesta" : when === "false" ? "respondió" : undefined;
+  const label =
+    when === "true" || when === "no_reply" ? "sin respuesta"
+    : when === "false" || when === "replied" ? "respondió"
+    : undefined;
   // type "deletable": edge con botón "×" para borrar una sola conexión (ver page.tsx).
   return { type: "deletable", label, animated: false, style: { stroke: "#94a3b8" }, labelStyle: { fontSize: 10, fill: "#64748b" } };
 }

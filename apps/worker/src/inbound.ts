@@ -10,7 +10,7 @@ import { resolveChannelAuth } from "./channel-auth";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
-import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
+import { cancelTimersOnReply, dispatchEvent, handlePendingObjective, handleWaitReply } from "./workflow-runtime";
 import { handleAppointmentResponse } from "./appointment-responses";
 import { resolveAdContext } from "./meta-ads-sync";
 
@@ -306,6 +306,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
 
     // El contacto respondió → cancelar seguimientos pendientes
     await cancelTimersOnReply(organizationId, result.conversationId);
+    // …y continuar por la rama "Sí, respondió" los nodos "¿El contacto respondió?".
+    await handleWaitReply(organizationId, result.conversationId).catch((err) => {
+      console.error(`✖ Error al reanudar "¿respondió?" (${result.conversationId}):`, (err as Error).message);
+      return false;
+    });
 
     // AGENDA-2: ¿es una respuesta al recordatorio (Confirmar/Reagendar)? Si la
     // maneja (confirma la cita / deriva a recepción), no seguimos al agente ni

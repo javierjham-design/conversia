@@ -74,7 +74,11 @@ const NODE_DEFS: NodeDef[] = [
   // Control de flujo
   { type: "wait", label: "Esperar", description: "Pausa el flujo; opcional cancelar si el contacto responde", category: "Control de flujo", icon: <Clock size={15} />, defaultConfig: { minutes: 5, cancelOn: "contact_reply" } },
   {
-    type: "condition", label: "¿Sigue sin responder?", description: "Ramifica según si el contacto ya respondió", category: "Control de flujo", icon: <GitBranch size={15} />, defaultConfig: { kind: "no_reply" },
+    type: "wait_reply", label: "¿El contacto respondió?", description: "Espera una respuesta un tiempo y ramifica: Sí respondió / No respondió. Ambas ramas continúan.", category: "Control de flujo", icon: <GitBranch size={15} />, defaultConfig: { hours: 24 },
+    branches: [{ handle: "replied", label: "Sí, respondió" }, { handle: "no_reply", label: "No respondió" }],
+  },
+  {
+    type: "condition", label: "¿Sigue sin responder? (instantáneo)", description: "Ramifica al instante según si el contacto ya respondió (no espera). Para esperar una respuesta usa «¿El contacto respondió?».", category: "Control de flujo", icon: <GitBranch size={15} />, defaultConfig: { kind: "no_reply" },
     branches: [{ handle: "true", label: "Sin respuesta" }, { handle: "false", label: "Respondió" }],
   },
   {
@@ -277,6 +281,11 @@ function nodeSummary(type: string, config: Record<string, any>): string {
       const v = config.days ?? config.hours ?? config.minutes ?? 0;
       const u = config.days ? "día(s)" : config.hours ? "hora(s)" : "minuto(s)";
       return `Esperar ${v} ${u}${config.cancelOn === "contact_reply" ? " · cancela si responde" : ""}`;
+    }
+    case "wait_reply": {
+      const v = config.days ?? config.hours ?? config.minutes ?? 0;
+      const u = config.days ? "día(s)" : config.hours ? "hora(s)" : "minuto(s)";
+      return `Espera respuesta hasta ${v} ${u} · Sí / No`;
     }
     case "condition": return "Continúa si el contacto no ha respondido";
     case "update_lead_status": return config.statusCode ? `→ ${config.statusCode}` : "(elige un estado)";
@@ -498,7 +507,8 @@ function Editor() {
       const newNode: Node = {
         id: newId,
         type: "stepNode",
-        position: { x: px + (addFromState.branch === "false" ? 210 : 0), y: py + 140 },
+        // Rama "derecha" (respondió/fuera/no cumplido/no respondió) se desplaza para no apilarse.
+        position: { x: px + (["false", "out", "unmet", "no_reply"].includes(addFromState.branch ?? "") ? 210 : 0), y: py + 140 },
         data: { nodeType: type, config: structuredClone(def?.defaultConfig ?? {}) },
       };
       const newEdge: Edge = {
@@ -1593,6 +1603,8 @@ function NodePanel({
 
       {type === "wait" && <WaitForm config={config} onChange={onChange} />}
 
+      {type === "wait_reply" && <WaitReplyForm config={config} onChange={onChange} />}
+
       {type === "condition" && (
         <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">
           Si el contacto <b>no ha respondido</b> desde que inició el flujo, sigue por <b>Sin respuesta</b>. Si respondió, sigue por <b>Respondió</b>.
@@ -2085,6 +2097,30 @@ function WaitForm({ config, onChange }: { config: Record<string, any>; onChange:
         <input type="checkbox" checked={config.cancelOn === "contact_reply"} onChange={(e) => onChange({ cancelOn: e.target.checked ? "contact_reply" : undefined })} />
         Cancelar la espera si el contacto responde
       </label>
+    </div>
+  );
+}
+
+/** "¿El contacto respondió?": ventana de espera → rama Sí (respondió) / No (venció). */
+function WaitReplyForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+  const unit: "minutes" | "hours" | "days" = config.days ? "days" : config.hours ? "hours" : config.minutes ? "minutes" : "hours";
+  const value = config.days ?? config.hours ?? config.minutes ?? 24;
+  const setWait = (v: number, u: "minutes" | "hours" | "days") => onChange({ minutes: undefined, hours: undefined, days: undefined, [u]: v });
+  return (
+    <div className="space-y-2 text-sm">
+      <span className="text-xs text-ink-muted">Esperar la respuesta hasta</span>
+      <div className="flex items-center gap-2">
+        <input type="number" min={1} value={value} onChange={(e) => setWait(Number(e.target.value), unit)} className="w-20 rounded-lg border border-line-strong px-2 py-1.5" />
+        <select value={unit} onChange={(e) => setWait(Number(value), e.target.value as any)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
+          <option value="minutes">minutos</option>
+          <option value="hours">horas</option>
+          <option value="days">días</option>
+        </select>
+      </div>
+      <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">
+        Si el contacto responde dentro de ese tiempo, sigue por <b>Sí, respondió</b>. Si vence sin respuesta, sigue por <b>No respondió</b>.
+        <b> Ambas ramas continúan el flujo.</b>
+      </p>
     </div>
   );
 }

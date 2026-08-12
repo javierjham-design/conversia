@@ -979,6 +979,12 @@ export async function resumeRun(organizationId: string, runId: string, nodeId: s
     await finishRun(organizationId, runId, result);
     return;
   }
+  // Timeout de "¿El contacto respondió?": venció sin respuesta → rama "no_reply".
+  if (node?.type === "wait_reply") {
+    const result = await resumeWithBranch(deps, loaded.ctx, loaded.def, nodeId, "no_reply");
+    await finishRun(organizationId, runId, result);
+    return;
+  }
   const result = await resumeAfterWait(deps, loaded.ctx, loaded.def, nodeId);
   await finishRun(organizationId, runId, result);
 }
@@ -989,6 +995,40 @@ export async function resumeRunWithBranch(organizationId: string, runId: string,
   if (!loaded) return;
   const result = await resumeWithBranch(deps, loaded.ctx, loaded.def, nodeId, branch);
   await finishRun(organizationId, runId, result);
+}
+
+/**
+ * El contacto respondió: reanuda por la rama "replied" los runs que esperan en un
+ * nodo "¿El contacto respondió?" (wait_reply) de esta conversación, cancelando su
+ * timeout. A diferencia de cancelTimersOnReply (que cancela el run), aquí el run
+ * CONTINÚA por la otra rama. Devuelve true si reanudó algún run.
+ */
+export async function handleWaitReply(organizationId: string, conversationId: string): Promise<boolean> {
+  const jobs = await withTenant(organizationId, (tx) =>
+    tx.scheduledJob.findMany({ where: { status: "PENDING", kind: "workflow_timer" } }),
+  );
+  let handled = false;
+  for (const job of jobs) {
+    const p = job.payload as Record<string, unknown>;
+    if (p.conversationId !== conversationId || !job.runId) continue;
+    // Solo los que esperan en un nodo wait_reply (sin tocar el estado del run).
+    const info = await withTenant(organizationId, async (tx) => {
+      const run = await tx.workflowRun.findUnique({ where: { id: job.runId! } });
+      if (!run || run.status !== "WAITING") return null;
+      const ver = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+      return ver ? { def: ver.definition } : null;
+    });
+    if (!info) continue;
+    const parsed = workflowDefinitionSchema.safeParse(info.def);
+    if (!parsed.success) continue;
+    const node = parsed.data.nodes.find((n) => n.id === String(p.nodeId));
+    if (node?.type !== "wait_reply") continue;
+    // Cancela el timeout y reanuda por "replied" (respondió).
+    await withTenant(organizationId, (tx) => tx.scheduledJob.update({ where: { id: job.id }, data: { status: "CANCELLED" } }));
+    await resumeRunWithBranch(organizationId, job.runId, String(p.nodeId), "replied");
+    handled = true;
+  }
+  return handled;
 }
 
 /**
