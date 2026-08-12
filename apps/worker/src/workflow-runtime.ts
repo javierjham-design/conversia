@@ -810,6 +810,9 @@ async function runWorkflowVersion(
  * Vuelve a ejecutar con efectos REALES (envía, agenda, etc.). Idempotencia por
  * paso `(runId, nodeId, attempt)` como en cualquier ejecución.
  */
+// Usa el MISMO `deps` (makeDeps) que dispatchEvent/runWorkflowVersion, así los
+// envíos de plantilla del reintento pasan por chargeTemplateSend (las 6
+// condiciones del guard): no hay camino paralelo.
 export async function retryRun(organizationId: string, runId: string): Promise<void> {
   const data = await withTenant(organizationId, async (tx) => {
     const run = await tx.workflowRun.findUnique({ where: { id: runId } });

@@ -544,6 +544,72 @@ export class WorkflowsController {
     });
   }
 
+  /**
+   * Vista previa del reintento ANTES de ejecutar: qué hará y qué costará. Estima
+   * (cota superior, recorriendo TODAS las ramas desde el paso que falló) cuántos
+   * mensajes de plantilla podría enviar y el descuento estimado de la bolsa
+   * (peso por categoría), contra el saldo actual. El reintento real pasa por las
+   * MISMAS 6 condiciones del guard (mismo `deps` que una corrida normal).
+   */
+  @Get(":id/runs/:runId/retry-preview")
+  async retryPreview(@Param("id") id: string, @Param("runId") runId: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const run = await tx.workflowRun.findFirst({ where: { id: runId, workflowId: id }, select: { status: true, currentNodeId: true, versionId: true } });
+      if (!run) throw new NotFoundException("Ejecución no encontrada");
+      const version = await tx.workflowVersion.findUnique({ where: { id: run.versionId }, select: { definition: true } });
+      const def = (version?.definition ?? {}) as { nodes?: any[]; edges?: any[] };
+      const nodes: any[] = Array.isArray(def.nodes) ? def.nodes : [];
+      const edges: any[] = Array.isArray(def.edges) ? def.edges : [];
+      const startNodeId = run.currentNodeId;
+      const startNode = nodes.find((n) => n.id === startNodeId);
+
+      // Nodos alcanzables desde el paso que falló (todas las ramas + saltos).
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const adj = new Map<string, string[]>();
+      for (const e of edges) { const arr = adj.get(e.from) ?? []; arr.push(e.to); adj.set(e.from, arr); }
+      const seen = new Set<string>();
+      const stack = startNodeId ? [startNodeId] : [];
+      while (stack.length) {
+        const nid = stack.pop()!;
+        if (seen.has(nid)) continue;
+        seen.add(nid);
+        const n = byId.get(nid);
+        if (!n) continue;
+        for (const to of adj.get(nid) ?? []) stack.push(to);
+        if (n.type === "goto" && n.config?.targetNodeId) stack.push(String(n.config.targetNodeId));
+      }
+      const tmplNodeIds = [...seen].filter((nid) => byId.get(nid)?.type === "send_template");
+
+      // Pesos por categoría (platform_setting) + categoría real de cada plantilla.
+      let weights = { utility: 1, authentication: 1, marketing: 1 };
+      const wr = await this.prisma.admin.platformSetting.findUnique({ where: { key: "walletWeights" } });
+      if (wr?.value) { try { const p = JSON.parse(wr.value); weights = { utility: Number(p.utility) || 1, authentication: Number(p.authentication) || 1, marketing: Number(p.marketing) || 1 }; } catch { /* default */ } }
+      const weightFor = (cat?: string | null) => { const c = String(cat ?? "").toUpperCase(); return c === "MARKETING" ? weights.marketing : c === "AUTHENTICATION" ? weights.authentication : weights.utility; };
+
+      const templates: { name: string; category: string; weight: number }[] = [];
+      let estimatedDebit = 0;
+      for (const nid of tmplNodeIds) {
+        const templateId = String(byId.get(nid)?.config?.templateId ?? "");
+        const tmpl = templateId ? await tx.whatsappTemplate.findUnique({ where: { id: templateId }, select: { name: true, category: true } }) : null;
+        const w = weightFor(tmpl?.category);
+        estimatedDebit += w;
+        templates.push({ name: tmpl?.name ?? "(plantilla no encontrada)", category: tmpl?.category ?? "UTILITY", weight: w });
+      }
+      const wallet = await tx.messageWallet.findUnique({ where: { organizationId: ctx.organizationId }, select: { balance: true } });
+      const walletBalance = wallet?.balance ?? 0;
+      return {
+        canRetry: run.status === "FAILED" && !!startNodeId,
+        fromNodeType: startNode?.type ?? null,
+        templateSends: tmplNodeIds.length,
+        templates,
+        estimatedDebit,
+        walletBalance,
+        wouldExceed: estimatedDebit > walletBalance,
+      };
+    });
+  }
+
   /** Reintenta una ejecución fallida desde el paso que falló (ENVÍA cosas reales). */
   @Post(":id/runs/:runId/retry")
   async retryRun(@Param("id") id: string, @Param("runId") runId: string) {
@@ -554,6 +620,8 @@ export class WorkflowsController {
     if (!run) throw new NotFoundException("Ejecución no encontrada");
     if (run.status !== "FAILED") throw new BadRequestException("Solo se pueden reintentar ejecuciones con error.");
     if (!run.currentNodeId) throw new BadRequestException("No hay un paso donde reintentar.");
+    // El reintento re-ejecuta con el MISMO `deps` que una corrida normal → los
+    // envíos de plantilla pasan por chargeTemplateSend (las 6 condiciones).
     await this.queues.enqueueWorkflowRetry({ organizationId: ctx.organizationId, runId });
     return { ok: true };
   }
