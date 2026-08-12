@@ -64,7 +64,10 @@ export interface EngineDeps {
 }
 
 export type EngineResult =
-  | { status: "completed" }
+  // `endReason` explica POR QUÉ terminó: "stop" = nodo «Terminar»; "end" = un nodo
+  // (o una rama) sin salida conectada. `nodeId`/`branch` señalan dónde, para que
+  // el probador diga "terminó aquí porque esta rama no continúa".
+  | { status: "completed"; endReason?: "stop" | "end"; nodeId?: string; branch?: string }
   | { status: "waiting"; nodeId: string }
   | { status: "failed"; nodeId: string; error: string };
 
@@ -669,7 +672,7 @@ export async function executeFrom(
       return { status: "waiting", nodeId: node.id };
     }
     await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: ok.branch !== undefined ? { branch: ok.branch } : ok.goto ? { goto: ok.goto } : undefined });
-    if (ok.stop) return { status: "completed" };
+    if (ok.stop) return { status: "completed", endReason: "stop", nodeId: node.id };
     // "Saltar a otro paso": salta al nodo destino, acotado por MAX_JUMPS_PER_RUN.
     if (ok.goto !== undefined) {
       if (!ok.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
@@ -679,15 +682,21 @@ export async function executeFrom(
       currentId = ok.goto;
       continue;
     }
-    currentId = nextNodeId(def, node.id, ok.branch);
+    const next = nextNodeId(def, node.id, ok.branch);
+    if (!next) {
+      // Fin natural: este nodo no continúa (por esta rama). Se reporta con la rama
+      // para que el probador avise si una salida quedó sin conectar.
+      return { status: "completed", endReason: "end", nodeId: node.id, branch: ok.branch };
+    }
+    currentId = next;
   }
-  return { status: "completed" };
+  return { status: "completed", endReason: "end" };
 }
 
 export type StepResult =
   | { status: "continue"; branch?: string; goto?: string; nextNodeId?: string }
   | { status: "waiting"; nodeId: string }
-  | { status: "completed" }
+  | { status: "completed"; endReason?: "stop" | "end" }
   | { status: "failed"; nodeId: string; error: string };
 
 /**
@@ -706,7 +715,7 @@ export async function stepNode(deps: EngineDeps, ctx: RunCtx, def: WorkflowDefin
       return { status: "waiting", nodeId: node.id };
     }
     await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: outcome.branch !== undefined ? { branch: outcome.branch } : outcome.goto ? { goto: outcome.goto } : undefined });
-    if (outcome.stop) return { status: "completed" };
+    if (outcome.stop) return { status: "completed", endReason: "stop" };
     if (outcome.goto !== undefined) {
       if (!outcome.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
       return { status: "continue", goto: outcome.goto, nextNodeId: outcome.goto };

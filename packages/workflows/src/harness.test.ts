@@ -88,7 +88,7 @@ describe("Bloque 1 — pasos: datos válidos / vacíos / inválidos", () => {
       { id: "h", type: "close_conversation", config: {} },
       { id: "z", type: "stop", config: {} },
     ]);
-    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["status:calificado", "tag:vip", "untag:frio", "contact:firstName,email", "user:u1", "team:t1", "note:Nota Ana", "close"]);
   });
 
@@ -151,7 +151,7 @@ describe("Bloque 1 — control de flujo y ramas", () => {
     expect(start.calls).toEqual(["timer:w"]);
 
     const replied = makeDeps();
-    expect(await resumeWithBranch(replied.deps, ctx(), flow, "w", "replied")).toEqual({ status: "completed" });
+    expect(await resumeWithBranch(replied.deps, ctx(), flow, "w", "replied")).toMatchObject({ status: "completed" });
     expect(replied.calls).toEqual(["tag:respondio"]);
 
     const timedOut = makeDeps();
@@ -230,7 +230,7 @@ describe("Bloque 2 — stepNode: ejecución nodo a nodo con rama y siguiente", (
       edges: [{ from: "w", to: "s" }],
     };
     expect(await stepNode(makeDeps().deps, ctx(), flow, "w")).toEqual({ status: "waiting", nodeId: "w" });
-    expect(await stepNode(makeDeps().deps, ctx(), flow, "s")).toEqual({ status: "completed" });
+    expect(await stepNode(makeDeps().deps, ctx(), flow, "s")).toMatchObject({ status: "completed" });
     expect((await stepNode(makeDeps().deps, ctx(), flow, "zzz") as any).status).toBe("failed");
   });
 });
@@ -270,7 +270,7 @@ describe("Bloque 1 — casos borde", () => {
       edges: [{ from: "q", to: "t", when: "true" }], // NO hay arista "false"
     };
     const r = await executeFrom(makeDeps({ evaluateCondition: async () => false }).deps, ctx(), flow, "q");
-    expect(r).toEqual({ status: "completed" });
+    expect(r).toMatchObject({ status: "completed" });
   });
 
   it("nodo deshabilitado (config.disabled): se salta sin efecto y continúa al siguiente", async () => {
@@ -281,7 +281,7 @@ describe("Bloque 1 — casos borde", () => {
       { id: "c", type: "add_tag", config: { tag: "fin" } },
       { id: "z", type: "stop", config: {} },
     ]);
-    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["tag:ini", "tag:fin"]); // el send_text deshabilitado no corrió
   });
 
@@ -306,7 +306,7 @@ describe("Bloque 5 — manejo de errores en la ejecución", () => {
       edges: [{ from: "a", to: "ok" }, { from: "a", to: "err", when: "error" }],
     };
     const { deps, calls } = makeDeps({ callApi: async () => { throw new Error("timeout"); } });
-    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["tag:fallo"]); // tomó la rama de error, no la normal
   });
 
@@ -317,7 +317,7 @@ describe("Bloque 5 — manejo de errores en la ejecución", () => {
       { id: "z", type: "stop", config: {} },
     ]);
     const c1 = makeDeps({ callApi: async () => { throw new Error("boom"); } });
-    expect(await executeFrom(c1.deps, ctx(), cont, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(c1.deps, ctx(), cont, "a")).toMatchObject({ status: "completed" });
     expect(c1.calls).toEqual(["tag:sigue"]);
 
     const stop = linear([{ id: "a", type: "call_api", config: { url: "https://x/y" } }, { id: "z", type: "stop", config: {} }]);
@@ -333,7 +333,7 @@ describe("Bloque 5 — manejo de errores en la ejecución", () => {
       { id: "z", type: "stop", config: {} },
     ]);
     const { deps, calls } = makeDeps({ callApi: async () => { if (n++ < 2) throw new Error("transitorio"); } });
-    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toMatchObject({ status: "completed" });
     expect(n).toBe(3); // 1 intento + 2 reintentos
     expect(calls).toEqual(["tag:ok"]);
   });
@@ -352,7 +352,7 @@ describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
       { id: "z", type: "stop", config: {} },
     ]);
     (flow.trigger as any) = { type: "click_to_chat", config: { mode: "selected", adIds: ["AD1"] } };
-    expect(await executeFrom(deps, c, flow, "a")).toEqual({ status: "completed" });
+    expect(await executeFrom(deps, c, flow, "a")).toMatchObject({ status: "completed" });
     expect(calls).toEqual(["open", "tag:anuncio-implantes", "send:¡Hola Ana! Vimos tu interés en implantes.", "agent:ventas"]);
   });
 
@@ -391,7 +391,7 @@ describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
       edges: [{ from: "o", to: "s", when: "met" }, { from: "s", to: "capi" }, { from: "capi", to: "z" }, { from: "o", to: "no", when: "unmet" }],
     };
     const met = makeDeps({ objective: "met" });
-    expect(await executeFrom(met.deps, ctx(), flow, "o")).toEqual({ status: "completed" });
+    expect(await executeFrom(met.deps, ctx(), flow, "o")).toMatchObject({ status: "completed" });
     expect(met.calls).toEqual(["objective:agendar una hora", "status:agendado", "capi:Schedule:0"]);
     const unmet = makeDeps({ objective: "unmet" });
     await executeFrom(unmet.deps, ctx(), flow, "o");
@@ -432,7 +432,7 @@ describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
     const first = makeDeps();
     expect(await executeFrom(first.deps, ctx(), flow, "m1")).toEqual({ status: "waiting", nodeId: "w" });
     const resumed = makeDeps();
-    expect(await resumeAfterWait(resumed.deps, ctx(), flow, "w")).toEqual({ status: "completed" });
+    expect(await resumeAfterWait(resumed.deps, ctx(), flow, "w")).toMatchObject({ status: "completed" });
     expect(resumed.calls).toEqual(["send:Última oportunidad 🙌", "tag:reactivacion"]);
   });
 
