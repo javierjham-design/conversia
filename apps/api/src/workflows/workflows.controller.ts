@@ -20,6 +20,7 @@ import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { simulateWorkflow, type SimNames } from "./workflow-sandbox";
+import { stepWorkflowSim, type LiveSimState } from "./workflow-live-sim";
 
 const createSchema = z.object({
   name: z.string().min(2).max(80),
@@ -455,6 +456,42 @@ export class WorkflowsController {
       const trace = simulateWorkflow(definition.data, { vars, names, assumeNoReply: input.assumeNoReply ?? true });
       return { ok: true, trace };
     });
+  }
+
+  /**
+   * Simulador INTERACTIVO del flujo: ejecuta el motor real y la IA real, un paso
+   * por llamada. El estado viaja de ida y vuelta (sin sesión en servidor).
+   * action = start | advance (adelantar espera/timeout) | reply (respuesta del
+   * contacto). NO envía WhatsApp ni escribe en la BD (solo cuenta tokens IA).
+   */
+  @Post(":id/test/live")
+  async testLive(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("workflows:write");
+    const input = parse(
+      z.object({
+        definition: z.unknown(),
+        contact: z.object({ firstName: z.string().max(80).nullable().optional() }).optional(),
+        state: z.unknown().optional(),
+        action: z.object({ type: z.enum(["start", "advance", "reply"]), text: z.string().max(2000).optional() }),
+      }),
+      body,
+    );
+    const definition = workflowDefinitionSchema.safeParse(input.definition);
+    if (!definition.success) {
+      throw new BadRequestException(`Definición inválida: ${definition.error.issues.map((i) => i.message).join("; ")}`);
+    }
+    // El flujo debe existir y pertenecer al tenant (aunque el probador usa la
+    // definición del borrador que llega en el cuerpo, no la publicada).
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const wf = await tx.workflow.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
+      if (!wf) throw new NotFoundException("Flujo no encontrado");
+    });
+    const state = await stepWorkflowSim(ctx.organizationId, definition.data, {
+      contact: input.contact,
+      state: (input.state as LiveSimState | undefined) ?? null,
+      action: input.action,
+    });
+    return { ok: true, state };
   }
 
   @Put(":id/draft")
