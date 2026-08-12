@@ -28,12 +28,13 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, Copy, CornerUpRight, Crosshair, FastForward, FileText, GitBranch, LayoutGrid, Megaphone, MessageSquare, MessageSquarePlus,
+  AlertTriangle, ArrowLeft, Bot, CalendarClock, CheckCircle2, Clock, Copy, CornerUpRight, Crosshair, FastForward, FileText, FlaskConical, GitBranch, LayoutGrid, Megaphone, MessageSquare, MessageSquarePlus,
   Pause, Pencil, Play, PlayCircle, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
+import { triggerPreview, messageWouldTrigger } from "@/lib/workflow-trigger-preview";
 import { CATEGORIES, NODE_DEF, NODE_DEFS, categoryMeta, type Category, type NodeDef } from "@/lib/workflow-catalog";
 
 // ---------------------------------------------------------------------------
@@ -749,8 +750,14 @@ function Editor() {
         toast.push(`El flujo tiene ${v.issues.length} problema(s): revisa lo marcado en rojo`, "error");
         return;
       }
-      const r = await api<{ publishedVersion: number }>(`/workflows/${id}/publish`, { method: "POST" });
+      const r = await api<{ publishedVersion: number; conflicts?: { id: string; name: string }[] }>(`/workflows/${id}/publish`, { method: "POST" });
       toast.push(`Versión ${r.publishedVersion} publicada y activa`, "ok");
+      if (r.conflicts && r.conflicts.length) {
+        toast.push(
+          `Ojo: ${r.conflicts.length === 1 ? "otro flujo activo reacciona" : `${r.conflicts.length} flujos activos reaccionan`} al mismo evento (${r.conflicts.map((c) => c.name).join(", ")}). Ambos se ejecutarán.`,
+          "error",
+        );
+      }
       await load();
     } catch (e) {
       toast.push((e as Error).message, "error");
@@ -951,7 +958,7 @@ function Editor() {
                 onClose={closeDebug}
               />
             ) : selectedId === TRIGGER_NODE_ID ? (
-              <TriggerPanel catalog={catalog} trigger={trigger} onChange={setTrigger} issues={triggerIssues} />
+              <TriggerPanel wfId={id} catalog={catalog} trigger={trigger} onChange={setTrigger} issues={triggerIssues} />
             ) : selectedNode ? (
               <NodePanel
                 node={selectedNode}
@@ -1548,8 +1555,32 @@ function ApptFilters({ catalog, trigger, onChange }: { catalog: Catalog; trigger
   );
 }
 
-function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void; issues?: string[] }) {
+function TriggerPanel({ wfId, catalog, trigger, onChange, issues = [] }: { wfId: string; catalog: Catalog; trigger: DefTrigger; onChange: (t: DefTrigger) => void; issues?: string[] }) {
   const desc = catalog.triggers.find((t) => t.type === trigger.type)?.description;
+  const isMsg = trigger.type === "message_received" || trigger.type === "keyword";
+  const preview = triggerPreview(trigger.type, trigger.config, {
+    leadStatusName: (c) => catalog.leadStatuses.find((s) => s.code === c)?.name,
+    channelName: (id) => MSG_CHANNELS.find((c) => c.value === id)?.label,
+  });
+
+  // Conflictos en vivo: otros flujos activos que reaccionan al mismo evento.
+  // Se consulta con debounce al cambiar el disparador (no bloquea; avisa).
+  const [conflicts, setConflicts] = useState<{ id: string; name: string }[]>([]);
+  const trigKey = JSON.stringify({ t: trigger.type, c: trigger.config });
+  useEffect(() => {
+    let alive = true;
+    const h = setTimeout(() => {
+      api<{ conflicts: { id: string; name: string }[] }>(`/workflows/${wfId}/trigger-conflicts`, {
+        method: "POST",
+        body: JSON.stringify({ trigger: { type: trigger.type, config: trigger.config } }),
+      })
+        .then((r) => { if (alive) setConflicts(r.conflicts ?? []); })
+        .catch(() => { if (alive) setConflicts([]); });
+    }, 400);
+    return () => { alive = false; clearTimeout(h); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wfId, trigKey]);
+
   return (
     <div className="space-y-3 p-5">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
@@ -1574,6 +1605,21 @@ function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Ca
         </select>
       </label>
       {desc && <p className="text-xs text-ink-subtle">{desc}</p>}
+
+      {/* Vista previa en lenguaje natural: qué hará realmente este disparador. */}
+      <div className="flex items-start gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
+        <Zap size={13} className="mt-0.5 shrink-0" />
+        <p><span className="font-medium">Se activará cuando</span> {preview}</p>
+      </div>
+
+      {/* Conflictos: otros flujos activos que reaccionan al mismo evento. */}
+      {conflicts.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          <p className="flex items-center gap-1 font-medium"><AlertTriangle size={13} /> Otros flujos ya reaccionan a este evento</p>
+          <ul className="mt-1 list-disc pl-4">{conflicts.map((c) => (<li key={c.id}>{c.name}</li>))}</ul>
+          <p className="mt-1 text-[10px]">Si publicas, ambos se ejecutarán con el mismo evento. Afina las condiciones (palabras, canal, etapa…) para separarlos.</p>
+        </div>
+      )}
 
       {trigger.type === "keyword" && (
         <div className="space-y-2">
@@ -1661,6 +1707,38 @@ function TriggerPanel({ catalog, trigger, onChange, issues = [] }: { catalog: Ca
       )}
 
       {APPT_FILTERABLE.has(trigger.type) && <ApptFilters catalog={catalog} trigger={trigger} onChange={onChange} />}
+
+      {isMsg && <TriggerTester config={trigger.config} />}
+    </div>
+  );
+}
+
+/** Probar el disparador de mensaje: escribes un texto y dice si dispararía. */
+function TriggerTester({ config }: { config: Record<string, unknown> }) {
+  const [text, setText] = useState("");
+  const t = text.trim();
+  const fires = t ? messageWouldTrigger(config, text) : null;
+  return (
+    <div className="space-y-2 rounded-lg border border-line p-3">
+      <p className="flex items-center gap-1 text-xs font-medium text-ink-muted"><FlaskConical size={13} /> Probar el disparador</p>
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Escribe un mensaje de ejemplo…"
+        className="block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+      />
+      {fires !== null && (
+        fires ? (
+          <p className="flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+            <CheckCircle2 size={14} /> Este mensaje SÍ dispararía el flujo.
+          </p>
+        ) : (
+          <p className="flex items-center gap-1.5 rounded-md bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            <XCircle size={14} /> No dispara: el texto no cumple las palabras configuradas.
+          </p>
+        )
+      )}
+      <p className="text-[10px] text-ink-subtle">Prueba solo las palabras/coincidencia. El canal y «primer mensaje» se validan en la ejecución real.</p>
     </div>
   );
 }
