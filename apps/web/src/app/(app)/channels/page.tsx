@@ -11,6 +11,7 @@ interface Channel {
   status: string;
   defaultAgentId: string | null;
   defaultAgentName: string | null;
+  defaultProactive?: boolean;
   phoneNumberId: string | null;
   displayPhone: string | null;
 }
@@ -106,6 +107,11 @@ export default function ChannelsPage() {
 
   async function setDefaultAgent(id: string, agentId: string) {
     await api(`/channels/${id}`, { method: "PATCH", body: JSON.stringify({ defaultAgentId: agentId || null }) });
+    await load();
+  }
+
+  async function setDefaultProactive(id: string, on: boolean) {
+    await api(`/channels/default-proactive`, { method: "PATCH", body: JSON.stringify({ channelId: on ? id : null }) });
     await load();
   }
 
@@ -342,6 +348,12 @@ export default function ChannelsPage() {
                     <option key={a.id} value={a.id}>🤖 {a.name}</option>
                   ))}
                 </select>
+                {c.type === "WHATSAPP_CLOUD" && c.status === "active" && (
+                  <label className="flex items-center gap-1.5 rounded-lg border border-line-strong px-2 py-1.5 text-xs text-ink-muted" title="Número desde el que salen los recordatorios/plantillas a contactos SIN conversación previa (p. ej. citas nacidas en Cláriva). Si el contacto ya escribió, sale por su mismo número.">
+                    <input type="checkbox" checked={c.defaultProactive ?? false} onChange={(e) => void setDefaultProactive(c.id, e.target.checked)} />
+                    Por defecto para recordatorios
+                  </label>
+                )}
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app">
                   Probar conexión
                 </button>

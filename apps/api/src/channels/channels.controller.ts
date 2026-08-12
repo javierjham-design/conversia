@@ -98,12 +98,14 @@ export class ChannelsController {
   list() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [channels, numbers, agents] = await Promise.all([
+      const [channels, numbers, agents, org] = await Promise.all([
         tx.channelConnection.findMany({ orderBy: { createdAt: "asc" } }),
         tx.whatsappPhoneNumber.findMany(),
         tx.agent.findMany({ where: { deletedAt: null }, select: { id: true, name: true } }),
+        tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
       ]);
       const agentName = new Map(agents.map((a) => [a.id, a.name]));
+      const defaultReminderChannelId = ((org?.settings as any)?.messaging?.defaultReminderChannelId as string | undefined) ?? null;
       return channels.map((c) => {
         const number = numbers.find((n) => n.channelConnectionId === c.id);
         return {
@@ -113,11 +115,42 @@ export class ChannelsController {
           status: c.status,
           defaultAgentId: c.defaultAgentId,
           defaultAgentName: c.defaultAgentId ? (agentName.get(c.defaultAgentId) ?? null) : null,
+          // Número por defecto para envíos proactivos (recordatorios/plantillas a
+          // contactos SIN conversación previa). Configurable por el tenant.
+          defaultProactive: c.id === defaultReminderChannelId,
           phoneNumberId: number?.phoneNumberId ?? null,
           displayPhone: number?.displayPhone ?? null,
           createdAt: c.createdAt,
         };
       });
+    });
+  }
+
+  /**
+   * Fija el número por defecto para envíos PROACTIVOS (recordatorios/plantillas a
+   * contactos sin conversación previa). Regla del envío: si el contacto tiene
+   * historial, sale por el mismo número con el que ya habló; si no, por este
+   * canal por defecto (o el primero activo si no se configuró). Sin migración
+   * (vive en org.settings.messaging.defaultReminderChannelId).
+   */
+  @Patch("default-proactive")
+  async setDefaultProactive(@Body() body: unknown) {
+    const ctx = requirePermission("channels:write");
+    const parsed = z.object({ channelId: z.string().nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("channelId requerido (o null para limpiar)");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const messaging = { ...(settings.messaging ?? {}) };
+      if (parsed.data.channelId === null) {
+        delete messaging.defaultReminderChannelId;
+      } else {
+        const ch = await tx.channelConnection.findFirst({ where: { id: parsed.data.channelId, status: "active" } });
+        if (!ch) throw new BadRequestException("Canal no encontrado o inactivo");
+        messaging.defaultReminderChannelId = parsed.data.channelId;
+      }
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, messaging } as object } });
+      return { ok: true };
     });
   }
 
