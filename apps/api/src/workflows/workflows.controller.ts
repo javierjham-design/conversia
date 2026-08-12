@@ -676,7 +676,7 @@ export class WorkflowsController {
         definition: z.unknown(),
         contact: z.object({ firstName: z.string().max(80).nullable().optional() }).optional(),
         state: z.unknown().optional(),
-        action: z.object({ type: z.enum(["start", "advance", "reply"]), text: z.string().max(2000).optional() }),
+        action: z.object({ type: z.enum(["start", "advance", "reply", "next"]), text: z.string().max(2000).optional(), mode: z.enum(["run", "step"]).optional() }),
       }),
       body,
     );
