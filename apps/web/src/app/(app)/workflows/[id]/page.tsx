@@ -21,8 +21,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
-  Pencil, Plus, Redo2, Search, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
+  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FastForward, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
+  Pencil, Play, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
@@ -279,7 +279,40 @@ function hasCycle(start: string, adj: Map<string, string[]>): boolean {
   return dfs(start);
 }
 
-interface SimStep { nodeId: string; nodeType: string; label: string; detail: string }
+// Simulador interactivo (botón "Probar"): eventos y estado que devuelve el servidor.
+interface LiveSimEvt {
+  kind: "message" | "action" | "wait" | "branch" | "info" | "end";
+  from?: "contact" | "bot";
+  text?: string;
+  agent?: string | null;
+  label?: string;
+  detail?: string;
+}
+interface LiveSim {
+  log: LiveSimEvt[];
+  status: "waiting" | "agent_chat" | "done" | "failed";
+  waiting: { label: string; cancelOnReply: boolean } | null;
+  objective: { objective: string } | null;
+  error?: string | null;
+}
+
+/** Una línea del transcript del simulador. */
+function SimBubble({ e }: { e: LiveSimEvt }) {
+  if (e.kind === "message") {
+    const contact = e.from === "contact";
+    return (
+      <div className={cn("flex", contact ? "justify-end" : "justify-start")}>
+        <div className={cn("max-w-[80%] rounded-2xl px-3 py-2 text-sm", contact ? "bg-brand-600 text-white" : "border border-line bg-panel text-ink")}>
+          {!contact && e.agent && <p className="mb-0.5 text-[10px] font-medium text-ink-subtle">🤖 {e.agent}</p>}
+          <p className="whitespace-pre-wrap">{e.text}</p>
+        </div>
+      </div>
+    );
+  }
+  if (e.kind === "action") return <p className="text-center text-[11px] text-ink-subtle">⚙ {e.label}: {e.detail}</p>;
+  if (e.kind === "end") return <p className="text-center text-xs font-medium text-emerald-600 dark:text-emerald-400">{e.text}</p>;
+  return <p className="text-center text-[11px] italic text-ink-subtle">{e.text}</p>;
+}
 
 // ---------------------------------------------------------------------------
 // Editor
@@ -309,9 +342,10 @@ function Editor() {
   const [busy, setBusy] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const [testContact, setTestContact] = useState("");
-  const [assumeNoReply, setAssumeNoReply] = useState(true);
-  const [testTrace, setTestTrace] = useState<SimStep[] | null>(null);
-  const [testBusy, setTestBusy] = useState(false);
+  const [simState, setSimState] = useState<LiveSim | null>(null);
+  const [simBusy, setSimBusy] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const simLogRef = useRef<HTMLDivElement | null>(null);
   // Problemas de validación (servidor): mensajes que apuntan al disparador y
   // aviso del flujo YA publicado que hoy no pasaría la validación.
   const [triggerIssues, setTriggerIssues] = useState<string[]>([]);
@@ -545,25 +579,34 @@ function Editor() {
     }
   }
 
-  async function runTest() {
-    setTestBusy(true);
-    setTestTrace(null);
+  // Simulador interactivo: cada paso ejecuta el motor real + IA real en el
+  // servidor. El estado viaja de ida y vuelta (sin sesión en el servidor).
+  async function stepSim(action: { type: "start" | "advance" | "reply"; text?: string }) {
+    setSimBusy(true);
     try {
-      const r = await api<{ trace: SimStep[] }>(`/workflows/${id}/test`, {
+      const r = await api<{ state: LiveSim }>(`/workflows/${id}/test/live`, {
         method: "POST",
         body: JSON.stringify({
           definition: flowToDef(nodes, edges, trigger),
           contact: { firstName: testContact || null },
-          assumeNoReply,
+          state: action.type === "start" ? null : simState,
+          action,
         }),
       });
-      setTestTrace(r.trace);
+      setSimState(r.state);
+      if (action.type === "reply") setReplyText("");
     } catch (e) {
       toast.push((e as Error).message, "error");
     } finally {
-      setTestBusy(false);
+      setSimBusy(false);
     }
   }
+
+  // Auto-scroll del transcript al último evento.
+  useEffect(() => {
+    const el = simLogRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [simState, simBusy]);
 
   const editorApi = useMemo<EditorApi>(
     () => ({ selectedId, select: setSelectedId, addFrom, catalog, triggerType: trigger.type }),
@@ -623,7 +666,7 @@ function Editor() {
             <button onClick={undo} disabled={!history.current.past.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Deshacer"><Undo2 size={16} /></button>
             <button onClick={redo} disabled={!history.current.future.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Rehacer"><Redo2 size={16} /></button>
             <span className="mx-1 h-5 w-px bg-line" />
-            <Button variant="secondary" onClick={() => { setTestTrace(null); setTestOpen(true); }} disabled={busy}>Probar</Button>
+            <Button variant="secondary" onClick={() => { setSimState(null); setReplyText(""); setTestOpen(true); }} disabled={busy}>Probar</Button>
             <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy}>Guardar</Button>
             <Button onClick={() => void publish()} disabled={busy}>Publicar</Button>
           </div>
@@ -688,39 +731,79 @@ function Editor() {
         </div>
       </div>
 
-      {/* Modo prueba */}
+      {/* Modo prueba: simulación interactiva (motor real + IA real) */}
       <Modal open={testOpen} onClose={() => setTestOpen(false)} title="Probar flujo" wide>
-        <p className="mb-3 text-sm text-ink-muted">
-          Recorre el flujo con un contacto ficticio y muestra qué haría cada paso. No envía nada ni cambia datos reales.
-        </p>
-        <div className="mb-3 flex flex-wrap items-end gap-3">
-          <label className="text-sm">
-            <span className="text-xs text-ink-muted">Nombre del contacto de prueba</span>
-            <input value={testContact} onChange={(e) => setTestContact(e.target.value)} placeholder="Prueba" className="mt-1 block w-48 rounded-lg border border-line-strong px-3 py-2 text-sm" />
-          </label>
-          <label className="flex items-center gap-1.5 pb-2 text-xs text-ink-muted">
-            <input type="checkbox" checked={assumeNoReply} onChange={(e) => setAssumeNoReply(e.target.checked)} />
-            En las condiciones, asumir que el contacto no respondió
-          </label>
-          <Button onClick={() => void runTest()} disabled={testBusy}>{testBusy ? "Ejecutando…" : "Ejecutar prueba"}</Button>
-        </div>
+        {!simState ? (
+          <div className="space-y-3">
+            <p className="text-sm text-ink-muted">
+              Simula el flujo como una <b>conversación real</b>: verás los mensajes que se envían, las respuestas de los agentes de IA (reales),
+              las esperas y las ramificaciones. Puedes responder como si fueras el contacto. No envía WhatsApp ni cambia datos reales.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-sm">
+                <span className="text-xs text-ink-muted">Nombre del contacto de prueba</span>
+                <input value={testContact} onChange={(e) => setTestContact(e.target.value)} placeholder="Prueba" className="mt-1 block w-48 rounded-lg border border-line-strong px-3 py-2 text-sm" />
+              </label>
+              <Button onClick={() => void stepSim({ type: "start" })} disabled={simBusy}>
+                <Play size={15} /> {simBusy ? "Iniciando…" : "Iniciar simulación"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col" style={{ height: "62vh" }}>
+            {/* Transcript */}
+            <div ref={simLogRef} className="flex-1 space-y-2 overflow-y-auto rounded-lg border border-line bg-app p-3">
+              {simState.log.map((e, i) => <SimBubble key={i} e={e} />)}
+              {simBusy && <p className="text-center text-xs text-ink-subtle">…</p>}
+            </div>
 
-        {testTrace && (
-          testTrace.length === 0 ? (
-            <p className="text-sm text-ink-subtle">El flujo no tiene pasos para recorrer.</p>
-          ) : (
-            <ol className="space-y-2">
-              {testTrace.map((s, i) => (
-                <li key={i} className="flex gap-3 rounded-lg border border-line p-3">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{i + 1}</span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-ink">{s.label}</p>
-                    <p className="whitespace-pre-wrap text-xs text-ink-muted">{s.detail}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )
+            {/* Controles según el estado */}
+            <div className="mt-3 space-y-2">
+              {simState.status === "waiting" && simState.waiting && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                  <Clock size={14} className="shrink-0" />
+                  <span className="flex-1">El flujo espera <b>{simState.waiting.label}</b>{simState.waiting.cancelOnReply ? " (se cancela si el contacto responde)" : ""}.</span>
+                  <Button variant="secondary" onClick={() => void stepSim({ type: "advance" })} disabled={simBusy}>
+                    <FastForward size={14} /> Adelantar el tiempo
+                  </Button>
+                </div>
+              )}
+              {simState.objective && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">
+                  <Target size={14} className="shrink-0" />
+                  <span className="flex-1">Objetivo del agente: <b>{simState.objective.objective}</b></span>
+                  <Button variant="secondary" onClick={() => void stepSim({ type: "advance" })} disabled={simBusy}>Dar por terminado</Button>
+                </div>
+              )}
+              {simState.status === "failed" && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">El flujo falló: {simState.error}</p>
+              )}
+
+              {(simState.status === "waiting" || simState.status === "agent_chat") && (
+                <div className="flex items-end gap-2">
+                  <input
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && replyText.trim() && !simBusy) void stepSim({ type: "reply", text: replyText.trim() }); }}
+                    placeholder="Escribe como si fueras el contacto…"
+                    className="flex-1 rounded-lg border border-line-strong px-3 py-2 text-sm"
+                    disabled={simBusy}
+                  />
+                  <Button onClick={() => { if (replyText.trim()) void stepSim({ type: "reply", text: replyText.trim() }); }} disabled={simBusy || !replyText.trim()}>
+                    <Send size={15} />
+                  </Button>
+                </div>
+              )}
+              {simState.status === "done" && (
+                <p className="text-center text-xs text-ink-subtle">La conversación terminó. Reinicia para volver a probar.</p>
+              )}
+
+              <div className="flex items-center justify-between">
+                <button onClick={() => { setSimState(null); setReplyText(""); }} className="text-xs text-ink-subtle underline hover:text-ink">↺ Reiniciar</button>
+                <span className="text-[10px] text-ink-subtle">Simulación — no envía WhatsApp ni cambia datos reales.</span>
+              </div>
+            </div>
+          </div>
         )}
       </Modal>
 
