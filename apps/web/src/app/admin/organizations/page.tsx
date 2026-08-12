@@ -15,6 +15,7 @@ interface OrgRow {
   plan: { code: string; name: string } | null;
   subscriptionStatus: string | null;
   counts: { users: number; conversations: number; agents: number };
+  messaging?: { blocked: boolean; blockedBy: string | null; reason: string | null };
 }
 interface Plan {
   code: string;
@@ -70,6 +71,7 @@ export default function OrganizationsPage() {
                 <th className="p-3">Organización</th>
                 <th className="p-3">Estado</th>
                 <th className="p-3">Plan</th>
+                <th className="p-3">Envío</th>
                 <th className="p-3">Uso</th>
                 <th className="p-3">Acciones</th>
               </tr>
@@ -93,6 +95,21 @@ export default function OrganizationsPage() {
                         <option key={p.code} value={p.code}>{p.name}</option>
                       ))}
                     </select>
+                  </td>
+                  <td className="p-3">
+                    {o.messaging ? (
+                      o.messaging.blocked ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] text-red-700" title={o.messaging.reason ?? "Bloqueado"}>
+                          <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> {o.messaging.reason ?? "Bloqueado"}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700" title="Puede enviar plantillas">
+                          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> OK
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
                   </td>
                   <td className="p-3 text-xs text-slate-500">{o.counts.users}u · {o.counts.agents}a · {o.counts.conversations}c</td>
                   <td className="p-3">

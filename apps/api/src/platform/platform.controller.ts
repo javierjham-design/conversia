@@ -24,6 +24,64 @@ import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
 
+// ---------------------------------------------------------------------------
+// Evaluador (solo lectura) del gate de envío de plantillas — MISMA lógica y
+// orden que chargeTemplateSend (worker/messaging-guard), sin efectos. Es la
+// fuente de verdad del panel de mensajería, el botón "¿puede enviar?" y el
+// indicador de la lista, para no cazar el bloqueo en seis lugares.
+// ---------------------------------------------------------------------------
+const MESSAGING_REASON_LABELS: Record<string, string> = {
+  plan_no_templates: "El plan no incluye plantillas",
+  templates_switch_off: "Interruptor del tenant apagado",
+  demo: "Cuenta en demo (TRIAL)",
+  grace: "Pago pendiente (período de gracia)",
+  suspended: "Cuenta suspendida",
+  tenant_cap: "Tope diario alcanzado",
+  no_balance: "Bolsa sin saldo",
+  global_fuse: "Fusible global cortado",
+};
+const ACTIVE_SUB_STATUSES = ["ACTIVE", "TRIALING"];
+
+interface GateInputs {
+  orgStatus: string;
+  templatesEnabled: boolean;
+  planAllows: boolean;
+  latestSubStatus: string | null;
+  balance: number;
+  today: number;
+  dailyCapEffective: number;
+  todayGlobal: number;
+  globalCap: number;
+  fuseTripped: boolean;
+}
+interface GateCondition { key: string; pass: boolean; reason: string | null }
+interface GateResult { conditions: GateCondition[]; canSend: boolean; blockedBy: string | null; reason: string | null }
+
+/** Evalúa las seis condiciones en el mismo orden que el gate real. Puro. */
+function evalMessagingGate(i: GateInputs): GateResult {
+  const conditions: GateCondition[] = [];
+  const push = (key: string, pass: boolean, reason: string) => conditions.push({ key, pass, reason: pass ? null : reason });
+
+  push("plan", i.planAllows, "plan_no_templates");
+  push("switch", i.templatesEnabled, "templates_switch_off");
+  let accReason = "";
+  if (i.orgStatus === "TRIAL") accReason = "demo";
+  else if (i.orgStatus === "SUSPENDED" || i.orgStatus === "CANCELLED") accReason = "suspended";
+  else if (i.latestSubStatus === "PAST_DUE") accReason = "grace";
+  push("account", accReason === "", accReason || "suspended");
+  push("daily", i.today < i.dailyCapEffective, "tenant_cap");
+  push("wallet", i.balance > 0, "no_balance");
+  push("fuse", !i.fuseTripped && i.todayGlobal < i.globalCap, "global_fuse");
+
+  const firstBlock = conditions.find((c) => !c.pass) ?? null;
+  return {
+    conditions,
+    canSend: !firstBlock,
+    blockedBy: firstBlock?.key ?? null,
+    reason: firstBlock?.reason ? (MESSAGING_REASON_LABELS[firstBlock.reason] ?? firstBlock.reason) : null,
+  };
+}
+
 /**
  * API del panel de PLATAFORMA (super-admin). Opera cross-tenant por diseño
  * (cliente admin de BD) — es el ÚNICO lugar autorizado a hacerlo, detrás de
@@ -113,9 +171,50 @@ export class PlatformController {
     const cmap = (rows: any[]) => new Map(rows.map((r) => [r.organizationId, r._count._all]));
     const uc = cmap(userCounts), cc = cmap(convCounts), ac = cmap(agentCounts);
 
+    // Indicador de mensajería: ¿algún tenant tiene bloqueado el envío de plantillas?
+    // Batch: bolsa por org + tope + fusible/consumo global + consumo diario por tenant.
+    const date = new Date().toISOString().slice(0, 10);
+    const [wallets, freePlan, caps] = await Promise.all([
+      db.messageWallet.findMany({ select: { organizationId: true, balance: true } }),
+      db.plan.findUnique({ where: { code: "free" } }),
+      this.readMessagingCaps(),
+    ]);
+    const walletByOrg = new Map(wallets.map((w) => [w.organizationId, w.balance]));
+    let todayGlobal = 0;
+    let fuseTripped = false;
+    const tenantToday = new Map<string, number>();
+    try {
+      const conn = this.queues.connection;
+      const [g, f] = await conn.mget(`msgcap:g:${date}`, `msgcap:fuse:${date}`);
+      todayGlobal = Number(g) || 0;
+      fuseTripped = f === "1";
+      const activeOrgs = orgs.filter((o) => !o.deletedAt);
+      if (activeOrgs.length) {
+        const vals = await conn.mget(...activeOrgs.map((o) => `msgcap:t:${o.id}:${date}`));
+        activeOrgs.forEach((o, idx) => tenantToday.set(o.id, Number(vals[idx]) || 0));
+      }
+    } catch {
+      /* redis caído → conteos en 0 (no bloquea por el contador) */
+    }
+
     return orgs.map((o) => {
       const sub = subByOrg.get(o.id);
       const plan = sub ? planById.get(sub.planId) : null;
+      const activePlan = sub && ACTIVE_SUB_STATUSES.includes(sub.status) ? plan : freePlan;
+      const settings = (o.settings ?? {}) as Record<string, any>;
+      const override = Number(settings?.messaging?.dailyCap);
+      const gate = evalMessagingGate({
+        orgStatus: o.status,
+        templatesEnabled: settings?.messaging?.templatesEnabled === true,
+        planAllows: ((activePlan?.features as any)?.whatsappTemplates) === true,
+        latestSubStatus: sub?.status ?? null,
+        balance: walletByOrg.get(o.id) ?? 0,
+        today: tenantToday.get(o.id) ?? 0,
+        dailyCapEffective: Number.isFinite(override) && override > 0 ? override : caps.perTenantDefault,
+        todayGlobal,
+        globalCap: caps.global,
+        fuseTripped,
+      });
       return {
         id: o.id,
         name: o.name,
@@ -127,6 +226,7 @@ export class PlatformController {
         plan: plan ? { code: plan.code, name: plan.name } : null,
         subscriptionStatus: sub?.status ?? null,
         counts: { users: uc.get(o.id) ?? 0, conversations: cc.get(o.id) ?? 0, agents: ac.get(o.id) ?? 0 },
+        messaging: { blocked: !gate.canSend, blockedBy: gate.blockedBy, reason: gate.reason },
       };
     });
   }
@@ -763,6 +863,107 @@ export class PlatformController {
     });
     await this.audit(req, "platform.wallet_adjust", "organization", id, { delta: parsed.data.delta, reason: parsed.data.reason });
     return { ok: true, balance };
+  }
+
+  // ---------------------- Panel único de mensajería por tenant ----------------------
+
+  /** Reúne las entradas del gate para un tenant (solo lectura: BD + Redis). */
+  private async messagingSnapshot(id: string) {
+    const db = this.prisma.admin;
+    const date = new Date().toISOString().slice(0, 10);
+    const [org, latestSub, activeSub, wallet, caps, cost] = await Promise.all([
+      db.organization.findUnique({ where: { id }, select: { id: true, name: true, status: true, settings: true, country: true } }),
+      db.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } }),
+      db.subscription.findFirst({ where: { organizationId: id, status: { in: ACTIVE_SUB_STATUSES as unknown as string[] } as never }, orderBy: { createdAt: "desc" } }),
+      db.messageWallet.findUnique({ where: { organizationId: id } }),
+      this.readMessagingCaps(),
+      this.readCostSettings(),
+    ]);
+    if (!org) throw new NotFoundException("Organización no encontrada");
+    const plan = activeSub ? await db.plan.findUnique({ where: { id: activeSub.planId } }) : await db.plan.findUnique({ where: { code: "free" } });
+    const settings = (org.settings ?? {}) as Record<string, any>;
+    const override = Number(settings?.messaging?.dailyCap);
+    const hasOverride = Number.isFinite(override) && override > 0;
+    const dailyCapEffective = hasOverride ? override : caps.perTenantDefault;
+    let today = 0;
+    let todayGlobal = 0;
+    let fuseTripped = false;
+    try {
+      const [t, g, f] = await this.queues.connection.mget(`msgcap:t:${id}:${date}`, `msgcap:g:${date}`, `msgcap:fuse:${date}`);
+      today = Number(t) || 0;
+      todayGlobal = Number(g) || 0;
+      fuseTripped = f === "1";
+    } catch {
+      /* redis caído → 0 (fail open en el conteo, como el gate) */
+    }
+    const inputs: GateInputs = {
+      orgStatus: org.status,
+      templatesEnabled: settings?.messaging?.templatesEnabled === true,
+      planAllows: ((plan?.features as any)?.whatsappTemplates) === true,
+      latestSubStatus: latestSub?.status ?? null,
+      balance: wallet?.balance ?? 0,
+      today,
+      dailyCapEffective,
+      todayGlobal,
+      globalCap: caps.global,
+      fuseTripped,
+    };
+    return { org, plan, settings, wallet, caps, cost, override: hasOverride ? override : null, dailyCapEffective, today, todayGlobal, fuseTripped, latestSub, inputs };
+  }
+
+  /** Panel único: las seis condiciones con semáforo + datos para editar en línea. */
+  @Get("organizations/:id/messaging-panel")
+  async messagingPanel(@Param("id") id: string) {
+    const s = await this.messagingSnapshot(id);
+    const gate = evalMessagingGate(s.inputs);
+    const cond = (key: string) => gate.conditions.find((c) => c.key === key)!;
+    const clpPerMsg = this.clpPerMsg(s.cost.usdToClp, s.org.country ?? "CL");
+    const now = new Date();
+    const periodStart = s.wallet?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
+    const tmplAgg = await this.prisma.admin.usageEvent.aggregate({
+      where: { organizationId: id, type: "whatsapp_message", occurredAt: { gte: periodStart } },
+      _count: { _all: true },
+    });
+    return {
+      summary: { canSend: gate.canSend, blockedBy: gate.blockedBy, reason: gate.reason, line: gate.canSend ? "Sí puede enviar" : `Bloqueado por: ${gate.reason}` },
+      conditions: {
+        plan: { pass: s.inputs.planAllows, planCode: s.plan?.code ?? null, planName: s.plan?.name ?? null, allows: s.inputs.planAllows },
+        switch: { pass: s.inputs.templatesEnabled, on: s.inputs.templatesEnabled },
+        account: { pass: cond("account").pass, status: s.org.status, subStatus: s.latestSub?.status ?? null },
+        daily: { pass: cond("daily").pass, effective: s.dailyCapEffective, override: s.override, today: s.today, clpPerMsg },
+        wallet: { pass: s.inputs.balance > 0, balance: s.wallet?.balance ?? 0, included: s.wallet?.includedPerPeriod ?? 0, usedThisPeriod: tmplAgg._count._all, periodStart },
+        fuse: { pass: cond("fuse").pass, tripped: s.fuseTripped, todayGlobal: s.todayGlobal, globalCap: s.caps.global },
+      },
+    };
+  }
+
+  /** "¿Puede enviar ahora?": corre las seis validaciones y responde en una línea. */
+  @Get("organizations/:id/can-send")
+  async canSend(@Param("id") id: string) {
+    const s = await this.messagingSnapshot(id);
+    const gate = evalMessagingGate(s.inputs);
+    return { canSend: gate.canSend, blockedBy: gate.blockedBy, reason: gate.reason, line: gate.canSend ? "Sí puede enviar" : `Bloqueado por: ${gate.reason}` };
+  }
+
+  /** Últimos envíos de plantilla rechazados por el gate (con condición y conversación). */
+  @Get("organizations/:id/rejected-sends")
+  async rejectedSends(@Param("id") id: string) {
+    const rows = await this.prisma.admin.integrationEvent.findMany({
+      where: { organizationId: id, provider: "messaging", type: "template.blocked" },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+    return rows.map((r) => {
+      const payload = (r.payload ?? {}) as Record<string, any>;
+      const reason = String(payload.reason ?? "");
+      return {
+        createdAt: r.createdAt,
+        reason,
+        reasonLabel: MESSAGING_REASON_LABELS[reason] ?? reason,
+        message: r.message,
+        conversationId: payload.conversationId ?? null,
+      };
+    });
   }
 
   // ---------------------- Margen por cliente + catálogo de paquetes ----------------------
