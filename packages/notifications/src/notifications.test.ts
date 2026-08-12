@@ -23,6 +23,14 @@ describe("catálogo de eventos", () => {
   it("render rellena variables y deja vacío lo ausente", () => {
     expect(render("Hola {name}, {x}", { name: "Ana" })).toBe("Hola Ana, ");
   });
+
+  it("el fallo de un flujo es crítico, va a admins/dueño y enlaza al flujo", () => {
+    const wf = getEvent("workflow.failed")!;
+    expect(wf.urgency).toBe("critical");
+    expect(wf.audience).toEqual(expect.arrayContaining(["tenant_admins", "owner"]));
+    expect(render(wf.link!, { workflowId: "wf_123" })).toBe("/workflows/wf_123");
+    expect(render(wf.body, { workflowName: "Bienvenida", error: "timeout" })).toContain("Bienvenida");
+  });
 });
 
 describe("preferencias por usuario", () => {
