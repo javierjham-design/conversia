@@ -423,7 +423,11 @@ function SystemUserTokenPanel({ onConnected }: { onConnected: () => void }) {
     <div className="rounded-card border border-line bg-panel p-4 shadow-card">
       <h2 className="text-[15px] font-semibold">Conectar con token de Usuario del Sistema</h2>
       <p className="mt-1 text-xs text-ink-muted">
-        Pega un token <b>permanente</b> generado en Business Manager (con <code>ads_read</code> y <code>business_management</code>). Lo validamos contra Meta y te mostramos qué trae antes de guardarlo. El token se guarda cifrado.
+        Pega un token <b>permanente</b> de Usuario del Sistema (Business Manager). Inclúyele{" "}
+        <code>ads_read</code> (para <b>seleccionar campañas activas</b> en los flujos),{" "}
+        <code>business_management</code> y, si vas a medir conversiones de anuncios,{" "}
+        <code>whatsapp_business_manage_events</code>. Un mismo token cubre las tres cosas. Lo validamos contra Meta y te
+        mostramos qué trae antes de guardarlo; se guarda cifrado.
       </p>
       <textarea
         value={token}
@@ -447,10 +451,10 @@ function SystemUserTokenPanel({ onConnected }: { onConnected: () => void }) {
         <div className="mt-3 space-y-2 rounded-card border border-line bg-app p-3 text-xs">
           {info.name && <p className="font-medium text-ink">{info.name}</p>}
           <div className="flex flex-wrap gap-1">
-            {["ads_read", "business_management", "whatsapp_business_messaging"].map((s) => (
+            {["ads_read", "business_management", "whatsapp_business_messaging", "whatsapp_business_manage_events"].map((s) => (
               <span key={s} className={cn("rounded px-1.5 py-0.5 text-[10px]", info.scopes.includes(s) ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-app text-ink-subtle line-through")}>{s}</span>
             ))}
-            <span className="text-[10px] text-ink-subtle">+{Math.max(0, info.scopes.length - 3)} más</span>
+            <span className="text-[10px] text-ink-subtle">+{Math.max(0, info.scopes.length - 4)} más</span>
           </div>
           {!info.hasAdsRead && <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">⚠ El token no trae <code>ads_read</code>: no podrás listar anuncios. Regenéralo con ese permiso.</p>}
           <div>

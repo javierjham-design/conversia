@@ -35,10 +35,11 @@ Clínica Demo 0). Pendientes menores:
 ## A. Go-live de Meta / WhatsApp (lo que condiciona el lanzamiento)
 | # | Ítem | Estado | ¿Sigue? | Esfuerzo |
 |---|------|--------|---------|----------|
-| A1 | **App Review de WhatsApp** (acceso Avanzado) | Enviada, PENDING veredicto | Sí — BLOQUEA autoservicio de terceros | ⏳ Meta |
-| A2 | **`ads_read` OAuth** para que un cliente externo conecte SUS anuncios | En cola (ni pedido en la review) | Sí, pero solo cuando vendas conexión de anuncios a terceros | M + ⏳ review |
+| A1 | **App Review de WhatsApp** (acceso Avanzado) | ✅ **APROBADA (2026-08-11)**: whatsapp_business_messaging, whatsapp_business_management, business_management, public_profile. ❌ `whatsapp_business_manage_events` **RECHAZADA** por prerrequisito ("no advanced access to whatsapp_business_messaging or policy violation in last 90 days") — es huevo-y-gallina (messaging recién se aprobó). **Acción:** cuando el acceso avanzado de messaging esté efectivo, **"Volver a solicitar"** solo ese permiso. Sirve solo para conversiones de anuncios CTWA, no para operar. | Parcial | ⏳ Meta |
+| A2 | **`ads_read` — seleccionar campañas activas en los flujos** | La plataforma **no usa OAuth para anuncios**; se activa cargando un **token de Usuario del Sistema con `ads_read`** en Integraciones → Meta. Para tu **propia** cuenta (TuBot/Digital Dent) **funciona YA**, sin depender de App Review. El OAuth self-service para que **terceros** conecten sus anuncios sigue siendo futuro. | Sí (cargar token) | S (tú) |
+| A2-bis | **`whatsapp_business_manage_events` vía token** (mientras se reaprueba) | El mismo token de Usuario del Sistema puede incluir `whatsapp_business_manage_events` para enviar conversiones CTWA sin esperar el reintento de App Review (asignación directa sobre tu WABA). | Sí (mismo token) | S (tú) |
 | A3 | **Línea de crédito compartida / OBO billing** (Meta cobra a TuBot, TuBot al cliente) | Parkeado, no implementado | Sí, si el modelo es reventa sin que el cliente ponga tarjeta en Meta | L + ⏳ |
-| A4 | **Sync del catálogo de anuncios vs campañas reales** | Bloqueado: falta que cargues el token de Usuario del Sistema | Sí | S (tú cargas token) |
+| A4 | **Sync del catálogo de anuncios vs campañas reales** | Bloqueado: falta que cargues el token de Usuario del Sistema (con `ads_read` para campañas y, opcional, `whatsapp_business_manage_events` para conversiones). Un mismo token cubre ambos. | Sí | S (tú cargas token) |
 | A5 | **Toggles del dashboard de Meta** (deauth callback, app secret proof, 2FA, verificar email) | Código listo (PR #39); pendiente activarlos tras el veredicto | Sí | S (tú, con `docs/META_SETUP.md`) |
 | A6 | **Verificar acceso del revisor** + configurar **BetterStack** | Pendiente tuyo | Sí | S (tú) |
 
