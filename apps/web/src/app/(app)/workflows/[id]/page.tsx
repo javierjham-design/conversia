@@ -118,6 +118,8 @@ interface Catalog {
   apiPresets?: { id: string; name: string; baseUrl: string }[];
   ga4Connected?: boolean;
   googleConnected?: boolean;
+  templatesEnabled?: boolean;
+  templatesPlanAllows?: boolean;
 }
 
 // ---- Contexto para que los nodos custom accedan a acciones/estado ----
@@ -1592,6 +1594,14 @@ function NodePanel({
 
       {type === "send_template" && (
         <div className="space-y-2">
+          {catalog.templatesEnabled === false && (
+            <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              {catalog.templatesPlanAllows === false
+                ? "Los mensajes de plantilla no están incluidos en tu plan. Sube de plan para poder publicar este flujo."
+                : "Requiere activar los mensajes de plantilla en tu cuenta. Contáctanos para habilitarlos."}{" "}
+              Mientras no esté activado, <b>no podrás publicar</b> un flujo que use este paso.
+            </p>
+          )}
           {catalog.templates.length === 0 ? (
             <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
               Requiere conectar WhatsApp y tener plantillas <b>aprobadas</b>. Crea o sincroniza plantillas en{" "}

@@ -175,6 +175,11 @@ export class PlatformController {
       limitsOverride: override,
       validUntil: typeof settings.validUntil === "string" ? settings.validUntil : null,
       aiKillSwitch: settings.aiKillSwitch === true,
+      // Interruptor de mensajes de plantilla del tenant + si el plan lo incluye.
+      templates_switch: {
+        switchOn: (settings.messaging as any)?.templatesEnabled === true,
+        planAllows: planFeatures.whatsappTemplates === true,
+      },
       paymentProvider: settings.paymentProvider ?? null,
       // Modelo de IA de TODA la plataforma del tenant (lo fija el Super Admin).
       ai: {
@@ -210,6 +215,9 @@ export class PlatformController {
         country: z.string().max(2).optional(),
         validUntil: z.string().nullable().optional(), // ISO date o null (sin vencimiento)
         aiKillSwitch: z.boolean().optional(),
+        // Interruptor de mensajes de plantilla de WhatsApp del tenant (apagado por
+        // defecto). Lo enciende el Super Admin al contratar la capacidad.
+        templatesEnabled: z.boolean().optional(),
         limits: z.record(z.coerce.number().int().min(0)).optional(), // override por-tenant; 0 = ilimitado
         paymentProvider: z.enum(["flow", "lemonsqueezy"]).nullable().optional(), // proveedor de pago del tenant
         // Modelo de IA para TODA la plataforma del tenant (exclusivo del Super Admin).
@@ -234,6 +242,11 @@ export class PlatformController {
     if (parsed.data.limits !== undefined) settings.limits = parsed.data.limits;
     if (parsed.data.paymentProvider !== undefined) settings.paymentProvider = parsed.data.paymentProvider || null;
     if (parsed.data.ai !== undefined) settings.ai = { ...(settings.ai ?? {}), ...parsed.data.ai };
+    // Interruptor de plantillas de WhatsApp: vive en settings.messaging.templatesEnabled.
+    const prevTemplatesEnabled = (settings.messaging as any)?.templatesEnabled === true;
+    if (parsed.data.templatesEnabled !== undefined) {
+      settings.messaging = { ...(settings.messaging ?? {}), templatesEnabled: parsed.data.templatesEnabled };
+    }
     const data: any = { settings };
     if (parsed.data.name) data.name = parsed.data.name;
     if (parsed.data.country) data.country = parsed.data.country;
@@ -243,6 +256,12 @@ export class PlatformController {
       aiKillSwitch: settings.aiKillSwitch ?? false,
       limits: settings.limits ?? {},
     });
+    // Auditoría EXPLÍCITA del switch de plantillas (quién lo encendió/apagó y cuándo).
+    if (parsed.data.templatesEnabled !== undefined && parsed.data.templatesEnabled !== prevTemplatesEnabled) {
+      await this.audit(req, parsed.data.templatesEnabled ? "platform.org.templates_on" : "platform.org.templates_off", "organization", id, {
+        templatesEnabled: parsed.data.templatesEnabled,
+      });
+    }
     return { ok: true };
   }
 
@@ -548,6 +567,42 @@ export class PlatformController {
   @Get("plans")
   plans() {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
+  }
+
+  /** Precio de activación de mensajes de plantilla (servicio adicional), editable. */
+  @Get("templates-pricing")
+  async templatesPricing() {
+    const row = await this.prisma.admin.platformSetting.findUnique({ where: { key: "templatesActivation" } });
+    let value = { priceClp: null as number | null, priceUsd: null as number | null };
+    if (row?.value) {
+      try {
+        const p = JSON.parse(row.value);
+        value = { priceClp: typeof p.priceClp === "number" ? p.priceClp : null, priceUsd: typeof p.priceUsd === "number" ? p.priceUsd : null };
+      } catch {
+        /* corrupto → nulls */
+      }
+    }
+    return value;
+  }
+
+  @Patch("templates-pricing")
+  async setTemplatesPricing(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z
+      .object({ priceClp: z.number().int().min(0).nullable().optional(), priceUsd: z.number().min(0).nullable().optional() })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Valores inválidos");
+    const cur = await this.templatesPricing();
+    const next = {
+      priceClp: parsed.data.priceClp !== undefined ? parsed.data.priceClp : cur.priceClp,
+      priceUsd: parsed.data.priceUsd !== undefined ? parsed.data.priceUsd : cur.priceUsd,
+    };
+    await this.prisma.admin.platformSetting.upsert({
+      where: { key: "templatesActivation" },
+      update: { value: JSON.stringify(next) },
+      create: { key: "templatesActivation", value: JSON.stringify(next) },
+    });
+    await this.audit(req, "platform.templates_pricing", "platform_setting", "templatesActivation", next);
+    return next;
   }
 
   /** Tarifas EFECTIVAS (IA por token + WhatsApp por mensaje, con overrides) + tipo de cambio. */

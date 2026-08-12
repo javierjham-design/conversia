@@ -16,7 +16,7 @@ import { workflowDefinitionSchema, type WorkflowDefinition } from "@conversia/ty
 import { validateWorkflowDefinition, type WorkflowValidationContext } from "@conversia/workflows";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
-import { canUseFeature, enforcePlanLimit } from "../common/plan-limits";
+import { canUseFeature, enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { simulateWorkflow, type SimNames } from "./workflow-sandbox";
@@ -178,6 +178,7 @@ export class WorkflowsController {
       const apiPresets = (((presetsConn?.config as any)?.presets ?? []) as any[]).map((p) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl }));
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
       const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
+      const tmplEnt = await getTemplatesEntitlement(tx);
       return {
         triggers: TRIGGER_CATALOG,
         nodes: NODE_CATALOG,
@@ -191,6 +192,10 @@ export class WorkflowsController {
         apiPresets,
         ga4Connected: Boolean(ga4Conn && ga4Conn.status !== "error"),
         googleConnected: Boolean(googleConn && googleConn.status !== "reauthorize"),
+        // Mensajes de plantilla: el editor avisa en el paso «Enviar plantilla» si
+        // no está incluido en el plan o el switch del tenant está apagado.
+        templatesEnabled: tmplEnt.enabled,
+        templatesPlanAllows: tmplEnt.planAllows,
       };
     });
   }
@@ -563,7 +568,24 @@ export class WorkflowsController {
         throw new BadRequestException("El paso «Petición HTTP» requiere un plan superior. Actualiza tu plan para publicar este flujo.");
       }
       // Requisitos de integraciones: no publicar pasos que no pueden ejecutarse.
-      for (const n of nodes.filter((x) => x.type === "send_template")) {
+      // Mensajes de plantilla: requiere que el plan lo incluya Y que el switch del
+      // tenant esté encendido (lo activa el Super Admin). Igual que una integración
+      // no conectada: se bloquea la publicación, no se falla en silencio al enviar.
+      const tmplNodes = nodes.filter((x) => x.type === "send_template");
+      if (tmplNodes.length > 0) {
+        const ent = await getTemplatesEntitlement(tx);
+        if (!ent.planAllows) {
+          throw new BadRequestException(
+            "El paso «Enviar plantilla WhatsApp» no está incluido en tu plan. Sube de plan para publicar este flujo.",
+          );
+        }
+        if (!ent.switchOn) {
+          throw new BadRequestException(
+            "El paso «Enviar plantilla WhatsApp» requiere activar los mensajes de plantilla en tu cuenta. Contáctanos para habilitarlos.",
+          );
+        }
+      }
+      for (const n of tmplNodes) {
         const templateId = String((n.config as any)?.templateId ?? "");
         if (!templateId) {
           throw new BadRequestException("El paso «Enviar plantilla WhatsApp» no tiene plantilla elegida. Selecciónala en el panel del paso.");
