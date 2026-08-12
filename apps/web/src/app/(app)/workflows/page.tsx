@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { MoreVertical, Search, Workflow as WorkflowIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, ConfirmDialog, EmptyState, Modal, PageHeader, StatusBadge, useToast, cn } from "@/components/ui";
-import { WORKFLOW_TEMPLATES, type WorkflowTemplate } from "@/lib/workflow-templates";
+import { templatesByIndustry, type WorkflowTemplate } from "@/lib/workflow-templates";
 
 interface WorkflowRow {
   id: string;
@@ -152,8 +152,8 @@ export default function WorkflowsPage() {
         <EmptyState
           icon={<WorkflowIcon size={28} />}
           title={query ? "Sin resultados" : "Aún no tienes flujos"}
-          description={query ? "Prueba con otro nombre." : "Crea tu primer flujo para automatizar respuestas y seguimientos."}
-          action={!query && <Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear workflow</Button>}
+          description={query ? "Prueba con otro nombre." : "Automatiza recordatorios, seguimientos y respuestas. Empieza con una plantilla lista para tu rubro y edítala a tu gusto."}
+          action={!query && <Button onClick={() => { setNewName(""); setCreateOpen(true); }}>Ver plantillas</Button>}
         />
       ) : (
         <div className="space-y-2">
@@ -184,21 +184,29 @@ export default function WorkflowsPage() {
           />
         </label>
 
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-medium text-ink-muted">Empieza desde una plantilla</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {WORKFLOW_TEMPLATES.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => void createFromTemplate(t)}
-                disabled={busy}
-                className="flex flex-col rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50"
-              >
-                <span className="text-sm font-medium text-ink">{t.name}</span>
-                <span className="mt-0.5 text-xs text-ink-muted">{t.description}</span>
-              </button>
-            ))}
-          </div>
+        <div className="mt-4 space-y-4">
+          <p className="text-xs font-medium text-ink-muted">Empieza desde una plantilla — la abres y la editas a tu gusto</p>
+          {templatesByIndustry().map(({ industry, items }) => (
+            <div key={industry}>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">{industry}</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {items.map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => void createFromTemplate(t)}
+                    disabled={busy}
+                    className="flex items-start gap-2.5 rounded-lg border border-line p-3 text-left hover:border-brand-300 hover:bg-brand-50 disabled:opacity-50 dark:hover:bg-brand-500/10"
+                  >
+                    <span className="text-lg leading-none" aria-hidden>{t.icon}</span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-ink">{t.name}</span>
+                      <span className="mt-0.5 block text-xs text-ink-muted">{t.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
