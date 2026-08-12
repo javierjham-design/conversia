@@ -425,6 +425,12 @@ export interface AgentTurnJob {
   conversationId: string;
 }
 
+/** Reintento de una ejecución de flujo fallida, desde el paso que falló. */
+export interface WorkflowRetryJob {
+  organizationId: string;
+  runId: string;
+}
+
 /** Trabajos de sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot). */
 export interface SyncJob {
   organizationId: string;

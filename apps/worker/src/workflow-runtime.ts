@@ -805,6 +805,36 @@ async function runWorkflowVersion(
   return { ok: true };
 }
 
+/**
+ * Reintenta una ejecución FALLIDA desde el paso que falló (`currentNodeId`).
+ * Vuelve a ejecutar con efectos REALES (envía, agenda, etc.). Idempotencia por
+ * paso `(runId, nodeId, attempt)` como en cualquier ejecución.
+ */
+export async function retryRun(organizationId: string, runId: string): Promise<void> {
+  const data = await withTenant(organizationId, async (tx) => {
+    const run = await tx.workflowRun.findUnique({ where: { id: runId } });
+    if (!run || run.status !== "FAILED" || !run.currentNodeId) return null;
+    const versionRow = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+    if (!versionRow) return null;
+    await tx.workflowRun.update({ where: { id: runId }, data: { status: "RUNNING", error: null } });
+    return { run, versionRow };
+  });
+  if (!data) return;
+  const parsed = workflowDefinitionSchema.safeParse(data.versionRow.definition);
+  if (!parsed.success) return;
+  const ctx: RunCtx = {
+    organizationId,
+    runId,
+    workflowId: data.run.workflowId,
+    versionId: data.run.versionId,
+    conversationId: data.run.conversationId ?? undefined,
+    contactId: data.run.contactId ?? undefined,
+    variables: (data.run.variables as Record<string, string>) ?? {},
+  };
+  const result = await executeFrom(deps, ctx, parsed.data, data.run.currentNodeId!);
+  await finishRun(organizationId, runId, result);
+}
+
 /** Horario de atención del negocio (default de recordatorios y del nodo horario). */
 async function loadOrgBusinessHours(tx: any, organizationId: string): Promise<{ bh: BusinessHoursConfig | null; timezone: string }> {
   const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true, settings: true } });

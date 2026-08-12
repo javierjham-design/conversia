@@ -13,6 +13,7 @@ import {
   type OutboundJob,
   type SyncJob,
   type WebhookDeliveryJob,
+  type WorkflowRetryJob,
 } from "@conversia/types";
 import type { NotifJob } from "@conversia/notifications";
 
@@ -30,6 +31,17 @@ export class QueueService implements OnModuleDestroy {
   readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
   readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
   readonly agentTurn = new Queue<AgentTurnJob>(QUEUE_NAMES.agentTurn, { connection: this.connection });
+  readonly workflowRetry = new Queue<WorkflowRetryJob>(QUEUE_NAMES.workflow, { connection: this.connection });
+
+  /** Reintenta una ejecución de flujo fallida desde el paso que falló (efectos reales). */
+  async enqueueWorkflowRetry(job: WorkflowRetryJob): Promise<void> {
+    await this.workflowRetry.add("retry", job, {
+      jobId: `retry:${job.runId}`, // coalesce doble clic; se remueve al completar
+      attempts: 1,
+      removeOnComplete: true,
+      removeOnFail: 500,
+    });
+  }
 
   /** Corre un turno del agente de IA para una conversación (p. ej. tras una indicación). */
   async enqueueAgentTurn(job: AgentTurnJob): Promise<void> {
@@ -66,6 +78,7 @@ export class QueueService implements OnModuleDestroy {
       this.emails.close(),
       this.notifications.close(),
       this.agentTurn.close(),
+      this.workflowRetry.close(),
     ]);
     this.connection.disconnect();
   }
