@@ -62,6 +62,7 @@ interface RunDetail {
   steps: { nodeId: string; nodeType: string; status: string; attempt: number; error: string | null; startedAt: string; finishedAt: string | null; durationMs: number | null; output: any }[];
   path: string[];
 }
+interface RetryPreview { canRetry: boolean; fromNodeType: string | null; templateSends: number; templates: { name: string; category: string; weight: number }[]; estimatedDebit: number; walletBalance: number; wouldExceed: boolean }
 
 // ── Canvas de recorrido (solo lectura): nodos por estado + camino resaltado ──
 function RunNode({ data }: NodeProps) {
@@ -122,6 +123,7 @@ export default function WorkflowRunsPage() {
   const [to, setTo] = useState("");
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [retryPreview, setRetryPreview] = useState<RetryPreview | null>(null);
 
   const load = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -151,13 +153,22 @@ export default function WorkflowRunsPage() {
     }
   }
 
+  async function openRetry() {
+    if (!detail) return;
+    try {
+      setRetryPreview(await api<RetryPreview>(`/workflows/${id}/runs/${detail.run.id}/retry-preview`));
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
+  }
+
   async function retry() {
     if (!detail) return;
-    if (!confirm("Reintentar esta ejecución desde el paso que falló ENVIARÁ mensajes/acciones reales (plantillas, eventos, etc.). ¿Continuar?")) return;
     setRetrying(true);
     try {
       await api(`/workflows/${id}/runs/${detail.run.id}/retry`, { method: "POST" });
       toast.push("Reintento encolado — se ejecuta en segundos.", "ok");
+      setRetryPreview(null);
       setDetail(null);
       setTimeout(() => void load(), 1500);
     } catch (e) {
@@ -261,7 +272,7 @@ export default function WorkflowRunsPage() {
               <span>Inicio: {fmtDate(detail.run.startedAt)}</span>
               <span>Duración: {fmtDur(detail.run.durationMs)}</span>
               {detail.run.status === "FAILED" && (
-                <Button variant="secondary" disabled={retrying} onClick={() => void retry()}><RefreshCw size={14} className="mr-1" /> Reintentar desde el paso que falló</Button>
+                <Button variant="secondary" disabled={retrying} onClick={() => void openRetry()}><RefreshCw size={14} className="mr-1" /> Reintentar desde el paso que falló</Button>
               )}
             </div>
             {detail.run.error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">⚠ {detail.run.error}</p>}
@@ -299,6 +310,48 @@ export default function WorkflowRunsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Confirmación del reintento: qué hará y qué costará */}
+      <Modal open={!!retryPreview} onClose={() => setRetryPreview(null)} title="Confirmar reintento">
+        {retryPreview && (
+          <div className="space-y-3 text-sm">
+            <p className="text-ink-muted">
+              El reintento retomará el flujo <b>desde el paso que falló</b>{retryPreview.fromNodeType ? <> (<b>{nodeLabel(retryPreview.fromNodeType)}</b>)</> : null} y <b>ejecuta acciones reales</b>.
+            </p>
+            <div className="rounded-lg border border-line bg-app p-3">
+              {retryPreview.templateSends === 0 ? (
+                <p className="text-ink-muted">No hay envíos de plantilla en el camino restante: <b>no descuenta bolsa</b>.</p>
+              ) : (
+                <>
+                  <p className="text-ink">
+                    Podría enviar hasta <b>{retryPreview.templateSends}</b> mensaje{retryPreview.templateSends > 1 ? "s" : ""} de plantilla ·
+                    descuento estimado de la bolsa: <b>{retryPreview.estimatedDebit}</b> crédito{retryPreview.estimatedDebit !== 1 ? "s" : ""} ·
+                    saldo actual: <b>{retryPreview.walletBalance}</b>.
+                  </p>
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-ink-muted">
+                    {retryPreview.templates.map((t, i) => (
+                      <li key={i}>· {t.name} <span className="text-ink-subtle">({t.category.toLowerCase()} · {t.weight} crédito{t.weight !== 1 ? "s" : ""})</span></li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 text-[11px] text-ink-subtle">Es una cota superior: el descuento real depende de las ramas que tome el flujo.</p>
+                  {retryPreview.wouldExceed && (
+                    <p className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                      ⚠ El descuento estimado supera tu saldo: algunos envíos podrían bloquearse por la bolsa.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <p className="text-[11px] text-ink-subtle">
+              El reintento pasa por las mismas <b>6 condiciones</b> del guard de mensajería (plan incluye plantillas → interruptor encendido → estado de la cuenta → tope diario → bolsa con saldo → fusible global); si alguna bloquea, ese envío no sale y queda registrado.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setRetryPreview(null)}>Cancelar</Button>
+              <Button disabled={retrying} onClick={() => void retry()}><RefreshCw size={14} className="mr-1" /> {retrying ? "Reintentando…" : "Reintentar"}</Button>
+            </div>
           </div>
         )}
       </Modal>
