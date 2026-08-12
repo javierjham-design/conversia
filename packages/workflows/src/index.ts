@@ -540,6 +540,41 @@ export async function executeFrom(
   return { status: "completed" };
 }
 
+export type StepResult =
+  | { status: "continue"; branch?: string; goto?: string; nextNodeId?: string }
+  | { status: "waiting"; nodeId: string }
+  | { status: "completed" }
+  | { status: "failed"; nodeId: string; error: string };
+
+/**
+ * Ejecuta UN solo nodo (probador paso a paso): aplica el efecto vía deps,
+ * persiste el step y devuelve la rama tomada + el siguiente nodo, sin avanzar el
+ * resto del flujo. No aplica los topes de nodos/saltos (eso es de executeFrom).
+ */
+export async function stepNode(deps: EngineDeps, ctx: RunCtx, def: WorkflowDefinition, nodeId: string): Promise<StepResult> {
+  const node = def.nodes.find((n) => n.id === nodeId);
+  if (!node) return { status: "failed", nodeId, error: `Nodo no encontrado: ${nodeId}` };
+  try {
+    const outcome = await executeNode(deps, ctx, node);
+    if (outcome.wait) {
+      await deps.scheduleTimer(ctx, node.id, outcome.wait, (node.config as any)?.cancelOn);
+      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: { waitUntil: outcome.wait.toISOString() } });
+      return { status: "waiting", nodeId: node.id };
+    }
+    await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: outcome.branch !== undefined ? { branch: outcome.branch } : outcome.goto ? { goto: outcome.goto } : undefined });
+    if (outcome.stop) return { status: "completed" };
+    if (outcome.goto !== undefined) {
+      if (!outcome.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
+      return { status: "continue", goto: outcome.goto, nextNodeId: outcome.goto };
+    }
+    return { status: "continue", branch: outcome.branch, nextNodeId: nextNodeId(def, node.id, outcome.branch) };
+  } catch (err) {
+    const message = (err as Error).message;
+    await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "FAILED", error: message });
+    return { status: "failed", nodeId: node.id, error: message };
+  }
+}
+
 /** Reanuda un run esperando en un nodo con ramas (p.ej. ai_objective
  *  multi-turno resuelto por respuesta del contacto o por timeout). */
 export async function resumeWithBranch(
