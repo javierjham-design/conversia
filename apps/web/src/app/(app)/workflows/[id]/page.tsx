@@ -9,6 +9,7 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
+  MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -17,6 +18,7 @@ import {
   reconnectEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -26,13 +28,13 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, CornerUpRight, Crosshair, FastForward, FileText, GitBranch, Megaphone, MessageSquare, MessageSquarePlus,
+  AlertTriangle, ArrowLeft, Bot, CalendarClock, Clock, Copy, CornerUpRight, Crosshair, FastForward, FileText, GitBranch, LayoutGrid, Megaphone, MessageSquare, MessageSquarePlus,
   Pause, Pencil, Play, PlayCircle, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, cn, useToast } from "@/components/ui";
 import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
-import { CATEGORIES, NODE_DEF, NODE_DEFS, type Category, type NodeDef } from "@/lib/workflow-catalog";
+import { CATEGORIES, NODE_DEF, NODE_DEFS, categoryMeta, type Category, type NodeDef } from "@/lib/workflow-catalog";
 
 // ---------------------------------------------------------------------------
 // Catálogo de nodos SOPORTADOS por el motor v0 (mismos que expone
@@ -69,11 +71,16 @@ interface EditorApi {
   select: (id: string | null) => void;
   addFrom: (parentId: string, branch?: string) => void;
   deleteEdge: (id: string) => void;
+  duplicateNode: (id: string) => void;
+  deleteNode: (id: string) => void;
+  toggleDisabled: (id: string) => void;
+  /** Estado de depuración del nodo cuando el probador está activo. */
+  debugNodeState: (id: string) => "current" | "done" | "failed" | null;
   catalog: Catalog | null;
   triggerType: string;
 }
 const EditorContext = createContext<EditorApi>({
-  selectedId: null, select: () => {}, addFrom: () => {}, deleteEdge: () => {}, catalog: null, triggerType: "",
+  selectedId: null, select: () => {}, addFrom: () => {}, deleteEdge: () => {}, duplicateNode: () => {}, deleteNode: () => {}, toggleDisabled: () => {}, debugNodeState: () => null, catalog: null, triggerType: "",
 });
 
 // ---- Conexión con botón para eliminarla (y su etiqueta de rama) ----
@@ -139,28 +146,54 @@ function TriggerNode() {
 
 // ---- Nodo de paso ----
 function StepNode({ id, data }: NodeProps) {
-  const { select, addFrom, selectedId } = useContext(EditorContext);
+  const { select, addFrom, selectedId, duplicateNode, deleteNode, toggleDisabled, debugNodeState } = useContext(EditorContext);
   const d = data as { nodeType: string; config: Record<string, any>; invalid?: string };
   const def = NODE_DEF(d.nodeType);
+  const meta = categoryMeta(d.nodeType);
   const selected = selectedId === id;
   const summary = nodeSummary(d.nodeType, d.config);
+  const disabled = d.config?.disabled === true;
+  const dbg = debugNodeState(id);
+  const [hover, setHover] = useState(false);
+
+  // Depuración > inválido > seleccionado > normal.
+  const border = dbg === "current" ? "border-brand-500 ring-2 ring-brand-300"
+    : dbg === "failed" ? "border-red-400 ring-2 ring-red-300"
+    : dbg === "done" ? "border-brand-400 bg-brand-soft"
+    : d.invalid ? "border-red-400 ring-1 ring-red-200"
+    : selected ? "border-brand-500" : "border-line hover:border-line-strong";
+
   return (
-    <div className="relative">
+    <div className="relative" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-line-strong !bg-panel" />
       <div
         onClick={() => select(id)}
         title={d.invalid ?? undefined}
-        className={cn(
-          "w-56 cursor-pointer rounded-xl border bg-panel px-3 py-2.5 shadow-card transition-colors",
-          d.invalid ? "border-red-400 ring-1 ring-red-200" : selected ? "border-brand-500" : "border-line hover:border-line-strong",
-        )}
+        className={cn("w-60 cursor-pointer overflow-hidden rounded-xl border bg-panel shadow-card transition-colors", border, disabled && "opacity-50")}
       >
-        <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
-          <span className="text-ink-subtle">{def?.icon}</span>
-          {def?.label ?? d.nodeType}
-        </p>
-        {summary && <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">{summary}</p>}
+        {/* Barra superior con el color de la categoría */}
+        <div className={cn("h-1 w-full", meta.bar)} />
+        <div className="flex items-start gap-2 px-3 py-2.5">
+          <span className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", meta.chip, meta.text)}>{def?.icon}</span>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
+              <span className="truncate">{def?.label ?? d.nodeType}</span>
+              {disabled && <span className="shrink-0 rounded bg-app px-1 text-[9px] uppercase text-ink-subtle">apagado</span>}
+            </p>
+            {summary && <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">{summary}</p>}
+          </div>
+          {d.invalid && <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-500" />}
+        </div>
       </div>
+
+      {/* Menú de acciones al pasar el mouse: duplicar / deshabilitar / eliminar */}
+      {hover && (
+        <div className="nodrag absolute -top-3 right-1 z-10 flex items-center gap-0.5 rounded-lg border border-line bg-panel px-1 py-0.5 shadow-pop">
+          <button onClick={(e) => { e.stopPropagation(); duplicateNode(id); }} title="Duplicar" className="rounded p-1 text-ink-subtle hover:bg-app hover:text-ink"><Copy size={12} /></button>
+          <button onClick={(e) => { e.stopPropagation(); toggleDisabled(id); }} title={disabled ? "Habilitar" : "Deshabilitar (se salta en la ejecución)"} className="rounded p-1 text-ink-subtle hover:bg-app hover:text-ink">{disabled ? <Play size={12} /> : <Pause size={12} />}</button>
+          <button onClick={(e) => { e.stopPropagation(); deleteNode(id); }} title="Eliminar" className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"><Trash2 size={12} /></button>
+        </div>
+      )}
 
       {def?.branches ? (
         <div className="flex justify-between px-2">
@@ -320,6 +353,7 @@ function Editor() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const { fitView } = useReactFlow();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [name, setName] = useState("");
@@ -416,6 +450,55 @@ function Editor() {
     },
     [snapshot, setEdges],
   );
+
+  // Acciones del nodo (menú al hover): duplicar, eliminar, deshabilitar.
+  const duplicateNode = useCallback((nodeId: string) => {
+    setNodes((ns) => {
+      const n = ns.find((x) => x.id === nodeId);
+      if (!n) return ns;
+      snapshot();
+      const newId = `n${Date.now().toString(36)}`;
+      const copy: Node = { ...n, id: newId, selected: false, position: { x: n.position.x + 40, y: n.position.y + 70 }, data: { ...(n.data as any), config: structuredClone((n.data as any).config ?? {}) } };
+      setSelectedId(newId);
+      return [...ns, copy];
+    });
+  }, [snapshot, setNodes]);
+
+  const toggleDisabled = useCallback((nodeId: string) => {
+    snapshot();
+    setNodes((ns) => ns.map((x) => {
+      if (x.id !== nodeId) return x;
+      const cfg = { ...((x.data as any).config ?? {}) };
+      cfg.disabled = !cfg.disabled;
+      if (!cfg.disabled) delete cfg.disabled; // habilitar = quitar la marca (config limpia)
+      return { ...x, data: { ...(x.data as any), config: cfg } };
+    }));
+  }, [snapshot, setNodes]);
+
+  // Auto-organizar: layout por capas (BFS desde el disparador siguiendo las aristas).
+  const autoLayout = useCallback(() => {
+    snapshot();
+    const adj = new Map<string, string[]>();
+    for (const e of edges) { const a = adj.get(e.source) ?? []; a.push(e.target); adj.set(e.source, a); }
+    const depth = new Map<string, number>();
+    const roots = nodes.filter((n) => !edges.some((e) => e.target === n.id)).map((n) => n.id);
+    const queue = roots.map((id) => ({ id, d: 0 }));
+    const seen = new Set<string>();
+    while (queue.length) {
+      const { id, d } = queue.shift()!;
+      depth.set(id, Math.max(depth.get(id) ?? 0, d));
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const to of adj.get(id) ?? []) queue.push({ id: to, d: d + 1 });
+    }
+    const byDepth = new Map<number, string[]>();
+    for (const n of nodes) { const d = depth.get(n.id) ?? 0; const a = byDepth.get(d) ?? []; a.push(n.id); byDepth.set(d, a); }
+    const pos = new Map<string, { x: number; y: number }>();
+    const COL = 270, ROW = 150, X0 = 300;
+    for (const [d, ids] of byDepth) ids.forEach((id, i) => pos.set(id, { x: X0 + (i - (ids.length - 1) / 2) * COL, y: 20 + d * ROW }));
+    setNodes((ns) => ns.map((n) => (pos.has(n.id) ? { ...n, position: pos.get(n.id)! } : n)));
+    window.requestAnimationFrame(() => fitView({ padding: 0.2, duration: 300 }));
+  }, [nodes, edges, snapshot, setNodes, fitView]);
 
   // Reconectar: arrastrar un extremo de la conexión a otro nodo (recablear sin borrar/rehacer).
   const onReconnect = useCallback(
@@ -617,8 +700,8 @@ function Editor() {
   }, [simState, simBusy]);
 
   const editorApi = useMemo<EditorApi>(
-    () => ({ selectedId, select: setSelectedId, addFrom, deleteEdge, catalog, triggerType: trigger.type }),
-    [selectedId, addFrom, deleteEdge, catalog, trigger.type],
+    () => ({ selectedId, select: setSelectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, debugNodeState: () => null, catalog, triggerType: trigger.type }),
+    [selectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, catalog, trigger.type],
   );
 
   const selectedNode = nodes.find((n) => n.id === selectedId && n.id !== TRIGGER_NODE_ID);
@@ -676,6 +759,7 @@ function Editor() {
             <button onClick={undo} disabled={!history.current.past.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Deshacer"><Undo2 size={16} /></button>
             <button onClick={redo} disabled={!history.current.future.length} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Rehacer"><Redo2 size={16} /></button>
             <span className="mx-1 h-5 w-px bg-line" />
+            <button onClick={autoLayout} disabled={busy} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Auto-organizar el diagrama"><LayoutGrid size={16} /></button>
             <Button variant="secondary" onClick={() => router.push(`/workflows/${id}/runs`)} disabled={busy}>Ejecuciones</Button>
             <Button variant="secondary" onClick={() => { setSimState(null); setReplyText(""); setTestOpen(true); }} disabled={busy}>Probar</Button>
             <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy}>Guardar</Button>
@@ -719,6 +803,14 @@ function Editor() {
             >
               <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#cbd5e1" />
               <Controls showInteractive={false} />
+              <MiniMap
+                pannable
+                zoomable
+                className="!bg-panel"
+                maskColor="rgba(100,116,139,0.15)"
+                nodeColor={(n) => (n.id === TRIGGER_NODE_ID ? "#2563eb" : "#94a3b8")}
+                nodeStrokeWidth={0}
+              />
             </ReactFlow>
           </div>
 

@@ -287,6 +287,7 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
   const withIncoming = new Set((def.edges ?? []).map((e) => e.to));
   for (const n of nodes) {
     const c = (n.config ?? {}) as Record<string, unknown>;
+    if (c.disabled === true) continue; // paso apagado: no se ejecuta → no se valida ni bloquea la publicación
     if (start && n.id !== start.id && !withIncoming.has(n.id)) {
       push(n.id, "unconnected", "Este paso no está conectado a ningún otro: nunca se ejecutará.");
     }
@@ -362,6 +363,9 @@ async function executeNode(
   node: WorkflowNode,
 ): Promise<{ branch?: string; wait?: Date; stop?: boolean; goto?: string }> {
   const cfg = node.config as Record<string, any>;
+  // Nodo deshabilitado (apagado en el editor): se salta sin efecto y continúa por
+  // la arista por defecto (sin rama). Sirve para depurar sin borrar el paso.
+  if (cfg?.disabled === true) return {};
   switch (node.type) {
     case "send_text":
       await deps.sendText(ctx, renderVars(String(cfg.text ?? ""), ctx.variables));

@@ -273,6 +273,18 @@ describe("Bloque 1 — casos borde", () => {
     expect(r).toEqual({ status: "completed" });
   });
 
+  it("nodo deshabilitado (config.disabled): se salta sin efecto y continúa al siguiente", async () => {
+    const { deps, calls } = makeDeps();
+    const flow = linear([
+      { id: "a", type: "add_tag", config: { tag: "ini" } },
+      { id: "b", type: "send_text", config: { text: "no debería enviarse", disabled: true } },
+      { id: "c", type: "add_tag", config: { tag: "fin" } },
+      { id: "z", type: "stop", config: {} },
+    ]);
+    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(calls).toEqual(["tag:ini", "tag:fin"]); // el send_text deshabilitado no corrió
+  });
+
   it("contacto sin datos: las variables faltantes se renderizan como vacío y el flujo no rompe", async () => {
     const { deps, calls } = makeDeps();
     const c: RunCtx = { ...ctx(), variables: {} }; // sin ninguna variable
