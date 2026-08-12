@@ -33,12 +33,19 @@ import { planAppointmentReminder, type BusinessHoursConfig } from "./appointment
  */
 async function ensureConversationForContact(organizationId: string, contactId: string): Promise<string | null> {
   return withTenant(organizationId, async (tx) => {
+    // Con historial: reutiliza la conversación abierta → sale por el MISMO número
+    // con el que el contacto ya habló.
     const existing = await tx.conversation.findFirst({
       where: { contactId, status: { not: "CLOSED" } },
       orderBy: { lastMessageAt: "desc" },
     });
     if (existing) return existing.id;
-    const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
+    // Sin historial (caso común de cita nacida en Cláriva): sale por el número por
+    // defecto que fijó el tenant en Configuración; si no configuró, el primero activo.
+    const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const defaultId = ((org?.settings as any)?.messaging?.defaultReminderChannelId as string | undefined) ?? null;
+    let channel = defaultId ? await tx.channelConnection.findFirst({ where: { id: defaultId, status: "active" } }) : null;
+    if (!channel) channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
     const created = await tx.conversation.create({
       data: {
         organizationId,
