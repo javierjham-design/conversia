@@ -310,10 +310,17 @@ interface LiveSimEvt {
 }
 interface LiveSim {
   log: LiveSimEvt[];
-  status: "waiting" | "agent_chat" | "done" | "failed";
+  status: "waiting" | "agent_chat" | "stepping" | "done" | "failed";
   waiting: { label: string; cancelOnReply: boolean } | null;
   objective: { objective: string } | null;
   error?: string | null;
+  // Paso a paso
+  cursor?: string | null;
+  executed?: string[];
+  failedNodeId?: string | null;
+  variables?: Record<string, string>;
+  varsBefore?: Record<string, string>;
+  lastStep?: { nodeId: string; nodeType: string; branch: string | null } | null;
 }
 
 /** Una línea del transcript del simulador. */
@@ -332,6 +339,70 @@ function SimBubble({ e }: { e: LiveSimEvt }) {
   if (e.kind === "action") return <p className="text-center text-[11px] text-ink-subtle">⚙ {e.label}: {e.detail}</p>;
   if (e.kind === "end") return <p className="text-center text-xs font-medium text-emerald-600 dark:text-emerald-400">{e.text}</p>;
   return <p className="text-center text-[11px] italic text-ink-subtle">{e.text}</p>;
+}
+
+/** Panel lateral de depuración paso a paso (el nodo en curso se resalta en el canvas). */
+function DebugPanel({ dbg, busy, contact, setContact, reply, setReply, onNext, onAdvance, onReply, onReset, onClose }: {
+  dbg: LiveSim; busy: boolean; contact: string; setContact: (s: string) => void; reply: string; setReply: (s: string) => void;
+  onNext: () => void; onAdvance: () => void; onReply: () => void; onReset: () => void; onClose: () => void;
+}) {
+  const vars = dbg.variables ?? {};
+  const before = dbg.varsBefore ?? {};
+  const changed = (k: string) => dbg.varsBefore !== undefined && before[k] !== vars[k];
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-ink">Depurar paso a paso</p>
+          <p className="text-[11px] text-ink-subtle">El nodo en curso se resalta en el canvas. No envía nada real.</p>
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1.5 text-ink-subtle hover:bg-app" title="Cerrar depuración"><XCircle size={16} /></button>
+      </div>
+      <div className="space-y-3 p-4">
+        <label className="block text-xs text-ink-muted">Contacto de prueba (ficticio)
+          <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Prueba" className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          {dbg.status === "stepping" && <Button onClick={onNext} disabled={busy}><FastForward size={14} className="mr-1" /> Siguiente paso</Button>}
+          {dbg.status === "waiting" && <Button variant="secondary" onClick={onAdvance} disabled={busy}><Clock size={14} className="mr-1" /> Adelantar el tiempo</Button>}
+          <Button variant="secondary" onClick={onReset} disabled={busy}>Reiniciar</Button>
+        </div>
+        {dbg.status === "waiting" && (
+          <div className="flex items-end gap-2">
+            <input value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && reply.trim() && !busy) onReply(); }} placeholder="Responder como el contacto…" className="flex-1 rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+            <Button onClick={onReply} disabled={busy || !reply.trim()}><Send size={14} /></Button>
+          </div>
+        )}
+        {dbg.status === "done" && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">✅ Fin del flujo. Reinicia para volver a correr.</p>}
+        {dbg.status === "failed" && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">⚠ {dbg.error}</p>}
+
+        {dbg.lastStep && (
+          <div className="rounded-lg border border-line bg-app p-2 text-xs">
+            <p className="font-medium text-ink">Último paso: {NODE_DEF(dbg.lastStep.nodeType)?.label ?? dbg.lastStep.nodeType}</p>
+            {dbg.lastStep.branch && <p className="text-ink-subtle">Rama tomada: <b>{dbg.lastStep.branch}</b></p>}
+          </div>
+        )}
+
+        <div>
+          <p className="mb-1 text-xs font-medium text-ink">Variables {dbg.varsBefore !== undefined && <span className="font-normal text-ink-subtle">(cambios resaltados)</span>}</p>
+          <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-line p-2">
+            {Object.entries(vars).map(([k, v]) => (
+              <p key={k} className={cn("truncate font-mono text-[10px]", changed(k) ? "font-semibold text-brand-600 dark:text-brand-300" : "text-ink-muted")}>
+                <b>{k}</b>: {String(v).slice(0, 60)}{changed(k) ? " ←" : ""}
+              </p>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1 text-xs font-medium text-ink">Recorrido y efectos (lo que haría)</p>
+          <div className="max-h-56 space-y-1 overflow-y-auto">
+            {dbg.log.map((e, i) => <SimBubble key={i} e={e} />)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -367,6 +438,10 @@ function Editor() {
   const [simBusy, setSimBusy] = useState(false);
   const [replyText, setReplyText] = useState("");
   const simLogRef = useRef<HTMLDivElement | null>(null);
+  // Depuración paso a paso SOBRE el canvas (panel lateral + resaltado de nodos).
+  const [dbg, setDbg] = useState<LiveSim | null>(null);
+  const [dbgBusy, setDbgBusy] = useState(false);
+  const [dbgReply, setDbgReply] = useState("");
   // Problemas de validación (servidor): mensajes que apuntan al disparador y
   // aviso del flujo YA publicado que hoy no pasaría la validación.
   const [triggerIssues, setTriggerIssues] = useState<string[]>([]);
@@ -693,6 +768,37 @@ function Editor() {
     }
   }
 
+  // ── Depuración paso a paso sobre el canvas ──
+  async function dbgAction(action: { type: "start" | "next" | "advance" | "reply"; text?: string; mode?: "run" | "step" }) {
+    setDbgBusy(true);
+    try {
+      const r = await api<{ state: LiveSim }>(`/workflows/${id}/test/live`, {
+        method: "POST",
+        body: JSON.stringify({
+          definition: flowToDef(nodes, edges, trigger),
+          contact: { firstName: testContact || null },
+          state: action.type === "start" ? null : dbg,
+          action,
+        }),
+      });
+      setDbg(r.state);
+      if (action.type === "reply") setDbgReply("");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setDbgBusy(false);
+    }
+  }
+  const startDebug = () => { setTestOpen(false); void dbgAction({ type: "start", mode: "step" }); };
+  const closeDebug = () => { setDbg(null); setDbgReply(""); };
+  const debugNodeState = useCallback((nodeId: string): "current" | "done" | "failed" | null => {
+    if (!dbg) return null;
+    if (dbg.failedNodeId === nodeId) return "failed";
+    if (dbg.cursor === nodeId) return "current";
+    if (dbg.executed?.includes(nodeId)) return "done";
+    return null;
+  }, [dbg]);
+
   // Auto-scroll del transcript al último evento.
   useEffect(() => {
     const el = simLogRef.current;
@@ -700,8 +806,8 @@ function Editor() {
   }, [simState, simBusy]);
 
   const editorApi = useMemo<EditorApi>(
-    () => ({ selectedId, select: setSelectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, debugNodeState: () => null, catalog, triggerType: trigger.type }),
-    [selectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, catalog, trigger.type],
+    () => ({ selectedId, select: setSelectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, debugNodeState, catalog, triggerType: trigger.type }),
+    [selectedId, addFrom, deleteEdge, duplicateNode, deleteNode, toggleDisabled, debugNodeState, catalog, trigger.type],
   );
 
   const selectedNode = nodes.find((n) => n.id === selectedId && n.id !== TRIGGER_NODE_ID);
@@ -761,6 +867,7 @@ function Editor() {
             <span className="mx-1 h-5 w-px bg-line" />
             <button onClick={autoLayout} disabled={busy} className="rounded-lg p-1.5 text-ink-muted hover:bg-app disabled:opacity-30" title="Auto-organizar el diagrama"><LayoutGrid size={16} /></button>
             <Button variant="secondary" onClick={() => router.push(`/workflows/${id}/runs`)} disabled={busy}>Ejecuciones</Button>
+            <Button variant="secondary" onClick={startDebug} disabled={busy || dbgBusy}>Depurar</Button>
             <Button variant="secondary" onClick={() => { setSimState(null); setReplyText(""); setTestOpen(true); }} disabled={busy}>Probar</Button>
             <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy}>Guardar</Button>
             <Button onClick={() => void publish()} disabled={busy}>Publicar</Button>
@@ -815,7 +922,21 @@ function Editor() {
           </div>
 
           <aside className="w-96 shrink-0 overflow-y-auto border-l border-line bg-panel">
-            {selectedId === TRIGGER_NODE_ID ? (
+            {dbg ? (
+              <DebugPanel
+                dbg={dbg}
+                busy={dbgBusy}
+                contact={testContact}
+                setContact={setTestContact}
+                reply={dbgReply}
+                setReply={setDbgReply}
+                onNext={() => void dbgAction({ type: "next" })}
+                onAdvance={() => void dbgAction({ type: "advance" })}
+                onReply={() => { if (dbgReply.trim()) void dbgAction({ type: "reply", text: dbgReply.trim() }); }}
+                onReset={() => void dbgAction({ type: "start", mode: "step" })}
+                onClose={closeDebug}
+              />
+            ) : selectedId === TRIGGER_NODE_ID ? (
               <TriggerPanel catalog={catalog} trigger={trigger} onChange={setTrigger} issues={triggerIssues} />
             ) : selectedNode ? (
               <NodePanel

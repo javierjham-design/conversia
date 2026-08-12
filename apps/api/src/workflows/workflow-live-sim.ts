@@ -11,8 +11,10 @@ import { getEnv } from "@conversia/config";
 import {
   executeFrom,
   findStartNode,
+  nextNodeId,
   resumeAfterWait,
   resumeWithBranch,
+  stepNode,
   type EngineDeps,
   type EngineResult,
   type RunCtx,
@@ -68,8 +70,9 @@ export interface SimObjective {
 }
 
 /** "waiting": el flujo está en una espera. "agent_chat": el agente activo quedó
- *  a cargo y el contacto puede seguir conversando. "done"/"failed": terminó. */
-export type SimStatus = "waiting" | "agent_chat" | "done" | "failed";
+ *  a cargo y el contacto puede seguir conversando. "stepping": modo paso a paso,
+ *  esperando "siguiente". "done"/"failed": terminó. */
+export type SimStatus = "waiting" | "agent_chat" | "stepping" | "done" | "failed";
 
 export interface LiveSimState {
   variables: Record<string, string>;
@@ -84,13 +87,21 @@ export interface LiveSimState {
   waiting: SimWaiting | null;
   objective: SimObjective | null;
   error?: string | null;
+  // ── Paso a paso (probador sobre el canvas) ──
+  mode?: "run" | "step";
+  cursor?: string | null; // próximo nodo a ejecutar en modo paso a paso
+  executed?: string[]; // nodos ya ejecutados (para resaltar en el canvas)
+  failedNodeId?: string | null; // nodo que falló (resaltado en rojo)
+  varsBefore?: Record<string, string>; // variables ANTES del último paso (inspector)
+  lastStep?: { nodeId: string; nodeType: string; branch: string | null } | null;
   /** Transitorio: la config "pending" de un ai_objective; se consume en el mismo paso. */
   _pending?: SimObjective;
 }
 
 export interface SimActionInput {
-  type: "start" | "advance" | "reply";
+  type: "start" | "advance" | "reply" | "next";
   text?: string;
+  mode?: "run" | "step";
 }
 
 function describeWait(cfg: Record<string, any>): string {
@@ -535,7 +546,18 @@ export async function stepWorkflowSim(
       status: "done",
       waiting: null,
       objective: null,
+      mode: opts.action.mode ?? "run",
+      executed: [],
+      failedNodeId: null,
     };
+    // Modo paso a paso: NO ejecuta; deja el cursor en el primer nodo listo para "siguiente".
+    if (opts.action.mode === "step") {
+      const start = findStartNode(def);
+      state.cursor = start?.id ?? null;
+      state.status = state.cursor ? "stepping" : "done";
+      state.log.push({ kind: "info", text: "▶ Modo paso a paso: pulsa «Siguiente» para ejecutar un paso a la vez." });
+      return state;
+    }
     await runEngine(orgId, def, state, { kind: "start" });
     delete state._pending;
     return state;
@@ -543,6 +565,73 @@ export async function stepWorkflowSim(
 
   const state = opts.state;
   const action = opts.action;
+
+  // ══════════════ Modo PASO A PASO (probador sobre el canvas) ══════════════
+  if (state.mode === "step") {
+    if (action.type === "next" && state.cursor) {
+      const deps = makeSimDeps(orgId, state);
+      const ctx: RunCtx = { organizationId: orgId, runId: "sim", workflowId: "sim", versionId: "sim", conversationId: "sandbox", contactId: "sandbox", variables: state.variables };
+      const nodeId = state.cursor;
+      const node = def.nodes.find((n) => n.id === nodeId);
+      state.varsBefore = { ...state.variables };
+      let result: Awaited<ReturnType<typeof stepNode>>;
+      try {
+        result = await stepNode(deps, ctx, def, nodeId);
+      } catch (e) {
+        result = { status: "failed", nodeId, error: (e as Error).message };
+      }
+      state.variables = ctx.variables;
+      state.executed = [...(state.executed ?? []), nodeId];
+      state.lastStep = { nodeId, nodeType: node?.type ?? "", branch: result.status === "continue" ? result.branch ?? null : null };
+      if (result.status === "failed") {
+        state.failedNodeId = nodeId;
+        state.status = "failed";
+        state.cursor = null;
+        state.error = result.error;
+        state.log.push({ kind: "info", text: `⚠ Falló en «${node?.type ?? nodeId}»: ${result.error}` });
+      } else if (result.status === "waiting") {
+        const cfg = (node?.config ?? {}) as Record<string, any>;
+        const label = describeWait(cfg);
+        state.waiting = node?.type === "wait_reply"
+          ? { nodeId, label, dueAtMs: Date.now(), cancelOnReply: false, kind: "wait_reply" }
+          : { nodeId, label, dueAtMs: Date.now(), cancelOnReply: cfg.cancelOn === "contact_reply", kind: "wait" };
+        state.status = "waiting";
+        state.cursor = null;
+        state.log.push({ kind: "wait", text: node?.type === "wait_reply" ? `⏳ Esperando respuesta (hasta ${label}). Responde o adelanta el tiempo.` : `⏳ Espera de ${label}.` });
+      } else if (result.status === "completed") {
+        state.status = "done";
+        state.cursor = null;
+        state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+      } else {
+        state.cursor = result.nextNodeId ?? null;
+        state.status = state.cursor ? "stepping" : "done";
+        if (!state.cursor) state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+      }
+    } else if (action.type === "advance" && state.status === "waiting" && state.waiting) {
+      const w = state.waiting;
+      state.waiting = null;
+      state.cursor = (w.kind === "wait_reply" ? nextNodeId(def, w.nodeId, "no_reply") : nextNodeId(def, w.nodeId)) ?? null;
+      state.log.push({ kind: "info", text: w.kind === "wait_reply" ? "⏭️ Sin respuesta → rama «No respondió»." : "⏭️ Adelantaste el tiempo." });
+      state.status = state.cursor ? "stepping" : "done";
+      if (!state.cursor) state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+    } else if (action.type === "reply" && state.status === "waiting" && state.waiting) {
+      const text = (action.text ?? "").trim();
+      if (text) { state.replied = true; state.transcript.push({ role: "user", content: text }); state.log.push({ kind: "message", from: "contact", text }); }
+      const w = state.waiting;
+      state.waiting = null;
+      if (w.kind === "wait_reply") {
+        state.cursor = nextNodeId(def, w.nodeId, "replied") ?? null;
+        state.log.push({ kind: "info", text: "✅ Respondió → rama «Sí, respondió»." });
+      } else {
+        state.cursor = w.cancelOnReply ? null : (nextNodeId(def, w.nodeId) ?? null);
+        if (w.cancelOnReply) state.log.push({ kind: "info", text: "✋ La espera se canceló por la respuesta." });
+      }
+      state.status = state.cursor ? "stepping" : "done";
+      if (!state.cursor) state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+    }
+    delete state._pending;
+    return state;
+  }
 
   // ----- Adelantar el tiempo / timeout -----
   if (action.type === "advance") {
