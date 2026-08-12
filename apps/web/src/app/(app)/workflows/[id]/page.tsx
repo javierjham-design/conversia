@@ -5,17 +5,22 @@ import { useParams, useRouter } from "next/navigation";
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   Position,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
+  getBezierPath,
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   type Connection,
   type Edge,
   type EdgeChange,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -127,12 +132,49 @@ interface EditorApi {
   selectedId: string | null;
   select: (id: string | null) => void;
   addFrom: (parentId: string, branch?: string) => void;
+  deleteEdge: (id: string) => void;
   catalog: Catalog | null;
   triggerType: string;
 }
 const EditorContext = createContext<EditorApi>({
-  selectedId: null, select: () => {}, addFrom: () => {}, catalog: null, triggerType: "",
+  selectedId: null, select: () => {}, addFrom: () => {}, deleteEdge: () => {}, catalog: null, triggerType: "",
 });
+
+// ---- Conexión con botón para eliminarla (y su etiqueta de rama) ----
+// Cada conexión trae una "×" para borrar SOLO esa arista, sin desarmar el resto
+// del flujo. Se oculta en la del disparador y en las de "saltar" (no editables).
+function DeletableEdge({ id, source, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, label, labelStyle }: EdgeProps) {
+  const { deleteEdge } = useContext(EditorContext);
+  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  const canDelete = source !== TRIGGER_NODE_ID && !id.startsWith("goto:");
+  return (
+    <>
+      <BaseEdge id={id} path={edgePath} style={style} markerEnd={markerEnd} />
+      <EdgeLabelRenderer>
+        {label && (
+          <div
+            style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY - 12}px)`, ...(labelStyle as React.CSSProperties), pointerEvents: "none" }}
+            className="rounded bg-app px-1 text-[10px]"
+          >
+            {label}
+          </div>
+        )}
+        {canDelete && (
+          <button
+            type="button"
+            className="nodrag nopan flex h-5 w-5 items-center justify-center rounded-full border border-line bg-panel text-[13px] leading-none text-ink-subtle opacity-60 shadow-sm transition hover:border-red-300 hover:text-red-500 hover:opacity-100"
+            style={{ position: "absolute", transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`, pointerEvents: "all" }}
+            title="Eliminar esta conexión"
+            onClick={(e) => { e.stopPropagation(); deleteEdge(id); }}
+          >
+            ×
+          </button>
+        )}
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+const edgeTypes = { deletable: DeletableEdge };
 
 // ---- Nodo Trigger (inicio) ----
 function TriggerNode() {
@@ -422,6 +464,26 @@ function Editor() {
     [snapshot, setEdges],
   );
 
+  // Eliminar UNA conexión (botón × del edge) sin desarmar el resto del flujo.
+  const deleteEdge = useCallback(
+    (id: string) => {
+      if (id.startsWith("goto:")) return; // las de "saltar" se quitan cambiando el nodo
+      snapshot();
+      setEdges((eds) => eds.filter((e) => e.id !== id));
+    },
+    [snapshot, setEdges],
+  );
+
+  // Reconectar: arrastrar un extremo de la conexión a otro nodo (recablear sin borrar/rehacer).
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConn: Connection) => {
+      if (newConn.source === newConn.target) return;
+      snapshot();
+      setEdges((eds) => reconnectEdge(oldEdge, newConn, eds));
+    },
+    [snapshot, setEdges],
+  );
+
   const addFrom = useCallback((parentId: string, branch?: string) => setAddFromState({ parentId, branch }), []);
 
   const createNode = useCallback(
@@ -611,8 +673,8 @@ function Editor() {
   }, [simState, simBusy]);
 
   const editorApi = useMemo<EditorApi>(
-    () => ({ selectedId, select: setSelectedId, addFrom, catalog, triggerType: trigger.type }),
-    [selectedId, addFrom, catalog, trigger.type],
+    () => ({ selectedId, select: setSelectedId, addFrom, deleteEdge, catalog, triggerType: trigger.type }),
+    [selectedId, addFrom, deleteEdge, catalog, trigger.type],
   );
 
   const selectedNode = nodes.find((n) => n.id === selectedId && n.id !== TRIGGER_NODE_ID);
@@ -623,11 +685,13 @@ function Editor() {
       .filter((n) => (n.data as any).nodeType === "goto" && (n.data as any).config?.targetNodeId)
       .map((n) => ({
         id: `goto:${n.id}`,
+        type: "default", // arista integrada (animada); no usa el edge con "×"
         source: n.id,
         target: (n.data as any).config.targetNodeId,
         animated: true,
         selectable: false,
         deletable: false,
+        reconnectable: false,
         style: { stroke: "#a855f7", strokeDasharray: "5 5" },
         label: "saltar",
         labelStyle: { fontSize: 10, fill: "#a855f7" },
@@ -699,12 +763,14 @@ function Editor() {
               onNodesChange={onNodesChange}
               onEdgesChange={handleEdgesChange}
               onConnect={onConnect}
+              onReconnect={onReconnect}
               onNodeDragStart={snapshot}
               onPaneClick={() => setSelectedId(null)}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               proOptions={{ hideAttribution: true }}
-              defaultEdgeOptions={{ style: { stroke: "#94a3b8" } }}
+              defaultEdgeOptions={{ type: "deletable", style: { stroke: "#94a3b8" } }}
             >
               <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#cbd5e1" />
               <Controls showInteractive={false} />
