@@ -58,6 +58,7 @@ const TRIGGER_CATALOG = [
   { type: "appointment_cancelled", label: "Cita cancelada", description: "Al cancelarse una cita — cancela el recordatorio pendiente" },
   { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita; respeta el horario de atención", conditions: ["hoursBefore"] },
   { type: "manual", label: "Disparo manual", description: "Se ejecuta a mano desde la bandeja o la lista de contactos" },
+  { type: "link_scan", label: "Enlace / Código QR", description: "Genera un enlace (y QR) con un mensaje predefinido; al enviarlo, arranca este flujo. Para carteles, redes o el local.", conditions: ["code"] },
   // Próximamente (estructura lista; falta la fuente del evento):
   { type: "missed_call", label: "Llamada perdida", description: "Llamada de WhatsApp no contestada (requiere eventos de llamada)", soon: true },
   { type: "tiktok_ad", label: "Anuncios de mensajería TikTok", description: "Mensaje desde un anuncio de TikTok (requiere canal TikTok)", soon: true },
@@ -193,8 +194,15 @@ export class WorkflowsController {
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
       const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
       const tmplEnt = await getTemplatesEntitlement(tx);
+      // Número de WhatsApp del tenant: para armar el enlace/QR del disparador
+      // «Enlace / Código QR» (wa.me/<número>?text=…). Se toma el primer número activo.
+      const waNumber = await tx.whatsappPhoneNumber.findFirst({
+        where: { status: "active" },
+        select: { displayPhone: true },
+      });
       return {
         triggers: TRIGGER_CATALOG,
+        waPhone: waNumber?.displayPhone ?? null,
         leadStatuses: statuses,
         appointmentFilters,
         agents,

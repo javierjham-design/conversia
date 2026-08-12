@@ -29,6 +29,10 @@ describe("triggerPreview — lenguaje natural del disparador", () => {
   it("recordatorio con horas", () => {
     expect(triggerPreview("appointment_upcoming", { hoursBefore: 2 })).toMatch(/faltan 2 horas/);
   });
+  it("enlace/QR con y sin código", () => {
+    expect(triggerPreview("link_scan", { code: "promo-x" })).toMatch(/«promo-x»/);
+    expect(triggerPreview("link_scan", {})).toMatch(/falta generar el código/);
+  });
   it("tipo desconocido no rompe", () => {
     expect(triggerPreview("algo_raro")).toBe("ocurre el evento configurado.");
   });

@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, type EngineDeps, type RunCtx } from "./index.js";
+import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, type EngineDeps, type RunCtx } from "./index.js";
 
 /** Deps de grabación: apunta cada efecto y sus datos; configurable por escenario. */
 function makeDeps(overrides: Partial<EngineDeps> & { objective?: "met" | "unmet" | "pending"; httpVars?: Record<string, string> } = {}) {
@@ -494,5 +494,27 @@ describe("Conflictos de disparadores (aviso al publicar)", () => {
   });
   it("click-to-chat: selecciones disjuntas no chocan", () => {
     expect(triggersMayOverlap(T("click_to_chat", { mode: "selected", adIds: ["1"] }), T("click_to_chat", { mode: "selected", adIds: ["2"] }))).toBe(false);
+  });
+  it("enlace/QR: mismo código choca, distinto no", () => {
+    expect(triggersMayOverlap(T("link_scan", { code: "promo-x" }), T("link_scan", { code: "PROMO-X" }))).toBe(true);
+    expect(triggersMayOverlap(T("link_scan", { code: "promo-x" }), T("link_scan", { code: "otra" }))).toBe(false);
+  });
+});
+
+describe("Disparador de enlace / QR (link_scan)", () => {
+  const ev = (text: string): any => ({ type: "message_received", organizationId: "o", data: { text } });
+  const def = (code: string): WorkflowDefinition => ({ trigger: { type: "link_scan", config: { code } }, variables: {}, nodes: [], edges: [] });
+
+  it("dispara cuando el mensaje contiene el código", () => {
+    expect(matchesTrigger(def("promo-implantes"), ev("Hola, quiero info 🦷 [promo-implantes]"))).toBe(true);
+  });
+  it("no dispara con otro texto", () => {
+    expect(matchesTrigger(def("promo-implantes"), ev("hola buenas"))).toBe(false);
+  });
+  it("sin código configurado no dispara", () => {
+    expect(matchesTrigger(def(""), ev("cualquier cosa [x]"))).toBe(false);
+  });
+  it("solo reacciona a message_received", () => {
+    expect(matchesTrigger(def("x"), { type: "conversation_started", organizationId: "o", data: {} } as any)).toBe(false);
   });
 });

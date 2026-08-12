@@ -302,6 +302,7 @@ export const TRIGGER_TYPES = [
   "appointment_rescheduled",
   "missed_call",
   "tiktok_ad",
+  "link_scan",
 ] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
