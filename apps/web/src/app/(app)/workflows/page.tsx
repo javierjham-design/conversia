@@ -37,6 +37,31 @@ const TRIGGER_LABELS: Record<string, string> = {
   appointment_upcoming: "Cita próxima",
 };
 
+const ONBOARDING_KEY = "conversia.workflows.onboarded";
+
+const ONBOARDING_STEPS: { icon: string; title: string; body: string }[] = [
+  {
+    icon: "⚡",
+    title: "¿Qué es un flujo de trabajo?",
+    body: "Una automatización que reacciona sola a algo que pasa —un mensaje nuevo, una cita, una etiqueta— y ejecuta una serie de pasos sin que tengas que estar tú. Ideal para bienvenidas, seguimientos y recordatorios.",
+  },
+  {
+    icon: "🎯",
+    title: "El disparador decide CUÁNDO arranca",
+    body: "Lo eliges en el panel del disparador. Ahí mismo verás, en palabras, «Se activará cuando…» y podrás probarlo con un mensaje de ejemplo. Si otro flujo ya reacciona a lo mismo, te avisamos para que no choquen.",
+  },
+  {
+    icon: "🧩",
+    title: "Los pasos son lo que el flujo HACE",
+    body: "Enviar un mensaje (con variables como el nombre del contacto), esperar, ramificar según si el contacto responde, escalar a una persona o dejar que responda la IA. Los encadenas arrastrando en el lienzo.",
+  },
+  {
+    icon: "🚀",
+    title: "Pruébalo y publícalo con red",
+    body: "Antes de publicar, usa «Depurar» para recorrerlo paso a paso con un contacto de prueba. Cuando publiques queda activo; y si un flujo falla en producción, te llega una alerta para que no te enteres por un cliente.",
+  },
+];
+
 const STATUS_BADGE = {
   draft: { kind: "incomplete" as const, label: "Borrador" },
   published: { kind: "connected" as const, label: "Publicado" },
@@ -52,15 +77,32 @@ export default function WorkflowsPage() {
   const router = useRouter();
   const toast = useToast();
   const [rows, setRows] = useState<WorkflowRow[] | null>(null);
+  const [hasAgents, setHasAgents] = useState<boolean | null>(null);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [renameTarget, setRenameTarget] = useState<WorkflowRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WorkflowRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  // Onboarding: se abre solo la PRIMERA vez (recordado en el navegador). Se puede
+  // reabrir con el botón «¿Cómo funciona?».
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!localStorage.getItem(ONBOARDING_KEY)) setShowHelp(true);
+  }, []);
+  const closeHelp = () => {
+    setShowHelp(false);
+    if (typeof window !== "undefined") localStorage.setItem(ONBOARDING_KEY, "1");
+  };
 
   const load = useCallback(async () => {
     setRows(await api<WorkflowRow[]>("/workflows"));
+    // Aviso de agentes: los pasos «Ejecutar agente IA» necesitan un agente activo.
+    api<{ id: string; name: string }[]>("/agents/assignable")
+      .then((a) => setHasAgents(a.length > 0))
+      .catch(() => setHasAgents(null));
   }, []);
 
   useEffect(() => {
@@ -133,7 +175,12 @@ export default function WorkflowsPage() {
       <PageHeader
         title="Flujos de trabajo"
         description="Automatizaciones sin código: seguimientos, respuestas, esperas y acciones sobre leads y conversaciones."
-        actions={<Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear workflow</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowHelp(true)}>¿Cómo funciona?</Button>
+            <Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear workflow</Button>
+          </div>
+        }
       />
 
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 sm:max-w-xs">
@@ -173,6 +220,15 @@ export default function WorkflowsPage() {
 
       {/* Crear */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear workflow" wide>
+        {hasAgents === false && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            <p className="font-medium">Aún no tienes agentes de IA.</p>
+            <p className="mt-0.5 text-xs">
+              Puedes crear el flujo igual, pero los pasos «Ejecutar agente IA» no responderán hasta que tengas uno activo.{" "}
+              <a href="/agents" className="font-medium underline hover:no-underline">Crear un agente primero →</a>
+            </p>
+          </div>
+        )}
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Nombre del flujo (opcional si eliges una plantilla)</span>
           <input
@@ -218,6 +274,9 @@ export default function WorkflowsPage() {
         </div>
       </Modal>
 
+      {/* Onboarding / ayuda */}
+      <OnboardingModal open={showHelp} onClose={closeHelp} onCreate={() => { closeHelp(); setNewName(""); setCreateOpen(true); }} />
+
       {/* Renombrar */}
       <RenameModal
         target={renameTarget}
@@ -236,6 +295,49 @@ export default function WorkflowsPage() {
         danger
       />
     </div>
+  );
+}
+
+function OnboardingModal({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: () => void }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => { if (open) setStep(0); }, [open]);
+  const s = ONBOARDING_STEPS[step];
+  const last = step === ONBOARDING_STEPS.length - 1;
+  return (
+    <Modal open={open} onClose={onClose} title="Cómo funcionan los flujos" wide>
+      <div className="flex items-start gap-4">
+        <span className="text-4xl leading-none" aria-hidden>{s.icon}</span>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-ink">{s.title}</h3>
+          <p className="mt-1.5 text-sm text-ink-muted">{s.body}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-between">
+        <div className="flex gap-1.5">
+          {ONBOARDING_STEPS.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setStep(i)}
+              aria-label={`Paso ${i + 1}`}
+              className={cn("h-1.5 rounded-full transition-all", i === step ? "w-6 bg-brand-500" : "w-1.5 bg-line-strong hover:bg-ink-subtle")}
+            />
+          ))}
+        </div>
+        <div className="flex gap-2">
+          {step > 0 && <Button variant="secondary" onClick={() => setStep((v) => v - 1)}>Atrás</Button>}
+          {last ? (
+            <Button onClick={onCreate}>Crear mi primer flujo</Button>
+          ) : (
+            <Button onClick={() => setStep((v) => v + 1)}>Siguiente</Button>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 text-center">
+        <button onClick={onClose} className="text-xs text-ink-subtle hover:text-ink-muted hover:underline">Entendido, cerrar</button>
+      </div>
+    </Modal>
   );
 }
 

@@ -23,6 +23,7 @@ import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend } from "./messaging-guard";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
+import { enqueueNotification } from "./notifications/queue";
 import { planAppointmentReminder, type BusinessHoursConfig } from "./appointment-reminders";
 
 /**
@@ -1184,20 +1185,48 @@ async function finishRun(
   result: { status: string; nodeId?: string; error?: string },
 ): Promise<void> {
   if (result.status === "waiting") return; // scheduleTimer ya dejó el run en WAITING
-  await withTenant(organizationId, (tx) =>
-    tx.workflowRun.update({
+  const failed = result.status !== "completed";
+  await withTenant(organizationId, async (tx) => {
+    const run = await tx.workflowRun.update({
       where: { id: runId },
       data: {
-        status: result.status === "completed" ? "COMPLETED" : "FAILED",
+        status: failed ? "FAILED" : "COMPLETED",
         error: result.error,
         currentNodeId: result.nodeId,
         finishedAt: new Date(),
       },
-    }),
-  );
+      select: { workflowId: true },
+    });
+    // Aviso al tenant cuando un flujo falla, con anti-spam: solo la PRIMERA falla
+    // del flujo en una ventana móvil de 1 h dispara notificación (evita tormenta
+    // si un flujo publicado falla en cada ejecución). Ver catálogo `workflow.failed`.
+    if (failed && run.workflowId) {
+      const prior = await tx.workflowRun.findFirst({
+        where: {
+          workflowId: run.workflowId,
+          status: "FAILED",
+          id: { not: runId },
+          finishedAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      if (!prior) {
+        const wf = await tx.workflow.findUnique({ where: { id: run.workflowId }, select: { name: true } });
+        await enqueueNotification({
+          eventKey: "workflow.failed",
+          organizationId,
+          data: {
+            workflowId: run.workflowId,
+            workflowName: wf?.name ?? "Flujo de trabajo",
+            error: (result.error ?? "error desconocido").slice(0, 200),
+          },
+        });
+      }
+    }
+  });
   await emitPlatformEvent(
     organizationId,
-    result.status === "completed" ? "workflow.completed" : "workflow.failed",
+    failed ? "workflow.failed" : "workflow.completed",
     { runId, error: result.error ?? null },
   );
 }

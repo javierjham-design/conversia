@@ -87,6 +87,16 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/integrations",
   },
   {
+    key: "workflow.failed",
+    title: "Un flujo de trabajo falló",
+    body: "«{workflowName}» se detuvo por un error: {error}",
+    audience: ["tenant_admins", "owner"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email"],
+    defaultChannels: ["in_app", "email"],
+    link: "/workflows/{workflowId}",
+  },
+  {
     key: "data.job_done",
     title: "Tarea de datos terminada",
     body: "{jobName} finalizó ({rows} registros).",
