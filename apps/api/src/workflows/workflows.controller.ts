@@ -63,23 +63,9 @@ const TRIGGER_CATALOG = [
   { type: "tiktok_ad", label: "Anuncios de mensajería TikTok", description: "Mensaje desde un anuncio de TikTok (requiere canal TikTok)", soon: true },
 ];
 
-const NODE_CATALOG = [
-  { type: "send_text", label: "Enviar mensaje", description: "Envía un texto (admite variables {{contact.firstName}}…)" },
-  { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación" },
-  { type: "wait", label: "Esperar", description: "Pausa el flujo; opcionalmente se cancela si el contacto responde" },
-  { type: "condition_no_reply", label: "¿Sigue sin responder?", description: "Si NO ha respondido continúa; si respondió, termina el flujo" },
-  { type: "update_lead_status", label: "Cambiar estado del lead", description: "Actualiza el estado del lead del contacto" },
-  { type: "add_tag", label: "Agregar etiqueta", description: "Etiqueta la conversación" },
-  { type: "remove_tag", label: "Quitar etiqueta", description: "Quita una etiqueta de la conversación" },
-  { type: "update_contact", label: "Actualizar datos del contacto", description: "Guarda nombre, apellido o email del contacto" },
-  { type: "assign_user", label: "Asignar a usuario", description: "Asigna la conversación a una persona (pausa la IA)" },
-  { type: "assign_team", label: "Asignar a equipo", description: "Asigna la conversación a un equipo (pausa la IA)" },
-  { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control de la conversación" },
-  { type: "transfer_human", label: "Escalar a humano", description: "Pausa la IA y notifica al equipo" },
-  { type: "close_conversation", label: "Cerrar conversación", description: "Marca la conversación como cerrada" },
-  { type: "start_workflow", label: "Disparar otro flujo", description: "Inicia otro workflow por su nombre" },
-  { type: "stop", label: "Terminar flujo", description: "Finaliza la ejecución" },
-];
+// El catálogo de PASOS (con iconos, categorías y formularios) es una sola fuente
+// de verdad en el editor (apps/web); el servidor no lo duplica. Aquí solo vive el
+// catálogo de DISPARADORES (arriba), que el editor consume por el endpoint.
 
 @Controller("workflows")
 export class WorkflowsController {
@@ -182,7 +168,6 @@ export class WorkflowsController {
       const tmplEnt = await getTemplatesEntitlement(tx);
       return {
         triggers: TRIGGER_CATALOG,
-        nodes: NODE_CATALOG,
         leadStatuses: statuses,
         appointmentFilters,
         agents,

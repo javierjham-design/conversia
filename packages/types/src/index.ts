@@ -305,18 +305,18 @@ export const TRIGGER_TYPES = [
 ] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 
+// Tipos de nodo IMPLEMENTADOS por el motor y ofrecidos en el editor. Se removieron
+// 12 nombres reservados sin ejecutor (2026-08-12) para no dejar zona gris: si
+// alguno vale la pena, se re-agrega con ejecutor + tarjeta juntos.
 export const NODE_TYPES = [
   // Mensajería
   "send_text",
   "send_template",
-  "send_media",
   "wait_reply",
   // IA
   "run_agent",
   "switch_agent",
-  "classify_intent",
-  "extract_data",
-  "summarize",
+  "ai_objective",
   // Contactos y leads
   "update_contact",
   "update_lead_status",
@@ -331,31 +331,21 @@ export const NODE_TYPES = [
   "transfer_human",
   "add_note",
   "open_conversation",
-  // Agenda
-  "check_availability",
-  "create_appointment",
-  "confirm_appointment",
-  "cancel_appointment",
-  // Automatización
+  // Control de flujo
   "wait",
   "condition",
-  "branch",
   "stop",
   "start_workflow",
-  "cancel_workflows",
   "goto",
   "business_hours",
   // Integraciones
   "call_api",
-  "send_webhook",
-  "notify_team",
   "send_internal_email",
-  // Marketing / IA (catálogo ampliado; send_template ya existe arriba)
+  "google_sheets_append",
+  // Marketing
   "send_capi",
   "send_ga4_event",
   "send_tiktok_event",
-  "google_sheets_append",
-  "ai_objective",
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
 

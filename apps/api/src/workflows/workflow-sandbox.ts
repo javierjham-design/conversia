@@ -108,6 +108,14 @@ export function simulateWorkflow(
         label = "Escalar a humano";
         detail = cfg.reason ? String(cfg.reason) : "Pausaría la IA y avisaría al equipo";
         break;
+      case "pause_ai":
+        label = "Pausar IA";
+        detail = "Detendría las respuestas automáticas del agente";
+        break;
+      case "resume_ai":
+        label = "Reanudar IA";
+        detail = "Reactivaría las respuestas automáticas del agente";
+        break;
       case "close_conversation":
         label = "Cerrar conversación";
         detail = "Marcaría la conversación como cerrada";
