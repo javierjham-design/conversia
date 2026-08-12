@@ -211,7 +211,21 @@ function StepNode({ id, data }: NodeProps) {
             </div>
           ))}
         </div>
-      ) : def?.terminal ? null : (
+      ) : def?.terminal ? null : d.config?.onError === "branch" ? (
+        // Dos salidas: continúa (izq) y "si falla" (der), para los pasos que pueden fallar.
+        <div className="flex justify-between px-2">
+          <div className="relative flex flex-col items-center" style={{ width: "50%" }}>
+            <Handle type="source" position={Position.Bottom} style={{ left: "30%" }} className="!h-2 !w-2 !border-line-strong !bg-panel" />
+            <span className="mt-1 text-[9px] font-medium text-ink-subtle">continúa</span>
+            <AddButton small onClick={() => addFrom(id)} />
+          </div>
+          <div className="relative flex flex-col items-center" style={{ width: "50%" }}>
+            <Handle id="error" type="source" position={Position.Bottom} style={{ left: "70%" }} className="!h-2 !w-2 !border-red-300 !bg-panel" />
+            <span className="mt-1 text-[9px] font-medium text-red-500">si falla</span>
+            <AddButton small onClick={() => addFrom(id, "error")} />
+          </div>
+        </div>
+      ) : (
         <>
           <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-line-strong !bg-panel" />
           <AddButton onClick={() => addFrom(id)} />
@@ -599,8 +613,8 @@ function Editor() {
       const newNode: Node = {
         id: newId,
         type: "stepNode",
-        // Rama "derecha" (respondió/fuera/no cumplido/no respondió) se desplaza para no apilarse.
-        position: { x: px + (["false", "out", "unmet", "no_reply"].includes(addFromState.branch ?? "") ? 210 : 0), y: py + 140 },
+        // Rama "derecha" (respondió/fuera/no cumplido/no respondió/si falla) se desplaza para no apilarse.
+        position: { x: px + (["false", "out", "unmet", "no_reply", "error"].includes(addFromState.branch ?? "") ? 210 : 0), y: py + 140 },
         data: { nodeType: type, config: structuredClone(def?.defaultConfig ?? {}) },
       };
       const newEdge: Edge = {
@@ -2068,6 +2082,29 @@ function NodePanel({
 
       {(type === "close_conversation" || type === "stop") && (
         <p className="text-xs text-ink-subtle">Este paso no necesita configuración.</p>
+      )}
+
+      {/* Política de errores — pasos que pueden fallar (integraciones, plantilla, agenda). */}
+      {["call_api", "send_template", "send_capi", "send_ga4_event", "google_sheets_append", "send_internal_email"].includes(type) && (
+        <div className="mt-2 space-y-2 rounded-lg border border-line bg-app p-3">
+          <p className="text-xs font-medium text-ink">En caso de error</p>
+          <div className="flex items-center gap-2">
+            <select
+              value={String(config.onError ?? "stop")}
+              onChange={(e) => onChange({ onError: e.target.value })}
+              className="flex-1 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
+            >
+              <option value="stop">Detener el flujo (por defecto)</option>
+              <option value="continue">Continuar al siguiente paso</option>
+              <option value="branch">Ramificar por «si falla»</option>
+            </select>
+            <label className="flex items-center gap-1 text-xs text-ink-muted">
+              Reintentos
+              <input type="number" min={0} max={5} value={Number(config.retries ?? 0)} onChange={(e) => onChange({ retries: Math.max(0, Math.min(5, Number(e.target.value))) })} className="w-14 rounded-lg border border-line-strong px-2 py-1 text-xs" />
+            </label>
+          </div>
+          {config.onError === "branch" && <p className="text-[11px] text-ink-subtle">Conecta la salida roja «si falla» a lo que quieras hacer cuando el paso falle.</p>}
+        </div>
       )}
     </div>
   );

@@ -293,6 +293,52 @@ describe("Bloque 1 — casos borde", () => {
   });
 });
 
+// ───────────────────────────── Bloque 5 — manejo de errores ─────────────────────────────
+describe("Bloque 5 — manejo de errores en la ejecución", () => {
+  it("rama de error (when:\"error\"): al fallar un paso, sigue por la arista de error", async () => {
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} }, variables: {},
+      nodes: [
+        { id: "a", type: "call_api", config: { url: "https://x/y" } },
+        { id: "ok", type: "add_tag", config: { tag: "ok" } },
+        { id: "err", type: "add_tag", config: { tag: "fallo" } },
+      ],
+      edges: [{ from: "a", to: "ok" }, { from: "a", to: "err", when: "error" }],
+    };
+    const { deps, calls } = makeDeps({ callApi: async () => { throw new Error("timeout"); } });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(calls).toEqual(["tag:fallo"]); // tomó la rama de error, no la normal
+  });
+
+  it("onError:\"continue\" salta el paso fallido y sigue; por defecto (stop) falla el run", async () => {
+    const cont = linear([
+      { id: "a", type: "call_api", config: { url: "https://x/y", onError: "continue" } },
+      { id: "b", type: "add_tag", config: { tag: "sigue" } },
+      { id: "z", type: "stop", config: {} },
+    ]);
+    const c1 = makeDeps({ callApi: async () => { throw new Error("boom"); } });
+    expect(await executeFrom(c1.deps, ctx(), cont, "a")).toEqual({ status: "completed" });
+    expect(c1.calls).toEqual(["tag:sigue"]);
+
+    const stop = linear([{ id: "a", type: "call_api", config: { url: "https://x/y" } }, { id: "z", type: "stop", config: {} }]);
+    const c2 = makeDeps({ callApi: async () => { throw new Error("boom"); } });
+    expect((await executeFrom(c2.deps, ctx(), stop, "a")).status).toBe("failed");
+  });
+
+  it("retries: reintenta el paso N veces; si luego funciona, continúa", async () => {
+    let n = 0;
+    const flow = linear([
+      { id: "a", type: "call_api", config: { url: "https://x/y", retries: 2 } },
+      { id: "b", type: "add_tag", config: { tag: "ok" } },
+      { id: "z", type: "stop", config: {} },
+    ]);
+    const { deps, calls } = makeDeps({ callApi: async () => { if (n++ < 2) throw new Error("transitorio"); } });
+    expect(await executeFrom(deps, ctx(), flow, "a")).toEqual({ status: "completed" });
+    expect(n).toBe(3); // 1 intento + 2 reintentos
+    expect(calls).toEqual(["tag:ok"]);
+  });
+});
+
 // ───────────────────────────── 6 flujos de punta a punta ─────────────────────────────
 describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
   it("1) Captación desde anuncio: abre conversación, etiqueta origen, saluda y deriva al agente", async () => {

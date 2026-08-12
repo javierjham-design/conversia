@@ -516,30 +516,55 @@ export async function executeFrom(
       return { status: "failed", nodeId: currentId, error: "Límite de nodos por ejecución excedido" };
     }
 
-    try {
-      const outcome = await executeNode(deps, ctx, node);
-      if (outcome.wait) {
-        await deps.scheduleTimer(ctx, node.id, outcome.wait, (node.config as any)?.cancelOn);
-        await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: { waitUntil: outcome.wait.toISOString() } });
-        return { status: "waiting", nodeId: node.id };
+    // Ejecuta el nodo con REINTENTOS inmediatos si el paso los pide (config.retries,
+    // tope 5). Si al final falla, se aplica el manejo de errores de abajo.
+    const maxRetries = Math.max(0, Math.min(Number((node.config as any)?.retries ?? 0), 5));
+    let outcome: Awaited<ReturnType<typeof executeNode>> | null = null;
+    let failure: string | null = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        outcome = await executeNode(deps, ctx, node);
+        failure = null;
+        break;
+      } catch (err) {
+        failure = (err as Error).message;
+        if (attempt < maxRetries) continue;
+        break;
       }
-      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: outcome.branch !== undefined ? { branch: outcome.branch } : outcome.goto ? { goto: outcome.goto } : undefined });
-      if (outcome.stop) return { status: "completed" };
-      // "Saltar a otro paso": salta al nodo destino, acotado por MAX_JUMPS_PER_RUN.
-      if (outcome.goto !== undefined) {
-        if (!outcome.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
-        if (++jumps > MAX_JUMPS_PER_RUN) {
-          return { status: "failed", nodeId: node.id, error: `Límite de saltos excedido (${MAX_JUMPS_PER_RUN}) — posible bucle` };
-        }
-        currentId = outcome.goto;
+    }
+
+    if (failure !== null) {
+      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "FAILED", error: failure });
+      // 1) Rama de error EXPLÍCITA (arista when:"error") → el diseñador decide qué hacer.
+      //    Se busca directa (no nextNodeId, que haría fallback a la arista por defecto).
+      const errEdge = def.edges.find((e) => e.from === node.id && e.when === "error");
+      if (errEdge) { currentId = errEdge.to; continue; }
+      // 2) Política del paso: "continue" sigue al siguiente; "stop" (defecto) detiene el flujo.
+      if (String((node.config as any)?.onError ?? "stop") === "continue") {
+        currentId = nextNodeId(def, node.id);
         continue;
       }
-      currentId = nextNodeId(def, node.id, outcome.branch);
-    } catch (err) {
-      const message = (err as Error).message;
-      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "FAILED", error: message });
-      return { status: "failed", nodeId: node.id, error: message };
+      return { status: "failed", nodeId: node.id, error: failure };
     }
+
+    const ok = outcome!;
+    if (ok.wait) {
+      await deps.scheduleTimer(ctx, node.id, ok.wait, (node.config as any)?.cancelOn);
+      await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: { waitUntil: ok.wait.toISOString() } });
+      return { status: "waiting", nodeId: node.id };
+    }
+    await deps.persistStep(ctx, { nodeId: node.id, nodeType: node.type, status: "COMPLETED", output: ok.branch !== undefined ? { branch: ok.branch } : ok.goto ? { goto: ok.goto } : undefined });
+    if (ok.stop) return { status: "completed" };
+    // "Saltar a otro paso": salta al nodo destino, acotado por MAX_JUMPS_PER_RUN.
+    if (ok.goto !== undefined) {
+      if (!ok.goto) return { status: "failed", nodeId: node.id, error: "Salto sin destino configurado" };
+      if (++jumps > MAX_JUMPS_PER_RUN) {
+        return { status: "failed", nodeId: node.id, error: `Límite de saltos excedido (${MAX_JUMPS_PER_RUN}) — posible bucle` };
+      }
+      currentId = ok.goto;
+      continue;
+    }
+    currentId = nextNodeId(def, node.id, ok.branch);
   }
   return { status: "completed" };
 }
