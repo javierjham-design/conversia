@@ -57,15 +57,16 @@ export function defToFlow(def: any): { nodes: Node[]; edges: Edge[]; trigger: De
   return { nodes, edges, trigger };
 }
 
+/**
+ * Config del disparador al serializar. Preserva `t.config` TAL CUAL — es la
+ * fuente de verdad del editor. Antes descartaba casi todo (solo keyword/
+ * firstMessage), así que abrir + guardar un flujo perdía `hoursBefore`,
+ * `keywords`/`matchType`/`channel`, `adIds`, `fromStatus`/`toStatus`, `tag`,
+ * filtros de cita, etc. → corrupción silenciosa. Cubierto por el round-trip
+ * contra los flujos reales de Digital Dent.
+ */
 function triggerConfigFor(t: DefTrigger): Record<string, unknown> {
-  if (t.type === "keyword") return { keyword: t.config.keyword ?? "" };
-  if (t.type === "message_received") {
-    const c: Record<string, unknown> = {};
-    if (String(t.config.keyword ?? "").trim()) c.keyword = t.config.keyword;
-    if (t.config.firstMessage === true) c.firstMessage = true;
-    return c;
-  }
-  return {};
+  return (t.config ?? {}) as Record<string, unknown>;
 }
 
 export function flowToDef(nodes: Node[], edges: Edge[], trigger: DefTrigger): any {
