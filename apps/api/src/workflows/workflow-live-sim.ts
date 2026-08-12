@@ -129,13 +129,20 @@ async function runSimAgentTurn(
     return;
   }
 
+  // El agente que PIDIÓ el paso (no el activo por defecto): si se pidió uno
+  // concreto y termina respondiendo otro, es una mala configuración y hay que
+  // avisarlo (si no, parece que el flujo "no funciona").
+  const requestedSlug = opts.agentSlug || null;
   const loaded = await withTenant(orgId, async (tx) => {
     let agent = null as Awaited<ReturnType<typeof tx.agent.findUnique>> | null;
     const slug = opts.agentSlug || state.activeAgentSlug;
     if (slug) {
       agent = await tx.agent.findUnique({ where: { organizationId_slug: { organizationId: orgId, slug } } });
     }
-    if (!agent) {
+    const requestedInactive = Boolean(requestedSlug && agent && !agent.active);
+    if (!agent || !agent.active) {
+      // Igual que en producción (agent-turn.ts): si el agente pedido no resuelve,
+      // responde el agente por defecto del canal.
       const channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
       if (channel?.defaultAgentId) agent = await tx.agent.findUnique({ where: { id: channel.defaultAgentId } });
     }
@@ -144,18 +151,27 @@ async function runSimAgentTurn(
       where: { agentId: agent.id, status: "PUBLISHED" },
       orderBy: { version: "desc" },
     });
-    const [org, clinic] = await Promise.all([
-      tx.organization.findUnique({ where: { id: orgId } }),
-      tx.clinic.findFirst({ where: { active: true, deletedAt: null } }),
-    ]);
-    return { agent, version, org, clinic };
+    return { agent, version, requestedInactive };
   });
 
   if (!loaded) {
     state.log.push({ kind: "info", text: "No hay un agente IA activo para responder en este punto." });
     return;
   }
-  const { agent, version, org, clinic } = loaded;
+  const [org, clinic] = await withTenant(orgId, (tx) =>
+    Promise.all([
+      tx.organization.findUnique({ where: { id: orgId } }),
+      tx.clinic.findFirst({ where: { active: true, deletedAt: null } }),
+    ]),
+  );
+  const { agent, version } = loaded;
+  // Aviso honesto: el paso pedía un agente que no está disponible → responde otro.
+  if (requestedSlug && agent.slug !== requestedSlug) {
+    state.log.push({
+      kind: "info",
+      text: `⚠️ El paso pedía el agente «${requestedSlug}», pero ${loaded.requestedInactive ? "está desactivado o sin publicar" : "no existe con ese nombre"}. Responde el agente por defecto del canal («${agent.name}»). En producción pasaría lo mismo: revísalo en Agentes (activo + versión publicada) y vuelve a elegirlo en el paso.`,
+    });
+  }
   if (!version) {
     state.log.push({ kind: "info", text: `El agente «${agent.name}» no tiene versión publicada.` });
     return;
