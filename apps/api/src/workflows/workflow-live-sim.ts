@@ -122,6 +122,16 @@ async function runSimAgentTurn(
   state: LiveSimState,
   opts: { agentSlug?: string | null; objective?: string },
 ): Promise<void> {
+  // Igual que producción (agent-turn.ts): si la IA está en pausa, NINGÚN agente
+  // responde —tampoco un paso «Ejecutar agente IA»—. Antes el simulador sí
+  // respondía, y luego en producción quedaba mudo (pie silencioso).
+  if (!state.aiEnabled) {
+    state.log.push({
+      kind: "info",
+      text: "⏸️ La IA está en pausa (por un paso «Pausar IA» o una derivación a humano): el agente NO responde, tampoco en producción. Para que responda, agrega «Reanudar IA» —o usa «Cambiar agente IA», que reactiva la IA y fija el agente— antes de este paso.",
+    });
+    return;
+  }
   const history: AIChatMessage[] = state.transcript.map((m) => ({ role: m.role, content: m.content }));
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) {
@@ -640,7 +650,15 @@ export async function stepWorkflowSim(
         state.log.push({ kind: "info", text: "✅ Respondió → rama «Sí, respondió»." });
       } else {
         state.cursor = w.cancelOnReply ? null : (nextNodeId(def, w.nodeId) ?? null);
-        if (w.cancelOnReply) state.log.push({ kind: "info", text: "✋ La espera se canceló por la respuesta." });
+        if (w.cancelOnReply) {
+          const deadBranch = nextNodeId(def, w.nodeId) != null;
+          state.log.push({
+            kind: "info",
+            text: deadBranch
+              ? "✋ El paso «Esperar» está en «cancelar si responde» → la respuesta DETIENE el flujo. Lo que sigue (incl. una rama «Respondió») no corre. Usa «¿El contacto respondió?» para ramificar."
+              : "✋ La espera se canceló por la respuesta.",
+          });
+        }
       }
       state.status = state.cursor ? "stepping" : "done";
       if (!state.cursor) state.log.push({ kind: "end", text: "✅ Fin del flujo." });
@@ -701,14 +719,24 @@ export async function stepWorkflowSim(
       await runEngine(orgId, def, state, { kind: "branch", nodeId, branch: "replied" });
     } else if (state.status === "waiting" && state.waiting) {
       if (state.waiting.cancelOnReply) {
-        state.log.push({ kind: "info", text: "✋ La espera se canceló porque el contacto respondió." });
+        // OJO: en producción esto CANCELA el run (cancelTimersOnReply). Las ramas
+        // que vengan después de este «Esperar» NO se ejecutan. Si el flujo tenía
+        // una rama «Respondió», es un pie: hay que usar «¿El contacto respondió?».
+        const nextAfterWait = nextNodeId(def, state.waiting.nodeId);
         state.waiting = null;
+        state.log.push({
+          kind: "info",
+          text: nextAfterWait
+            ? "✋ El contacto respondió y el paso «Esperar» está en «cancelar si responde» → en producción esto DETIENE el flujo aquí. Los pasos que siguen (incl. una rama «Respondió») no se ejecutan. Para ramificar según la respuesta usa «¿El contacto respondió?»."
+            : "✋ La espera se canceló porque el contacto respondió.",
+        });
         if (state.activeAgentSlug && state.aiEnabled) {
+          state.log.push({ kind: "info", text: "En producción, tras cancelarse el flujo, respondería el agente activo del canal:" });
           await runSimAgentTurn(orgId, state, {});
           state.status = "agent_chat";
         } else {
           state.status = "done";
-          state.log.push({ kind: "end", text: "✅ Fin del flujo." });
+          state.log.push({ kind: "end", text: "✅ Fin del flujo (run cancelado por la respuesta)." });
         }
       } else {
         if (state.activeAgentSlug && state.aiEnabled) await runSimAgentTurn(orgId, state, {});
