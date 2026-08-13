@@ -295,6 +295,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
 
     if (!result) continue; // duplicado
 
+    // Marca de inicio del ciclo de este mensaje: para saber qué runs de flujo lo
+    // "tomaron" (arrancaron por él) y así el agente por defecto sea un FALLBACK,
+    // no un bot omnipotente que compite con los flujos.
+    const cycleStart = new Date();
+
     // Bandeja en vivo: nuevo mensaje entrante + conteos del clasificador.
     const { publishRealtime } = await import("./realtime.js");
     await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
@@ -374,11 +379,18 @@ export async function processInbound(job: InboundJob): Promise<void> {
       return false;
     });
 
-    // Respuesta del agente activo — salvo que el objetivo ya haya corrido el
-    // turno, o un workflow lo haya ejecutado en este ciclo (evita doble respuesta).
-    const agentAlreadyRan = objectiveHandled
-      ? true
-      : await withTenant(organizationId, (tx) =>
+    // Respuesta del agente activo (bot por defecto del canal) — SOLO como FALLBACK.
+    // Se suprime si, en este ciclo, un flujo "tomó" el mensaje:
+    //   (a) el objetivo ya corrió el turno;
+    //   (b) un flujo ejecutó un agente (run_agent) para esta conversación; o
+    //   (c) un flujo ARRANCÓ por este mensaje y quedó esperando (p. ej. promo →
+    //       «¿El contacto respondió?»): el flujo es dueño de la conversación aunque
+    //       aún no haya corrido su agente. Así el bot por defecto deja de competir
+    //       (ya no hace falta «Pausar IA» al inicio del flujo).
+    const flowTookMessage =
+      objectiveHandled ||
+      Boolean(
+        await withTenant(organizationId, (tx) =>
           tx.workflowRunStep.findFirst({
             where: {
               nodeType: "run_agent",
@@ -387,8 +399,17 @@ export async function processInbound(job: InboundJob): Promise<void> {
               run: { conversationId: result.conversationId },
             },
           }),
-        );
-    if (!agentAlreadyRan) {
+        ),
+      ) ||
+      Boolean(
+        await withTenant(organizationId, (tx) =>
+          tx.workflowRun.findFirst({
+            where: { conversationId: result.conversationId, status: "WAITING", startedAt: { gte: cycleStart } },
+            select: { id: true },
+          }),
+        ),
+      );
+    if (!flowTookMessage) {
       try {
         await runAgentTurn({ organizationId, conversationId: result.conversationId });
       } catch (err) {

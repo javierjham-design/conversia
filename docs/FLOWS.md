@@ -115,6 +115,13 @@ nodo de inicio, ids/aristas coherentes y disparador/pasos soportados.
 - **IA en pausa**: un paso «Ejecutar agente IA» **no responde** si la IA está en
   pausa (`Pausar IA` o derivación a humano) — ni en producción ni en el simulador
   (alineados). Reactívala con «Reanudar IA» o «Cambiar agente IA» antes del paso.
+- **Agente por defecto del canal = FALLBACK, no omnipotente** (`inbound.ts`): sólo
+  responde a un mensaje si **ningún flujo lo tomó** en ese ciclo. "Tomó" =
+  (a) un flujo corrió `run_agent`; (b) el objetivo corrió su turno; o (c) un flujo
+  **arrancó por ese mensaje y quedó esperando** (p. ej. promo → «¿El contacto
+  respondió?»). Por eso ya **no hace falta `Pausar IA`** al inicio de un flujo de
+  captación. El agente por defecto del canal es **opcional** (`channel.defaultAgentId`
+  nullable): si no hay, sólo responden los flujos.
 
 ## Validación al publicar
 `validateWorkflowDefinition` bloquea publicar con: nodos sin conectar, campos
