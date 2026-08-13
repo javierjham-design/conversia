@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition } from "@conversia/types";
-import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, type EngineDeps, type RunCtx } from "./index.js";
+import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
 
 /** Deps de grabación: apunta cada efecto y sus datos; configurable por escenario. */
 function makeDeps(overrides: Partial<EngineDeps> & { objective?: "met" | "unmet" | "pending"; httpVars?: Record<string, string> } = {}) {
@@ -450,6 +450,76 @@ describe("Bloque 1 — 6 flujos realistas de punta a punta", () => {
     const escala = makeDeps({ objective: "unmet" });
     await executeFrom(escala.deps, ctx(), flow, "a");
     expect(escala.calls).toEqual(["agent:recepcion", "objective:resolver la duda", "human:requiere humano"]);
+  });
+});
+
+// ───────── Flujo real «Captación por QR» con el patrón CORRECTO (wait_reply) ─────────
+describe("Flujo Captación por QR (patrón correcto: ¿El contacto respondió?)", () => {
+  // pause_ai → promo → ¿respondió? (5min)
+  //   Sí → switch_agent(implantes) → run_agent(implantes)
+  //   No → insistencia → ¿respondió? (5min)
+  //        Sí → switch_agent(implantes) → run_agent(implantes)
+  //        No → etiqueta "sin-respuesta"
+  const flow: WorkflowDefinition = {
+    trigger: { type: "link_scan", config: { code: "promo-implantes" } },
+    variables: {},
+    nodes: [
+      { id: "pause", type: "pause_ai", config: {} },
+      { id: "promo", type: "send_text", config: { text: "Hola {{contact.firstName}}, limpieza premium $28.990. ¿Agendas?" } },
+      { id: "wr1", type: "wait_reply", config: { minutes: 5 } },
+      { id: "sw1", type: "switch_agent", config: { agentSlug: "implantes" } },
+      { id: "ra1", type: "run_agent", config: { agentSlug: "implantes" } },
+      { id: "nudge", type: "send_text", config: { text: "¿Tienes alguna otra duda o consulta?" } },
+      { id: "wr2", type: "wait_reply", config: { minutes: 5 } },
+      { id: "sw2", type: "switch_agent", config: { agentSlug: "implantes" } },
+      { id: "ra2", type: "run_agent", config: { agentSlug: "implantes" } },
+      { id: "tag", type: "add_tag", config: { tag: "sin-respuesta" } },
+    ],
+    edges: [
+      { from: "pause", to: "promo" },
+      { from: "promo", to: "wr1" },
+      { from: "wr1", to: "sw1", when: "replied" },
+      { from: "wr1", to: "nudge", when: "no_reply" },
+      { from: "sw1", to: "ra1" },
+      { from: "nudge", to: "wr2" },
+      { from: "wr2", to: "sw2", when: "replied" },
+      { from: "wr2", to: "tag", when: "no_reply" },
+      { from: "sw2", to: "ra2" },
+    ],
+  };
+
+  it("no tiene ramas «Respondió» muertas (validación limpia)", () => {
+    const issues = validateWorkflowDefinition(flow, { agentSlugs: ["implantes"] });
+    expect(issues.some((i) => i.code === "unreachable_replied_branch")).toBe(false);
+    expect(issues.filter((i) => i.code !== "unreachable_replied_branch")).toEqual([]);
+  });
+
+  it("arranca: pausa IA, envía la promo y queda esperando la respuesta", async () => {
+    const { deps, calls } = makeDeps();
+    expect(await executeFrom(deps, ctx(), flow, "pause")).toEqual({ status: "waiting", nodeId: "wr1" });
+    expect(calls).toEqual(["ai:false", "send:Hola Ana, limpieza premium $28.990. ¿Agendas?", "timer:wr1"]);
+  });
+
+  it("responde de inmediato → cambia al agente implantes y lo ejecuta", async () => {
+    const { deps, calls } = makeDeps();
+    expect(await resumeWithBranch(deps, ctx(), flow, "wr1", "replied")).toMatchObject({ status: "completed" });
+    expect(calls).toEqual(["switch:implantes", "agent:implantes"]);
+  });
+
+  it("no responde → insiste y vuelve a esperar; si luego responde, va al agente", async () => {
+    const first = makeDeps();
+    expect(await resumeWithBranch(first.deps, ctx(), flow, "wr1", "no_reply")).toEqual({ status: "waiting", nodeId: "wr2" });
+    expect(first.calls).toEqual(["send:¿Tienes alguna otra duda o consulta?", "timer:wr2"]);
+
+    const replied = makeDeps();
+    expect(await resumeWithBranch(replied.deps, ctx(), flow, "wr2", "replied")).toMatchObject({ status: "completed" });
+    expect(replied.calls).toEqual(["switch:implantes", "agent:implantes"]);
+  });
+
+  it("nunca responde → etiqueta «sin-respuesta» y termina", async () => {
+    const { deps, calls } = makeDeps();
+    expect(await resumeWithBranch(deps, ctx(), flow, "wr2", "no_reply")).toMatchObject({ status: "completed" });
+    expect(calls).toEqual(["tag:sin-respuesta"]);
   });
 });
 

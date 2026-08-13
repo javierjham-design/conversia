@@ -6,6 +6,7 @@ const TRIGGERS = new Set([
   "conversation_started", "conversation_closed", "message_received", "keyword", "click_to_chat",
   "lead_status_changed", "tag_added", "appointment_created", "appointment_confirmed",
   "appointment_rescheduled", "appointment_cancelled", "appointment_upcoming", "no_show", "manual",
+  "link_scan",
 ]);
 const STEPS = new Set([
   "send_text", "send_template", "update_lead_status", "add_tag", "remove_tag", "update_contact",

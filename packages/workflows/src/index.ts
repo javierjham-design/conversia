@@ -434,24 +434,28 @@ export function validateWorkflowDefinition(def: WorkflowDefinition, ctx: Workflo
     }
   }
 
-  // Rama muerta: «Esperar (cancela si responde)» → «¿Sigue sin responder?» con una
-  // rama «Respondió» cableada. Como la respuesta CANCELA el run en ese punto, esa
-  // rama nunca se ejecuta. Es un pie común (el usuario quiere reaccionar a la
-  // respuesta): se bloquea y se apunta al nodo correcto «¿El contacto respondió?».
+  // Rama «Respondió» muerta en «¿Sigue sin responder?» (condition no_reply).
+  // Esa condición es INSTANTÁNEA: mira si el contacto YA respondió, sin esperar.
+  // Su rama «Respondió» (when:"false") sólo puede ejecutarse si ANTES hubo un
+  // paso «Esperar» que NO cancele por respuesta (así el contacto alcanza a
+  // responder durante la espera). En cualquier otro caso —viene de «Enviar
+  // mensaje», del disparador, o de un «Esperar (cancela si responde)» que aborta
+  // el run al responder— esa rama nunca corre. Es EL pie recurrente: se bloquea y
+  // se apunta al nodo correcto «¿El contacto respondió?» (wait_reply).
   const nodeById = new Map(def.nodes.map((n) => [n.id, n]));
-  for (const e of def.edges) {
-    const from = nodeById.get(e.from);
-    const to = nodeById.get(e.to);
-    if (!from || !to) continue;
-    const fromCancels = from.type === "wait" && (from.config as any)?.cancelOn === "contact_reply";
-    const toIsNoReply = to.type === "condition" && (to.config as any)?.kind === "no_reply";
-    if (!fromCancels || !toIsNoReply) continue;
-    const hasRepliedBranch = def.edges.some((x) => x.from === to.id && x.when === "false");
-    if (hasRepliedBranch) {
+  const isPlainWait = (n: WorkflowNode | undefined) =>
+    n?.type === "wait" && (n.config as any)?.cancelOn !== "contact_reply";
+  for (const cond of def.nodes) {
+    if (cond.type !== "condition" || (cond.config as any)?.kind !== "no_reply") continue;
+    const hasRepliedBranch = def.edges.some((e) => e.from === cond.id && e.when === "false");
+    if (!hasRepliedBranch) continue; // sólo «sin respuesta» cableada = patrón de nudge válido
+    const preds = def.edges.filter((e) => e.to === cond.id).map((e) => nodeById.get(e.from));
+    const reachableByReply = preds.length > 0 && preds.every((p) => isPlainWait(p));
+    if (!reachableByReply) {
       push(
-        to.id,
+        cond.id,
         "unreachable_replied_branch",
-        "La rama «Respondió» nunca se ejecuta: el paso «Esperar» anterior está en «cancelar si el contacto responde», así que la respuesta detiene el flujo antes de llegar aquí. Para reaccionar a la respuesta, reemplaza «Esperar» + «¿Sigue sin responder?» por el paso «¿El contacto respondió?» (ramas Sí/No).",
+        "La rama «Respondió» nunca se ejecuta: «¿Sigue sin responder?» mira al instante si el contacto respondió, y aquí todavía no pudo hacerlo. Para reaccionar a la respuesta usa el paso «¿El contacto respondió?» (espera y ramifica Sí/No), en vez de «Enviar mensaje/Esperar» + «¿Sigue sin responder?».",
       );
     }
   }

@@ -27,6 +27,42 @@ const y = (i: number) => 130 + i * 140; // filas del canvas
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   // ─────────────────────────── Dental ───────────────────────────
   {
+    key: "dental-captacion-qr",
+    name: "Captación por enlace / QR",
+    description: "Un QR o enlace inicia el flujo: pausa la IA, envía la oferta y ESPERA la respuesta. Si responde, la IA de ventas retoma; si no, insiste una vez. Elige tu agente de ventas en los pasos «Ejecutar agente IA».",
+    industry: "Dental",
+    icon: "📲",
+    definition: {
+      trigger: { type: "link_scan", config: { code: "promo-limpieza", linkMessage: "¡Hola! Quiero más información 🙌" } },
+      variables: {},
+      nodes: [
+        { id: "pause", type: "pause_ai", config: {}, position: { x: COL, y: y(0) } },
+        { id: "promo", type: "send_text", config: { text: "Hola {{contact.firstName}} 👋 Te escribimos de {{organization.name}}: nuestra limpieza premium tiene un valor de $28.990. ¿Te gustaría agendar tu hora?" }, position: { x: COL, y: y(1) } },
+        { id: "wr1", type: "wait_reply", config: { minutes: 5 }, position: { x: COL, y: y(2) } },
+        // Rama: respondió al toque → retoma la IA de ventas y responde.
+        { id: "resume1", type: "resume_ai", config: {}, position: { x: COL + 260, y: y(3) } },
+        { id: "agent1", type: "run_agent", config: { agentSlug: "" }, position: { x: COL + 260, y: y(4) } },
+        // Rama: no respondió → insiste una vez y vuelve a esperar.
+        { id: "nudge", type: "send_text", config: { text: "¿Te quedó alguna duda, {{contact.firstName}}? Con gusto te ayudo a agendar cuando quieras 😊" }, position: { x: COL - 240, y: y(3) } },
+        { id: "wr2", type: "wait_reply", config: { minutes: 5 }, position: { x: COL - 240, y: y(4) } },
+        { id: "resume2", type: "resume_ai", config: {}, position: { x: COL - 240, y: y(5) } },
+        { id: "agent2", type: "run_agent", config: { agentSlug: "" }, position: { x: COL - 240, y: y(6) } },
+        { id: "tag", type: "add_tag", config: { tag: "sin-respuesta" }, position: { x: COL - 500, y: y(5) } },
+      ],
+      edges: [
+        { from: "pause", to: "promo" },
+        { from: "promo", to: "wr1" },
+        { from: "wr1", to: "resume1", when: "replied" },
+        { from: "resume1", to: "agent1" },
+        { from: "wr1", to: "nudge", when: "no_reply" },
+        { from: "nudge", to: "wr2" },
+        { from: "wr2", to: "resume2", when: "replied" },
+        { from: "resume2", to: "agent2" },
+        { from: "wr2", to: "tag", when: "no_reply" },
+      ],
+    },
+  },
+  {
     key: "dental-recordatorio-cita",
     name: "Recordatorio de cita (24 h antes)",
     description: "Avisa al paciente un día antes de su cita y lo etiqueta. Para que llegue fuera de las 24 h, cambia el mensaje por «Enviar plantilla WhatsApp».",

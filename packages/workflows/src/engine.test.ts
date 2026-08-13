@@ -240,6 +240,31 @@ describe("motor de workflows v0", () => {
     // Sin la rama «Respondió» cableada (patrón de recordatorio) NO se marca.
     const ok: WorkflowDefinition = { ...trap, edges: [{ from: "w", to: "c" }, { from: "c", to: "nudge", when: "true" }], nodes: trap.nodes.filter((n) => n.id !== "agent") };
     expect(validateWorkflowDefinition(ok, ctx).some((i) => i.code === "unreachable_replied_branch")).toBe(false);
+
+    // Caso del usuario: «Enviar mensaje» → «¿Sigue sin responder?» → rama «Respondió».
+    // La condición es instantánea (0s tras el mensaje) → «Respondió» está muerta.
+    const afterSend: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} }, variables: {},
+      nodes: [
+        { id: "m", type: "send_text", config: { text: "Hola" } },
+        { id: "c", type: "condition", config: { kind: "no_reply" } },
+        { id: "agent", type: "run_agent", config: { agentSlug: "ventas" } },
+      ],
+      edges: [{ from: "m", to: "c" }, { from: "c", to: "agent", when: "false" }],
+    };
+    expect(validateWorkflowDefinition(afterSend, { ...ctx, agentSlugs: ["ventas"] }).some((i) => i.code === "unreachable_replied_branch")).toBe(true);
+
+    // Patrón VÁLIDO: «Esperar (sin cancelar)» → condición → «Respondió» sí puede correr.
+    const valid: WorkflowDefinition = {
+      trigger: { type: "conversation_started", config: {} }, variables: {},
+      nodes: [
+        { id: "w", type: "wait", config: { minutes: 5 } },
+        { id: "c", type: "condition", config: { kind: "no_reply" } },
+        { id: "agent", type: "run_agent", config: { agentSlug: "ventas" } },
+      ],
+      edges: [{ from: "w", to: "c" }, { from: "c", to: "agent", when: "false" }],
+    };
+    expect(validateWorkflowDefinition(valid, { ...ctx, agentSlugs: ["ventas"] }).some((i) => i.code === "unreachable_replied_branch")).toBe(false);
   });
 
   it("ejecuta hasta la espera y programa el timer", async () => {
