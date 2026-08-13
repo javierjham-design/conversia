@@ -104,10 +104,14 @@ nodo de inicio, ids/aristas coherentes y disparador/pasos soportados.
 - **Para ramificar según la respuesta** usa **«¿El contacto respondió?»**
   (`wait_reply`): reanuda por «Sí respondió» al recibir mensaje (`handleWaitReply`)
   o por «No respondió» al vencer.
-- **Guard**: `validateWorkflowDefinition` **bloquea** publicar un `wait(cancelOn:
-  contact_reply) → condition(no_reply)` con la rama «Respondió» (`when:"false"`)
-  cableada, porque esa rama es **inalcanzable** (`unreachable_replied_branch`). El
-  probador lo explica en vivo en vez de decir sólo «Fin del flujo».
+- **Guard**: `validateWorkflowDefinition` **bloquea** publicar un
+  `condition(no_reply)` con la rama «Respondió» (`when:"false"`) cableada cuando esa
+  rama es **inalcanzable** (`unreachable_replied_branch`): la condición es
+  INSTANTÁNEA, así que «Respondió» sólo puede correr si ANTES hubo un `wait` que NO
+  cancele por respuesta. Si viene de «Enviar mensaje», del disparador, o de un
+  `wait(cancelOn: contact_reply)`, se bloquea y apunta a `wait_reply`. El probador
+  lo explica en vivo. Plantilla lista con el patrón correcto: **«Captación por
+  enlace / QR»** (`apps/web/src/lib/workflow-templates.ts`).
 - **IA en pausa**: un paso «Ejecutar agente IA» **no responde** si la IA está en
   pausa (`Pausar IA` o derivación a humano) — ni en producción ni en el simulador
   (alineados). Reactívala con «Reanudar IA» o «Cambiar agente IA» antes del paso.
