@@ -69,7 +69,7 @@ export default function ChannelsPage() {
     e.preventDefault();
     setMsg(null);
     try {
-      await api("/channels", {
+      const r = await api<{ warnings?: string[] }>("/channels", {
         method: "POST",
         body: JSON.stringify({
           type: form.type,
@@ -88,7 +88,13 @@ export default function ChannelsPage() {
       setShowNew(false);
       setForm({ ...form, name: "", phoneNumberId: "", wabaId: "", displayPhone: "", accessToken: "" });
       await load();
-      setMsg("Canal creado ✔");
+      // La conexión ya suscribe la app al WABA (entrantes) y registra el número
+      // (salientes). Si algo falló, se avisa en vez de dar un "creado" engañoso.
+      setMsg(
+        r?.warnings && r.warnings.length
+          ? `Canal creado, pero revisa: ${r.warnings.join(" · ")}`
+          : "Canal creado ✔ (número enganchado: recibe y envía)",
+      );
     } catch (err) {
       setMsg((err as Error).message);
     }

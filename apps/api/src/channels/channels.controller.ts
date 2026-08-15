@@ -17,6 +17,7 @@ import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
+import { subscribeAndRegisterWhatsapp } from "./whatsapp-onboard";
 
 const createChannelSchema = z.object({
   type: z.enum(["WHATSAPP_CLOUD", "MOCK"]),
@@ -155,21 +156,34 @@ export class ChannelsController {
   }
 
   @Post()
-  create(@Body() body: unknown) {
+  async create(@Body() body: unknown) {
     const ctx = requirePermission("channels:write");
     const input = parse(createChannelSchema, body);
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+
+    // WhatsApp Cloud: enganchar el número a Meta ANTES de la transacción (las
+    // llamadas de red NO pueden ir dentro de withTenant, que es una tx
+    // interactiva). Suscribe la app al WABA (webhooks ENTRANTES) y REGISTRA el
+    // número para Cloud API (necesario para ENVIAR; sin esto Meta responde
+    // #133010). Antes esto solo lo hacía el Embedded Signup y la conexión manual
+    // lo saltaba, dejando el canal a medias. `warnings` avisa si algo falló, sin
+    // bloquear la creación del canal.
+    let warnings: string[] = [];
+    if (input.type === "WHATSAPP_CLOUD") {
+      if (!input.phoneNumberId || !input.wabaId || !input.accessToken) {
+        throw new BadRequestException("WhatsApp Cloud requiere phoneNumberId, wabaId y accessToken");
+      }
+      warnings = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, input.accessToken);
+    }
+
+    const created = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await enforcePlanLimit(
         tx,
         "channels",
         await tx.channelConnection.count({ where: { status: { not: "inactive" } } }),
       );
       if (input.type === "WHATSAPP_CLOUD") {
-        if (!input.phoneNumberId || !input.wabaId || !input.accessToken) {
-          throw new BadRequestException("WhatsApp Cloud requiere phoneNumberId, wabaId y accessToken");
-        }
         const existing = await tx.whatsappPhoneNumber.findUnique({
-          where: { phoneNumberId: input.phoneNumberId },
+          where: { phoneNumberId: input.phoneNumberId! },
         });
         if (existing) throw new BadRequestException("Ese phone_number_id ya está conectado");
       }
@@ -228,6 +242,7 @@ export class ChannelsController {
       });
       return channel;
     });
+    return { ...created, warnings };
   }
 
   /** Config pública para el frontend del Embedded Signup (sin secretos). */
