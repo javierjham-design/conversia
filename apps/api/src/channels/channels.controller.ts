@@ -35,6 +35,11 @@ const updateChannelSchema = z.object({
   defaultAgentId: z.string().nullable().optional(),
   status: z.enum(["active", "inactive"]).optional(),
   accessToken: z.string().min(10).optional(),
+  // Edición en sitio de los datos de WhatsApp (evita borrar+recrear para cambiar
+  // algo o repegar un token que caducó).
+  displayPhone: z.string().optional(),
+  wabaId: z.string().min(3).optional(),
+  phoneNumberId: z.string().min(5).optional(),
 });
 
 // Plantillas de mensaje de WhatsApp (HSM) — gestión vía Graph API sobre la WABA
@@ -99,13 +104,15 @@ export class ChannelsController {
   list() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [channels, numbers, agents, org] = await Promise.all([
+      const [channels, numbers, accounts, agents, org] = await Promise.all([
         tx.channelConnection.findMany({ orderBy: { createdAt: "asc" } }),
         tx.whatsappPhoneNumber.findMany(),
+        tx.whatsappAccount.findMany({ select: { id: true, wabaId: true } }),
         tx.agent.findMany({ where: { deletedAt: null }, select: { id: true, name: true } }),
         tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
       ]);
       const agentName = new Map(agents.map((a) => [a.id, a.name]));
+      const wabaByAccount = new Map(accounts.map((a) => [a.id, a.wabaId]));
       const defaultReminderChannelId = ((org?.settings as any)?.messaging?.defaultReminderChannelId as string | undefined) ?? null;
       return channels.map((c) => {
         const number = numbers.find((n) => n.channelConnectionId === c.id);
@@ -121,6 +128,7 @@ export class ChannelsController {
           defaultProactive: c.id === defaultReminderChannelId,
           phoneNumberId: number?.phoneNumberId ?? null,
           displayPhone: number?.displayPhone ?? null,
+          wabaId: number ? (wabaByAccount.get(number.accountId) ?? null) : null,
           createdAt: c.createdAt,
         };
       });
@@ -442,38 +450,114 @@ export class ChannelsController {
   }
 
   @Patch(":id")
-  update(@Param("id") id: string, @Body() body: unknown) {
+  async update(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("channels:write");
     const input = parse(updateChannelSchema, body);
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+
+    // Estado actual para saber el token/WABA/número EFECTIVOS con los que
+    // re-enganchar en Meta si cambian datos de WhatsApp (subscribe+register NO
+    // puede ir dentro de withTenant, que es una tx interactiva).
+    const current = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const channel = await tx.channelConnection.findUnique({ where: { id } });
+      if (!channel) throw new NotFoundException("Canal no encontrado");
+      const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: id } });
+      const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
+      const credential = account?.credentialId
+        ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } })
+        : null;
+      return {
+        type: channel.type,
+        numberId: number?.id ?? null,
+        accountId: account?.id ?? null,
+        wabaId: account?.wabaId ?? null,
+        phoneNumberId: number?.phoneNumberId ?? null,
+        token: credential ? decryptSecret(credential.ciphertext) : null,
+      };
+    });
+
+    // Re-enganche en Meta si es WhatsApp y se repega el token o cambia WABA/número.
+    // Un token fresco RE-REGISTRA el número (justo el caso del token de prueba que
+    // caduca cada 24h): así al editar el canal vuelve a poder ENVIAR sin usar Graph.
+    let warnings: string[] = [];
+    if (current.type === "WHATSAPP_CLOUD") {
+      const effToken = input.accessToken ?? current.token;
+      const effWaba = input.wabaId ?? current.wabaId;
+      const effPhone = input.phoneNumberId ?? current.phoneNumberId;
+      const changedWhatsapp = !!(input.accessToken || input.wabaId || input.phoneNumberId);
+      if (changedWhatsapp && effToken && effWaba && effPhone) {
+        warnings = await subscribeAndRegisterWhatsapp(effWaba, effPhone, effToken);
+      }
+    }
+
+    const updated = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const channel = await tx.channelConnection.findUnique({ where: { id } });
       if (!channel) throw new NotFoundException("Canal no encontrado");
 
-      if (input.accessToken) {
-        const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: id } });
-        const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
-        if (account) {
-          const credential = await tx.integrationCredential.create({
-            data: {
-              organizationId: ctx.organizationId,
-              provider: "whatsapp",
-              label: `Token ${channel.name} (rotado)`,
-              ciphertext: encryptSecret(input.accessToken),
-            },
-          });
-          await tx.whatsappAccount.update({ where: { id: account.id }, data: { credentialId: credential.id } });
-        }
+      // Repegar token → nueva credencial cifrada sobre la WABA del canal.
+      if (input.accessToken && current.accountId) {
+        const credential = await tx.integrationCredential.create({
+          data: {
+            organizationId: ctx.organizationId,
+            provider: "whatsapp",
+            label: `Token ${input.name ?? channel.name} (editado)`,
+            ciphertext: encryptSecret(input.accessToken),
+          },
+        });
+        await tx.whatsappAccount.update({ where: { id: current.accountId }, data: { credentialId: credential.id } });
       }
+
+      // WABA ID (sobre la cuenta).
+      if (input.wabaId && current.accountId && input.wabaId !== current.wabaId) {
+        await tx.whatsappAccount.update({ where: { id: current.accountId }, data: { wabaId: input.wabaId } });
+      }
+
+      // Número visible y/o phone_number_id (sobre el número del canal).
+      const changingPhone = !!(input.phoneNumberId && input.phoneNumberId !== current.phoneNumberId);
+      if (current.numberId && (input.displayPhone !== undefined || changingPhone)) {
+        if (changingPhone) {
+          const clash = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId! } });
+          if (clash) throw new BadRequestException("Ese phone_number_id ya está conectado en otro canal");
+        }
+        await tx.whatsappPhoneNumber.update({
+          where: { id: current.numberId },
+          data: {
+            ...(changingPhone ? { phoneNumberId: input.phoneNumberId! } : {}),
+            ...(input.displayPhone !== undefined
+              ? { displayPhone: input.displayPhone || input.phoneNumberId || current.phoneNumberId || "" }
+              : {}),
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "channel.update",
+          entityType: "channel_connection",
+          entityId: id,
+          after: {
+            ...(input.name ? { name: input.name } : {}),
+            ...(input.wabaId ? { wabaId: input.wabaId } : {}),
+            ...(input.phoneNumberId ? { phoneNumberId: input.phoneNumberId } : {}),
+            tokenRotated: !!input.accessToken,
+          },
+        },
+      });
 
       return tx.channelConnection.update({
         where: { id },
         data: {
           ...(input.name ? { name: input.name } : {}),
           ...(input.defaultAgentId !== undefined ? { defaultAgentId: input.defaultAgentId } : {}),
-          ...(input.status ? { status: input.status } : {}),
+          // Repegar token limpia el estado de error (se re-evalúa al probar).
+          ...(input.status ? { status: input.status } : input.accessToken ? { status: "active" } : {}),
         },
       });
     });
+
+    return { ...updated, warnings };
   }
 
   /** Prueba la conexión: para WhatsApp consulta el número en la Graph API de Meta. */
