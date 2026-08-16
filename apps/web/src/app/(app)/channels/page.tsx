@@ -14,6 +14,7 @@ interface Channel {
   defaultProactive?: boolean;
   phoneNumberId: string | null;
   displayPhone: string | null;
+  wabaId: string | null;
 }
 interface AgentOpt {
   id: string;
@@ -27,6 +28,9 @@ export default function ChannelsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
   const [templatesOpen, setTemplatesOpen] = useState<Record<string, boolean>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", displayPhone: "", wabaId: "", phoneNumberId: "", accessToken: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
   const [health, setHealth] = useState<{ id: string; type: string; status: string; message: string | null; createdAt: string }[]>([]);
   const [transcription, setTranscription] = useState<boolean | null>(null);
   const [esConfig, setEsConfig] = useState<{ appId: string; configId: string; graphVersion: string; featureType?: string } | null>(null);
@@ -119,6 +123,51 @@ export default function ChannelsPage() {
   async function setDefaultProactive(id: string, on: boolean) {
     await api(`/channels/default-proactive`, { method: "PATCH", body: JSON.stringify({ channelId: on ? id : null }) });
     await load();
+  }
+
+  function openEdit(c: Channel) {
+    setEditingId(c.id);
+    setMsg(null);
+    setEditForm({
+      name: c.name,
+      displayPhone: c.displayPhone ?? "",
+      wabaId: c.wabaId ?? "",
+      phoneNumberId: c.phoneNumberId ?? "",
+      accessToken: "", // vacío = no se toca el token; pega uno nuevo para rotarlo
+    });
+  }
+
+  async function saveEdit(c: Channel) {
+    setSavingEdit(true);
+    setMsg(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (editForm.name && editForm.name !== c.name) payload.name = editForm.name;
+      if (c.type === "WHATSAPP_CLOUD") {
+        if (editForm.displayPhone !== (c.displayPhone ?? "")) payload.displayPhone = editForm.displayPhone;
+        if (editForm.wabaId && editForm.wabaId !== (c.wabaId ?? "")) payload.wabaId = editForm.wabaId;
+        if (editForm.phoneNumberId && editForm.phoneNumberId !== (c.phoneNumberId ?? "")) payload.phoneNumberId = editForm.phoneNumberId;
+        if (editForm.accessToken) payload.accessToken = editForm.accessToken;
+      }
+      if (Object.keys(payload).length === 0) {
+        setEditingId(null);
+        return;
+      }
+      const r = await api<{ warnings?: string[] }>(`/channels/${c.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      setEditingId(null);
+      await load();
+      setMsg(
+        r?.warnings && r.warnings.length
+          ? `Canal actualizado, pero revisa: ${r.warnings.join(" · ")}`
+          : payload.accessToken
+            ? "Canal actualizado ✔ (token repegado y número re-registrado: vuelve a enviar)"
+            : "Canal actualizado ✔",
+      );
+    } catch (err) {
+      setMsg((err as Error).message);
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   async function removeChannel(id: string, name: string) {
@@ -363,6 +412,13 @@ export default function ChannelsPage() {
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app">
                   Probar conexión
                 </button>
+                <button
+                  onClick={() => (editingId === c.id ? setEditingId(null) : openEdit(c))}
+                  className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app"
+                  title="Editar datos del canal (nombre, número, WABA, token) sin borrarlo"
+                >
+                  {editingId === c.id ? "Cerrar" : "Editar"}
+                </button>
                 {c.type === "WHATSAPP_CLOUD" && (
                   <button
                     onClick={() => setTemplatesOpen((p) => ({ ...p, [c.id]: !p[c.id] }))}
@@ -401,6 +457,46 @@ export default function ChannelsPage() {
                     className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100 dark:text-red-300 dark:border-red-500/30"
                   >
                     Volver a probar
+                  </button>
+                </div>
+              </div>
+            )}
+            {editingId === c.id && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <p className="mb-2 text-xs font-medium text-ink">Editar canal — actualiza los datos sin borrar ni recrear.</p>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="text-xs">
+                    Nombre
+                    <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2" />
+                  </label>
+                  {c.type === "WHATSAPP_CLOUD" && (
+                    <>
+                      <label className="text-xs">
+                        Teléfono visible
+                        <input value={editForm.displayPhone} onChange={(e) => setEditForm({ ...editForm, displayPhone: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2" placeholder="+56 9 …" />
+                      </label>
+                      <label className="text-xs">
+                        Phone Number ID (Meta)
+                        <input value={editForm.phoneNumberId} onChange={(e) => setEditForm({ ...editForm, phoneNumberId: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono" />
+                      </label>
+                      <label className="text-xs">
+                        WABA ID
+                        <input value={editForm.wabaId} onChange={(e) => setEditForm({ ...editForm, wabaId: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono" />
+                      </label>
+                      <label className="text-xs md:col-span-2">
+                        Access token nuevo (opcional — pega el token de prueba fresco para re-registrar el número)
+                        <input value={editForm.accessToken} onChange={(e) => setEditForm({ ...editForm, accessToken: e.target.value })} type="password" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono" placeholder="Déjalo vacío para no cambiar el token" />
+                        <span className="text-[10px] text-ink-subtle">Se guarda cifrado (AES-256). Al pegar uno nuevo, se re-suscribe y re-registra el número en Meta.</span>
+                      </label>
+                    </>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button onClick={() => void saveEdit(c)} disabled={savingEdit} className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                    {savingEdit ? "Guardando…" : "Guardar cambios"}
+                  </button>
+                  <button onClick={() => setEditingId(null)} className="rounded-lg border border-line-strong px-4 py-1.5 text-xs hover:bg-app">
+                    Cancelar
                   </button>
                 </div>
               </div>
