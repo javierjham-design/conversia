@@ -122,6 +122,29 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
+    // Diagnóstico del #133010: si el número tiene credencial propia pero NO
+    // pudimos usar el token del canal (usamos el global), deja constancia clara del
+    // motivo en Salud — el caso típico es CREDENTIALS_ENCRYPTION_KEY del worker ≠ API.
+    if (auth.tokenSource && auth.tokenSource !== "channel") {
+      const reason =
+        auth.tokenSource === "global-decrypt-failed"
+          ? "El worker NO pudo descifrar el token del canal (revisa que CREDENTIALS_ENCRYPTION_KEY del worker sea IDÉNTICA a la del API) y usó el token global — por eso Meta rechaza el número."
+          : auth.tokenSource === "global-no-credential"
+            ? "El canal no tiene un token propio cargado; se usó el token global. Carga el token en Canales → Editar."
+            : "El envío usó el token global de la plataforma (el número no resolvió a un canal con token propio).";
+      await withTenant(organizationId, (tx) =>
+        tx.integrationEvent.create({
+          data: {
+            organizationId,
+            provider: "whatsapp",
+            type: "channel.token_fallback",
+            status: "warning",
+            message: reason,
+            payload: { tokenSource: auth.tokenSource, phoneNumberId: auth.phoneNumberId, channelConnectionId: auth.channelConnectionId },
+          },
+        }),
+      ).catch(() => undefined);
+    }
     await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
     // Auth (token) o configuración (nombre para mostrar, registro, pago…): marcar
     // el canal con un aviso y NO reintentar en bucle — no se arreglan solos.

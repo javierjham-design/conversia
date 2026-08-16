@@ -14,6 +14,14 @@ export interface ChannelAuth {
   phoneNumberId: string;
   accessToken: string | null;
   channelConnectionId: string | null;
+  /**
+   * De dónde salió el token efectivo — para diagnosticar el #133010 "misterioso":
+   * si el número tiene credencial propia pero terminamos usando el GLOBAL, es que
+   * el worker no pudo descifrarla (típicamente CREDENTIALS_ENCRYPTION_KEY distinta
+   * a la del API) y por eso Meta rechaza el envío (el global no puede operar la
+   * WABA del tenant / un número de prueba).
+   */
+  tokenSource?: "channel" | "global-no-account" | "global-no-credential" | "global-decrypt-failed" | "none";
 }
 
 /** Error de autenticación del canal (token vencido/revocado — Meta code 190/401). */
@@ -40,8 +48,8 @@ export class ChannelConfigError extends Error {
 export function channelConfigNotice(text: string): string | null {
   if (text.includes('"code":131037') || text.toLowerCase().includes("display name"))
     return "Tu número de WhatsApp necesita que Meta apruebe su Nombre para mostrar antes de poder enviar mensajes. Configúralo en WhatsApp Manager → tu número → Nombre para mostrar.";
-  if (text.includes('"code":131045'))
-    return "Tu número de WhatsApp no está registrado en la plataforma de WhatsApp (Cloud API). Debe completarse el registro del número antes de enviar.";
+  if (text.includes('"code":131045') || text.includes('"code":133010'))
+    return "Tu número de WhatsApp no está registrado en Cloud API para el token con el que se está enviando. Si es un número de PRUEBA, solo envía con su token de prueba (repégalo en Canales → Editar). Si es un número real, revisa que el token del canal esté vigente y que el número tenga completado su registro.";
   if (text.includes('"code":131042'))
     return "Tu cuenta de WhatsApp Business tiene un problema de método de pago o elegibilidad en Meta. Revísalo en Meta Business Manager.";
   if (text.includes('"code":131031'))
@@ -109,21 +117,30 @@ export async function resolveChannelAuth(
     }
 
     let accessToken: string | null = env.META_ACCESS_TOKEN || null;
+    let tokenSource: ChannelAuth["tokenSource"] = accessToken ? "global-no-account" : "none";
     const account = await tx.whatsappAccount.findUnique({ where: { id: number.accountId } });
     if (account?.credentialId) {
       const credential = await tx.integrationCredential.findUnique({ where: { id: account.credentialId } });
       if (credential) {
         try {
           accessToken = decryptCredential(credential.ciphertext);
+          tokenSource = "channel";
         } catch {
-          /* credencial ilegible → fallback al global */
+          // Credencial ilegible → fallback al global. NO es normal: suele ser que
+          // el worker tiene otra CREDENTIALS_ENCRYPTION_KEY que el API que la cifró.
+          tokenSource = "global-decrypt-failed";
         }
+      } else {
+        tokenSource = "global-no-credential";
       }
+    } else if (account) {
+      tokenSource = "global-no-credential";
     }
     return {
       phoneNumberId: number.phoneNumberId,
       accessToken,
       channelConnectionId: number.channelConnectionId ?? opts.channelConnectionId ?? null,
+      tokenSource,
     };
   });
 }
