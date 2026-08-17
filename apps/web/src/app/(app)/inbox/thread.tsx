@@ -94,6 +94,7 @@ export function Thread({
   agents,
   workflows,
   channel,
+  channels,
   onRefresh,
   onBack,
   onTogglePanel,
@@ -108,6 +109,7 @@ export function Thread({
   agents: { id: string; name: string }[];
   workflows: { id: string; name: string }[];
   channel: ChannelInfo | null;
+  channels: ChannelInfo[];
   onRefresh: () => void;
   onBack: () => void;
   onTogglePanel: () => void;
@@ -277,6 +279,29 @@ export function Thread({
                   <option key={a.id} value={a.id}>🤖 {a.name}</option>
                 ))}
               </select>
+              {/* Canal de envío: por cuál número sale esta conversación. Se muestra
+                  cuando hay 2+ canales de WhatsApp o si el actual no resuelve (quedó
+                  atada a un canal viejo). Cambiarlo re-envía por el número elegido. */}
+              {(() => {
+                const waChannels = channels.filter((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status !== "inactive");
+                const currentUnresolved = !channels.some((ch) => ch.id === conversation.channelConnectionId);
+                if (waChannels.length < 2 && !(currentUnresolved && waChannels.length >= 1)) return null;
+                return (
+                  <select
+                    value={channels.some((ch) => ch.id === conversation.channelConnectionId) ? conversation.channelConnectionId ?? "" : ""}
+                    onChange={(e) => {
+                      if (e.target.value) void act("channel", { channelConnectionId: e.target.value }).then(() => toast.push("Canal de envío cambiado", "ok"));
+                    }}
+                    className={sel}
+                    title="Canal (número de WhatsApp) por el que se envía esta conversación"
+                  >
+                    <option value="">📱 Elegir canal…</option>
+                    {waChannels.map((ch) => (
+                      <option key={ch.id} value={ch.id}>📱 {ch.name}{ch.displayPhone ? ` · ${ch.displayPhone}` : ""}{ch.status === "error" ? " ⚠" : ""}</option>
+                    ))}
+                  </select>
+                );
+              })()}
               {workflows.length > 0 && (
                 <select
                   value=""
