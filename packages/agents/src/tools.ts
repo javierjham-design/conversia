@@ -34,6 +34,11 @@ export interface ToolServices {
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
+  // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
+  // el tenant del CLIENTE (previa autorización), acotado a su configuración.
+  generateAssistedLink(): Promise<{ url: string }>;
+  assistedSetupState(): Promise<{ authorized: boolean; state?: { agents: number; flows: number; services: number; knowledge: number } }>;
+  assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }): Promise<{ ok: boolean; agentId?: string; error?: string }>;
 }
 
 function services(ctx: ToolContext): ToolServices {
@@ -276,6 +281,39 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { note: string }) {
         await services(ctx).addInternalNote(input.note);
         return { ok: true, message: "Nota interna agregada" };
+      },
+    },
+    {
+      name: "requestAssistedSetup",
+      description:
+        "Genera un ENLACE DE UN CLIC para que el CLIENTE autorice que tú (TuBot) le configures su cuenta durante la implementación. Mándaselo en el chat antes de dejarle algo configurado. Solo tocas su configuración; nunca ves sus conversaciones ni contactos.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        const { url } = await services(ctx).generateAssistedLink();
+        return { ok: true, url, message: `Mándale este enlace al cliente para que te autorice a configurarle la cuenta: ${url}` };
+      },
+    },
+    {
+      name: "getClientSetupState",
+      description:
+        "Consulta en qué paso va el montaje del cliente (cuántos agentes, flujos, servicios y documentos tiene) para saber qué falta. Requiere que el cliente haya autorizado el montaje asistido.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        return services(ctx).assistedSetupState();
+      },
+    },
+    {
+      name: "upsertClientAgent",
+      description:
+        "Crea o actualiza el AGENTE del cliente con las instrucciones que redactaste desde su entrevista de negocio, y lo deja publicado. Requiere autorización del cliente. Solo toca su configuración (nunca sus conversaciones ni contactos).",
+      inputSchema: z.object({
+        slug: z.string().describe("identificador corto, p.ej. recepcionista"),
+        name: z.string(),
+        systemPrompt: z.string().min(20).describe("las instrucciones COMPLETAS del agente del cliente"),
+        kind: z.string().optional(),
+      }),
+      async execute(ctx, input: { slug: string; name: string; systemPrompt: string; kind?: string }) {
+        return services(ctx).assistedUpsertAgent(input);
       },
     },
   ];

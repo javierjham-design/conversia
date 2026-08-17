@@ -1,5 +1,15 @@
+import { createHmac } from "node:crypto";
 import { getEnv } from "@conversia/config";
-import { withTenant } from "@conversia/database";
+import { getAdminPrisma, withTenant } from "@conversia/database";
+import { openAssistedSetup } from "./assisted-setup";
+
+/** Firma un JWT HS256 estándar (sin dependencias) — lo verifica el API con jsonwebtoken. */
+function signHs256(payload: Record<string, unknown>, secret: string): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const data = `${b64({ alg: "HS256", typ: "JWT" })}.${b64(payload)}`;
+  const sig = createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
 import { enqueueEscalationEmail } from "./mailer";
 import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
@@ -120,6 +130,29 @@ export interface ToolOptions {
  * su propia transacción withTenant: las tools se ejecutan FUERA de la
  * transacción que cargó la conversación (la llamada al modelo es lenta).
  */
+/**
+ * Resuelve el org del CLIENTE al que corresponde el montaje asistido de ESTA
+ * conversación: solo si el agente corre en el tenant de TuBot (proveedor) y existe
+ * un grant ACTIVO y vigente ligado al contacto de la conversación. Lectura admin
+ * (cross-tenant por diseño, como la resolución de tenant); si no hay grant → null.
+ */
+async function resolveAssistedClientOrg(agentOrgId: string, contactId: string | null | undefined): Promise<string | null> {
+  const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
+  if (!contactId || agentOrgId !== providerOrgId) return null;
+  const admin = getAdminPrisma();
+  const grant = await admin.assistedSetupGrant.findFirst({
+    where: {
+      grantedByOrganizationId: providerOrgId,
+      linkedProviderContactId: contactId,
+      status: "active",
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { organizationId: true },
+  });
+  return grant?.organizationId ?? null;
+}
+
 export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
   const scheduling = await getSchedulingProviderFor(orgId);
   const knowledgeSources = opts.knowledgeSources;
@@ -446,6 +479,40 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           },
         }),
       );
+    },
+
+    // ---------------- Montaje asistido (agente de implementación de TuBot) ----------------
+    async generateAssistedLink() {
+      const env = getEnv();
+      const now = Math.floor(Date.now() / 1000);
+      const token = signHs256(
+        { providerOrgId: env.ASSISTED_SETUP_PROVIDER_ORG_ID, contactId: t.contactId, conversationId: t.conversationId, aud: "assisted-setup-link", iat: now, exp: now + 2 * 3600 },
+        env.JWT_SECRET,
+      );
+      return { url: `${env.WEB_URL}/montaje-asistido?t=${encodeURIComponent(token)}` };
+    },
+    async assistedSetupState() {
+      const clientOrgId = await resolveAssistedClientOrg(orgId, t.contactId);
+      if (!clientOrgId) return { authorized: false };
+      try {
+        const svc = await openAssistedSetup(clientOrgId, getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID);
+        return { authorized: true, state: await svc.getSetupState() };
+      } catch {
+        return { authorized: false };
+      }
+    },
+    async assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }) {
+      const clientOrgId = await resolveAssistedClientOrg(orgId, t.contactId);
+      if (!clientOrgId) {
+        return { ok: false, error: "El cliente aún no autorizó el montaje asistido. Usa requestAssistedSetup para mandarle el enlace primero." };
+      }
+      try {
+        const svc = await openAssistedSetup(clientOrgId, getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID);
+        const r = await svc.upsertClientAgent({ slug: input.slug, name: input.name, systemPrompt: input.systemPrompt, kind: input.kind });
+        return { ok: true, agentId: r.agentId };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
     },
   };
 }
