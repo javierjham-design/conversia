@@ -27,6 +27,8 @@ export default function ChannelsPage() {
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [registerResult, setRegisterResult] = useState<Record<string, string>>({});
+  const [registering, setRegistering] = useState<string | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: "", displayPhone: "", wabaId: "", phoneNumberId: "", accessToken: "" });
@@ -112,6 +114,24 @@ export default function ChannelsPage() {
       await load(); // la prueba puede cambiar el estado del canal (error ↔ activo)
     } catch (err) {
       setTestResult((p) => ({ ...p, [id]: `✖ ${(err as Error).message}` }));
+    }
+  }
+
+  async function registerNumber(id: string) {
+    setRegistering(id);
+    setRegisterResult((p) => ({ ...p, [id]: "activando…" }));
+    try {
+      const r = await api<{ ok: boolean; steps: { step: string; ok: boolean; detail: string }[] }>(
+        `/channels/${id}/register`,
+        { method: "POST" },
+      );
+      const lines = r.steps.map((s) => `${s.ok ? "✔" : "✖"} ${s.step === "subscribe" ? "Entrantes" : "Envío"}: ${s.detail}`);
+      setRegisterResult((p) => ({ ...p, [id]: lines.join("  ·  ") }));
+      await load();
+    } catch (err) {
+      setRegisterResult((p) => ({ ...p, [id]: `✖ ${(err as Error).message}` }));
+    } finally {
+      setRegistering(null);
     }
   }
 
@@ -412,6 +432,16 @@ export default function ChannelsPage() {
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app">
                   Probar conexión
                 </button>
+                {c.type === "WHATSAPP_CLOUD" && (
+                  <button
+                    onClick={() => void registerNumber(c.id)}
+                    disabled={registering === c.id}
+                    className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app disabled:opacity-50"
+                    title="Suscribe la app al WABA (entrantes) y registra el número (salientes). Úsalo si el número quedó «Pendiente» o no recibe/envía."
+                  >
+                    {registering === c.id ? "Activando…" : "Activar número"}
+                  </button>
+                )}
                 <button
                   onClick={() => (editingId === c.id ? setEditingId(null) : openEdit(c))}
                   className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app"
@@ -502,6 +532,7 @@ export default function ChannelsPage() {
               </div>
             )}
             {testResult[c.id] && <p className="mt-2 text-xs text-ink-muted">{testResult[c.id]}</p>}
+            {registerResult[c.id] && <p className="mt-2 text-xs text-ink-muted">{registerResult[c.id]}</p>}
             {c.type === "WHATSAPP_CLOUD" && templatesOpen[c.id] && <TemplatesPanel channelId={c.id} />}
           </div>
         ))}

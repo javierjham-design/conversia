@@ -1,16 +1,31 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
 
+export interface OnboardStep {
+  step: "subscribe" | "register";
+  ok: boolean;
+  detail: string;
+}
+
+export interface OnboardResult {
+  /** Avisos legibles para mostrar al usuario cuando algo NO quedó bien. */
+  warnings: string[];
+  /** Resultado detallado por paso (para el botón "Activar número"). */
+  steps: OnboardStep[];
+}
+
 /**
  * Engancha un número de WhatsApp Cloud a nuestra app de Meta, con dos pasos que
  * SIEMPRE deben ir juntos al conectar un número:
  *  1) `subscribed_apps` sobre el WABA → recibir webhooks ENTRANTES.
  *  2) `register` sobre el número → poder ENVIAR (sin esto Meta responde
- *     #133010 "account is not registered" al mandar el primer mensaje).
+ *     #133010 "account is not registered" al mandar el primer mensaje) y sacar
+ *     el número de "Pendiente" a "Conectado".
  *
- * Antes esto SOLO lo hacía el Embedded Signup; la conexión MANUAL lo saltaba y
- * dejaba el canal a medias: no llegaban entrantes (hasta suscribir a mano) y el
- * envío fallaba con #133010. Best-effort: no lanza (el canal se crea igual),
- * pero devuelve avisos legibles para mostrarlos al usuario.
+ * Best-effort: NO lanza (el canal se crea/edita igual), pero devuelve el detalle
+ * por paso + avisos legibles. Es idempotente: si el número ya estaba registrado
+ * o la app ya estaba suscrita, se trata como éxito. Reintentable desde el botón
+ * "Activar número" (p. ej. cuando el `register` falló porque el Nombre para
+ * mostrar aún no estaba aprobado al momento de conectar).
  *
  * `fetchImpl` se inyecta en tests; en producción usa el `fetch` global.
  */
@@ -19,9 +34,10 @@ export async function subscribeAndRegisterWhatsapp(
   phoneNumberId: string,
   accessToken: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<string[]> {
+): Promise<OnboardResult> {
   const v = getEnv().META_GRAPH_VERSION;
   const warnings: string[] = [];
+  const steps: OnboardStep[] = [];
 
   // 1) Suscribir la app al WABA (webhooks entrantes).
   try {
@@ -31,12 +47,18 @@ export async function subscribeAndRegisterWhatsapp(
     );
     const json = (await res.json().catch(() => ({}))) as { error?: { message?: string; code?: number } };
     if (!res.ok || json?.error) {
+      const detail = json?.error?.message ?? `HTTP ${res.status}`;
       warnings.push(
-        `No se pudo suscribir la app al WABA (mensajes entrantes): ${json?.error?.message ?? `HTTP ${res.status}`}. Los mensajes que te escriban podrían no llegar.`,
+        `No se pudo suscribir la app al WABA (mensajes entrantes): ${detail}. Los mensajes que te escriban podrían no llegar.`,
       );
+      steps.push({ step: "subscribe", ok: false, detail });
+    } else {
+      steps.push({ step: "subscribe", ok: true, detail: "App suscrita al WABA — los mensajes entrantes ya llegan." });
     }
   } catch (e) {
-    warnings.push(`No se pudo suscribir la app al WABA (mensajes entrantes): ${(e as Error).message}`);
+    const detail = (e as Error).message;
+    warnings.push(`No se pudo suscribir la app al WABA (mensajes entrantes): ${detail}`);
+    steps.push({ step: "subscribe", ok: false, detail });
   }
 
   // 2) Registrar el número para Cloud API (necesario para ENVIAR; ver #133010).
@@ -51,17 +73,30 @@ export async function subscribeAndRegisterWhatsapp(
       },
     );
     const json = (await res.json().catch(() => ({}))) as { error?: { message?: string; code?: number } };
-    // "Ya registrado" es benigno (idempotente): no se cuenta como error.
+    // "Ya registrado" es benigno (idempotente): el número ya está activo. Meta lo
+    // reporta con texto /already/ o el código 133005 (PIN ya configurado).
     const msg = String(json?.error?.message ?? "");
     const alreadyRegistered = /already/i.test(msg) || json?.error?.code === 133005;
     if ((!res.ok || json?.error) && !alreadyRegistered) {
+      const detail = json?.error?.message ?? `HTTP ${res.status}`;
       warnings.push(
-        `No se pudo registrar el número para Cloud API (necesario para ENVIAR; error Meta #133010): ${json?.error?.message ?? `HTTP ${res.status}`}`,
+        `No se pudo registrar el número para Cloud API (necesario para ENVIAR y para sacarlo de "Pendiente"): ${detail}`,
       );
+      steps.push({ step: "register", ok: false, detail });
+    } else {
+      steps.push({
+        step: "register",
+        ok: true,
+        detail: alreadyRegistered
+          ? "El número ya estaba registrado (activo para envío)."
+          : "Número registrado para Cloud API — ya puede enviar y pasa de «Pendiente» a «Conectado».",
+      });
     }
   } catch (e) {
-    warnings.push(`No se pudo registrar el número para Cloud API: ${(e as Error).message}`);
+    const detail = (e as Error).message;
+    warnings.push(`No se pudo registrar el número para Cloud API: ${detail}`);
+    steps.push({ step: "register", ok: false, detail });
   }
 
-  return warnings;
+  return { warnings, steps };
 }
