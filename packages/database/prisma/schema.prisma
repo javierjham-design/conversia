@@ -385,6 +385,9 @@ model AssistedSetupGrant {
   scopes                  Json      @default("[\"agents\",\"flows\",\"services\",\"knowledge\"]")
   status                  String    @default("active") // active | revoked | expired
   authorizedByUserId      String?   @map("authorized_by_user_id") // usuario del cliente que autorizó
+  // Contacto de TuBot (en el tenant de TuBot) que este grant atiende — la ligadura
+  // conversación-de-TuBot ↔ org-cliente. La setea el enlace de un clic al autorizar.
+  linkedProviderContactId String?   @map("linked_provider_contact_id")
   expiresAt               DateTime  @map("expires_at")
   revokedAt               DateTime? @map("revoked_at")
   createdAt               DateTime  @default(now()) @map("created_at")
