@@ -254,6 +254,16 @@ export async function processInbound(job: InboundJob): Promise<void> {
           },
         });
         started = true;
+      } else if (tenant.channelConnectionId && conversation.channelConnectionId !== tenant.channelConnectionId) {
+        // Reatar la conversación al canal que REALMENTE recibió este mensaje. Si el
+        // canal se reconectó/renombró/recreó, el puntero viejo quedaba muerto y el
+        // envío caía a "primer número activo" → número/token equivocado → #133010.
+        // Así la respuesta sale SIEMPRE por el mismo número con el que habló.
+        await tx.conversation.update({
+          where: { id: conversation.id },
+          data: { channelConnectionId: tenant.channelConnectionId },
+        });
+        conversation = { ...conversation, channelConnectionId: tenant.channelConnectionId };
       }
 
       await tx.message.create({
