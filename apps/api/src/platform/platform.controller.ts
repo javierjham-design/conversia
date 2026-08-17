@@ -265,6 +265,34 @@ export class PlatformController {
     const planFeatures = (plan?.features as Record<string, any>) ?? {};
     const tmplIncluded = typeof planFeatures.templateMessages === "number" ? planFeatures.templateMessages : 0;
     const tmplUsed = tmplAgg._count._all;
+    // Agentes de IA del tenant con su modelo POR-AGENTE (override en la versión
+    // publicada) + el modelo efectivo (agente → tenant → default de plataforma).
+    // Permite optimizar costos: p. ej. ventas en gpt-4o-mini y implementación en Opus.
+    const agents = await db.agent.findMany({
+      where: { organizationId: id, deletedAt: null },
+      select: { id: true, name: true, slug: true, kind: true, active: true, currentVersionId: true },
+      orderBy: { createdAt: "asc" },
+    });
+    const agentVersionIds = agents.map((a) => a.currentVersionId).filter(Boolean) as string[];
+    const agentVersions = agentVersionIds.length
+      ? await db.agentVersion.findMany({ where: { id: { in: agentVersionIds } }, select: { id: true, config: true } })
+      : [];
+    const cfgByVersion = new Map(agentVersions.map((v) => [v.id, (v.config ?? {}) as Record<string, any>]));
+    const tenantModel = ((settings.ai as any)?.model as string | undefined) ?? null;
+    const platformDefaultModel = getEnv().AI_DEFAULT_MODEL;
+    const agentsList = agents.map((a) => {
+      const cfg = a.currentVersionId ? cfgByVersion.get(a.currentVersionId) ?? {} : {};
+      const agentModel = typeof cfg.model === "string" && cfg.model ? cfg.model : null;
+      return {
+        id: a.id,
+        name: a.name,
+        slug: a.slug,
+        kind: a.kind,
+        active: a.active,
+        model: agentModel, // null = hereda del tenant
+        effectiveModel: agentModel ?? tenantModel ?? platformDefaultModel,
+      };
+    });
     return {
       organization: { id: org.id, name: org.name, slug: org.slug, status: org.status, country: org.country, createdAt: org.createdAt, settings: org.settings },
       adminEmail: adminMember?.user.email ?? null,
@@ -286,7 +314,11 @@ export class PlatformController {
         model: (settings.ai as any)?.model ?? null,
         maxTokens: (settings.ai as any)?.maxTokens ?? null,
         maxToolRounds: (settings.ai as any)?.maxToolRounds ?? null,
+        platformDefaultModel,
       },
+      // Modelo por-agente (override) + modelo efectivo, editable desde el Super Admin.
+      agents: agentsList,
+      availableModels: Object.keys(MODEL_PRICING),
       availablePlans: plans.map((p) => ({ code: p.code, name: p.name })),
       templates: {
         used: tmplUsed,
@@ -363,6 +395,39 @@ export class PlatformController {
       });
     }
     return { ok: true };
+  }
+
+  /**
+   * Fija el modelo de IA de UN agente (override por-agente). `model: null` lo hace
+   * heredar del modelo del tenant. Permite bajar costos: los agentes que solo
+   * responden (ventas/soporte) en un modelo económico, y reservar Opus para los
+   * exigentes (implementación). Se guarda en el config de TODAS las versiones del
+   * agente para que sobreviva a re-publicaciones.
+   */
+  @Post("organizations/:id/agents/:agentId/model")
+  async setAgentModel(
+    @Param("id") id: string,
+    @Param("agentId") agentId: string,
+    @Body() body: unknown,
+    @Req() req: PlatformRequest,
+  ) {
+    const parsed = z.object({ model: z.string().min(1).max(60).nullable() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("model requerido (o null para heredar del tenant)");
+    if (parsed.data.model && !MODEL_PRICING[parsed.data.model]) {
+      throw new BadRequestException("Modelo no reconocido");
+    }
+    const db = this.prisma.admin;
+    const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
+    if (!agent) throw new NotFoundException("Agente no encontrado");
+    const versions = await db.agentVersion.findMany({ where: { agentId }, select: { id: true, config: true } });
+    for (const v of versions) {
+      const config = { ...((v.config ?? {}) as Record<string, any>) };
+      if (parsed.data.model) config.model = parsed.data.model;
+      else delete config.model;
+      await db.agentVersion.update({ where: { id: v.id }, data: { config } });
+    }
+    await this.audit(req, "platform.agent.model", "agent", agentId, { model: parsed.data.model ?? null, organizationId: id });
+    return { ok: true, model: parsed.data.model ?? null };
   }
 
   // ------------------- Cuenta del administrador del tenant -------------------
