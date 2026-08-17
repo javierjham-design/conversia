@@ -401,11 +401,24 @@ mínima y auditada, NO reutilizando el Super Admin ni abriendo un camino genéri
    conversaciones ni contactos; revocar corta el acceso de inmediato; ningún otro
    tenant puede usar esta capacidad.
 
-**Modelo de datos (propuesto, requiere migración — pendiente de OK):** tabla
-`assisted_setup_grants` (`organizationId` cliente, `grantedByOrganizationId` = TuBot,
-`scopes` acotados, `status` active|revoked|expired, `expiresAt`, `authorizedByUserId`,
-timestamps) + verificación en un `AssistedSetupContext` propio (no `withTenant`
-genérico) que solo abre acceso de escritura a las tablas de configuración del scope.
+**Modelo de datos (IMPLEMENTADO — tabla `assisted_setup_grants`, migración
+`20260817140000`):** `organizationId` (cliente, bajo RLS), `grantedByOrganizationId`
+(TuBot), `scopes` acotados `["agents","flows","services","knowledge"]`, `status`
+active|revoked|expired, `expiresAt`, `authorizedByUserId`, `revokedAt`, timestamps.
+**Vigencia por defecto: 14 días** (alineada con la ventana de la prueba),
+**renovable** cuando el cliente pide una reimplementación (re-autoriza desde su panel
+→ nueva `expiresAt`).
+
+**Punto de seguridad clave (la RLS es por FILA, no por TABLA):** abrir
+`withTenant(clienteOrgId)` limita a las filas del cliente pero NO impide tocar sus
+tablas de conversaciones/contactos. Por eso el `AssistedSetupContext` (verificación
+del grant vía conexión admin, luego apertura del contexto del cliente) **NO expone
+una transacción cruda** al agente: expone un **servicio ANGOSTO** con solo las
+operaciones de configuración del scope (agentes, flujos, servicios, KB). El agente
+solo puede llamar esas tools; jamás lee conversaciones/contactos ni envía mensajes.
+Cada acción se audita en el `audit_log` del cliente con `actorType = "assisted_setup"`.
+Los **tests obligatorios** blindan ese límite (sin grant → nada; con grant → no lee
+conversaciones/contactos; revocar → corta al instante; ningún otro tenant lo usa).
 
 ---
 
