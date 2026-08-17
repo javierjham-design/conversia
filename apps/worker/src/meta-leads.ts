@@ -208,7 +208,8 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       },
     });
 
-    return { contactId: contact.id, leadId, phone, newTags };
+    const displayName = [contactData.firstName, contactData.lastName].filter(Boolean).join(" ");
+    return { contactId: contact.id, leadId, phone, newTags, displayName };
   });
 
   if (!result) return; // duplicado
@@ -241,6 +242,17 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
     { source: "meta_lead_ads", formId: change.form_id, contactId: result.contactId },
     { contactPhone: result.phone || null, leadId: result.leadId },
   );
+  // Aviso al equipo del tenant: con una campaña activa, un lead sin respuesta
+  // rápida es un lead perdido. El catálogo define canales y audiencia.
+  const { enqueueNotification } = await import("./notifications/queue.js");
+  await enqueueNotification({
+    eventKey: "lead.created",
+    organizationId,
+    data: {
+      contactName: result.displayName || result.phone || "Nuevo contacto",
+      source: "Meta Lead Ads",
+    },
+  });
 }
 
 /** Extrae los cambios leadgen de un payload de webhook de Meta (object=page). */
