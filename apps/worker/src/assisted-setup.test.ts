@@ -25,6 +25,10 @@ function fakeTx() {
       workflow: { count: async () => 0 },
       service: { count: async () => 0 },
       knowledgeDocument: { count: async () => 0 },
+      channelConnection: {
+        findUnique: async () => { rec("channelConnection.read"); return { id: "ch1" }; },
+        update: async () => { rec("channelConnection.write"); return { id: "ch1" }; },
+      },
       auditLog: { create: async (args: any) => { rec("auditLog.write"); return args; } },
     } as any,
   };
@@ -113,5 +117,16 @@ describe("montaje asistido — el límite de seguridad cross-tenant", () => {
     const { deps } = makeDeps(grantSoloKB);
     const svc = await openAssistedSetup(CLIENT, TUBOT, deps);
     await expect(svc.upsertClientAgent({ slug: "x", name: "X", systemPrompt: "…" })).rejects.toBeInstanceOf(AssistedSetupDenied);
+  });
+
+  it("con canal autorizado → deja el agente como predeterminado de ESE canal y lo audita", async () => {
+    const { deps, audits, touched } = makeDeps(activeGrant());
+    const svc = await openAssistedSetup(CLIENT, TUBOT, deps, { scopeChannelId: "ch1" });
+    await svc.upsertClientAgent({ slug: "recepcionista", name: "Recepcionista", systemPrompt: "Eres…" });
+    // Actualizó el canal (defaultAgentId) dentro del tenant del cliente.
+    expect(touched).toContain("channelConnection.write");
+    expect(audits.some((a) => a.action === "assisted_setup.channel_default_agent" && a.organizationId === CLIENT)).toBe(true);
+    // Sigue sin salirse a conversaciones/contactos.
+    expect(touched.every((t) => /^(agent|agentVersion|channelConnection|auditLog)\./.test(t))).toBe(true);
   });
 });

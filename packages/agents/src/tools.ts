@@ -37,6 +37,7 @@ export interface ToolServices {
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
+  redeemAssistedCode(code: string): Promise<{ ok: boolean; orgName?: string | null; channelName?: string | null; error?: string }>;
   assistedSetupState(): Promise<{ authorized: boolean; state?: { agents: number; flows: number; services: number; knowledge: number } }>;
   assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }): Promise<{ ok: boolean; agentId?: string; error?: string }>;
 }
@@ -286,11 +287,26 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "requestAssistedSetup",
       description:
-        "Genera un ENLACE DE UN CLIC para que el CLIENTE autorice que tú (TuBot) le configures su cuenta durante la implementación. Mándaselo en el chat antes de dejarle algo configurado. Solo tocas su configuración; nunca ves sus conversaciones ni contactos.",
+        "Explica al CLIENTE cómo autorizarte a configurar su cuenta: debe entrar a su panel (Configuración → Datos → «Montaje asistido»), elegir el canal a configurar y darle Autorizar; ahí obtiene un CÓDIGO tipo TB-XXXX-XXXX que te debe dictar por el chat. Úsalo antes de dejarle algo configurado.",
       inputSchema: z.object({}),
-      async execute(ctx) {
-        const { url } = await services(ctx).generateAssistedLink();
-        return { ok: true, url, message: `Mándale este enlace al cliente para que te autorice a configurarle la cuenta: ${url}` };
+      async execute() {
+        return {
+          ok: true,
+          message:
+            "Pídele al cliente que haga esto en su panel: 1) Configuración → Datos, 2) sección «Montaje asistido de TuBot», 3) elegir el canal que quiere configurar y presionar «Autorizar». Le aparecerá un código como TB-XXXX-XXXX (vence en 30 min). Pídele que te lo dicte por aquí y canjéalo con vincularMontajeCliente.",
+        };
+      },
+    },
+    {
+      name: "vincularMontajeCliente",
+      description:
+        "Canjea el CÓDIGO que el cliente generó en su panel y te dictó (tipo TB-XXXX-XXXX). Vincula su cuenta a esta conversación y te autoriza a configurarle SOLO el canal que él eligió. Llámalo apenas te pase el código; luego confirma con él la empresa y el canal antes de crear nada.",
+      inputSchema: z.object({ codigo: z.string().describe("el código que dictó el cliente, p.ej. TB-4K9M-2XQ7") }),
+      async execute(ctx, input: { codigo: string }) {
+        const r = await services(ctx).redeemAssistedCode(input.codigo);
+        if (!r.ok) return { ok: false, message: r.error };
+        const canal = r.channelName ? ` para el canal «${r.channelName}»` : "";
+        return { ok: true, orgName: r.orgName, channelName: r.channelName, message: `Listo, quedé vinculado con «${r.orgName ?? "la cuenta del cliente"}»${canal}. Confírmale que vas a configurar esa cuenta antes de crear nada.` };
       },
     },
     {

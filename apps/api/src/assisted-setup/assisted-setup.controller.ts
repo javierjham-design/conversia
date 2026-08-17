@@ -1,3 +1,4 @@
+import { createHash, randomInt } from "node:crypto";
 import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
@@ -8,6 +9,30 @@ import { requirePermission } from "../tenancy/permissions";
 
 /** Audiencia del token del enlace de montaje asistido (firmado con JWT_SECRET). */
 export const ASSISTED_LINK_AUD = "assisted-setup-link";
+
+/** Vida del código corto de vinculación (el grant dura 14 días; el código, minutos). */
+const REDEEM_CODE_TTL_MIN = 30;
+/** Alfabeto sin caracteres ambiguos (sin 0/O/1/I/L) para dictar el código por voz. */
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/**
+ * Normaliza un código dictado (mayúsculas, sin separadores) para hashear/verificar.
+ * OJO: `hashRedeemCode` DEBE producir el mismo hash que el del worker
+ * (`apps/worker/src/tool-services.ts`), que canjea el código — si cambia uno,
+ * cambia el otro, o el canje fallará.
+ */
+export function normalizeRedeemCode(raw: string): string {
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+export function hashRedeemCode(raw: string): string {
+  return createHash("sha256").update(normalizeRedeemCode(raw)).digest("hex");
+}
+/** Genera un código legible tipo `TB-XXXX-XXXX`. */
+function generateRedeemCode(): string {
+  let body = "";
+  for (let i = 0; i < 8; i++) body += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  return `TB-${body.slice(0, 4)}-${body.slice(4)}`;
+}
 
 /**
  * MONTAJE ASISTIDO — autorización del CLIENTE (dueño de su tenant) para que TuBot
@@ -45,17 +70,46 @@ export class AssistedSetupController {
     });
   }
 
-  /** Autoriza (o RENUEVA) el montaje asistido por 14 días. */
+  /** Canales del cliente, para elegir cuál se autoriza a configurar (desambigua). */
+  @Get("channels")
+  channels() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const list = await tx.channelConnection.findMany({
+        where: { status: { not: "inactive" } },
+        select: { id: true, name: true, type: true },
+        orderBy: { createdAt: "asc" },
+      });
+      return list;
+    });
+  }
+
+  /**
+   * Autoriza (o RENUEVA) el montaje asistido por 14 días y devuelve un CÓDIGO CORTO
+   * (vida corta) que el cliente le dicta al bot en el chat para vincular su cuenta.
+   * Opcionalmente ligado a un canal específico (el que se quiere configurar).
+   */
   @Post("authorize")
-  async authorize() {
+  async authorize(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
     const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
     if (!providerOrgId) throw new BadRequestException("El montaje asistido no está configurado");
     if (providerOrgId === ctx.organizationId) {
       throw new BadRequestException("El proveedor no puede autorizarse a sí mismo");
     }
+    const parsed = z.object({ channelId: z.string().optional() }).safeParse(body ?? {});
+    const channelId = parsed.success ? parsed.data.channelId : undefined;
     const expiresAt = new Date(Date.now() + 14 * 24 * 3600 * 1000);
+    const code = generateRedeemCode();
+    const redeemCodeExpiresAt = new Date(Date.now() + REDEEM_CODE_TTL_MIN * 60 * 1000);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // El canal (si se indicó) debe ser de este mismo cliente (RLS ya lo acota).
+      let channelName: string | null = null;
+      if (channelId) {
+        const ch = await tx.channelConnection.findUnique({ where: { id: channelId }, select: { id: true, name: true } });
+        if (!ch) throw new BadRequestException("El canal indicado no existe en tu cuenta");
+        channelName = ch.name;
+      }
       // Renovar = revocar los activos previos y crear uno nuevo con nueva vigencia.
       await tx.assistedSetupGrant.updateMany({
         where: { grantedByOrganizationId: providerOrgId, status: "active" },
@@ -68,6 +122,9 @@ export class AssistedSetupController {
           scopes: [...SCOPES],
           status: "active",
           authorizedByUserId: ctx.userId,
+          scopeChannelId: channelId ?? null,
+          redeemCodeHash: hashRedeemCode(code),
+          redeemCodeExpiresAt,
           expiresAt,
         },
       });
@@ -79,10 +136,19 @@ export class AssistedSetupController {
           action: "assisted_setup.authorize",
           entityType: "assisted_setup_grant",
           entityId: grant.id,
-          after: { expiresAt, scopes: [...SCOPES] },
+          after: { expiresAt, scopes: [...SCOPES], scopeChannelId: channelId ?? null },
         },
       });
-      return { ok: true, authorized: true, expiresAt: grant.expiresAt, scopes: [...SCOPES] };
+      // El código en claro se devuelve UNA sola vez (solo se guarda su hash).
+      return {
+        ok: true,
+        authorized: true,
+        expiresAt: grant.expiresAt,
+        scopes: [...SCOPES],
+        code,
+        codeExpiresAt: redeemCodeExpiresAt,
+        channelName,
+      };
     });
   }
 
