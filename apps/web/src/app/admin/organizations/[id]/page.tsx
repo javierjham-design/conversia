@@ -61,6 +61,15 @@ export default function OrgDetailPage() {
       setSaving(false);
     }
   }
+  async function setAgentModel(agentId: string, model: string | null) {
+    try {
+      await padmin(`/platform/organizations/${id}/agents/${agentId}/model`, { method: "POST", body: JSON.stringify({ model }) });
+      toast.push("Modelo del agente actualizado ✔", "ok");
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    }
+  }
   async function setStatus(status: string) {
     await padmin(`/platform/organizations/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
     toast.push(`Estado: ${status}`, "ok");
@@ -236,7 +245,7 @@ export default function OrgDetailPage() {
         {/* Modelo de IA del cliente — aplica a TODA su plataforma */}
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
           <h2 className="mb-1 font-semibold text-navy-900">Modelo de IA del cliente</h2>
-          <p className="mb-3 text-xs text-slate-500">Aplica a toda la plataforma del cliente (todos sus agentes y el probador). El cliente no puede cambiarlo.</p>
+          <p className="mb-3 text-xs text-slate-500">Modelo por DEFECTO del cliente (todos sus agentes y el probador), salvo los agentes con override abajo. El cliente no puede cambiarlo.</p>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="text-xs text-slate-600">
               Modelo
@@ -258,6 +267,35 @@ export default function OrgDetailPage() {
             <span className="text-xs text-slate-400">Aplica de inmediato a los agentes del cliente.</span>
           </div>
         </section>
+
+        {/* Modelo POR AGENTE — override para optimizar costos (p. ej. ventas barato, implementación Opus) */}
+        {Array.isArray(d?.agents) && d.agents.length > 0 && (
+          <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
+            <h2 className="mb-1 font-semibold text-navy-900">Modelo por agente</h2>
+            <p className="mb-3 text-xs text-slate-500">
+              Override por agente. «Heredar» usa el modelo del cliente de arriba. Optimiza costos: ventas/soporte en un modelo
+              económico y el de implementación en Opus. Por defecto de plataforma: <span className="font-mono">{d?.ai?.platformDefaultModel ?? "gpt-4o-mini"}</span>.
+            </p>
+            <div className="space-y-2">
+              {d.agents.map((a: any) => (
+                <div key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-navy-900">{a.name}{!a.active && <span className="ml-1 text-xs text-slate-400">(inactivo)</span>}</p>
+                    <p className="text-xs text-slate-400">{a.kind} · efectivo: <span className="font-mono">{a.effectiveModel}</span></p>
+                  </div>
+                  <select
+                    value={a.model ?? ""}
+                    onChange={(e) => void setAgentModel(a.id, e.target.value || null)}
+                    className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                  >
+                    <option value="">Heredar del cliente</option>
+                    {(d.availableModels ?? []).map((m: string) => (<option key={m} value={m}>{m}</option>))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Costo de los máximos */}
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card">

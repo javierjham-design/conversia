@@ -234,7 +234,11 @@ export async function runAgentTurn(opts: {
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
       buildConversationInstructions(aiNotes) +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
-    model: aiCfg.model ?? getEnv().AI_DEFAULT_MODEL,
+    // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
+    // por agente) → modelo del tenant (org.settings.ai) → default de plataforma
+    // (gpt-4o-mini). Así se pone Opus solo en los agentes que lo valen (p. ej.
+    // implementación) y los económicos (ventas/soporte) no gastan de más.
+    model: (typeof cfg.model === "string" && cfg.model) || aiCfg.model || getEnv().AI_DEFAULT_MODEL,
     maxTokens: aiCfg.maxTokens ?? 400,
     maxToolRounds: aiCfg.maxToolRounds ?? 5,
     tools: Array.isArray(version.tools) ? (version.tools as string[]) : [],
