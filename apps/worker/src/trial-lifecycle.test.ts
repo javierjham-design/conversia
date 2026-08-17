@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { planTrialAction, type TrialState } from "./trial-lifecycle";
+import { describe, expect, it, vi } from "vitest";
+import { executeTrialPurge, planTrialAction, type PurgeDeps, type PurgeableOrg, type TrialState } from "./trial-lifecycle";
 
 const DAY = 86_400_000;
 const created = new Date("2026-08-01T00:00:00Z");
@@ -68,5 +68,59 @@ describe("planTrialAction — ciclo de vida de la prueba (7+7)", () => {
   it("cancelada → none", () => {
     const d = planTrialAction({ now: at(8), createdAt: created, orgStatus: "CANCELLED", trial: activeTrial(), hasPaid: false });
     expect(d.action).toBe("none");
+  });
+});
+
+describe("executeTrialPurge — guardas de la purga (destructiva)", () => {
+  const disabledOrg = (): PurgeableOrg => ({
+    id: "org1",
+    name: "Prueba Abandonada",
+    createdAt: created,
+    settings: { trial: activeTrial({ state: "disabled" }) },
+  });
+  const makeDeps = (over: Partial<PurgeDeps> = {}): { deps: PurgeDeps; calls: Record<string, number> } => {
+    const calls = { recordPurge: 0, softDelete: 0, hardDelete: 0 };
+    const deps: PurgeDeps = {
+      hasEverPaid: vi.fn(async () => false),
+      recordPurge: vi.fn(async () => { calls.recordPurge++; }),
+      softDelete: vi.fn(async () => { calls.softDelete++; }),
+      hardDelete: vi.fn(async () => { calls.hardDelete++; }),
+      hardPurgeEnabled: false,
+      now: () => at(14),
+      ...over,
+    };
+    return { deps, calls };
+  };
+
+  it("PAGÓ → skipped, NUNCA borra (soft ni hard)", async () => {
+    const { deps, calls } = makeDeps({ hasEverPaid: vi.fn(async () => true) });
+    const r = await executeTrialPurge(disabledOrg(), deps);
+    expect(r).toBe("skipped");
+    expect(calls.softDelete + calls.hardDelete).toBe(0);
+  });
+
+  it("antes del día 14 → skipped", async () => {
+    const { deps, calls } = makeDeps({ now: () => at(10) });
+    const r = await executeTrialPurge(disabledOrg(), deps);
+    expect(r).toBe("skipped");
+    expect(calls.softDelete + calls.hardDelete).toBe(0);
+  });
+
+  it("día 14, no pagó, HARD desactivado → SOFT (marca, no borra de verdad)", async () => {
+    const { deps, calls } = makeDeps();
+    const r = await executeTrialPurge(disabledOrg(), deps);
+    expect(r).toBe("soft");
+    expect(calls.softDelete).toBe(1);
+    expect(calls.hardDelete).toBe(0);
+    expect(calls.recordPurge).toBe(1);
+  });
+
+  it("día 14, no pagó, HARD activado → HARD (borra en cascada) + registro", async () => {
+    const { deps, calls } = makeDeps({ hardPurgeEnabled: true });
+    const r = await executeTrialPurge(disabledOrg(), deps);
+    expect(r).toBe("hard");
+    expect(calls.hardDelete).toBe(1);
+    expect(calls.softDelete).toBe(0);
+    expect(calls.recordPurge).toBe(1);
   });
 });

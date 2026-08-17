@@ -95,8 +95,57 @@ export function planTrialAction(input: TrialInput): TrialDecision {
   return { action: "none", ...base };
 }
 
+// --------------------------- PURGA (destructiva) ---------------------------
+// SEGURIDAD: por defecto la purga es SOFT (marca la org como eliminada; nada se
+// borra de verdad). El borrado REAL (cascade) solo ocurre con TRIAL_HARD_PURGE=true
+// — así un bug jamás elimina datos por sí solo. Defensa en profundidad: se
+// re-verifica la decisión (nunca purgar a quien pagó) justo antes de actuar.
+
+export interface PurgeableOrg {
+  id: string;
+  name: string;
+  createdAt: Date;
+  settings: Record<string, unknown> | null;
+}
+
+export interface PurgeDeps {
+  hasEverPaid: (orgId: string) => Promise<boolean>;
+  /** Registro FUERA del tenant (se conserva aunque se borre la org). */
+  recordPurge: (org: PurgeableOrg, mode: "soft" | "hard") => Promise<void>;
+  /** Marca la org como eliminada (reversible): deletedAt + CANCELLED + trial.purged. */
+  softDelete: (orgId: string) => Promise<void>;
+  /** Borra la org y CASCADEA todos sus datos (irreversible). */
+  hardDelete: (orgId: string) => Promise<void>;
+  hardPurgeEnabled: boolean;
+  now?: () => Date;
+}
+
+/**
+ * Ejecuta la purga de UNA prueba abandonada, re-verificando la regla como defensa
+ * en profundidad. Devuelve qué hizo. NUNCA purga a quien pagó.
+ */
+export async function executeTrialPurge(org: PurgeableOrg, deps: PurgeDeps): Promise<"skipped" | "soft" | "hard"> {
+  const trial = (org.settings?.trial as TrialState | undefined) ?? null;
+  const hasPaid = await deps.hasEverPaid(org.id);
+  const decision = planTrialAction({
+    now: deps.now?.() ?? new Date(),
+    createdAt: org.createdAt,
+    orgStatus: "SUSPENDED",
+    trial,
+    hasPaid,
+  });
+  if (decision.action !== "purge") return "skipped"; // guard: pagó / no corresponde / antes de tiempo
+  const mode = deps.hardPurgeEnabled ? "hard" : "soft";
+  await deps.recordPurge(org, mode);
+  if (mode === "hard") {
+    await deps.hardDelete(org.id);
+    return "hard";
+  }
+  await deps.softDelete(org.id);
+  return "soft";
+}
+
 // --------------------------- Tick de aplicación ---------------------------
-// Solo init / avisos / deshabilitar (reversible). La PURGA la hace otro job.
 
 const ONE_HOUR = 60 * 60 * 1000;
 
@@ -118,7 +167,7 @@ export function startTrialLifecycle(): () => void {
       // con settings.trial.state=disabled). No tocamos ACTIVE/CANCELLED.
       const orgs = await prisma.organization.findMany({
         where: { status: { in: ["TRIAL", "SUSPENDED"] }, deletedAt: null },
-        select: { id: true, status: true, settings: true, createdAt: true },
+        select: { id: true, name: true, status: true, settings: true, createdAt: true },
       });
       for (const org of orgs) {
         const settings = { ...((org.settings as Record<string, unknown>) ?? {}) };
@@ -128,7 +177,33 @@ export function startTrialLifecycle(): () => void {
         const hasPaid = await hasEverPaid(prisma, org.id);
         const decision = planTrialAction({ now, createdAt: org.createdAt, orgStatus: org.status, trial, hasPaid });
 
-        if (decision.action === "none" || decision.action === "purge") continue; // purge lo hace otro job
+        if (decision.action === "purge") {
+          await executeTrialPurge(
+            { id: org.id, name: org.name, createdAt: org.createdAt, settings },
+            {
+              hasEverPaid: (id) => hasEverPaid(prisma, id),
+              recordPurge: async (o, mode) => {
+                // Registro platform-level (organization_id NULL) — se conserva aunque se borre la org.
+                await prisma.auditLog.create({
+                  data: { organizationId: null, actorType: "system", actorId: "trial", action: "trial.purge", entityType: "organization", entityId: o.id, after: { name: o.name, mode, at: new Date().toISOString() } },
+                });
+              },
+              softDelete: async (id) => {
+                await withTenant(id, async (tx) => {
+                  const s = { ...settings, trial: { ...(trial ?? {}), state: "purged", purgedAt: now.toISOString() } };
+                  await tx.organization.update({ where: { id }, data: { status: "CANCELLED", deletedAt: now, settings: s as object } });
+                });
+              },
+              hardDelete: async (id) => {
+                // Irreversible: la FK ON DELETE CASCADE borra todos los datos del tenant.
+                await prisma.organization.delete({ where: { id } });
+              },
+              hardPurgeEnabled: process.env.TRIAL_HARD_PURGE === "true",
+            },
+          );
+          continue;
+        }
+        if (decision.action === "none") continue;
 
         if (decision.action === "init") {
           const nextTrial: TrialState = {
