@@ -199,6 +199,10 @@ export default function LoginPage() {
         </label>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button type="submit" disabled={loading} className={btn}>{loading ? "Entrando…" : "Entrar"}</button>
+        <p className="text-center text-sm text-ink-muted">
+          ¿No tienes cuenta?{" "}
+          <a href="/registro" className="font-medium text-brand-600 hover:text-brand-700">Crear cuenta gratis</a>
+        </p>
       </form>
     </main>
   );
