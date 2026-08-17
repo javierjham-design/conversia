@@ -13,6 +13,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:setup": "prisma db execute --file ./sql/setup.sql --schema ./prisma/schema.prisma",
     "db:seed": "tsx src/seed.ts",
+    "seed:tubot": "tsx src/seed-tubot.ts",
     "verify:isolation": "tsx src/verify-isolation.ts"
   },
   "dependencies": {

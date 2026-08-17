@@ -8,6 +8,17 @@ español de Chile. Ser nuestro propio cliente es la mejor auditoría del product
 > está en el **número de PRUEBA de Meta** (App Review pendiente), así que la
 > operación queda **lista para atender apenas el número esté vivo**; mientras
 > tanto se valida en el simulador y con las conversaciones de prueba de abajo.
+>
+> **Fuente de verdad de los prompts (2026-08)**: los prompts de los TRES agentes
+> (ventas, **implementación** y soporte) viven versionados en
+> `packages/database/seeds/tubot-prompts/*.md` y se publican al tenant con
+> `pnpm --filter @conversia/database seed:tubot` (crea una versión nueva del
+> agente solo si el prompt cambió; nunca crea la organización). Los bloques de
+> prompt más abajo son la referencia histórica: **edita los .md, no este doc**.
+> Cambio comercial clave: el cierre ya no depende solo de la demo con Javier —
+> existe registro autoservicio (`tubot.cl/registro`, con `?plan=starter|pro`
+> para contratar y pagar online al tiro) y un agente de implementación que
+> acompaña la puesta en marcha del que crea su cuenta.
 
 ---
 
@@ -259,11 +270,24 @@ REGLAS INNEGOCIABLES
 
 ## 5. Derivaciones y enrutamiento
 - **Ventas** es el agente por defecto del canal: atiende todo mensaje entrante.
+- Ventas → **Implementación** (`transferToAgent`) cuando el prospecto confirma
+  que creó su cuenta en `tubot.cl/registro` (etapa `en_prueba`).
 - Ventas → **Soporte** (`transferToAgent`) cuando detecta un cliente existente con
   problema de uso/facturación.
-- Soporte → **Ventas** (`transferToAgent`) si en realidad es un prospecto.
-- Ambos → **Javier** (`transferToHuman`) según sus reglas (persona, complejo,
-  condiciones, facturación, riesgo). El soporte deja `addInternalNote` con resumen.
+- Implementación → **Soporte** si algo no funciona de verdad; → **Ventas** si en
+  realidad es un prospecto sin cuenta; → **Javier** (`transferToHuman` + nota)
+  cuando llega al paso de conectar su número de WhatsApp (paso asistido).
+- Soporte → **Ventas** si en realidad es un prospecto; → **Implementación** si la
+  duda es de puesta en marcha inicial.
+- Todos → **Javier** (`transferToHuman`) según sus reglas (persona, complejo,
+  condiciones, facturación, riesgo), dejando `addInternalNote` con resumen.
+
+**Cierres del agente de ventas** (en orden de preferencia):
+1. `tubot.cl/registro` — cuenta gratis autoservicio ("conocer la plataforma");
+   al confirmar: etapa `en_prueba` + derivar a Implementación.
+2. `tubot.cl/registro?plan=starter` / `?plan=pro` — crear cuenta y **pagar
+   online** en el mismo paso (Flow/CLP); el webhook activa la suscripción sola.
+3. Demo con Javier (`transferToHuman`) — cadenas, integraciones, condiciones.
 
 ---
 

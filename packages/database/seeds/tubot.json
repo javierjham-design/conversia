@@ -1,0 +1,58 @@
+{
+  "$comment": "Operación comercial del tenant TuBot (docs/TUBOT_TENANT.md). Lo consume src/seed-tubot.ts, que NUNCA crea la organización: actualiza una existente (slug 'tubot' o TUBOT_ORG_SLUG) publicando una versión nueva de cada agente solo si el prompt cambió. Los prompts viven en seeds/tubot-prompts/*.md para editarlos cómodo.",
+  "organization": { "slug": "tubot" },
+  "fallbackAdminEmail": "info.tubot@gmail.com",
+  "leadStatuses": [
+    { "code": "nuevo", "name": "Nuevo interesado", "category": "OPEN", "order": 0 },
+    { "code": "calificado", "name": "Calificado", "category": "OPEN", "order": 1 },
+    { "code": "demo_agendada", "name": "Demo agendada", "category": "OPEN", "order": 2 },
+    { "code": "en_prueba", "name": "En prueba", "category": "OPEN", "order": 3 },
+    { "code": "cliente", "name": "Cliente", "category": "WON", "order": 4 },
+    { "code": "perdido", "name": "Perdido", "category": "LOST", "order": 5 }
+  ],
+  "tags": [
+    { "name": "Salud", "color": "#0ea5e9" },
+    { "name": "Comercio", "color": "#f59e0b" },
+    { "name": "Servicios", "color": "#8b5cf6" },
+    { "name": "Educación", "color": "#22c55e" },
+    { "name": "Inmobiliaria", "color": "#64748b" },
+    { "name": "Fitness", "color": "#ef4444" },
+    { "name": "Turismo", "color": "#06b6d4" },
+    { "name": "Automotriz", "color": "#78716c" },
+    { "name": "Objeción precio", "color": "#dc2626" },
+    { "name": "Objeción bot", "color": "#ea580c" },
+    { "name": "Objeción equipo", "color": "#d97706" },
+    { "name": "Caliente", "color": "#e11d48" },
+    { "name": "Tibio", "color": "#f59e0b" },
+    { "name": "Frío", "color": "#38bdf8" }
+  ],
+  "agents": [
+    {
+      "slug": "ventas",
+      "name": "Ventas TuBot",
+      "kind": "sales",
+      "description": "Vende TuBot: descubre el negocio, conecta el dolor, cotiza y cierra con registro autoservicio, contratación online o demo con Javier.",
+      "promptFile": "tubot-prompts/ventas.md",
+      "tools": ["searchKnowledgeBase", "updateContactFields", "updateLeadStatus", "addTag", "addInternalNote", "transferToAgent", "transferToHuman"],
+      "config": { "model": "claude-opus-4-8", "maxTokens": 450, "language": "es", "maxToolRounds": 4 }
+    },
+    {
+      "slug": "implementacion",
+      "name": "Implementación TuBot",
+      "kind": "onboarding",
+      "description": "Acompaña a quien ya creó su cuenta: guía la puesta en marcha (rubro, agente, flujo, WhatsApp asistido, equipo) hasta dejarlo operando.",
+      "promptFile": "tubot-prompts/implementacion.md",
+      "tools": ["searchKnowledgeBase", "updateContactFields", "updateLeadStatus", "addTag", "addInternalNote", "transferToAgent", "transferToHuman"],
+      "config": { "model": "claude-opus-4-8", "maxTokens": 450, "language": "es", "maxToolRounds": 4 }
+    },
+    {
+      "slug": "soporte",
+      "name": "Soporte TuBot",
+      "kind": "support",
+      "description": "Resuelve dudas de uso de clientes activos con pasos concretos; escala a Javier con nota interna cuando corresponde.",
+      "promptFile": "tubot-prompts/soporte.md",
+      "tools": ["searchKnowledgeBase", "addTag", "addInternalNote", "transferToAgent", "transferToHuman"],
+      "config": { "model": "claude-opus-4-8", "maxTokens": 450, "language": "es", "maxToolRounds": 4 }
+    }
+  ]
+}
