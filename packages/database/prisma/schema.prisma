@@ -371,6 +371,30 @@ model Organization {
   @@map("organizations")
 }
 
+// Autorización del cliente para el MONTAJE ASISTIDO de TuBot. Permite que el agente
+// de implementación de TuBot escriba SOLO objetos de configuración (agentes, flujos,
+// servicios, base de conocimiento) en el tenant del cliente — NUNCA conversaciones,
+// contactos, ni enviar mensajes en su nombre. Acotada por diseño, auditada, expira a
+// los 14 días (renovable para reimplementaciones), y el cliente puede revocarla
+// cuando quiera desde su panel. `organization_id` = tenant del CLIENTE (queda bajo
+// RLS: cada cliente solo ve/gestiona su propia autorización).
+model AssistedSetupGrant {
+  id                      String    @id @default(cuid())
+  organizationId          String    @map("organization_id") // tenant del CLIENTE
+  grantedByOrganizationId String    @map("granted_by_organization_id") // TuBot (quién montará)
+  scopes                  Json      @default("[\"agents\",\"flows\",\"services\",\"knowledge\"]")
+  status                  String    @default("active") // active | revoked | expired
+  authorizedByUserId      String?   @map("authorized_by_user_id") // usuario del cliente que autorizó
+  expiresAt               DateTime  @map("expires_at")
+  revokedAt               DateTime? @map("revoked_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@index([organizationId, status])
+  @@index([grantedByOrganizationId])
+  @@map("assisted_setup_grants")
+}
+
 // Tickets de soporte in-app: el tenant reporta un problema y el Super Admin lo ve.
 // Estructura pensada para, a futuro, ENRUTAR los tickets a la bandeja de TuBot
 // (cuando TuBot sea tenant de sí mismo): guarda el tenant de origen, el usuario
