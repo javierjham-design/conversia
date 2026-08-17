@@ -180,7 +180,7 @@ export class ChannelsController {
       if (!input.phoneNumberId || !input.wabaId || !input.accessToken) {
         throw new BadRequestException("WhatsApp Cloud requiere phoneNumberId, wabaId y accessToken");
       }
-      warnings = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, input.accessToken);
+      warnings = (await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, input.accessToken)).warnings;
     }
 
     const created = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -485,7 +485,7 @@ export class ChannelsController {
       const effPhone = input.phoneNumberId ?? current.phoneNumberId;
       const changedWhatsapp = !!(input.accessToken || input.wabaId || input.phoneNumberId);
       if (changedWhatsapp && effToken && effWaba && effPhone) {
-        warnings = await subscribeAndRegisterWhatsapp(effWaba, effPhone, effToken);
+        warnings = (await subscribeAndRegisterWhatsapp(effWaba, effPhone, effToken)).warnings;
       }
     }
 
@@ -558,6 +558,44 @@ export class ChannelsController {
     });
 
     return { ...updated, warnings };
+  }
+
+  /**
+   * Reintenta ENGANCHAR el número a Meta: suscribe la app al WABA (entrantes) +
+   * registra el número para Cloud API (salientes / lo saca de "Pendiente"). Es lo
+   * mismo que corre solo al conectar/editar, pero a demanda y devolviendo el
+   * resultado EXACTO por paso — para cuando el registro automático no alcanzó a
+   * completarse (p. ej. el número se conectó ANTES de que Meta aprobara el Nombre
+   * para mostrar, que es requisito del `register`). Evita tener que usar la Graph
+   * API a mano.
+   */
+  @Post(":id/register")
+  async registerNumber(@Param("id") id: string) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const channel = await tx.channelConnection.findUnique({ where: { id } });
+      if (!channel) throw new NotFoundException("Canal no encontrado");
+      if (channel.type !== "WHATSAPP_CLOUD") throw new BadRequestException("Solo aplica a canales de WhatsApp Cloud");
+      const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: id } });
+      if (!number) throw new BadRequestException("El canal no tiene número asociado");
+      const account = await tx.whatsappAccount.findUnique({ where: { id: number.accountId } });
+      if (!account?.wabaId) throw new BadRequestException("El canal no tiene una WABA asociada");
+      const credential = account.credentialId
+        ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } })
+        : null;
+      return {
+        wabaId: account.wabaId,
+        phoneNumberId: number.phoneNumberId,
+        token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN,
+      };
+    });
+    if (!data.token) throw new BadRequestException("Sin token: carga el access token del canal (Editar)");
+    const result = await subscribeAndRegisterWhatsapp(data.wabaId, data.phoneNumberId, data.token);
+    const ok = result.steps.every((s) => s.ok);
+    // Si quedó todo OK y el canal estaba en error, lo reactivamos.
+    if (ok) await this.setChannelHealth(ctx.organizationId, id, "active");
+    return { ok, ...result };
   }
 
   /** Prueba la conexión: para WhatsApp consulta el número en la Graph API de Meta. */
