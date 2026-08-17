@@ -386,8 +386,17 @@ model AssistedSetupGrant {
   status                  String    @default("active") // active | revoked | expired
   authorizedByUserId      String?   @map("authorized_by_user_id") // usuario del cliente que autorizó
   // Contacto de TuBot (en el tenant de TuBot) que este grant atiende — la ligadura
-  // conversación-de-TuBot ↔ org-cliente. La setea el enlace de un clic al autorizar.
+  // conversación-de-TuBot ↔ org-cliente. La setea el enlace de un clic al autorizar,
+  // o el CANJE del código corto (redeem) desde el chat.
   linkedProviderContactId String?   @map("linked_provider_contact_id")
+  // Vinculación por CÓDIGO CORTO: el cliente autoriza en su panel, recibe un código
+  // tipo `TB-XXXX-XXXX` (guardado como hash SHA-256, vida corta) y se lo dicta al bot;
+  // el bot lo canjea y recién ahí queda ligado a su contacto. `scopeChannelId` = el
+  // canal del cliente que autorizó configurar (desambigua si tiene varios).
+  redeemCodeHash          String?   @map("redeem_code_hash")
+  redeemCodeExpiresAt     DateTime? @map("redeem_code_expires_at")
+  redeemedAt              DateTime? @map("redeemed_at")
+  scopeChannelId          String?   @map("scope_channel_id")
   expiresAt               DateTime  @map("expires_at")
   revokedAt               DateTime? @map("revoked_at")
   createdAt               DateTime  @default(now()) @map("created_at")
@@ -395,6 +404,7 @@ model AssistedSetupGrant {
 
   @@index([organizationId, status])
   @@index([grantedByOrganizationId])
+  @@index([redeemCodeHash])
   @@map("assisted_setup_grants")
 }
 

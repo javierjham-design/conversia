@@ -204,6 +204,10 @@ export async function buildSandboxServices(
       track("Enlace de montaje asistido", "(simulado)");
       return { url: "https://tubot.cl/montaje-asistido?t=SIMULADO" };
     },
+    async redeemAssistedCode(code: string) {
+      track("Vinculación por código", `${code} — simulado`);
+      return { ok: true, orgName: "Cliente de prueba", channelName: "Canal de prueba" };
+    },
     async assistedSetupState() {
       track("Estado del montaje del cliente", "(simulado)");
       return { authorized: true, state: { agents: 0, flows: 0, services: 0, knowledge: 0 } };
