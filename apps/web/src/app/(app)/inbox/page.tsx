@@ -441,6 +441,7 @@ export default function InboxPage() {
             agents={agents}
             workflows={workflows}
             channel={channelOf(conversation)}
+            channels={channels}
             onRefresh={refreshCurrent}
             onBack={() => setSelectedId(null)}
             onTogglePanel={() => setPanelOpen(!panelOpen)}

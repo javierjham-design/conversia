@@ -831,6 +831,38 @@ export class ConversationsController {
     return r;
   }
 
+  /**
+   * Reasigna el CANAL (número de WhatsApp) por el que sale esta conversación.
+   * Útil cuando el tenant opera varios números y quiere responder por uno u otro,
+   * o cuando una conversación quedó atada a un canal viejo/reconectado. El worker
+   * también la re-ata sola al canal que recibe el próximo mensaje entrante.
+   */
+  @Post(":id/channel")
+  async setChannel(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ channelConnectionId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("channelConnectionId requerido");
+    const r = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const channel = await tx.channelConnection.findFirst({ where: { id: parsed.data.channelConnectionId } });
+      if (!channel) throw new BadRequestException("Canal no encontrado");
+      if (channel.status === "inactive") throw new BadRequestException("Ese canal está inactivo");
+      if (channel.type === "WHATSAPP_CLOUD") {
+        const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: channel.id } });
+        if (!number) throw new BadRequestException("Ese canal no tiene un número de WhatsApp asociado");
+      }
+      await tx.conversation.update({ where: { id }, data: { channelConnectionId: channel.id } });
+      await this.systemMessage(tx, ctx.organizationId, id, `📱 Canal de envío: «${channel.name}» · por ${await this.userName(tx, ctx.userId)}`);
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "conversation.set_channel", entityType: "conversation", entityId: id, after: { channelConnectionId: channel.id, name: channel.name } },
+      });
+      return { ok: true, channelConnectionId: channel.id };
+    });
+    await this.publish(ctx.organizationId, id);
+    return r;
+  }
+
   // ------------------- Indicaciones para la IA (por conversación) -------------------
 
   @Get(":id/ai-notes")
