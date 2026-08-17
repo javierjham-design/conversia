@@ -60,6 +60,8 @@ export class StripePaymentProvider implements PaymentProvider {
     p.set("client_reference_id", input.organizationId);
     p.set("metadata[organizationId]", input.organizationId);
     p.set("metadata[planCode]", input.planCode);
+    // Monto esperado (unidad menor) para que el webhook valide lo pagado (S-4).
+    p.set("metadata[expectedAmount]", String(minor));
     p.set("subscription_data[metadata][organizationId]", input.organizationId);
     p.set("subscription_data[metadata][planCode]", input.planCode);
     if (input.email) p.set("customer_email", input.email);
@@ -167,7 +169,8 @@ export class FlowPaymentProvider implements PaymentProvider {
       email: input.email || "facturacion@tubot.cl",
       urlConfirmation: `${env.API_URL}/billing/webhooks/flow`,
       urlReturn: `${input.successUrl}?paid=1`,
-      optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode }),
+      // expectedAmount: el webhook compara lo reportado por Flow contra esto (S-4).
+      optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode, expectedAmount: Math.round(input.amount) }),
     };
     params.s = flowSign(params, this.secretKey);
     const res = await fetch(`${this.baseUrl}/payment/create`, {

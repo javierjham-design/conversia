@@ -248,6 +248,12 @@ export class BillingController {
       const meta = obj.metadata ?? {};
       const organizationId = meta.organizationId ?? obj.client_reference_id;
       if (organizationId && meta.planCode) {
+        // S-4: el monto pagado debe corresponder al del checkout que emitimos
+        // (ambos en unidad menor). Sin expectedAmount (sesiones previas) no se valida.
+        if (this.amountMismatch(meta.expectedAmount, obj.amount_total)) {
+          await this.reportAmountMismatch(organizationId, meta.planCode, "stripe", meta.expectedAmount, obj.amount_total, obj.id);
+          return { received: true, rejected: "amount_mismatch" };
+        }
         await this.activateOrCredit(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id);
       }
     }
@@ -279,10 +285,50 @@ export class BillingController {
         if (await this.alreadyProcessed("flow", token, "flow.payment")) {
           return { received: true, deduped: true };
         }
+        // S-4: lo pagado (getStatus firmado) debe calzar con el checkout emitido.
+        if (this.amountMismatch(meta.expectedAmount, status?.amount)) {
+          await this.reportAmountMismatch(meta.organizationId, meta.planCode, "flow", meta.expectedAmount, status?.amount, token);
+          return { received: true, rejected: "amount_mismatch" };
+        }
         await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token);
       }
     }
     return { received: true };
+  }
+
+  /** S-4: hay conflicto solo si ambos montos existen y difieren en más de 1 unidad. */
+  private amountMismatch(expected: unknown, paid: unknown): boolean {
+    const e = Number(expected);
+    const p = Number(paid);
+    if (!Number.isFinite(e) || !Number.isFinite(p)) return false;
+    return Math.abs(p - e) > 1;
+  }
+
+  /** Deja rastro auditable de un pago con monto distinto al del checkout emitido. */
+  private async reportAmountMismatch(
+    organizationId: string,
+    planCode: string,
+    provider: string,
+    expected: unknown,
+    paid: unknown,
+    providerRef?: string,
+  ): Promise<void> {
+    console.error(`✖ billing: monto pagado no coincide (${provider} ${planCode}): esperado=${expected} pagado=${paid} ref=${providerRef}`);
+    await this.prisma
+      .withTenant(organizationId, (tx) =>
+        tx.auditLog.create({
+          data: {
+            organizationId,
+            actorType: "system",
+            actorId: "billing-webhook",
+            action: "billing.amount_mismatch",
+            entityType: "plan",
+            entityId: planCode,
+            after: { provider, expected: String(expected), paid: String(paid), providerRef: providerRef ?? null },
+          },
+        }),
+      )
+      .catch(() => undefined);
   }
 
   /** Webhook de Lemon Squeezy (MoR). Firma X-Signature (HMAC del raw body). */
