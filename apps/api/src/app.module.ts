@@ -26,6 +26,7 @@ import { OnboardingController } from "./organizations/onboarding.controller";
 import { SupportController } from "./organizations/support.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
 import { SettingsController } from "./organizations/settings.controller";
+import { AssistedSetupController } from "./assisted-setup/assisted-setup.controller";
 import { PrismaService } from "./prisma.service";
 import { QueueService } from "./queues";
 import { BillingController } from "./billing/billing.controller";
@@ -52,6 +53,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     SupportController, // soporte in-app: el tenant reporta, el Super Admin lo ve
     NotificationsController, // campana in-app + dispositivos Web Push + presencia
     SettingsController, // Centro de Configuración del tenant (/settings)
+    AssistedSetupController, // montaje asistido: el cliente autoriza/revoca a TuBot
     AgentsController,
     ConversationsController,
     InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA

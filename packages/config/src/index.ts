@@ -41,6 +41,9 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["anthropic", "openai", "mock"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   AI_DEFAULT_MODEL: z.string().default("gpt-4o-mini"),
+  // Org de TuBot (el proveedor del "montaje asistido"): el cliente autoriza a ESTE
+  // org a escribir su configuración durante la implementación. Default = tenant de TuBot.
+  ASSISTED_SETUP_PROVIDER_ORG_ID: z.string().default("cms5zmgtz0001od01t30lw4t6"),
   AI_CLASSIFIER_MODEL: z.string().default("gpt-4o-mini"),
   AI_TRANSCRIBE_MODEL: z.string().default("whisper-1"), // notas de voz de WhatsApp (OpenAI)
   // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
