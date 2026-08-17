@@ -36,6 +36,7 @@ import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, retryRun, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
+import { startTrialLifecycle } from "./trial-lifecycle";
 import { startRetentionPurge } from "./retention-purge";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
 
@@ -160,6 +161,7 @@ async function main() {
   const stopDailyDigests = startDailyDigests();
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
   const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
+  const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
 
@@ -180,6 +182,7 @@ async function main() {
     console.log("Cerrando worker…");
     clearInterval(heartbeat);
     stopBillingDunning();
+    stopTrialLifecycle();
     stopRetentionPurge();
     stopOrphanWaba();
     stopScheduler();
