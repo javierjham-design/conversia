@@ -116,8 +116,8 @@ export default async function LandingPage() {
             <span className="bg-gradient-to-r from-brand-600 to-accent-400 bg-clip-text text-transparent">24/7</span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-ink-muted">
-            Plataforma de IA conversacional para WhatsApp y otros canales. Configura agentes con la información real
-            de tu negocio y deja que tu equipo se enfoque en lo importante. Sin código.
+            <strong>TuBot</strong> es la plataforma de IA conversacional para WhatsApp y otros canales. Configura agentes
+            con la información real de tu negocio y deja que tu equipo se enfoque en lo importante. Sin código.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
             <DemoCta label="Solicitar una demo" className="rounded-lg bg-brand-600 px-6 py-3 font-medium text-white shadow-sm hover:bg-brand-700" />
@@ -229,7 +229,7 @@ export default async function LandingPage() {
             <Link href="/legal/eliminacion-datos" className="hover:text-white">Eliminación de datos</Link>
             <a href="mailto:hola@tubot.cl" className="hover:text-white">Contacto</a>
           </nav>
-          <span className="text-xs text-ink-subtle">© {new Date().getFullYear()} Servicios Digital-Dent SpA</span>
+          <span className="text-xs text-ink-subtle"><strong>TuBot</strong> es un servicio de Servicios Digital-Dent SpA · © {new Date().getFullYear()}</span>
         </div>
       </footer>
     </div>
