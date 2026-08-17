@@ -187,6 +187,21 @@ export function Thread({
     }
   };
 
+  // Si la conversación quedó SIN un canal que resuelva (p. ej. atada a uno viejo)
+  // y existe UN solo canal de WhatsApp activo, asígnalo por defecto — así siempre
+  // hay un canal de envío asignado y no se ve "Elegir canal…". El ref evita
+  // re-disparar mientras se guarda / al recargar.
+  const autoBoundRef = useRef<string | null>(null);
+  useEffect(() => {
+    const waChannels = channels.filter((ch) => ch.type === "WHATSAPP_CLOUD" && ch.status !== "inactive");
+    const resolved = channels.some((ch) => ch.id === conversation.channelConnectionId);
+    if (!resolved && waChannels.length === 1 && autoBoundRef.current !== conversation.id) {
+      autoBoundRef.current = conversation.id;
+      void act("channel", { channelConnectionId: waChannels[0]!.id });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id, conversation.channelConnectionId, channels]);
+
   // Selects terciarios: compactos, borde sutil, sin competir con la acción primaria.
   const sel = "rounded-control border border-line bg-app px-2 py-1.5 text-xs text-ink transition-colors hover:border-line-strong max-w-[8.5rem] truncate";
   const closed = conversation.status === "CLOSED";
