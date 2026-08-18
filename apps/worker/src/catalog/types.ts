@@ -21,9 +21,14 @@ export interface NormalizedItem {
   available: boolean;
   variants: unknown[]; // variantes / modificadores
   imageUrl: string | null;
+  images: string[]; // galería completa
   productUrl: string | null;
   buyUrl: string | null; // enlace de compra / carrito armado donde el proveedor lo permita
   tags: string[];
+  attributes: Record<string, unknown>; // marca, peso, material, alérgenos, atributos del proveedor…
+  brand: string | null;
+  barcode: string | null;
+  unit: string | null;
   menuSection: string | null; // restaurante
   availability: Record<string, unknown>; // ventanas por horario / precios por canal
   raw: unknown; // objeto crudo original

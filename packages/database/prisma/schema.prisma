@@ -1235,9 +1235,16 @@ model CatalogItem {
   active         Boolean  @default(true) // el bot lo ofrece (toggle del tenant)
   variants       Json     @default("[]") // variantes / modificadores (tamaños, agregados, sin cebolla…)
   imageUrl       String?  @map("image_url")
+  images         Json     @default("[]") // galería completa de imágenes
   productUrl     String?  @map("product_url")
   buyUrl         String?  @map("buy_url") // enlace de compra / carrito armado donde el proveedor lo permita
   tags           Json     @default("[]")
+  // Toda la info adicional para que el bot responda con detalle (marca, peso, material,
+  // dimensiones, alérgenos, atributos del proveedor…). Estructurado + flexible.
+  attributes     Json     @default("{}")
+  brand          String?
+  barcode        String?
+  unit           String? // kg | un | lt … (retail / restaurante)
   // Restaurante: sección de menú, ventanas de disponibilidad por horario y precios por canal.
   menuSection    String?  @map("menu_section")
   availability   Json     @default("{}") // { windows: [...], channelPrices: {...} }
