@@ -491,12 +491,41 @@ el cliente pide hablar con una persona. Siempre con resumen en comentario intern
 
 ## 10. Pago mensual y ANUAL
 - Pago **mensual por adelantado** + opción **anual** (con descuento configurable por
-  plan desde el Super Admin).
+  plan desde el Super Admin). ✅ Implementado (precio mensual+anual por plan; el cliente
+  elige la cadencia al suscribir).
 - **Bolsa de mensajes en el anual**: se acredita **mes a mes** dentro del año
-  contratado (no los 12 de una vez), para no financiar el resto con la línea de
-  crédito si un cliente quema todo el primer mes.
-- **Estado**: verificar si el checkout ya soporta anual; si no, implementarlo (precio
-  anual por plan + acreditación mensual del cupo). Puede requerir migración → OK.
+  contratado (no los 12 de una vez). ✅ Implementado.
+
+### Bloque de COBRO Y SUSCRIPCIÓN para los agentes (2026-08-18)
+
+Pegar TAL CUAL en el prompt del **agente de Soporte** (y una versión corta en Comercial
+e Implementación). Ajustado a lo realmente implementado (cobro recurrente por Flow, gateado
+por `RECURRING_BILLING_ENABLED`):
+
+```
+COBRO Y SUSCRIPCIÓN (responde con seguridad; NUNCA inventes montos — los precios salen del sistema):
+- Cómo se paga: el plan se cobra automáticamente en cada fecha de renovación (mensual o anual)
+  a la tarjeta que el cliente registró. Registra o cambia su tarjeta en Configuración → Plan y
+  facturación. Nunca guardamos los datos de la tarjeta (los toma la pasarela de pago).
+- Si un cobro falla: la plataforma SIGUE funcionando 48 horas. Se reintenta el cobro solo, y el
+  cliente puede pagar manualmente desde el panel (misma tarjeta u otra). Si a las 48 h no se pagó,
+  el servicio se suspende.
+- Qué es una SUSPENSIÓN: el bot deja de responder, los flujos se detienen y no salen mensajes. PERO
+  sus datos y conversaciones se conservan intactos, y los mensajes que le lleguen se siguen
+  guardando. Reactiva al instante pagando desde la pantalla de pagos.
+- Cambiar de plan o de mensual a anual: se hace desde el mismo panel, en Plan y facturación.
+- Cancelar: desde el panel, sin escribirle a nadie. Sigue con servicio hasta el fin del período ya
+  pagado; no se le cobra un período nuevo. Puede reactivar antes de que termine el período.
+- Si algo del cobro no calza o el cliente insiste en un problema de plata, deriva a Javier con nota
+  interna: los temas de dinero se tratan con cuidado.
+```
+
+Versión CORTA para Comercial e Implementación (una línea en el prompt):
+```
+Si preguntan por el cobro: el plan se cobra automático (mensual o anual) a la tarjeta registrada;
+si un pago falla hay 48 h para regularizar antes de suspender; se cancela desde el panel sin
+perder los datos. Para dudas finas de facturación, deriva a soporte/Javier.
+```
 
 ---
 
