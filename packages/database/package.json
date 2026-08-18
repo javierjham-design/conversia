@@ -13,7 +13,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:setup": "prisma db execute --file ./sql/setup.sql --schema ./prisma/schema.prisma",
     "db:seed": "tsx src/seed.ts",
-    "verify:isolation": "tsx src/verify-isolation.ts"
+    "verify:isolation": "tsx src/verify-isolation.ts",
+    "verify:rls": "tsx src/verify-rls-coverage.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
