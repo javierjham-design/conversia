@@ -47,6 +47,9 @@ BEGIN
       AND t.table_type = 'BASE TABLE'
   LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.table_name);
+    -- FORCE: la RLS aplica INCLUSO al dueño de la tabla (solo el superusuario/BYPASSRLS
+    -- la evade). Defensa en profundidad por si la app llega a conectar como dueño.
+    EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', r.table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', r.table_name);
     -- Filas con organization_id NULL (plantillas globales, logs de plataforma)
     -- solo son visibles para roles que bypasean RLS (admin), no para la app.
@@ -63,6 +66,7 @@ END $$;
 -- platform_admins): el aislamiento se aplica en la capa de aplicación.
 -- Para organizations, política adicional: la app solo ve su propia fila.
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.organizations FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS org_self ON public.organizations;
 CREATE POLICY org_self ON public.organizations
   USING (id = current_setting('app.org_id', true));
@@ -72,6 +76,7 @@ CREATE POLICY org_self ON public.organizations
 -- users (identidad global): el rol de app solo ve usuarios que son miembros
 -- de la organización del contexto. Login/registro/invitaciones usan admin.
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS users_member_visibility ON public.users;
 CREATE POLICY users_member_visibility ON public.users
   USING (EXISTS (
@@ -83,10 +88,12 @@ CREATE POLICY users_member_visibility ON public.users
 -- platform_admins: invisible e inmodificable para el rol de app
 -- (RLS habilitado sin políticas = deny-all para no-bypass).
 ALTER TABLE public.platform_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_admins FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS deny_app ON public.platform_admins;
 
 -- plans: solo lectura para el rol de app
 ALTER TABLE public.plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plans FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS plans_read ON public.plans;
 CREATE POLICY plans_read ON public.plans FOR SELECT USING (true);
 

@@ -124,6 +124,8 @@ jobs:
       - run: pnpm --filter @conversia/database db:generate
       - run: pnpm --filter @conversia/database db:deploy
       - run: pnpm --filter @conversia/database db:setup
+      - name: Cobertura de RLS (falla si una tabla de tenant no tiene política)
+        run: pnpm --filter @conversia/database verify:rls
       - run: pnpm --filter @conversia/database db:seed
       - name: Verificar aislamiento (rol conversia_app, sin BYPASSRLS)
         run: pnpm --filter @conversia/database verify:isolation

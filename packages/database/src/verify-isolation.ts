@@ -100,6 +100,33 @@ async function main() {
     check(`${table}: 0 filas de otro tenant (${rows.length} propias)`, leaked.length === 0, `— fugaron ${leaked.length}`);
   }
 
+  // 1b. Barrido EXHAUSTIVO: TODAS las tablas con organization_id (no solo la lista
+  // de arriba). Estando en A, ninguna tabla debe exponer filas de otro tenant.
+  console.log("\n1b. Barrido exhaustivo de TODAS las tablas con organization_id:");
+  const tenantTables = await withoutTenant((tx) =>
+    tx.$queryRawUnsafe<{ table_name: string }[]>(
+      `SELECT c.table_name FROM information_schema.columns c
+       JOIN information_schema.tables t ON t.table_name = c.table_name AND t.table_schema = c.table_schema
+       WHERE c.table_schema = 'public' AND c.column_name = 'organization_id' AND t.table_type = 'BASE TABLE'
+       ORDER BY c.table_name`,
+    ),
+  );
+  let sweepLeaks = 0;
+  for (const { table_name } of tenantTables) {
+    const res = await asTenant(orgA, (tx) =>
+      tx.$queryRawUnsafe<{ leaked: bigint }[]>(
+        `SELECT count(*)::bigint AS leaked FROM public."${table_name}" WHERE organization_id <> $1`,
+        orgA,
+      ),
+    );
+    const leaked = Number(res[0]?.leaked ?? 0);
+    if (leaked > 0) {
+      sweepLeaks++;
+      console.log(`  ✖ ${table_name}: ${leaked} filas de otro tenant visibles`);
+    }
+  }
+  check(`barrido exhaustivo: ${tenantTables.length} tablas de tenant sin fuga`, sweepLeaks === 0, `— ${sweepLeaks} con fuga`);
+
   // 2. Acceso directo por id de una fila de B estando en A -----------------
   console.log("\n2. Acceso directo cruzado (buscar por id de B desde A):");
   const bAgent = await asTenant(orgB, (tx) => tx.agent.findFirst());
