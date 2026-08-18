@@ -1370,6 +1370,10 @@ const planFields = {
   name: z.string().min(2).max(80),
   priceClp: z.coerce.number().min(0).default(0),
   priceUsd: z.coerce.number().min(0).default(0),
+  // Precio ANUAL opcional (null = no se ofrece anual). `.nullable()` deja pasar null
+  // tal cual (no lo coerce a 0). Faltaban aquí → el PATCH los descartaba (bug del PR #127).
+  priceClpYearly: z.coerce.number().min(0).nullable().optional(),
+  priceUsdYearly: z.coerce.number().min(0).nullable().optional(),
   interval: z.enum(["monthly", "yearly"]).default("monthly"),
   trialDays: z.coerce.number().int().min(0).max(90).default(0),
   isPublic: z.boolean().default(true),
