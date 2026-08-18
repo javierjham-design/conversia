@@ -47,6 +47,10 @@ export class StripeSubscriptionProvider implements SubscriptionProvider {
     // off_session:true, confirm:true, metadata[commerceOrder] }. Resultado por webhook.
     throw new Error("Stripe: charge pendiente.");
   }
+  async getChargeStatus(_providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }> {
+    // TODO(stripe): GET /v1/payment_intents/{id} → status succeeded|requires_payment_method|...
+    return { settled: false, ok: false, reason: null };
+  }
   async cancelSubscription(_customerRef: string): Promise<void> {
     /* no-op: cobramos por PaymentIntent en nuestro calendario */
   }

@@ -17,50 +17,62 @@ function billablesTotal(settings: unknown): number {
   return b.reduce((a, x) => a + (Number((x as { amount?: unknown })?.amount) || 0), 0);
 }
 
-/** Mapea el estado interno a SubscriptionStatus de Prisma. */
-function toDbStatus(state: SubState): "ACTIVE" | "PAST_DUE" | "SUSPENDED" | "CANCELLED" {
-  return state === "CANCELED" ? "CANCELLED" : state;
+/** Construye un EngineSub (monto = base de la cadencia + facturables) desde la BD. */
+async function buildEngineSub(admin: ReturnType<typeof getAdminPrisma>, s: { id: string; organizationId: string; status: string; interval: string; periodEnd: Date | null; nextChargeAt: Date | null; pastDueSince: Date | null; retriesDone: number; cancelAtPeriodEnd: boolean; providerCustomerRef: string | null; planId: string }): Promise<EngineSub | null> {
+  const plan = await admin.plan.findUnique({ where: { id: s.planId }, select: { name: true, priceClp: true, priceUsd: true, priceClpYearly: true, priceUsdYearly: true } });
+  const org = await admin.organization.findUnique({ where: { id: s.organizationId }, select: { currency: true, settings: true } });
+  if (!plan || !org) return null;
+  const currency = org.currency ?? "CLP";
+  const yearly = s.interval === "yearly";
+  const base = currency === "CLP"
+    ? Number(yearly && plan.priceClpYearly != null ? plan.priceClpYearly : plan.priceClp)
+    : Number(yearly && plan.priceUsdYearly != null ? plan.priceUsdYearly : plan.priceUsd);
+  return {
+    id: s.id,
+    organizationId: s.organizationId,
+    state: (s.status === "CANCELLED" ? "CANCELED" : s.status) as SubState,
+    interval: yearly ? "yearly" : "monthly",
+    amount: base + billablesTotal(org.settings),
+    currency,
+    subject: `Plan ${plan.name} (${yearly ? "anual" : "mensual"})`,
+    providerCustomerRef: s.providerCustomerRef,
+    dueAt: s.nextChargeAt ?? s.periodEnd,
+    periodEnd: s.periodEnd,
+    pastDueSince: s.pastDueSince,
+    retriesDone: s.retriesDone,
+    cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+  };
 }
+
+const SUB_SELECT = { id: true, organizationId: true, status: true, interval: true, periodEnd: true, nextChargeAt: true, pastDueSince: true, retriesDone: true, cancelAtPeriodEnd: true, providerCustomerRef: true, planId: true } as const;
 
 export function createDbBillingPort(): BillingPort {
   const admin = getAdminPrisma();
   return {
-    async listActionable(now) {
-      const subs = await admin.subscription.findMany({
-        where: { status: { in: ["ACTIVE", "PAST_DUE"] } },
-        select: {
-          id: true, organizationId: true, status: true, interval: true, periodEnd: true,
-          nextChargeAt: true, pastDueSince: true, retriesDone: true, cancelAtPeriodEnd: true,
-          providerCustomerRef: true, planId: true,
-        },
-      });
+    async listActionable() {
+      const subs = await admin.subscription.findMany({ where: { status: { in: ["ACTIVE", "PAST_DUE"] } }, select: SUB_SELECT });
       const out: EngineSub[] = [];
       for (const s of subs) {
-        const plan = await admin.plan.findUnique({ where: { id: s.planId }, select: { name: true, priceClp: true, priceUsd: true, priceClpYearly: true, priceUsdYearly: true } });
-        const org = await admin.organization.findUnique({ where: { id: s.organizationId }, select: { currency: true, settings: true } });
-        if (!plan || !org) continue;
-        const currency = org.currency ?? "CLP";
-        const yearly = s.interval === "yearly";
-        const base = currency === "CLP"
-          ? Number(yearly && plan.priceClpYearly != null ? plan.priceClpYearly : plan.priceClp)
-          : Number(yearly && plan.priceUsdYearly != null ? plan.priceUsdYearly : plan.priceUsd);
-        out.push({
-          id: s.id,
-          organizationId: s.organizationId,
-          state: (s.status === "CANCELLED" ? "CANCELED" : s.status) as SubState,
-          interval: yearly ? "yearly" : "monthly",
-          amount: base + billablesTotal(org.settings),
-          currency,
-          subject: `Plan ${plan.name} (${yearly ? "anual" : "mensual"})`,
-          providerCustomerRef: s.providerCustomerRef,
-          dueAt: s.nextChargeAt ?? s.periodEnd,
-          periodEnd: s.periodEnd,
-          pastDueSince: s.pastDueSince,
-          retriesDone: s.retriesDone,
-          cancelAtPeriodEnd: s.cancelAtPeriodEnd,
-        });
+        const es = await buildEngineSub(admin, s);
+        if (es) out.push(es);
       }
       return out;
+    },
+
+    async listPending(now) {
+      // Intentos que llevan pendientes ≥ 2 min (dar tiempo al webhook antes de reconsultar).
+      const cutoff = new Date(now.getTime() - 2 * 60 * 1000);
+      const rows = await admin.paymentAttempt.findMany({
+        where: { status: "pending", createdAt: { lte: cutoff } },
+        select: { commerceOrder: true, providerRef: true, subscriptionId: true },
+        take: 200,
+      });
+      return rows.map((r) => ({ commerceOrder: r.commerceOrder, providerRef: r.providerRef ?? "", subscriptionId: r.subscriptionId }));
+    },
+
+    async getSub(subscriptionId) {
+      const s = await admin.subscription.findUnique({ where: { id: subscriptionId }, select: SUB_SELECT });
+      return s ? buildEngineSub(admin, s) : null;
     },
 
     async createAttempt(sub, kind, attemptNumber, commerceOrder) {

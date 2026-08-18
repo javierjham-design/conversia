@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOutcome, runBillingCycle, type BillingPort, type EngineSub } from "./engine";
+import { applyOutcome, reconcilePending, runBillingCycle, type BillingPort, type EngineSub } from "./engine";
 import { FakeSubscriptionProvider } from "./provider";
 import { addMonths } from "./state-machine";
 
@@ -55,6 +55,12 @@ function fakePort(subs: EngineSub[]) {
     },
     async notify(orgId, kind) {
       notes.push({ orgId, kind });
+    },
+    async listPending() {
+      return attempts.filter((a) => a.status === "pending").map((a) => ({ commerceOrder: a.commerceOrder, providerRef: "ref", subscriptionId: subs[0]?.id ?? "s1" }));
+    },
+    async getSub(subscriptionId) {
+      return subs.find((s) => s.id === subscriptionId) ?? null;
     },
   };
   return { port, attempts, notes, successes, failures, suspended };
@@ -115,6 +121,24 @@ describe("runBillingCycle — ciclo de cobro con adaptador falso", () => {
     const r = await runBillingCycle(f.port, await providerFor(true), periodEnd);
     expect(r.suspended).toBe(1);
     expect(f.attempts.length).toBe(0);
+  });
+});
+
+describe("reconcilePending — cobros asíncronos de Flow y webhooks perdidos", () => {
+  it("cobro asíncrono: queda pendiente en el ciclo y se aplica al reconciliar", async () => {
+    const f = fakePort([baseSub({ dueAt: T0, periodEnd: T0 })]);
+    // Adaptador en modo asíncrono (Flow collect): el charge deja el intento PENDIENTE.
+    const p = new FakeSubscriptionProvider();
+    p.scheduleCharge(true, null, true);
+    const providerAsync = async () => p;
+    await runBillingCycle(f.port, providerAsync, T0);
+    expect(f.attempts[0].status).toBe("pending");
+    expect(f.successes.length).toBe(0); // aún no aplicado
+    // Reconciliación: reconsulta el estado (OK) y aplica el resultado.
+    const r = await reconcilePending(f.port, providerAsync, hoursAfter(T0, 1));
+    expect(r.reconciled).toBe(1);
+    expect(f.successes.length).toBe(1);
+    expect(f.notes.map((n) => n.kind)).toContain("payment_succeeded");
   });
 });
 

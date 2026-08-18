@@ -4,11 +4,11 @@
  * Flow). Al encenderlo, el dunning legacy de 7 días se apaga (guard en billing-dunning).
  */
 import { getEnv } from "@conversia/config";
-import { runBillingCycle } from "./engine";
+import { reconcilePending, runBillingCycle } from "./engine";
 import { createDbBillingPort } from "./db-port";
 import { resolveSubscriptionProvider } from "./resolve-provider";
 
-const HOUR = 3_600_000;
+const TICK_MS = 15 * 60 * 1000; // cada 15 min: cobros/reintentos por hora + reconciliación ágil
 
 export function startSubscriptionBilling(): () => void {
   if (!getEnv().RECURRING_BILLING_ENABLED) {
@@ -20,14 +20,16 @@ export function startSubscriptionBilling(): () => void {
       const env = getEnv();
       const port = createDbBillingPort();
       const urls = { confirmation: `${env.API_URL}/billing/webhooks/flow`, ret: `${env.WEB_URL}/billing` };
-      const r = await runBillingCycle(port, resolveSubscriptionProvider, new Date(), urls);
-      if (r.charged || r.suspended) console.log(`• Cobro recurrente: ${r.charged} cobros, ${r.suspended} suspensiones.`);
+      const now = new Date();
+      const r = await runBillingCycle(port, resolveSubscriptionProvider, now, urls);
+      const rec = await reconcilePending(port, resolveSubscriptionProvider, now);
+      if (r.charged || r.suspended || rec.reconciled) console.log(`• Cobro recurrente: ${r.charged} cobros, ${r.suspended} suspensiones, ${rec.reconciled} reconciliados.`);
     } catch (err) {
       console.error("✖ subscription-billing tick:", (err as Error).message);
     }
   };
   void run();
-  const interval = setInterval(run, HOUR);
+  const interval = setInterval(run, TICK_MS);
   interval.unref?.();
   return () => clearInterval(interval);
 }
