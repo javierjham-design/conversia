@@ -32,6 +32,18 @@ export interface SandboxState {
  *   se muta solo en memoria. Así el operador prueba el comportamiento del agente
  *   sin ensuciar conversaciones, leads ni la agenda reales.
  */
+/** Mapea una fila de catalog_items a lo que el bot necesita (botDescription si existe). */
+function sandboxCatalogHit(c: any) {
+  return {
+    name: c.name, sku: c.sku ?? null,
+    price: c.price != null ? Number(c.price) : null,
+    compareAtPrice: c.compareAtPrice != null ? Number(c.compareAtPrice) : null,
+    currency: c.currency, available: c.available, stock: c.stock ?? null, category: c.category ?? null,
+    description: c.botDescription || c.description || null,
+    variants: Array.isArray(c.variants) ? c.variants : [], productUrl: c.productUrl ?? null, buyUrl: c.buyUrl ?? null,
+  };
+}
+
 export async function buildSandboxServices(
   orgId: string,
   state: SandboxState,
@@ -205,6 +217,30 @@ export async function buildSandboxServices(
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
         return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null, priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null, templateMessages: typeof tm === "number" ? tm : null };
+      });
+    },
+    async searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }) {
+      // Lectura REAL del catálogo del tenant (búsqueda textual, igual que en producción).
+      return withTenant(orgId, async (tx) => {
+        const words = input.query.split(/\s+/).filter((w) => w.length > 2).slice(0, 6);
+        const items = await tx.catalogItem.findMany({
+          where: {
+            active: true,
+            ...(input.onlyAvailable ? { available: true } : {}),
+            ...(input.category ? { category: { equals: input.category, mode: "insensitive" as const } } : {}),
+            ...(input.maxPrice ? { price: { lte: input.maxPrice } } : {}),
+            ...(words.length ? { OR: words.flatMap((w) => [{ name: { contains: w, mode: "insensitive" as const } }, { description: { contains: w, mode: "insensitive" as const } }, { botDescription: { contains: w, mode: "insensitive" as const } }, { category: { contains: w, mode: "insensitive" as const } }, { brand: { contains: w, mode: "insensitive" as const } }]) } : {}),
+          },
+          take: 8,
+          orderBy: [{ available: "desc" }],
+        });
+        return items.map(sandboxCatalogHit);
+      });
+    },
+    async getCatalogItem(idOrSku: string) {
+      return withTenant(orgId, async (tx) => {
+        const item = await tx.catalogItem.findFirst({ where: { active: true, OR: [{ id: idOrSku }, { sku: { equals: idOrSku, mode: "insensitive" } }, { name: { contains: idOrSku, mode: "insensitive" } }] }, orderBy: { available: "desc" } });
+        return item ? sandboxCatalogHit(item) : null;
       });
     },
     // Montaje asistido: en el PROBADOR se simula (no toca ningún tenant real).

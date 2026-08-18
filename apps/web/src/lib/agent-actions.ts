@@ -70,6 +70,13 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     placeholder: "Dispara el flujo 'Seguimiento 24h' cuando el cliente no confirme la cita.",
   },
   {
+    key: "catalog",
+    label: "Vender con el catálogo",
+    description: "Buscar en el catálogo real del negocio (productos de la tienda o platos del menú), consultar precio/stock/disponibilidad y enviar el enlace de compra.",
+    tools: ["buscarProductos", "verProducto"],
+    placeholder: "Cuando pregunten por un producto, búscalo en el catálogo y responde con precio y disponibilidad reales; si está agotado ofrece alternativas; manda el enlace para comprar.",
+  },
+  {
     key: "pricing",
     label: "Cotizar precios vigentes",
     description: "Consultar los planes y precios actuales de TuBot desde el sistema, para cotizar sin inventar ni memorizar valores.",

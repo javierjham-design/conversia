@@ -13,6 +13,22 @@ import type {
  * Todos operan YA dentro del contexto del tenant (withTenant) — las tools
  * jamás reciben ni aceptan organizationId desde el modelo.
  */
+/** Producto/plato del catálogo, en la forma que el bot necesita para vender. */
+export interface CatalogHit {
+  name: string;
+  sku: string | null;
+  price: number | null;
+  compareAtPrice: number | null;
+  currency: string;
+  available: boolean;
+  stock: number | null;
+  category: string | null;
+  description: string | null; // botDescription si existe, si no la del origen
+  variants: unknown[];
+  productUrl: string | null;
+  buyUrl: string | null;
+}
+
 export interface ToolServices {
   listServices(): Promise<
     Array<{ code: string; name: string; price: number | null; currency: string; durationMin: number; category: string | null }>
@@ -35,6 +51,9 @@ export interface ToolServices {
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
   listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null }>>;
+  // Catálogo comercial real del negocio (tienda o menú). Vender con datos vivos.
+  searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }): Promise<Array<CatalogHit>>;
+  getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
@@ -283,6 +302,31 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { note: string }) {
         await services(ctx).addInternalNote(input.note);
         return { ok: true, message: "Nota interna agregada" };
+      },
+    },
+    {
+      name: "buscarProductos",
+      description:
+        "Busca en el CATÁLOGO real del negocio (productos de la tienda o platos del menú) en lenguaje natural — encuentra aunque las palabras no estén literales. Devuelve nombre, precio, disponibilidad y enlace. Úsalo SIEMPRE para cotizar, recomendar y vender con datos vivos; nunca inventes productos ni precios. Si algo está agotado, ofrece alternativas de los resultados.",
+      inputSchema: z.object({
+        query: z.string().describe("lo que busca el cliente, p.ej. 'algo para el dolor de espalda' o 'pizza sin gluten'"),
+        category: z.string().optional(),
+        maxPrice: z.number().optional(),
+        onlyAvailable: z.boolean().optional().describe("true = solo lo que está disponible ahora"),
+      }),
+      async execute(ctx, input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }) {
+        const items = await services(ctx).searchCatalog(input);
+        return { items, count: items.length };
+      },
+    },
+    {
+      name: "verProducto",
+      description:
+        "Trae el detalle de un producto/plato por su nombre, SKU o código: precio, precio antes de descuento, descripción, variantes/modificadores, disponibilidad, stock y enlace de compra. Úsalo antes de confirmarle un precio o disponibilidad al cliente.",
+      inputSchema: z.object({ idOrSku: z.string() }),
+      async execute(ctx, input: { idOrSku: string }) {
+        const item = await services(ctx).getCatalogItem(input.idOrSku);
+        return item ?? { error: "No encontré ese producto en el catálogo." };
       },
     },
     {
