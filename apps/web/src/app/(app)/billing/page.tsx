@@ -5,7 +5,7 @@
  * barras, catálogo completo de planes (Enterprise incluido), facturas y pago
  * con la pasarela ya configurada (Flow CLP / Lemon Squeezy USD / Mock en dev).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
 import { money } from "@/lib/safe";
@@ -72,9 +72,25 @@ export default function BillingPage() {
     const [o, p] = await Promise.all([api<Overview>("/billing/me"), api<Plan[]>("/billing/plans")]);
     setData(o);
     setPlans(p);
+    return { overview: o, plans: p };
   }, []);
+  // Checkout directo al llegar con ?plan=starter|pro (registro público / link del
+  // bot de ventas): se dispara una sola vez y se limpia la URL para no repetirlo.
+  const autoCheckout = useRef(false);
   useEffect(() => {
-    void load().catch(() => setData(null));
+    void load()
+      .then(({ overview, plans: catalog }) => {
+        if (autoCheckout.current) return;
+        const wanted = new URLSearchParams(window.location.search).get("plan");
+        if (!wanted) return;
+        autoCheckout.current = true;
+        window.history.replaceState(null, "", window.location.pathname);
+        const target = catalog.find((p) => p.code === wanted && p.isPublic);
+        if (!target || target.code === overview.plan?.code) return;
+        void checkout(target.code);
+      })
+      .catch(() => setData(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   async function checkout(planCode: string) {

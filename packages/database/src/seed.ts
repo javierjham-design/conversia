@@ -321,8 +321,8 @@ const PLANS = [
   {
     code: "starter",
     name: "Starter",
-    priceClp: 29_990,
-    priceUsd: 39,
+    priceClp: 69_900,
+    priceUsd: 75,
     order: 1,
     limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensDaily: 1_000_000 },
     features: { whiteLabel: false, api: true, templateMessages: 1000, whatsappTemplates: true },
@@ -330,8 +330,8 @@ const PLANS = [
   {
     code: "pro",
     name: "Pro",
-    priceClp: 79_990,
-    priceUsd: 99,
+    priceClp: 119_900,
+    priceUsd: 129,
     order: 2,
     limits: { users: 20, clinics: 5, channels: 3, agents: 20, workflows: 50, aiTokensDaily: 5_000_000 },
     features: { whiteLabel: true, api: true, templateMessages: 1500, whatsappTemplates: true },

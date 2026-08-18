@@ -37,6 +37,16 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/inbox/{conversationId}",
   },
   {
+    key: "lead.created",
+    title: "Nuevo lead",
+    body: "{contactName} llegó desde {source}. Respóndele antes de que se enfríe.",
+    audience: ["tenant_admins", "owner"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email", "whatsapp"],
+    defaultChannels: ["in_app", "web_push"],
+    link: "/contacts",
+  },
+  {
     key: "comment.mention",
     title: "Te mencionaron",
     body: "{authorName} te mencionó: {excerpt}",

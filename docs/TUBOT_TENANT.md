@@ -14,6 +14,21 @@ en español de Chile. Ser nuestro propio cliente es la mejor auditoría del prod
 > **Canal**: SOLO WhatsApp. No se construye un asistente dentro del panel del
 > cliente (descartado, no es pendiente).
 
+> **Estado**: configurado y sembrado en el tenant. El número de WhatsApp de TuBot
+> está en el **número de PRUEBA de Meta** (App Review pendiente), así que la
+> operación queda **lista para atender apenas el número esté vivo**; mientras
+> tanto se valida en el simulador y con las conversaciones de prueba de abajo.
+>
+> **Fuente de verdad de los prompts (2026-08)**: los TRES agentes
+> (`comercial` / `implementacion` / `soporte`) se gestionan **por panel/API** en el
+> tenant, y sus prompts finales son los bloques §3/§4/§5 de este documento —
+> **edita aquí y publica en el panel** (Agentes IA → editar → publicar). Modelos por
+> agente en el Super Admin: comercial=`gpt-4o-mini`, implementacion=`claude-opus-4-8`,
+> soporte=`claude-haiku-4-5`. Cierre comercial: registro autoservicio
+> (`tubot.cl/registro`, con `?plan=starter|pro` para contratar y pagar online al
+> tiro) y el agente de implementación acompaña la puesta en marcha —incluido el
+> **montaje asistido por código** (§4)— del que crea su cuenta.
+
 ---
 
 ## 0. Motor de IA del tenant de TuBot — análisis y decisión
@@ -375,11 +390,26 @@ PROSPECTO (aún no es cliente, pregunta precios), deriva a comercial
 
 ## 6. Derivaciones y enrutamiento
 - **Comercial** es el agente por defecto del canal: atiende todo mensaje entrante.
-- Comercial → **Implementación** al activar la prueba (`transferToAgent`).
-- Comercial → **Soporte** si es cliente existente con problema de uso.
-- Soporte/Implementación → **Comercial** si en realidad es un prospecto.
-- Todos → **Javier** (`transferToHuman`) según §9. Soporte/Implementación dejan
+- Comercial → **Implementación** (`transferToAgent`) al activar la prueba, o
+  cuando el prospecto confirma que creó su cuenta en `tubot.cl/registro`
+  (etapa `en_prueba`).
+- Comercial → **Soporte** si es cliente existente con problema de uso/facturación.
+- Implementación → **Soporte** si algo no funciona de verdad; → **Comercial** si
+  en realidad es un prospecto sin cuenta; → **Javier** (`transferToHuman` + nota)
+  cuando llega al paso de conectar su número de WhatsApp (paso asistido).
+- Soporte → **Comercial** si en realidad es un prospecto; → **Implementación** si
+  la duda es de puesta en marcha inicial.
+- Todos → **Javier** (`transferToHuman`) SOLO según §9 (el ~1%), dejando
   `addInternalNote` con resumen.
+
+**Cierres del agente comercial** (en orden de preferencia; sin demos — ver
+cambio de enfoque al inicio):
+1. `tubot.cl/registro` — cuenta gratis autoservicio ("conocer la plataforma");
+   al confirmar: etapa `en_prueba` + derivar a Implementación.
+2. `tubot.cl/registro?plan=starter` / `?plan=pro` — crear cuenta y **pagar
+   online** en el mismo paso (Flow/CLP); el webhook activa la suscripción sola.
+3. Casos del §9 (cadenas, integraciones a medida, condiciones especiales) →
+   `transferToHuman` con nota interna (no es una "demo": es el ~1% humano).
 
 ---
 
