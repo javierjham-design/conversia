@@ -70,6 +70,13 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     placeholder: "Dispara el flujo 'Seguimiento 24h' cuando el cliente no confirme la cita.",
   },
   {
+    key: "pricing",
+    label: "Cotizar precios vigentes",
+    description: "Consultar los planes y precios actuales de TuBot desde el sistema, para cotizar sin inventar ni memorizar valores.",
+    tools: ["getPlanes"],
+    placeholder: "Antes de dar un precio, consulta los planes vigentes con el sistema (getPlanes); nunca inventes ni repitas valores de memoria.",
+  },
+  {
     key: "assistedSetup",
     label: "Montaje asistido del cliente",
     description: "Configurar la cuenta del cliente por él: pedirle que autorice y te dicte su código, vincular su cuenta, ver en qué paso va y crearle su agente. Solo para el agente de implementación de TuBot.",
