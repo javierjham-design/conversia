@@ -5,6 +5,7 @@
  */
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { planIncludedQuota } from "../annual-wallet-refill";
+import { alertOwner, sendBillingEmail } from "./billing-emails";
 import { getEnv } from "@conversia/config";
 import type { BillingPort, EngineSub } from "./engine";
 import type { SubState } from "./state-machine";
@@ -142,8 +143,13 @@ export function createDbBillingPort(): BillingPort {
       };
       const e = map[kind];
       if (!e) return;
+      // Panel (integration_event) siempre.
       await withTenant(orgId, (tx) => tx.integrationEvent.create({ data: { organizationId: orgId, provider: "billing", type: e.type, status: e.status, message: e.message } })).catch(() => undefined);
-      void data;
+      // Correo (canal principal de cobranza, irrenunciable) + alerta al owner en los hitos críticos.
+      await sendBillingEmail(orgId, kind, data).catch(() => undefined);
+      if (kind === "payment_failed" || kind === "suspended") {
+        await alertOwner(`${kind === "suspended" ? "Suspensión" : "Cobro rechazado"} — tenant ${orgId}`).catch(() => undefined);
+      }
     },
   };
 }
