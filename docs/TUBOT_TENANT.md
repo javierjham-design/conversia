@@ -19,14 +19,15 @@ en español de Chile. Ser nuestro propio cliente es la mejor auditoría del prod
 > operación queda **lista para atender apenas el número esté vivo**; mientras
 > tanto se valida en el simulador y con las conversaciones de prueba de abajo.
 >
-> **Fuente de verdad de los prompts (2026-08)**: los prompts de los TRES agentes
-> viven versionados en `packages/database/seeds/tubot-prompts/*.md` y se publican
-> al tenant con `pnpm --filter @conversia/database seed:tubot` (crea una versión
-> nueva del agente solo si el prompt cambió; nunca crea la organización). Los
-> bloques de prompt más abajo son la referencia histórica: **edita los .md, no
-> este doc**. Cierre comercial: registro autoservicio (`tubot.cl/registro`, con
-> `?plan=starter|pro` para contratar y pagar online al tiro) y el agente de
-> implementación acompaña la puesta en marcha del que crea su cuenta.
+> **Fuente de verdad de los prompts (2026-08)**: los TRES agentes
+> (`comercial` / `implementacion` / `soporte`) se gestionan **por panel/API** en el
+> tenant, y sus prompts finales son los bloques §3/§4/§5 de este documento —
+> **edita aquí y publica en el panel** (Agentes IA → editar → publicar). Modelos por
+> agente en el Super Admin: comercial=`gpt-4o-mini`, implementacion=`claude-opus-4-8`,
+> soporte=`claude-haiku-4-5`. Cierre comercial: registro autoservicio
+> (`tubot.cl/registro`, con `?plan=starter|pro` para contratar y pagar online al
+> tiro) y el agente de implementación acompaña la puesta en marcha —incluido el
+> **montaje asistido por código** (§4)— del que crea su cuenta.
 
 ---
 
