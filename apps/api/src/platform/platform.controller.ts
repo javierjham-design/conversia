@@ -251,6 +251,7 @@ export class PlatformController {
       db.usageEvent.aggregate({ where: { organizationId: id, type: "ai_tokens", occurredAt: { gte: startOfDay } }, _sum: { quantity: true } }),
     ]);
     const plan = sub ? plans.find((p) => p.id === sub.planId) : null;
+    const paymentAttempts = await db.paymentAttempt.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 10 });
     const settings = (org.settings ?? {}) as Record<string, any>;
     const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
     const planLimits = (plan?.limits as Record<string, number>) ?? {};
@@ -313,6 +314,11 @@ export class PlatformController {
       // Facturables a medida del tenant (se suman a la base del plan al cobrar).
       billables: Array.isArray(settings.billables) ? settings.billables : [],
       currency: (org as any).currency ?? "CLP",
+      // Estado del cobro recurrente + últimos intentos (para el Super Admin).
+      recurring: sub
+        ? { status: sub.status, interval: sub.interval, periodEnd: sub.periodEnd, nextChargeAt: sub.nextChargeAt, pastDueSince: sub.pastDueSince, retriesDone: sub.retriesDone, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, hasCard: !!sub.providerCustomerRef }
+        : null,
+      paymentAttempts: paymentAttempts.map((a) => ({ id: a.id, amount: Number(a.amount), currency: a.currency, kind: a.kind, status: a.status, reason: a.reason, createdAt: a.createdAt })),
       // Modelo de IA de TODA la plataforma del tenant (lo fija el Super Admin).
       ai: {
         model: (settings.ai as any)?.model ?? null,
@@ -1361,6 +1367,36 @@ export class PlatformController {
     }
     await this.audit(req, "platform.subscription.assign", "subscription", sub.id, { planCode: plan.code, status: parsed.data.status });
     return { ok: true, planCode: plan.code, status: sub.status };
+  }
+
+  /** Acciones del Super Admin sobre el cobro recurrente de un tenant. */
+  @Post("organizations/:id/billing-action")
+  async billingAction(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ action: z.enum(["reactivate", "extend_window", "register_payment"]), hours: z.coerce.number().int().min(1).max(240).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Acción inválida");
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
+    if (!sub) throw new BadRequestException("El tenant no tiene suscripción");
+    const admin = this.prisma.admin;
+
+    if (parsed.data.action === "reactivate") {
+      // Reactivación manual (override del Super Admin): vuelve a ACTIVE sin cobrar.
+      await admin.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0 } });
+      await admin.organization.update({ where: { id }, data: { status: "ACTIVE" } });
+    } else if (parsed.data.action === "extend_window") {
+      // Extiende la ventana de 48 h: reinicia el reloj del impago desde ahora (+hours opcional).
+      const base = new Date(Date.now() + (parsed.data.hours ?? 24) * 3_600_000 - 48 * 3_600_000);
+      await admin.subscription.update({ where: { id: sub.id }, data: { status: "PAST_DUE", pastDueSince: base, retriesDone: 0 } });
+    } else if (parsed.data.action === "register_payment") {
+      // Pago recibido POR FUERA (transferencia, etc.): renueva el período y reactiva.
+      const plan = await admin.plan.findUnique({ where: { id: sub.planId }, select: { interval: true } });
+      const periodEnd = new Date();
+      periodEnd.setMonth(periodEnd.getMonth() + (sub.interval === "yearly" || plan?.interval === "yearly" ? 12 : 1));
+      await admin.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0, periodStart: new Date(), periodEnd, nextChargeAt: periodEnd } });
+      await admin.organization.update({ where: { id }, data: { status: "ACTIVE" } });
+      await admin.paymentAttempt.create({ data: { organizationId: id, subscriptionId: sub.id, commerceOrder: `ext-${sub.id}-${Date.now()}`, amount: 0, currency: "CLP", kind: "manual", status: "succeeded", provider: "external", reason: "Pago externo registrado por el Super Admin" } });
+    }
+    await this.audit(req, `platform.billing.${parsed.data.action}`, "subscription", sub.id, { hours: parsed.data.hours ?? null });
+    return { ok: true };
   }
 
   // ------------------------------ Facturas ------------------------------

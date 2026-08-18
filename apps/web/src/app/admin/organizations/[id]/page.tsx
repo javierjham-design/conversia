@@ -63,6 +63,19 @@ export default function OrgDetailPage() {
       setSaving(false);
     }
   }
+
+  async function billingAction(action: string, hours?: number) {
+    setSaving(true);
+    try {
+      await padmin(`/platform/organizations/${id}/billing-action`, { method: "POST", body: JSON.stringify({ action, hours }) });
+      toast.push("Hecho ✔", "ok");
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
   async function setAgentModel(agentId: string, model: string | null) {
     try {
       await padmin(`/platform/organizations/${id}/agents/${agentId}/model`, { method: "POST", body: JSON.stringify({ model }) });
@@ -245,6 +258,35 @@ export default function OrgDetailPage() {
             </div>
           </div>
         </section>
+
+        {/* Cobro recurrente del tenant */}
+        {d.recurring && (
+          <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
+            <p className="text-sm font-semibold">Cobro recurrente</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+              <span>Estado: <b className={d.recurring.status === "ACTIVE" ? "text-emerald-600" : d.recurring.status === "SUSPENDED" ? "text-red-600" : d.recurring.status === "PAST_DUE" ? "text-amber-600" : ""}>{d.recurring.status}</b></span>
+              <span>Cadencia: {d.recurring.interval === "yearly" ? "anual" : "mensual"}</span>
+              <span>Tarjeta: {d.recurring.hasCard ? "registrada" : "sin registrar"}</span>
+              {d.recurring.nextChargeAt && <span>Próximo cobro: {new Date(d.recurring.nextChargeAt).toLocaleDateString("es-CL")}</span>}
+              {d.recurring.cancelAtPeriodEnd && <span className="text-amber-600">Cancelada al fin del período</span>}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button disabled={saving} onClick={() => void billingAction("reactivate")}>Reactivar</Button>
+              <button disabled={saving} onClick={() => void billingAction("extend_window", 24)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Extender ventana 48 h (+24 h)</button>
+              <button disabled={saving} onClick={() => { if (confirm("¿Registrar un pago recibido POR FUERA (transferencia, etc.)? Renueva el período y reactiva la cuenta.")) void billingAction("register_payment"); }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Registrar pago externo</button>
+            </div>
+            {Array.isArray(d.paymentAttempts) && d.paymentAttempts.length > 0 && (
+              <div className="mt-3 overflow-hidden rounded-lg border border-slate-100 text-xs">
+                {d.paymentAttempts.slice(0, 6).map((a: any) => (
+                  <div key={a.id} className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5 last:border-0">
+                    <span className="text-slate-500">{new Date(a.createdAt).toLocaleDateString("es-CL")} · {a.kind}</span>
+                    <span className={a.status === "succeeded" ? "text-emerald-600" : a.status === "failed" ? "text-red-600" : "text-amber-600"}>{a.status}{a.reason ? ` · ${a.reason}` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Límites (token limiter + caps) */}
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
