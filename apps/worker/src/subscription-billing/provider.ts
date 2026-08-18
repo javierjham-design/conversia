@@ -52,6 +52,8 @@ export interface SubscriptionProvider {
   getPaymentMethodStatus(token: string): Promise<{ status: "registered" | "pending" | "failed"; brand: string | null; last4: string | null }>;
   /** Cobra el monto a la tarjeta guardada del cliente. */
   charge(input: ChargeInput): Promise<ChargeResult>;
+  /** Reconsulta el estado de un cobro por su referencia (para reconciliar cobros pendientes / webhooks perdidos). */
+  getChargeStatus(providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }>;
   /** Cancela cualquier objeto de suscripción del proveedor (si aplica). No-op válido. */
   cancelSubscription(customerRef: string): Promise<void>;
   /** Verifica la firma del webhook entrante. */
@@ -69,12 +71,14 @@ export class FakeSubscriptionProvider implements SubscriptionProvider {
   readonly kind = "fake";
   private nextChargeOk = true;
   private nextReason: string | null = null;
+  private async_ = false; // si true, charge devuelve settled=false (simula Flow)
   charges: ChargeInput[] = [];
 
-  /** Programa el resultado del PRÓXIMO charge. */
-  scheduleCharge(ok: boolean, reason: string | null = null) {
+  /** Programa el resultado del PRÓXIMO charge. `async_` simula el flujo asíncrono de Flow. */
+  scheduleCharge(ok: boolean, reason: string | null = null, async_ = false) {
     this.nextChargeOk = ok;
     this.nextReason = reason;
+    this.async_ = async_;
   }
 
   async createCustomer(input: CreateCustomerInput) {
@@ -90,7 +94,11 @@ export class FakeSubscriptionProvider implements SubscriptionProvider {
     this.charges.push(input);
     const ok = this.nextChargeOk;
     const reason = ok ? null : (this.nextReason ?? "card_declined");
-    return { ok, providerRef: `fake_ch_${this.charges.length}`, reason, settled: true };
+    // settled=false simula el collect asíncrono de Flow (el resultado llega por reconciliación).
+    return { ok: this.async_ ? true : ok, providerRef: `fake_ch_${this.charges.length}`, reason: this.async_ ? null : reason, settled: !this.async_ };
+  }
+  async getChargeStatus(_providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }> {
+    return { settled: true, ok: this.nextChargeOk, reason: this.nextChargeOk ? null : (this.nextReason ?? "card_declined") };
   }
   async cancelSubscription(_customerRef: string) {
     /* no-op */

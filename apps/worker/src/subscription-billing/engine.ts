@@ -50,6 +50,10 @@ export interface BillingPort {
   suspend(sub: EngineSub): Promise<void>;
   /** Avisa por los canales (correo/panel/WhatsApp) y al owner. */
   notify(orgId: string, kind: "payment_failed" | "payment_succeeded" | "suspended" | "reactivated", data: Record<string, unknown>): Promise<void>;
+  /** Intentos de cobro aún PENDIENTES (para reconciliar contra la pasarela). */
+  listPending(now: Date): Promise<Array<{ commerceOrder: string; providerRef: string; subscriptionId: string }>>;
+  /** Carga la suscripción de un intento (para aplicar el resultado reconciliado). */
+  getSub(subscriptionId: string): Promise<EngineSub | null>;
 }
 
 const URL_CONFIRM = "/billing/webhooks/flow"; // se completa con API_URL en el tick real
@@ -81,6 +85,31 @@ export async function applyOutcome(port: BillingPort, sub: EngineSub, commerceOr
     await port.applyFailure(sub, t.pastDueSince!, t.retriesDone);
     await port.notify(sub.organizationId, "payment_failed", { reason, suspendAt: t.pastDueSince ? new Date(t.pastDueSince.getTime() + 48 * 3_600_000) : null });
   }
+}
+
+/**
+ * Reconciliación: aplica el resultado de los cobros PENDIENTES reconsultándolos en la
+ * pasarela. Cubre el flujo asíncrono de Flow (collect) Y los webhooks PERDIDOS — un
+ * cliente que pagó y quedó pendiente por un webhook que no llegó es el peor escenario.
+ */
+export async function reconcilePending(
+  port: BillingPort,
+  providerFor: (orgId: string) => Promise<SubscriptionProvider>,
+  now: Date,
+): Promise<{ reconciled: number }> {
+  const pending = await port.listPending(now);
+  let reconciled = 0;
+  for (const p of pending) {
+    if (!p.providerRef) continue;
+    const sub = await port.getSub(p.subscriptionId);
+    if (!sub) continue;
+    const provider = await providerFor(sub.organizationId);
+    const st = await provider.getChargeStatus(p.providerRef);
+    if (!st.settled) continue;
+    await applyOutcome(port, sub, p.commerceOrder, st.ok, st.reason, now);
+    reconciled++;
+  }
+  return { reconciled };
 }
 
 /** Un ciclo de cobro: decide la acción por suscripción y la ejecuta. */

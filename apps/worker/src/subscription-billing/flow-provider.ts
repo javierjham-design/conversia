@@ -96,6 +96,14 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
     return { ok: false, providerRef: null, reason: r?.message ?? "collect_failed", settled: true };
   }
 
+  async getChargeStatus(providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }> {
+    // providerRef = token de collect. status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado.
+    const st = await this.get("payment/getStatus", { token: providerRef });
+    if (st?.status === 2) return { settled: true, ok: true, reason: null };
+    if (st?.status === 3 || st?.status === 4) return { settled: true, ok: false, reason: st?.status === 4 ? "anulado" : "rechazado" };
+    return { settled: false, ok: false, reason: null };
+  }
+
   async cancelSubscription(_customerRef: string): Promise<void> {
     // No usamos suscripciones nativas de Flow (cobramos por collect en nuestro calendario),
     // así que cancelar es dejar de programar cobros — se maneja en la máquina de estados.
