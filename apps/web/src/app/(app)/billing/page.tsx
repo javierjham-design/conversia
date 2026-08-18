@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
+import { SubscriptionSelfService } from "./subscription-self-service";
 import { money } from "@/lib/safe";
 import { Button, ConfirmDialog, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
 
@@ -245,6 +246,9 @@ export default function BillingPage() {
           </ul>
         </div>
       </div>
+
+      {/* -------- Suscripción automática (autogestión) -------- */}
+      <SubscriptionSelfService planCode={data.plan?.code ?? null} interval={billingInterval} />
 
       {/* -------- Planes disponibles -------- */}
       <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
