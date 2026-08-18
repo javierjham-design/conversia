@@ -68,8 +68,11 @@ export class BillingController {
               priceUsdYearly: plan.priceUsdYearly != null ? Number(plan.priceUsdYearly) : null,
               // Cadencia REAL de la suscripción (el mismo plan puede ser mensual o anual).
               interval: sub?.interval ?? plan.interval,
+              custom: (plan.features as any)?.custom === true,
             }
           : null,
+        // Facturables a medida del tenant (se suman a la base del plan).
+        billables: this.readBillables(org),
         subscription: sub ? { status: sub.status, periodEnd: sub.periodEnd, interval: sub.interval } : null,
         usage: {
           agents: { used: agents, limit: limits.agents ?? null },
@@ -103,6 +106,7 @@ export class BillingController {
         priceUsd: Number(pl.priceUsd),
         priceClpYearly: pl.priceClpYearly != null ? Number(pl.priceClpYearly) : null,
         priceUsdYearly: pl.priceUsdYearly != null ? Number(pl.priceUsdYearly) : null,
+        custom: (pl.features as any)?.custom === true,
       }))
       .sort((a, b) => a.priceClp - b.priceClp);
   }
@@ -143,9 +147,13 @@ export class BillingController {
     if (wantYearly && yearlyPrice <= 0) throw new BadRequestException("Este plan no tiene precio anual configurado");
     const useYearly = wantYearly && yearlyPrice > 0;
     const interval = useYearly ? "yearly" : "monthly";
-    const listAmount = useYearly ? yearlyPrice : currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
-    const applied = await this.applyCoupon(parsed.data.couponCode, listAmount, currency);
-    const amount = applied.amount;
+    const baseAmount = useYearly ? yearlyPrice : currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    // Facturables a medida del tenant (plan "desde"): se suman a la base (el cupón solo
+    // descuenta la base, no los facturables).
+    const billablesTotal = this.readBillables(org).reduce((a, b) => a + b.amount, 0);
+    const applied = await this.applyCoupon(parsed.data.couponCode, baseAmount, currency);
+    const listAmount = baseAmount + billablesTotal;
+    const amount = applied.amount + billablesTotal;
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
     const settings = await this.paymentSettings.get();
     const preferred = (org?.settings as any)?.paymentProvider as string | undefined; // proveedor asignado al tenant
@@ -396,6 +404,15 @@ export class BillingController {
     return this.activate(organizationId, planCode, provider, providerRef, interval);
   }
 
+  /** Facturables a medida del tenant (settings.billables): se suman a la base del plan. */
+  private readBillables(org: { settings?: unknown } | null): Array<{ concept: string; amount: number }> {
+    const b = (org?.settings as Record<string, unknown> | undefined)?.billables;
+    if (!Array.isArray(b)) return [];
+    return b
+      .filter((x): x is { concept: string; amount: number } => !!x && typeof (x as any).concept === "string" && Number((x as any).amount) > 0)
+      .map((x) => ({ concept: String(x.concept), amount: Math.round(Number(x.amount)) }));
+  }
+
   /**
    * Acredita un PAQUETE de mensajes a la bolsa (compra prepago adicional) y emite
    * la factura. Idempotencia garantizada por el dedup de webhooks del llamador.
@@ -450,16 +467,19 @@ export class BillingController {
     const yearlyAmount = currency === "CLP" ? Number(plan.priceClpYearly ?? 0) : Number(plan.priceUsdYearly ?? 0);
     // Si se pidió anual pero el plan no tiene precio anual, cae a mensual (defensivo).
     const useYearly = yearly && yearlyAmount > 0;
-    const amount = useYearly ? yearlyAmount : monthlyAmount;
+    const baseAmount = useYearly ? yearlyAmount : monthlyAmount;
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + (useYearly ? 12 : 1));
 
     const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" } });
 
-    // Modelo PREPAGO: el plan es la única línea. Los mensajes de plantilla se pagan
-    // por adelantado con la bolsa (message_wallets) + paquetes; no hay excedente
-    // post-pago. (Overage legacy eliminado — docs/PREPAID_WALLET_DESIGN.md.)
-    const lines: Array<{ concept: string; amount: number }> = [{ concept: `Plan ${plan.name} (${useYearly ? "anual" : "mensual"})`, amount }];
+    // Modelo PREPAGO: plan base + FACTURABLES a medida del tenant (plan "desde").
+    // Los mensajes de plantilla se pagan por adelantado con la bolsa + paquetes.
+    const billables = this.readBillables(org);
+    const lines: Array<{ concept: string; amount: number }> = [
+      { concept: `Plan ${plan.name} (${useYearly ? "anual" : "mensual"})`, amount: baseAmount },
+      ...billables,
+    ];
 
     if (existing) {
       await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });

@@ -30,6 +30,7 @@ export default function OrgDetailPage() {
   const [aiMaxTokens, setAiMaxTokens] = useState(400);
   const [aiMaxToolRounds, setAiMaxToolRounds] = useState(5);
   const [saving, setSaving] = useState(false);
+  const [billables, setBillables] = useState<Array<{ concept: string; amount: number }>>([]);
   const [adminEmail, setAdminEmail] = useState("");
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
 
@@ -43,6 +44,7 @@ export default function OrgDetailPage() {
     setAiModel(detail.ai?.model ?? "gpt-4o-mini");
     setAiMaxTokens(detail.ai?.maxTokens ?? 400);
     setAiMaxToolRounds(detail.ai?.maxToolRounds ?? 5);
+    setBillables(Array.isArray(detail.billables) ? detail.billables : []);
   }, [id]);
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
@@ -209,6 +211,39 @@ export default function OrgDetailPage() {
               <option value="lemonsqueezy">Lemon Squeezy (USD)</option>
             </select>
           </label>
+
+          {/* Facturables a medida: se suman a la base del plan "Desde" al cobrar */}
+          <div className="mt-4 border-t border-slate-100 pt-3">
+            <p className="text-xs font-medium text-slate-600">Facturables a medida ({d.currency ?? "CLP"})</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">Se suman a la base del plan en cada cobro y factura. Úsalos para adaptar un plan «Desde» a los requerimientos del cliente.</p>
+            <div className="mt-2 space-y-2">
+              {billables.map((b, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={b.concept}
+                    onChange={(e) => setBillables((prev) => prev.map((x, j) => (j === i ? { ...x, concept: e.target.value } : x)))}
+                    placeholder="Concepto (p. ej. Integración a medida)"
+                    className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    type="number"
+                    value={b.amount}
+                    onChange={(e) => setBillables((prev) => prev.map((x, j) => (j === i ? { ...x, amount: Number(e.target.value) } : x)))}
+                    placeholder="Monto"
+                    className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm"
+                  />
+                  <button onClick={() => setBillables((prev) => prev.filter((_, j) => j !== i))} className="px-2 text-slate-400 hover:text-red-500" title="Quitar">✕</button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-3">
+              <button onClick={() => setBillables((prev) => [...prev, { concept: "", amount: 0 }])} className="text-xs font-medium text-brand-600 hover:text-brand-700">+ Agregar facturable</button>
+              <Button disabled={saving} onClick={() => void saveConfig({ billables: billables.filter((b) => b.concept.trim() && b.amount > 0) })}>Guardar facturables</Button>
+              {billables.length > 0 && (
+                <span className="text-[11px] text-slate-400">Total add-ons: {billables.reduce((a, b) => a + (Number(b.amount) || 0), 0).toLocaleString("es-CL")}</span>
+              )}
+            </div>
+          </div>
         </section>
 
         {/* Límites (token limiter + caps) */}
