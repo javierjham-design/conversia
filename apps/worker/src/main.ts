@@ -36,6 +36,7 @@ import { processWebhookDelivery } from "./webhook-sender";
 import { dispatchEvent, retryRun, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
+import { startSubscriptionBilling } from "./subscription-billing/start";
 import { startTrialLifecycle } from "./trial-lifecycle";
 import { startAnnualWalletRefill } from "./annual-wallet-refill";
 import { startRetentionPurge } from "./retention-purge";
@@ -161,7 +162,8 @@ async function main() {
   const stopTemplateSync = startTemplateSync();
   const stopDailyDigests = startDailyDigests();
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
-  const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
+  const stopBillingDunning = startBillingDunning(); // gracia 7d legacy (se apaga si el recurrente está ON)
+  const stopSubscriptionBilling = startSubscriptionBilling(); // cobro recurrente 48h (gateado por env)
   const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
   const stopAnnualRefill = startAnnualWalletRefill(); // anual: acredita el cupo mes a mes (no 12 de una)
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
@@ -184,6 +186,7 @@ async function main() {
     console.log("Cerrando worker…");
     clearInterval(heartbeat);
     stopBillingDunning();
+    stopSubscriptionBilling();
     stopTrialLifecycle();
     stopAnnualRefill();
     stopRetentionPurge();
