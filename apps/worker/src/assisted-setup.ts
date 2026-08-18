@@ -81,10 +81,16 @@ export const defaultAssistedSetupDeps: AssistedSetupDeps = {
  * Abre el montaje asistido para un cliente. Verifica el grant y devuelve el
  * servicio angosto. Lanza `AssistedSetupDenied` si no hay autorización vigente.
  */
+export interface AssistedSetupOptions {
+  /** Canal del cliente que autorizó configurar: el agente creado queda como su predeterminado. */
+  scopeChannelId?: string | null;
+}
+
 export async function openAssistedSetup(
   clientOrgId: string,
   providerOrgId: string,
   deps: AssistedSetupDeps = defaultAssistedSetupDeps,
+  opts: AssistedSetupOptions = {},
 ): Promise<AssistedSetupService> {
   if (!clientOrgId || !providerOrgId) throw new AssistedSetupDenied("Faltan organizaciones");
   if (clientOrgId === providerOrgId) throw new AssistedSetupDenied("El proveedor no puede montarse a sí mismo");
@@ -163,6 +169,15 @@ export async function openAssistedSetup(
           });
           await tx.agent.update({ where: { id: agent.id }, data: { currentVersionId: version.id } });
           agentId = agent.id;
+        }
+        // Si el cliente autorizó un canal puntual, deja este agente como su predeterminado
+        // (verificando que el canal sea de su misma cuenta — la RLS ya lo acota).
+        if (opts.scopeChannelId) {
+          const ch = await tx.channelConnection.findUnique({ where: { id: opts.scopeChannelId }, select: { id: true } });
+          if (ch) {
+            await tx.channelConnection.update({ where: { id: ch.id }, data: { defaultAgentId: agentId } });
+            await audit(tx, "assisted_setup.channel_default_agent", "channel_connection", ch.id, { agentId, slug: input.slug });
+          }
         }
         await audit(tx, "assisted_setup.agent_upsert", "agent", agentId, { slug: input.slug, name: input.name });
         return { agentId };

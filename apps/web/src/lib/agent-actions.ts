@@ -69,6 +69,13 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     tools: ["triggerWorkflow"],
     placeholder: "Dispara el flujo 'Seguimiento 24h' cuando el cliente no confirme la cita.",
   },
+  {
+    key: "assistedSetup",
+    label: "Montaje asistido del cliente",
+    description: "Configurar la cuenta del cliente por él: pedirle que autorice y te dicte su código, vincular su cuenta, ver en qué paso va y crearle su agente. Solo para el agente de implementación de TuBot.",
+    tools: ["requestAssistedSetup", "vincularMontajeCliente", "getClientSetupState", "upsertClientAgent"],
+    placeholder: "Pídele que autorice en su panel y te dicte el código; canjéalo para vincular su cuenta; revisa en qué paso va; y créale su agente con las instrucciones que redactaste desde su entrevista de negocio.",
+  },
 ];
 
 /** Deriva el array de `tools` a partir de las acciones habilitadas (+ extras a preservar). */

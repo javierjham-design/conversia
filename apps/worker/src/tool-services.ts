@@ -1,5 +1,20 @@
+import { createHash, createHmac } from "node:crypto";
 import { getEnv } from "@conversia/config";
-import { withTenant } from "@conversia/database";
+import { getAdminPrisma, withTenant } from "@conversia/database";
+import { openAssistedSetup } from "./assisted-setup";
+
+/** Firma un JWT HS256 estándar (sin dependencias) — lo verifica el API con jsonwebtoken. */
+function signHs256(payload: Record<string, unknown>, secret: string): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const data = `${b64({ alg: "HS256", typ: "JWT" })}.${b64(payload)}`;
+  const sig = createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+/** Hash del código de vinculación — DEBE coincidir con el del API (mayúsculas, sin separadores). */
+function hashRedeemCode(raw: string): string {
+  return createHash("sha256").update(raw.toUpperCase().replace(/[^A-Z0-9]/g, "")).digest("hex");
+}
 import { enqueueEscalationEmail } from "./mailer";
 import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
@@ -120,6 +135,32 @@ export interface ToolOptions {
  * su propia transacción withTenant: las tools se ejecutan FUERA de la
  * transacción que cargó la conversación (la llamada al modelo es lenta).
  */
+/**
+ * Resuelve el org del CLIENTE al que corresponde el montaje asistido de ESTA
+ * conversación: solo si el agente corre en el tenant de TuBot (proveedor) y existe
+ * un grant ACTIVO y vigente ligado al contacto de la conversación. Lectura admin
+ * (cross-tenant por diseño, como la resolución de tenant); si no hay grant → null.
+ */
+async function resolveAssistedClientOrg(
+  agentOrgId: string,
+  contactId: string | null | undefined,
+): Promise<{ orgId: string; scopeChannelId: string | null } | null> {
+  const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
+  if (!contactId || agentOrgId !== providerOrgId) return null;
+  const admin = getAdminPrisma();
+  const grant = await admin.assistedSetupGrant.findFirst({
+    where: {
+      grantedByOrganizationId: providerOrgId,
+      linkedProviderContactId: contactId,
+      status: "active",
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { organizationId: true, scopeChannelId: true },
+  });
+  return grant ? { orgId: grant.organizationId, scopeChannelId: grant.scopeChannelId } : null;
+}
+
 export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
   const scheduling = await getSchedulingProviderFor(orgId);
   const knowledgeSources = opts.knowledgeSources;
@@ -446,6 +487,82 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           },
         }),
       );
+    },
+
+    // ---------------- Montaje asistido (agente de implementación de TuBot) ----------------
+    async generateAssistedLink() {
+      const env = getEnv();
+      const now = Math.floor(Date.now() / 1000);
+      const token = signHs256(
+        { providerOrgId: env.ASSISTED_SETUP_PROVIDER_ORG_ID, contactId: t.contactId, conversationId: t.conversationId, aud: "assisted-setup-link", iat: now, exp: now + 2 * 3600 },
+        env.JWT_SECRET,
+      );
+      return { url: `${env.WEB_URL}/montaje-asistido?t=${encodeURIComponent(token)}` };
+    },
+    /**
+     * Canjea el CÓDIGO CORTO que el cliente generó en su panel y le dictó al bot.
+     * Solo el tenant de TuBot puede canjear. Verifica hash + vigencia del código, y
+     * LIGA el grant a este contacto (recién ahí el bot queda autorizado, y solo sobre
+     * el canal que el cliente eligió). El código es de un solo uso.
+     */
+    async redeemAssistedCode(rawCode: string) {
+      const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
+      if (orgId !== providerOrgId) return { ok: false, error: "El canje de códigos solo lo hace el asistente de implementación." };
+      const clean = (rawCode ?? "").trim();
+      if (clean.replace(/[^A-Za-z0-9]/g, "").length < 8) {
+        return { ok: false, error: "Ese código no parece válido. Debe verse como TB-XXXX-XXXX." };
+      }
+      const admin = getAdminPrisma();
+      const grant = await admin.assistedSetupGrant.findFirst({
+        where: {
+          grantedByOrganizationId: providerOrgId,
+          redeemCodeHash: hashRedeemCode(clean),
+          status: "active",
+          redeemedAt: null,
+          redeemCodeExpiresAt: { gt: new Date() },
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, organizationId: true, scopeChannelId: true },
+      });
+      if (!grant) return { ok: false, error: "El código no es válido o ya venció. Pídele al cliente que lo genere de nuevo en su panel." };
+      // Liga el grant a ESTE contacto y marca el código como usado (un solo uso).
+      await admin.assistedSetupGrant.update({
+        where: { id: grant.id },
+        data: { linkedProviderContactId: t.contactId, redeemedAt: new Date(), redeemCodeHash: null },
+      });
+      const org = await admin.organization.findUnique({ where: { id: grant.organizationId }, select: { name: true } });
+      let channelName: string | null = null;
+      if (grant.scopeChannelId) {
+        const ch = await admin.channelConnection.findUnique({ where: { id: grant.scopeChannelId }, select: { name: true } });
+        channelName = ch?.name ?? null;
+      }
+      return { ok: true, orgName: org?.name ?? null, channelName };
+    },
+    async assistedSetupState() {
+      const client = await resolveAssistedClientOrg(orgId, t.contactId);
+      if (!client) return { authorized: false };
+      try {
+        const svc = await openAssistedSetup(client.orgId, getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID);
+        return { authorized: true, state: await svc.getSetupState() };
+      } catch {
+        return { authorized: false };
+      }
+    },
+    async assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }) {
+      const client = await resolveAssistedClientOrg(orgId, t.contactId);
+      if (!client) {
+        return { ok: false, error: "El cliente aún no vinculó su cuenta. Pídele que autorice en su panel y te dicte el código; luego canjéalo con vincularMontajeCliente." };
+      }
+      try {
+        const svc = await openAssistedSetup(client.orgId, getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID, undefined, {
+          scopeChannelId: client.scopeChannelId,
+        });
+        const r = await svc.upsertClientAgent({ slug: input.slug, name: input.name, systemPrompt: input.systemPrompt, kind: input.kind });
+        return { ok: true, agentId: r.agentId };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
     },
   };
 }

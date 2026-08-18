@@ -37,6 +37,7 @@ import { dispatchEvent, retryRun, startWorkflowById } from "./workflow-runtime";
 import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
 import { startTrialLifecycle } from "./trial-lifecycle";
+import { startAnnualWalletRefill } from "./annual-wallet-refill";
 import { startRetentionPurge } from "./retention-purge";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
 
@@ -162,6 +163,7 @@ async function main() {
   startInboxRules(); // auto-cierre + retoma del bot + purga de exports
   const stopBillingDunning = startBillingDunning(); // gracia + suspensión por impago
   const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
+  const stopAnnualRefill = startAnnualWalletRefill(); // anual: acredita el cupo mes a mes (no 12 de una)
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
 
@@ -183,6 +185,7 @@ async function main() {
     clearInterval(heartbeat);
     stopBillingDunning();
     stopTrialLifecycle();
+    stopAnnualRefill();
     stopRetentionPurge();
     stopOrphanWaba();
     stopScheduler();
