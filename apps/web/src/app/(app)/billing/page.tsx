@@ -20,11 +20,13 @@ interface Plan {
   priceUsdYearly: number | null;
   interval: string;
   isPublic: boolean;
+  custom: boolean;
   limits: Record<string, number | null>;
 }
 interface Overview {
   organization: { name: string; status: string; currency: string };
-  plan: { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; interval: string } | null;
+  plan: { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; interval: string; custom: boolean } | null;
+  billables: Array<{ concept: string; amount: number }>;
   subscription: { status: string; periodEnd: string | null; interval: string } | null;
   usage: Record<string, { used: number; limit: number | null }>;
   invoices: { id: string; number: string; status: string; currency: string; amountDue: number; createdAt: string; dueAt: string | null; paidAt: string | null }[];
@@ -165,12 +167,33 @@ export default function BillingPage() {
           {data.plan ? (
             <>
               <p className="mt-1 text-2xl font-semibold text-cyan-800 dark:text-cyan-300">{data.plan.name}</p>
-              <p className="text-sm text-ink-muted">
-                {money(priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly"), currency)} / {data.plan.interval === "yearly" ? "año" : "mes"}
-                {data.subscription?.periodEnd && (
-                  <span className="text-ink-subtle"> · renueva el {new Date(data.subscription.periodEnd).toLocaleDateString("es-CL")}</span>
-                )}
-              </p>
+              {(() => {
+                const base = priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly");
+                const billTotal = data.billables.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+                const cad = data.plan.interval === "yearly" ? "año" : "mes";
+                return (
+                  <>
+                    <p className="text-sm text-ink-muted">
+                      {data.plan.custom && billTotal > 0 && <span className="text-ink-subtle">Base </span>}
+                      {money(base, currency)} / {cad}
+                      {data.subscription?.periodEnd && (
+                        <span className="text-ink-subtle"> · renueva el {new Date(data.subscription.periodEnd).toLocaleDateString("es-CL")}</span>
+                      )}
+                    </p>
+                    {data.billables.length > 0 && (
+                      <div className="mt-2 rounded-lg bg-app p-2 text-xs text-ink-muted">
+                        <p className="font-medium text-ink-muted">Facturables a medida</p>
+                        {data.billables.map((b, i) => (
+                          <div key={i} className="flex justify-between"><span>{b.concept}</span><span>{money(Number(b.amount), currency)}</span></div>
+                        ))}
+                        <div className="mt-1 flex justify-between border-t border-line pt-1 font-semibold text-ink">
+                          <span>Total / {cad}</span><span>{money(base + billTotal, currency)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               {currentPlanFull && (
                 <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-muted">
                   {Object.entries(currentPlanFull.limits ?? {}).map(([k, v]) => (
@@ -257,6 +280,7 @@ export default function BillingPage() {
                 const showYearly = billingInterval === "yearly" && (yearlyPriceOf(p) ?? 0) > 0;
                 return (
                   <p className="mt-1 text-lg font-semibold text-ink">
+                    {p.custom && <span className="text-xs font-normal text-ink-subtle">Desde </span>}
                     {enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}
                     {!(enterprise && priceOf(p) === 0) && <span className="text-xs font-normal text-ink-subtle"> /{showYearly ? "año" : "mes"}</span>}
                   </p>

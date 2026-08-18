@@ -19,8 +19,8 @@ interface Plan {
   features: Record<string, unknown>;
 }
 type Draft = { priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
-type NewPlan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; templateMessages: number; whatsappTemplates: boolean; isPublic: boolean; order: number };
-const EMPTY_NEW: NewPlan = { code: "", name: "", priceClp: 0, priceUsd: 0, priceClpYearly: 0, priceUsdYearly: 0, templateMessages: 1000, whatsappTemplates: true, isPublic: true, order: 10 };
+type NewPlan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; templateMessages: number; whatsappTemplates: boolean; custom: boolean; isPublic: boolean; order: number };
+const EMPTY_NEW: NewPlan = { code: "", name: "", priceClp: 0, priceUsd: 0, priceClpYearly: 0, priceUsdYearly: 0, templateMessages: 1000, whatsappTemplates: true, custom: false, isPublic: true, order: 10 };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -37,6 +37,7 @@ const FEATURE_FIELDS: { key: string; label: string }[] = [
   { key: "api", label: "API" },
   { key: "whiteLabel", label: "Marca blanca" },
   { key: "whatsappTemplates", label: "Plantillas WhatsApp" },
+  { key: "custom", label: "A medida (Desde)" },
 ];
 
 export default function PlansPage() {
@@ -131,7 +132,7 @@ export default function PlansPage() {
           priceUsdYearly: newPlan.priceUsdYearly || null,
           isPublic: newPlan.isPublic,
           order: newPlan.order,
-          features: { templateMessages: newPlan.templateMessages, whatsappTemplates: newPlan.whatsappTemplates },
+          features: { templateMessages: newPlan.templateMessages, whatsappTemplates: newPlan.whatsappTemplates, custom: newPlan.custom },
           limits: {},
         }),
       });
@@ -204,6 +205,10 @@ export default function PlansPage() {
               Plantillas WhatsApp
             </label>
             <label className="flex items-center gap-2 self-end text-xs text-slate-600">
+              <input type="checkbox" checked={newPlan.custom} onChange={(e) => setNewPlan((p) => ({ ...p, custom: e.target.checked }))} />
+              A medida (precio «Desde»)
+            </label>
+            <label className="flex items-center gap-2 self-end text-xs text-slate-600">
               <input type="checkbox" checked={newPlan.isPublic} onChange={(e) => setNewPlan((p) => ({ ...p, isPublic: e.target.checked }))} />
               Público (visible al cotizar)
             </label>
@@ -270,7 +275,10 @@ export default function PlansPage() {
               <div key={p.id} className="rounded-card border border-slate-200 bg-white p-4 shadow-card">
                 <div className="mb-2 flex items-center justify-between">
                   <div>
-                    <p className="font-semibold">{p.name}</p>
+                    <p className="font-semibold">
+                      {p.name}
+                      {d.features.custom && <span className="ml-2 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">A medida · Desde</span>}
+                    </p>
                     <p className="text-xs text-slate-400">{p.code}{p.isPublic ? "" : " · privado"}</p>
                   </div>
                   <button onClick={() => void toggleActive(p)}>

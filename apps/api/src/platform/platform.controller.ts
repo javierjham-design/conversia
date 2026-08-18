@@ -310,6 +310,9 @@ export class PlatformController {
         planAllows: planFeatures.whatsappTemplates === true,
       },
       paymentProvider: settings.paymentProvider ?? null,
+      // Facturables a medida del tenant (se suman a la base del plan al cobrar).
+      billables: Array.isArray(settings.billables) ? settings.billables : [],
+      currency: (org as any).currency ?? "CLP",
       // Modelo de IA de TODA la plataforma del tenant (lo fija el Super Admin).
       ai: {
         model: (settings.ai as any)?.model ?? null,
@@ -353,6 +356,12 @@ export class PlatformController {
         templatesEnabled: z.boolean().optional(),
         limits: z.record(z.coerce.number().int().min(0)).optional(), // override por-tenant; 0 = ilimitado
         paymentProvider: z.enum(["flow", "lemonsqueezy"]).nullable().optional(), // proveedor de pago del tenant
+        // FACTURABLES a medida del tenant (plan custom "desde"): se suman a la base del
+        // plan en cada cobro/factura. Monto en la moneda de la organización, por período.
+        billables: z
+          .array(z.object({ concept: z.string().min(1).max(80), amount: z.coerce.number().min(0).max(999_999_999) }))
+          .max(30)
+          .optional(),
         // Modelo de IA para TODA la plataforma del tenant (exclusivo del Super Admin).
         ai: z
           .object({
@@ -374,6 +383,7 @@ export class PlatformController {
     if (parsed.data.aiKillSwitch !== undefined) settings.aiKillSwitch = parsed.data.aiKillSwitch;
     if (parsed.data.limits !== undefined) settings.limits = parsed.data.limits;
     if (parsed.data.paymentProvider !== undefined) settings.paymentProvider = parsed.data.paymentProvider || null;
+    if (parsed.data.billables !== undefined) settings.billables = parsed.data.billables;
     if (parsed.data.ai !== undefined) settings.ai = { ...(settings.ai ?? {}), ...parsed.data.ai };
     // Interruptor de plantillas de WhatsApp: vive en settings.messaging.templatesEnabled.
     const prevTemplatesEnabled = (settings.messaging as any)?.templatesEnabled === true;
