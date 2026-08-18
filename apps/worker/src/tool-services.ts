@@ -484,7 +484,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           name: p.name,
           priceClp: Number(p.priceClp),
           priceUsd: Number(p.priceUsd),
-          interval: p.interval,
+          priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null,
+          priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null,
           templateMessages: typeof tm === "number" ? tm : null,
         };
       });

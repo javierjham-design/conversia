@@ -16,14 +16,16 @@ interface Plan {
   name: string;
   priceClp: number;
   priceUsd: number;
+  priceClpYearly: number | null;
+  priceUsdYearly: number | null;
   interval: string;
   isPublic: boolean;
   limits: Record<string, number | null>;
 }
 interface Overview {
   organization: { name: string; status: string; currency: string };
-  plan: { code: string; name: string; priceClp: number; priceUsd: number; interval: string } | null;
-  subscription: { status: string; periodEnd: string | null } | null;
+  plan: { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; interval: string } | null;
+  subscription: { status: string; periodEnd: string | null; interval: string } | null;
   usage: Record<string, { used: number; limit: number | null }>;
   invoices: { id: string; number: string; status: string; currency: string; amountDue: number; createdAt: string; dueAt: string | null; paidAt: string | null }[];
   paymentMethod: { provider: string; brand: string | null; last4: string | null } | null;
@@ -67,6 +69,7 @@ export default function BillingPage() {
   const [changing, setChanging] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [mockBanner, setMockBanner] = useState(false);
+  const [billingInterval, setBillingInterval] = useState<"monthly" | "yearly">("monthly");
 
   const load = useCallback(async () => {
     const [o, p] = await Promise.all([api<Overview>("/billing/me"), api<Plan[]>("/billing/plans")]);
@@ -81,26 +84,29 @@ export default function BillingPage() {
     void load()
       .then(({ overview, plans: catalog }) => {
         if (autoCheckout.current) return;
-        const wanted = new URLSearchParams(window.location.search).get("plan");
+        const params = new URLSearchParams(window.location.search);
+        const wanted = params.get("plan");
         if (!wanted) return;
+        const wantedInterval = params.get("interval") === "yearly" ? "yearly" : "monthly";
+        if (wantedInterval === "yearly") setBillingInterval("yearly");
         autoCheckout.current = true;
         window.history.replaceState(null, "", window.location.pathname);
         const target = catalog.find((p) => p.code === wanted && p.isPublic);
         if (!target || target.code === overview.plan?.code) return;
-        void checkout(target.code);
+        void checkout(target.code, wantedInterval);
       })
       .catch(() => setData(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  async function checkout(planCode: string) {
+  async function checkout(planCode: string, interval: "monthly" | "yearly" = billingInterval) {
     setBusy(true);
     try {
-      const session = await api<{ url: string; mock: boolean }>("/billing/checkout", { method: "POST", body: JSON.stringify({ planCode }) });
+      const session = await api<{ url: string; mock: boolean }>("/billing/checkout", { method: "POST", body: JSON.stringify({ planCode, billingInterval: interval }) });
       if (session.mock) {
         // Dev: sin pasarela — se confirma simulado con banner claro.
         setMockBanner(true);
-        await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode }) });
+        await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode, billingInterval: interval }) });
         toast.push("Pago de PRUEBA confirmado (sin cobro real) ✔", "ok");
         await load();
       } else {
@@ -119,7 +125,19 @@ export default function BillingPage() {
   const currency = data.organization.currency ?? "CLP";
   const currentCode = data.plan?.code ?? null;
   const currentPlanFull = plans.find((p) => p.code === currentCode) ?? null;
-  const priceOf = (p: { priceClp: number; priceUsd: number }) => (currency === "CLP" ? p.priceClp : p.priceUsd);
+  type Priced = { priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null };
+  const yearlyPriceOf = (p: Priced): number | null => (currency === "CLP" ? p.priceClpYearly : p.priceUsdYearly);
+  const anyYearly = plans.some((p) => p.isPublic && (yearlyPriceOf(p) ?? 0) > 0);
+  // Precio a una cadencia dada (cae a mensual si el plan no tiene anual).
+  const priceAt = (p: Priced, interval: "monthly" | "yearly") => {
+    if (interval === "yearly") {
+      const y = yearlyPriceOf(p);
+      if (y && y > 0) return y;
+    }
+    return currency === "CLP" ? p.priceClp : p.priceUsd;
+  };
+  const priceOf = (p: Priced) => priceAt(p, billingInterval); // catálogo: según el toggle
+  const cadence = billingInterval === "yearly" ? "año" : "mes";
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -148,7 +166,7 @@ export default function BillingPage() {
             <>
               <p className="mt-1 text-2xl font-semibold text-cyan-800 dark:text-cyan-300">{data.plan.name}</p>
               <p className="text-sm text-ink-muted">
-                {money(priceOf(data.plan), currency)} / {data.plan.interval === "year" ? "año" : "mes"}
+                {money(priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly"), currency)} / {data.plan.interval === "yearly" ? "año" : "mes"}
                 {data.subscription?.periodEnd && (
                   <span className="text-ink-subtle"> · renueva el {new Date(data.subscription.periodEnd).toLocaleDateString("es-CL")}</span>
                 )}
@@ -206,7 +224,25 @@ export default function BillingPage() {
       </div>
 
       {/* -------- Planes disponibles -------- */}
-      <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-ink-subtle">Planes disponibles</h2>
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-subtle">Planes disponibles</h2>
+        {anyYearly && (
+          <div className="inline-flex rounded-lg border border-line-strong p-0.5 text-xs">
+            <button
+              onClick={() => setBillingInterval("monthly")}
+              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "monthly" ? "bg-cyan-600 text-white" : "text-ink-muted hover:bg-app")}
+            >
+              Mensual
+            </button>
+            <button
+              onClick={() => setBillingInterval("yearly")}
+              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "yearly" ? "bg-cyan-600 text-white" : "text-ink-muted hover:bg-app")}
+            >
+              Anual
+            </button>
+          </div>
+        )}
+      </div>
       <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {plans.map((p) => {
           const isCurrent = p.code === currentCode;
@@ -217,10 +253,15 @@ export default function BillingPage() {
                 <p className="font-semibold">{p.name}</p>
                 {isCurrent && <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">Tu plan actual</span>}
               </div>
-              <p className="mt-1 text-lg font-semibold text-ink">
-                {enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}
-                {!(enterprise && priceOf(p) === 0) && <span className="text-xs font-normal text-ink-subtle"> /{p.interval === "year" ? "año" : "mes"}</span>}
-              </p>
+              {(() => {
+                const showYearly = billingInterval === "yearly" && (yearlyPriceOf(p) ?? 0) > 0;
+                return (
+                  <p className="mt-1 text-lg font-semibold text-ink">
+                    {enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}
+                    {!(enterprise && priceOf(p) === 0) && <span className="text-xs font-normal text-ink-subtle"> /{showYearly ? "año" : "mes"}</span>}
+                  </p>
+                );
+              })()}
               <ul className="mt-2 flex-1 space-y-0.5 text-[11px] text-ink-muted">
                 {Object.entries(p.limits ?? {}).slice(0, 5).map(([k, v]) => (
                   <li key={k}>• {v == null || v === 0 ? "∞" : Number(v).toLocaleString("es-CL")} {LIMIT_LABELS[k] ?? k}</li>
@@ -291,7 +332,7 @@ export default function BillingPage() {
         title={`¿Cambiar al plan ${changing?.name}?`}
         description={
           changing
-            ? `Pasarás de ${data.plan?.name ?? "sin plan"} a ${changing.name} por ${money(priceOf(changing), currency)}/${changing.interval === "year" ? "año" : "mes"}. Nuevos límites: ${Object.entries(changing.limits ?? {})
+            ? `Pasarás de ${data.plan?.name ?? "sin plan"} a ${changing.name} por ${money(priceOf(changing), currency)}/${cadence} (facturación ${billingInterval === "yearly" ? "anual" : "mensual"}). Nuevos límites: ${Object.entries(changing.limits ?? {})
                 .map(([k, v]) => `${v == null || v === 0 ? "∞" : v} ${LIMIT_LABELS[k] ?? k}`)
                 .join(" · ")}. Si bajas de plan y excedes un límite, no podrás crear más elementos de ese tipo (lo existente no se borra). El pago se procesa con ${PROVIDER_LABELS[data.paymentProvider] ?? data.paymentProvider}.`
             : ""

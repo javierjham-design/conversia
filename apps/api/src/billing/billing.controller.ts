@@ -59,9 +59,18 @@ export class BillingController {
         organization: { name: org?.name, status: org?.status, currency: org?.currency },
         billing: { state: billingState, graceEndsAt: billingSettings.graceEndsAt ?? null },
         plan: plan
-          ? { code: plan.code, name: plan.name, priceClp: Number(plan.priceClp), priceUsd: Number(plan.priceUsd), interval: plan.interval }
+          ? {
+              code: plan.code,
+              name: plan.name,
+              priceClp: Number(plan.priceClp),
+              priceUsd: Number(plan.priceUsd),
+              priceClpYearly: plan.priceClpYearly != null ? Number(plan.priceClpYearly) : null,
+              priceUsdYearly: plan.priceUsdYearly != null ? Number(plan.priceUsdYearly) : null,
+              // Cadencia REAL de la suscripción (el mismo plan puede ser mensual o anual).
+              interval: sub?.interval ?? plan.interval,
+            }
           : null,
-        subscription: sub ? { status: sub.status, periodEnd: sub.periodEnd } : null,
+        subscription: sub ? { status: sub.status, periodEnd: sub.periodEnd, interval: sub.interval } : null,
         usage: {
           agents: { used: agents, limit: limits.agents ?? null },
           channels: { used: channels, limit: limits.channels ?? null },
@@ -88,7 +97,13 @@ export class BillingController {
     requireContext();
     const rows = await this.prisma.admin.plan.findMany({ where: { active: true } });
     return rows
-      .map((pl) => ({ ...pl, priceClp: Number(pl.priceClp), priceUsd: Number(pl.priceUsd) }))
+      .map((pl) => ({
+        ...pl,
+        priceClp: Number(pl.priceClp),
+        priceUsd: Number(pl.priceUsd),
+        priceClpYearly: pl.priceClpYearly != null ? Number(pl.priceClpYearly) : null,
+        priceUsdYearly: pl.priceUsdYearly != null ? Number(pl.priceUsdYearly) : null,
+      }))
       .sort((a, b) => a.priceClp - b.priceClp);
   }
 
@@ -115,28 +130,37 @@ export class BillingController {
   @Post("checkout")
   async checkout(@Body() body: unknown) {
     const ctx = requirePermission("billing:write");
-    const parsed = z.object({ planCode: z.string(), couponCode: z.string().max(40).optional() }).safeParse(body);
+    const parsed = z.object({ planCode: z.string(), couponCode: z.string().max(40).optional(), billingInterval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
     if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
 
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
     const currency = org?.currency ?? "CLP";
-    const listAmount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    // Cadencia elegida: anual solo si el plan tiene precio anual configurado.
+    const wantYearly = parsed.data.billingInterval === "yearly";
+    const yearlyPrice = currency === "CLP" ? Number(plan.priceClpYearly ?? 0) : Number(plan.priceUsdYearly ?? 0);
+    if (wantYearly && yearlyPrice <= 0) throw new BadRequestException("Este plan no tiene precio anual configurado");
+    const useYearly = wantYearly && yearlyPrice > 0;
+    const interval = useYearly ? "yearly" : "monthly";
+    const listAmount = useYearly ? yearlyPrice : currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
     const applied = await this.applyCoupon(parsed.data.couponCode, listAmount, currency);
     const amount = applied.amount;
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
     const settings = await this.paymentSettings.get();
     const preferred = (org?.settings as any)?.paymentProvider as string | undefined; // proveedor asignado al tenant
     const provider = createPaymentProvider(settings, currency, preferred);
+    // Lemon Squeezy: la variante anual es otra (el precio lo fija LS server-side).
+    const feats = (plan.features as any) ?? {};
+    const variantId = useYearly ? (feats.lsVariantIdYearly ?? feats.lsVariantId) : feats.lsVariantId;
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: plan.code,
       amount,
       currency,
       email: user?.email,
-      interval: plan.interval,
-      variantId: (plan.features as any)?.lsVariantId ? String((plan.features as any).lsVariantId) : undefined,
+      interval,
+      variantId: variantId ? String(variantId) : undefined,
       successUrl: `${getEnv().WEB_URL}/billing`,
       cancelUrl: `${getEnv().WEB_URL}/billing`,
     });
@@ -146,10 +170,10 @@ export class BillingController {
     }
     await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.auditLog.create({
-        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.checkout", entityType: "plan", entityId: plan.id, after: { planCode: plan.code, provider: session.provider, couponCode: applied.coupon?.code ?? null, amount } },
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.checkout", entityType: "plan", entityId: plan.id, after: { planCode: plan.code, provider: session.provider, couponCode: applied.coupon?.code ?? null, amount, interval } },
       }),
     );
-    return { ...session, mock: session.provider === "mock", listAmount, amount, couponCode: applied.coupon?.code ?? null };
+    return { ...session, mock: session.provider === "mock", listAmount, amount, interval, couponCode: applied.coupon?.code ?? null };
   }
 
   /** Compra de un PAQUETE de mensajes: checkout por el precio del paquete. */
@@ -219,12 +243,12 @@ export class BillingController {
   @Post("mock-confirm")
   async mockConfirm(@Body() body: unknown) {
     const ctx = requireContext();
-    const parsed = z.object({ planCode: z.string() }).safeParse(body);
+    const parsed = z.object({ planCode: z.string(), billingInterval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     if (getEnv().NODE_ENV === "production" && getEnv().STRIPE_SECRET_KEY) {
       throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
     }
-    await this.activateOrCredit(ctx.organizationId, parsed.data.planCode, "mock");
+    await this.activateOrCredit(ctx.organizationId, parsed.data.planCode, "mock", undefined, parsed.data.billingInterval ?? "monthly");
     return { ok: true, planCode: parsed.data.planCode, note: "Pago simulado (dev). En producción lo confirma el webhook de la pasarela." };
   }
 
@@ -254,7 +278,7 @@ export class BillingController {
           await this.reportAmountMismatch(organizationId, meta.planCode, "stripe", meta.expectedAmount, obj.amount_total, obj.id);
           return { received: true, rejected: "amount_mismatch" };
         }
-        await this.activateOrCredit(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id);
+        await this.activateOrCredit(organizationId, meta.planCode, "stripe", obj.subscription ?? obj.id, meta.interval === "yearly" ? "yearly" : "monthly");
       }
     }
     return { received: true };
@@ -290,7 +314,7 @@ export class BillingController {
           await this.reportAmountMismatch(meta.organizationId, meta.planCode, "flow", meta.expectedAmount, status?.amount, token);
           return { received: true, rejected: "amount_mismatch" };
         }
-        await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token);
+        await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token, meta.interval === "yearly" ? "yearly" : "monthly");
       }
     }
     return { received: true };
@@ -360,16 +384,16 @@ export class BillingController {
     ) {
       const status = event?.data?.attributes?.status; // active | on_trial | past_due | cancelled | expired | unpaid
       if (status === "active" || status === "on_trial" || eventName === "subscription_payment_success") {
-        await this.activateOrCredit(organizationId, planCode, "lemonsqueezy", subId);
+        await this.activateOrCredit(organizationId, planCode, "lemonsqueezy", subId, custom.billing_interval === "yearly" ? "yearly" : "monthly");
       }
     }
     return { received: true };
   }
 
   /** Enruta el pago confirmado: `pkg:<code>` acredita un paquete; si no, activa plan. */
-  private async activateOrCredit(organizationId: string, planCode: string, provider: string, providerRef?: string) {
+  private async activateOrCredit(organizationId: string, planCode: string, provider: string, providerRef?: string, interval: string = "monthly") {
     if (planCode.startsWith("pkg:")) return this.creditPackage(organizationId, planCode.slice(4), provider, providerRef);
-    return this.activate(organizationId, planCode, provider, providerRef);
+    return this.activate(organizationId, planCode, provider, providerRef, interval);
   }
 
   /**
@@ -415,27 +439,32 @@ export class BillingController {
    * el mock (dev) y los webhooks de Stripe/Flow/Lemon Squeezy (prod). Cliente admin: es una
    * operación de plataforma sobre subscription/organization/invoice.
    */
-  private async activate(organizationId: string, planCode: string, provider: string, providerRef?: string) {
+  private async activate(organizationId: string, planCode: string, provider: string, providerRef?: string, interval: string = "monthly") {
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: planCode } });
     if (!plan) return;
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId } });
     if (!org) return;
     const currency = org.currency ?? "CLP";
-    const amount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    const yearly = interval === "yearly";
+    const monthlyAmount = currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    const yearlyAmount = currency === "CLP" ? Number(plan.priceClpYearly ?? 0) : Number(plan.priceUsdYearly ?? 0);
+    // Si se pidió anual pero el plan no tiene precio anual, cae a mensual (defensivo).
+    const useYearly = yearly && yearlyAmount > 0;
+    const amount = useYearly ? yearlyAmount : monthlyAmount;
     const periodEnd = new Date();
-    periodEnd.setMonth(periodEnd.getMonth() + (plan.interval === "yearly" ? 12 : 1));
+    periodEnd.setMonth(periodEnd.getMonth() + (useYearly ? 12 : 1));
 
     const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" } });
 
     // Modelo PREPAGO: el plan es la única línea. Los mensajes de plantilla se pagan
     // por adelantado con la bolsa (message_wallets) + paquetes; no hay excedente
     // post-pago. (Overage legacy eliminado — docs/PREPAID_WALLET_DESIGN.md.)
-    const lines: Array<{ concept: string; amount: number }> = [{ concept: `Plan ${plan.name} (${plan.interval})`, amount }];
+    const lines: Array<{ concept: string; amount: number }> = [{ concept: `Plan ${plan.name} (${useYearly ? "anual" : "mensual"})`, amount }];
 
     if (existing) {
-      await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
+      await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });
     } else {
-      await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", periodStart: new Date(), periodEnd } });
+      await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });
     }
     await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id } });
 

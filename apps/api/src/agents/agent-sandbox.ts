@@ -204,7 +204,7 @@ export async function buildSandboxServices(
       const plans = await withTenant(orgId, (tx) => tx.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } }));
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
-        return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), interval: p.interval, templateMessages: typeof tm === "number" ? tm : null };
+        return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null, priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null, templateMessages: typeof tm === "number" ? tm : null };
       });
     },
     // Montaje asistido: en el PROBADOR se simula (no toca ningún tenant real).

@@ -34,7 +34,7 @@ export interface ToolServices {
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
-  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; interval: string; templateMessages: number | null }>>;
+  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null }>>;
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
