@@ -14,9 +14,12 @@ const wooProduct = {
   stock_status: "instock",
   short_description: "<p>Relaja y ayuda a <b>dormir</b>.</p>",
   permalink: "https://tienda.cl/producto/lavanda",
-  images: [{ src: "https://tienda.cl/img/lav.jpg" }],
+  images: [{ src: "https://tienda.cl/img/lav.jpg" }, { src: "https://tienda.cl/img/lav2.jpg" }],
   categories: [{ name: "Aromaterapia" }, { name: "Aceites" }],
   tags: [{ name: "relajación" }, { name: "sueño" }],
+  attributes: [{ name: "Volumen", options: ["30ml"] }, { name: "Material", options: ["vidrio"] }],
+  brands: [{ name: "Naturalis" }],
+  global_unique_id: "7801234567890",
   variations: [101, 102],
   purchasable: true,
 };
@@ -54,6 +57,13 @@ describe("normalizeWooProduct — mapeo WooCommerce → NormalizedItem", () => {
   it("etiquetas y variantes", () => {
     expect(n.tags).toEqual(["relajación", "sueño"]);
     expect(n.variants).toEqual([101, 102]);
+  });
+
+  it("galería, atributos, marca y código de barras (info completa)", () => {
+    expect(n.images).toEqual(["https://tienda.cl/img/lav.jpg", "https://tienda.cl/img/lav2.jpg"]);
+    expect(n.attributes).toEqual({ Volumen: ["30ml"], Material: ["vidrio"] });
+    expect(n.brand).toBe("Naturalis");
+    expect(n.barcode).toBe("7801234567890");
   });
 
   it("producto agotado → no disponible; sin oferta → sin compareAtPrice", () => {

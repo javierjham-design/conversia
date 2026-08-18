@@ -37,9 +37,17 @@ export function normalizeWooProduct(p: any, currency: string): NormalizedItem | 
     available: p.stock_status ? p.stock_status === "instock" : p.purchasable !== false,
     variants: Array.isArray(p.variations) ? p.variations : [],
     imageUrl: p.images?.[0]?.src ?? null,
+    images: Array.isArray(p.images) ? p.images.map((im: any) => im.src).filter(Boolean) : [],
     productUrl: p.permalink ?? null,
     buyUrl: p.permalink ? `${p.permalink}${p.permalink.includes("?") ? "&" : "?"}add-to-cart=${p.id}` : null,
     tags: Array.isArray(p.tags) ? p.tags.map((t: any) => t.name).filter(Boolean) : [],
+    // Atributos de WooCommerce (color, talla, material…) → objeto plano nombre→opciones.
+    attributes: Array.isArray(p.attributes)
+      ? Object.fromEntries(p.attributes.map((a: any) => [a.name, a.options ?? a.option ?? null]))
+      : {},
+    brand: p.brands?.[0]?.name ?? null,
+    barcode: p.global_unique_id || null,
+    unit: null,
     menuSection: null,
     availability: {},
     raw: p,
