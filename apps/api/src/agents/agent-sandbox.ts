@@ -199,6 +199,14 @@ export async function buildSandboxServices(
     async addInternalNote(note: string) {
       track("Nota interna", note.length > 120 ? `${note.slice(0, 120)}…` : note);
     },
+    async listPlans() {
+      // Lectura REAL del catálogo global de planes (precios vigentes del Super Admin).
+      const plans = await withTenant(orgId, (tx) => tx.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } }));
+      return plans.map((p) => {
+        const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
+        return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), interval: p.interval, templateMessages: typeof tm === "number" ? tm : null };
+      });
+    },
     // Montaje asistido: en el PROBADOR se simula (no toca ningún tenant real).
     async generateAssistedLink() {
       track("Enlace de montaje asistido", "(simulado)");

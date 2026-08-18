@@ -472,6 +472,24 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       return startWorkflowByName(orgId, workflowName, { conversationId: t.conversationId, contactId: t.contactId });
     },
 
+    async listPlans() {
+      // Catálogo GLOBAL de planes (tabla plans, sin organización) — precios vigentes
+      // que fija el Super Admin. Lectura admin: es catálogo público, no dato de tenant.
+      const admin = getAdminPrisma();
+      const plans = await admin.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } });
+      return plans.map((p) => {
+        const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
+        return {
+          code: p.code,
+          name: p.name,
+          priceClp: Number(p.priceClp),
+          priceUsd: Number(p.priceUsd),
+          interval: p.interval,
+          templateMessages: typeof tm === "number" ? tm : null,
+        };
+      });
+    },
+
     async addInternalNote(note: string) {
       await withTenant(orgId, (tx) =>
         tx.message.create({

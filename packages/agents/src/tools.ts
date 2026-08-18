@@ -34,6 +34,7 @@ export interface ToolServices {
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
+  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; interval: string; templateMessages: number | null }>>;
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
@@ -282,6 +283,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { note: string }) {
         await services(ctx).addInternalNote(input.note);
         return { ok: true, message: "Nota interna agregada" };
+      },
+    },
+    {
+      name: "getPlanes",
+      description:
+        "Devuelve los planes y PRECIOS VIGENTES de TuBot desde el sistema (nombre, precio en CLP y USD, si es mensual o anual, y mensajes de plantilla incluidos). Úsalo SIEMPRE antes de cotizar un precio: nunca inventes ni memorices valores, pueden cambiar en cualquier momento.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        return { plans: await services(ctx).listPlans() };
       },
     },
     {

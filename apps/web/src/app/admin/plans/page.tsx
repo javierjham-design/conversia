@@ -17,7 +17,9 @@ interface Plan {
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
+type Draft = { priceClp: number; priceUsd: number; interval: string; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
+type NewPlan = { code: string; name: string; interval: string; priceClp: number; priceUsd: number; templateMessages: number; whatsappTemplates: boolean; isPublic: boolean; order: number };
+const EMPTY_NEW: NewPlan = { code: "", name: "", interval: "monthly", priceClp: 0, priceUsd: 0, templateMessages: 1000, whatsappTemplates: true, isPublic: true, order: 10 };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -41,6 +43,9 @@ export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [cost, setCost] = useState<CostModel | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [newPlan, setNewPlan] = useState<NewPlan>(EMPTY_NEW);
+  const [showNew, setShowNew] = useState(false);
+  const [creating, setCreating] = useState(false);
   // Supuestos del estimador de costos de IA.
   const [model, setModel] = useState("gpt-4o-mini");
   const [inputPct, setInputPct] = useState(75);
@@ -69,6 +74,8 @@ export default function PlansPage() {
       d[plan.id] = {
         priceClp: Number(plan.priceClp),
         priceUsd: Number(plan.priceUsd),
+        interval: plan.interval || "monthly",
+        isPublic: Boolean(plan.isPublic),
         limits: Object.fromEntries(LIMIT_FIELDS.map((f) => [f.key, Number(plan.limits?.[f.key] ?? 0)])),
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
         lsVariantId: String((plan.features as any)?.lsVariantId ?? ""),
@@ -92,7 +99,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, interval: d.interval, isPublic: d.isPublic, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -103,6 +110,37 @@ export default function PlansPage() {
   async function toggleActive(p: Plan) {
     await padmin(`/platform/plans/${p.id}`, { method: "PATCH", body: JSON.stringify({ active: !p.active }) });
     await load();
+  }
+  async function createPlan() {
+    if (!newPlan.code.trim() || !newPlan.name.trim()) {
+      toast.push("Código y nombre son obligatorios", "error");
+      return;
+    }
+    setCreating(true);
+    try {
+      await padmin("/platform/plans", {
+        method: "POST",
+        body: JSON.stringify({
+          code: newPlan.code.trim(),
+          name: newPlan.name.trim(),
+          interval: newPlan.interval,
+          priceClp: newPlan.priceClp,
+          priceUsd: newPlan.priceUsd,
+          isPublic: newPlan.isPublic,
+          order: newPlan.order,
+          features: { templateMessages: newPlan.templateMessages, whatsappTemplates: newPlan.whatsappTemplates },
+          limits: {},
+        }),
+      });
+      toast.push(`Plan ${newPlan.name} creado`, "ok");
+      setNewPlan(EMPTY_NEW);
+      setShowNew(false);
+      await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setCreating(false);
+    }
   }
 
   // Costo IA mensual estimado según el tope diario de tokens y el modelo/mezcla elegidos.
@@ -116,7 +154,62 @@ export default function PlansPage() {
 
   return (
     <div className="mx-auto max-w-[1300px] px-6 py-6 lg:px-8">
-      <PageHeader title="Planes" description="Edita precios y límites. El estimador calcula el costo de IA para fijar el cobro con margen." />
+      <PageHeader title="Planes" description="Crea y edita planes (mensuales y anuales), precios y límites. El estimador calcula el costo de IA para fijar el cobro con margen." />
+
+      {/* Crear plan (incluye variante ANUAL) */}
+      <div className="mb-5 rounded-card border border-slate-200 bg-white p-4 shadow-card">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold">Nuevo plan</p>
+          <Button onClick={() => setShowNew((v) => !v)}>{showNew ? "Cancelar" : "+ Crear plan"}</Button>
+        </div>
+        {showNew && (
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <label className="text-xs text-slate-500">
+              Código (único)
+              <input value={newPlan.code} onChange={(e) => setNewPlan((p) => ({ ...p, code: e.target.value }))} placeholder="p. ej. starter_anual" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Nombre
+              <input value={newPlan.name} onChange={(e) => setNewPlan((p) => ({ ...p, name: e.target.value }))} placeholder="p. ej. Starter Anual" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Cobro
+              <select value={newPlan.interval} onChange={(e) => setNewPlan((p) => ({ ...p, interval: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                <option value="monthly">Mensual</option>
+                <option value="yearly">Anual</option>
+              </select>
+            </label>
+            <label className="text-xs text-slate-500">
+              Precio CLP {newPlan.interval === "yearly" ? "(total del año)" : "(por mes)"}
+              <input type="number" value={newPlan.priceClp} onChange={(e) => setNewPlan((p) => ({ ...p, priceClp: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Precio USD {newPlan.interval === "yearly" ? "(total del año)" : "(por mes)"}
+              <input type="number" value={newPlan.priceUsd} onChange={(e) => setNewPlan((p) => ({ ...p, priceUsd: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Mensajes de plantilla / mes (−1 = ilimitado)
+              <input type="number" value={newPlan.templateMessages} onChange={(e) => setNewPlan((p) => ({ ...p, templateMessages: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Orden
+              <input type="number" value={newPlan.order} onChange={(e) => setNewPlan((p) => ({ ...p, order: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="flex items-center gap-2 self-end text-xs text-slate-600">
+              <input type="checkbox" checked={newPlan.whatsappTemplates} onChange={(e) => setNewPlan((p) => ({ ...p, whatsappTemplates: e.target.checked }))} />
+              Plantillas WhatsApp
+            </label>
+            <label className="flex items-center gap-2 self-end text-xs text-slate-600">
+              <input type="checkbox" checked={newPlan.isPublic} onChange={(e) => setNewPlan((p) => ({ ...p, isPublic: e.target.checked }))} />
+              Público (visible al cotizar)
+            </label>
+            <div className="md:col-span-3">
+              <Button onClick={() => void createPlan()} disabled={creating}>{creating ? "Creando…" : "Crear plan"}</Button>
+              <span className="ml-3 text-[11px] text-slate-400">El plan anual es una fila aparte (p. ej. «Starter Anual»). El bot lo mostrará al cotizar si es público.</span>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Supuestos del estimador */}
       <div className="mb-5 flex flex-wrap items-end gap-4 rounded-card border border-slate-200 bg-white p-4 shadow-card">
@@ -189,6 +282,20 @@ export default function PlansPage() {
                   <label className="text-xs text-slate-500">
                     Precio USD
                     <input type="number" value={d.priceUsd} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, priceUsd: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                  </label>
+                </div>
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="text-xs text-slate-500">
+                    Cobro
+                    <select value={d.interval} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, interval: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                      <option value="monthly">Mensual</option>
+                      <option value="yearly">Anual</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 self-end pb-1.5 text-xs text-slate-600">
+                    <input type="checkbox" checked={d.isPublic} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, isPublic: e.target.checked }))} />
+                    Público (cotizable)
                   </label>
                 </div>
 
