@@ -745,6 +745,40 @@ export class PlatformController {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
   }
 
+  /** Vista global del cobro recurrente: MRR, fallos, suspendidas, canceladas y próximos cobros. */
+  @Get("billing/recurring")
+  async recurringOverview() {
+    const admin = this.prisma.admin;
+    const now = new Date();
+    const in7 = new Date(now.getTime() + 7 * 86_400_000);
+    const from30 = new Date(now.getTime() - 30 * 86_400_000);
+    const [activeSubs, pastDue, suspended, canceling, failed30, upcoming, plans] = await Promise.all([
+      admin.subscription.findMany({ where: { status: "ACTIVE" }, select: { organizationId: true, planId: true, interval: true } }),
+      admin.subscription.count({ where: { status: "PAST_DUE" } }),
+      admin.subscription.count({ where: { status: "SUSPENDED" } }),
+      admin.subscription.count({ where: { status: "ACTIVE", cancelAtPeriodEnd: true } }),
+      admin.paymentAttempt.count({ where: { status: "failed", createdAt: { gte: from30 } } }),
+      admin.subscription.findMany({ where: { status: "ACTIVE", nextChargeAt: { gte: now, lte: in7 } }, select: { organizationId: true, nextChargeAt: true, interval: true }, orderBy: { nextChargeAt: "asc" }, take: 30 }),
+      admin.plan.findMany({ select: { id: true, priceClp: true, priceClpYearly: true } }),
+    ]);
+    const priceById = new Map(plans.map((p) => [p.id, { m: Number(p.priceClp), y: p.priceClpYearly != null ? Number(p.priceClpYearly) : null }]));
+    // MRR mensual-equivalente en CLP (anual/12). Facturables no incluidos (aprox).
+    let mrr = 0;
+    for (const s of activeSubs) {
+      const pr = priceById.get(s.planId);
+      if (!pr) continue;
+      mrr += s.interval === "yearly" ? (pr.y ?? pr.m * 12) / 12 : pr.m;
+    }
+    const orgIds = [...new Set(upcoming.map((u) => u.organizationId))];
+    const orgs = await admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } });
+    const nameById = new Map(orgs.map((o) => [o.id, o.name]));
+    return {
+      mrr: Math.round(mrr),
+      counts: { active: activeSubs.length, pastDue, suspended, canceling, failed30 },
+      upcoming: upcoming.map((u) => ({ org: nameById.get(u.organizationId) ?? u.organizationId, nextChargeAt: u.nextChargeAt, interval: u.interval })),
+    };
+  }
+
   /**
    * Monitor de infraestructura para el Super Admin: conexiones y tamaño de Postgres
    * (por SQL, el cuello de botella #1) + métricas de Railway (CPU/RAM por servicio y
