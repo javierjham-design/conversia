@@ -240,7 +240,11 @@ model Plan {
   features  Json     @default("{}")
   priceUsd  Decimal  @default(0) @map("price_usd") @db.Decimal(10, 2)
   priceClp  Decimal  @default(0) @map("price_clp") @db.Decimal(12, 0)
-  interval  String   @default("monthly") // monthly | yearly
+  // Precio ANUAL opcional del MISMO plan (null/0 = no se ofrece anual). La cadencia
+  // (mensual/anual) se elige en el checkout, no se crean planes separados.
+  priceUsdYearly Decimal? @map("price_usd_yearly") @db.Decimal(10, 2)
+  priceClpYearly Decimal? @map("price_clp_yearly") @db.Decimal(12, 0)
+  interval  String   @default("monthly") // default de cadencia (legacy; la real se elige al suscribir)
   trialDays Int      @default(0) @map("trial_days")
   isPublic  Boolean  @default(true) @map("is_public")
   order     Int      @default(0)
@@ -448,6 +452,9 @@ model Subscription {
   organizationId String             @map("organization_id")
   planId         String             @map("plan_id")
   status         SubscriptionStatus @default(TRIALING)
+  // Cadencia de cobro ELEGIDA al suscribir (monthly | yearly). Antes se heredaba de
+  // plan.interval; ahora el mismo plan ofrece ambas y aquí queda la elegida.
+  interval       String             @default("monthly")
   // Ítems/addons del plan (subscription_items fusionado)
   items          Json               @default("[]")
   periodStart    DateTime?          @map("period_start")

@@ -10,16 +10,17 @@ interface Plan {
   name: string;
   priceClp: string;
   priceUsd: string;
-  interval: string;
+  priceClpYearly: string | null;
+  priceUsdYearly: string | null;
   isPublic: boolean;
   active: boolean;
   order: number;
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; interval: string; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
-type NewPlan = { code: string; name: string; interval: string; priceClp: number; priceUsd: number; templateMessages: number; whatsappTemplates: boolean; isPublic: boolean; order: number };
-const EMPTY_NEW: NewPlan = { code: "", name: "", interval: "monthly", priceClp: 0, priceUsd: 0, templateMessages: 1000, whatsappTemplates: true, isPublic: true, order: 10 };
+type Draft = { priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
+type NewPlan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; templateMessages: number; whatsappTemplates: boolean; isPublic: boolean; order: number };
+const EMPTY_NEW: NewPlan = { code: "", name: "", priceClp: 0, priceUsd: 0, priceClpYearly: 0, priceUsdYearly: 0, templateMessages: 1000, whatsappTemplates: true, isPublic: true, order: 10 };
 interface CostModel {
   models: Record<string, { inputPerMTok: number; outputPerMTok: number }>;
 }
@@ -74,7 +75,8 @@ export default function PlansPage() {
       d[plan.id] = {
         priceClp: Number(plan.priceClp),
         priceUsd: Number(plan.priceUsd),
-        interval: plan.interval || "monthly",
+        priceClpYearly: Number(plan.priceClpYearly ?? 0),
+        priceUsdYearly: Number(plan.priceUsdYearly ?? 0),
         isPublic: Boolean(plan.isPublic),
         limits: Object.fromEntries(LIMIT_FIELDS.map((f) => [f.key, Number(plan.limits?.[f.key] ?? 0)])),
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
@@ -99,7 +101,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, interval: d.interval, isPublic: d.isPublic, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, priceClpYearly: d.priceClpYearly || null, priceUsdYearly: d.priceUsdYearly || null, isPublic: d.isPublic, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -123,9 +125,10 @@ export default function PlansPage() {
         body: JSON.stringify({
           code: newPlan.code.trim(),
           name: newPlan.name.trim(),
-          interval: newPlan.interval,
           priceClp: newPlan.priceClp,
           priceUsd: newPlan.priceUsd,
+          priceClpYearly: newPlan.priceClpYearly || null,
+          priceUsdYearly: newPlan.priceUsdYearly || null,
           isPublic: newPlan.isPublic,
           order: newPlan.order,
           features: { templateMessages: newPlan.templateMessages, whatsappTemplates: newPlan.whatsappTemplates },
@@ -173,19 +176,20 @@ export default function PlansPage() {
               <input value={newPlan.name} onChange={(e) => setNewPlan((p) => ({ ...p, name: e.target.value }))} placeholder="p. ej. Starter Anual" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="text-xs text-slate-500">
-              Cobro
-              <select value={newPlan.interval} onChange={(e) => setNewPlan((p) => ({ ...p, interval: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
-                <option value="monthly">Mensual</option>
-                <option value="yearly">Anual</option>
-              </select>
-            </label>
-            <label className="text-xs text-slate-500">
-              Precio CLP {newPlan.interval === "yearly" ? "(total del año)" : "(por mes)"}
+              Precio CLP / mes
               <input type="number" value={newPlan.priceClp} onChange={(e) => setNewPlan((p) => ({ ...p, priceClp: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="text-xs text-slate-500">
-              Precio USD {newPlan.interval === "yearly" ? "(total del año)" : "(por mes)"}
+              Precio USD / mes
               <input type="number" value={newPlan.priceUsd} onChange={(e) => setNewPlan((p) => ({ ...p, priceUsd: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Precio CLP / año <span className="text-slate-400">(opcional)</span>
+              <input type="number" value={newPlan.priceClpYearly} onChange={(e) => setNewPlan((p) => ({ ...p, priceClpYearly: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">
+              Precio USD / año <span className="text-slate-400">(opcional)</span>
+              <input type="number" value={newPlan.priceUsdYearly} onChange={(e) => setNewPlan((p) => ({ ...p, priceUsdYearly: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
             </label>
             <label className="text-xs text-slate-500">
               Mensajes de plantilla / mes (−1 = ilimitado)
@@ -205,7 +209,7 @@ export default function PlansPage() {
             </label>
             <div className="md:col-span-3">
               <Button onClick={() => void createPlan()} disabled={creating}>{creating ? "Creando…" : "Crear plan"}</Button>
-              <span className="ml-3 text-[11px] text-slate-400">El plan anual es una fila aparte (p. ej. «Starter Anual»). El bot lo mostrará al cotizar si es público.</span>
+              <span className="ml-3 text-[11px] text-slate-400">El precio anual es opcional: si lo cargas, el cliente elige mensual o anual al suscribir (no se crean planes aparte).</span>
             </div>
           </div>
         )}
@@ -267,7 +271,7 @@ export default function PlansPage() {
                 <div className="mb-2 flex items-center justify-between">
                   <div>
                     <p className="font-semibold">{p.name}</p>
-                    <p className="text-xs text-slate-400">{p.code} · {p.interval}{p.isPublic ? "" : " · privado"}</p>
+                    <p className="text-xs text-slate-400">{p.code}{p.isPublic ? "" : " · privado"}</p>
                   </div>
                   <button onClick={() => void toggleActive(p)}>
                     <StatusBadge kind={p.active ? "connected" : "disconnected"} label={p.active ? "activo" : "inactivo"} />
@@ -276,28 +280,30 @@ export default function PlansPage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-xs text-slate-500">
-                    Precio CLP
+                    Precio CLP / mes
                     <input type="number" value={d.priceClp} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, priceClp: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
                   </label>
                   <label className="text-xs text-slate-500">
-                    Precio USD
+                    Precio USD / mes
                     <input type="number" value={d.priceUsd} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, priceUsd: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
                   </label>
                 </div>
 
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label className="text-xs text-slate-500">
-                    Cobro
-                    <select value={d.interval} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, interval: e.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
-                      <option value="monthly">Mensual</option>
-                      <option value="yearly">Anual</option>
-                    </select>
+                    Precio CLP / año <span className="text-slate-400">(opcional)</span>
+                    <input type="number" value={d.priceClpYearly} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, priceClpYearly: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
                   </label>
-                  <label className="flex items-center gap-2 self-end pb-1.5 text-xs text-slate-600">
-                    <input type="checkbox" checked={d.isPublic} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, isPublic: e.target.checked }))} />
-                    Público (cotizable)
+                  <label className="text-xs text-slate-500">
+                    Precio USD / año <span className="text-slate-400">(opcional)</span>
+                    <input type="number" value={d.priceUsdYearly} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, priceUsdYearly: Number(e.target.value) }))} className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
                   </label>
                 </div>
+
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={d.isPublic} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, isPublic: e.target.checked }))} />
+                  Público (cotizable)
+                </label>
 
                 <div className="mt-3 space-y-1.5 rounded-lg bg-slate-50 p-2">
                   {LIMIT_FIELDS.map((f) => (

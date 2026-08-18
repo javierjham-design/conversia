@@ -60,6 +60,7 @@ export class StripePaymentProvider implements PaymentProvider {
     p.set("client_reference_id", input.organizationId);
     p.set("metadata[organizationId]", input.organizationId);
     p.set("metadata[planCode]", input.planCode);
+    p.set("metadata[interval]", input.interval === "yearly" ? "yearly" : "monthly");
     // Monto esperado (unidad menor) para que el webhook valide lo pagado (S-4).
     p.set("metadata[expectedAmount]", String(minor));
     p.set("subscription_data[metadata][organizationId]", input.organizationId);
@@ -103,7 +104,7 @@ export class LemonSqueezyPaymentProvider implements PaymentProvider {
         attributes: {
           checkout_data: {
             email: input.email,
-            custom: { organization_id: input.organizationId, plan_code: input.planCode },
+            custom: { organization_id: input.organizationId, plan_code: input.planCode, billing_interval: input.interval === "yearly" ? "yearly" : "monthly" },
           },
           product_options: { redirect_url: `${input.successUrl}?paid=1` },
         },
@@ -170,7 +171,7 @@ export class FlowPaymentProvider implements PaymentProvider {
       urlConfirmation: `${env.API_URL}/billing/webhooks/flow`,
       urlReturn: `${input.successUrl}?paid=1`,
       // expectedAmount: el webhook compara lo reportado por Flow contra esto (S-4).
-      optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode, expectedAmount: Math.round(input.amount) }),
+      optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode, expectedAmount: Math.round(input.amount), interval: input.interval === "yearly" ? "yearly" : "monthly" }),
     };
     params.s = flowSign(params, this.secretKey);
     const res = await fetch(`${this.baseUrl}/payment/create`, {

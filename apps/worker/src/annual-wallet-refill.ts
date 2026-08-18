@@ -56,16 +56,18 @@ export function startAnnualWalletRefill(): () => void {
       const now = new Date();
       const walletDefault = getEnv().WALLET_DEFAULT_QUOTA;
       const subs = await prisma.subscription.findMany({
-        where: { status: "ACTIVE", periodEnd: { not: null } },
-        select: { id: true, organizationId: true, planId: true, periodEnd: true },
+        where: { status: "ACTIVE", periodEnd: { not: null }, interval: "yearly" },
+        select: { id: true, organizationId: true, planId: true, periodEnd: true, interval: true },
       });
       for (const sub of subs) {
-        const plan = await prisma.plan.findUnique({ where: { id: sub.planId }, select: { interval: true, features: true } });
-        if (!plan || plan.interval !== "yearly") continue;
+        // La cadencia real vive en la suscripción (el mismo plan ofrece mensual/anual).
+        if (sub.interval !== "yearly") continue;
+        const plan = await prisma.plan.findUnique({ where: { id: sub.planId }, select: { features: true } });
+        if (!plan) continue;
         const wallet = await prisma.messageWallet.findUnique({ where: { organizationId: sub.organizationId } });
         const due = isMonthlyRefillDue({
           now,
-          interval: plan.interval,
+          interval: sub.interval,
           subStatus: "ACTIVE",
           periodEnd: sub.periodEnd,
           walletPeriodStart: wallet?.periodStart ?? null,
