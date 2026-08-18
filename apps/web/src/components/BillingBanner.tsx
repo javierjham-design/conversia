@@ -2,7 +2,7 @@
 
 /** Aviso global de cobro: período de gracia (impago) o cuenta suspendida. */
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -12,6 +12,7 @@ interface BillingState {
 
 export function BillingBanner() {
   const router = useRouter();
+  const pathname = usePathname();
   const [state, setState] = useState<BillingState["billing"] | null>(null);
 
   useEffect(() => {
@@ -19,6 +20,15 @@ export function BillingBanner() {
       .then((r) => setState(r.billing ?? null))
       .catch(() => setState(null));
   }, []);
+
+  // APAGADO TOTAL: si está SUSPENDIDA, la única ruta accesible es la pantalla de pagos.
+  // Cualquier otra ruta redirige a /billing (el bot/flujos/IA ya están apagados en el
+  // backend; esto restringe además el panel).
+  useEffect(() => {
+    if (state?.state === "suspended" && pathname && !pathname.startsWith("/billing")) {
+      router.replace("/billing");
+    }
+  }, [state, pathname, router]);
 
   if (!state || state.state === "ok") return null;
 
