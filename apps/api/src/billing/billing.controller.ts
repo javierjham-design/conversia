@@ -7,6 +7,7 @@ import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { getTemplateUsage } from "../common/plan-limits";
 import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStripeSignature } from "./payment-provider";
+import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus } from "./flow-subscriptions";
 import { PaymentSettingsService } from "./payment-settings.service";
 
 /**
@@ -109,6 +110,135 @@ export class BillingController {
         custom: (pl.features as any)?.custom === true,
       }))
       .sort((a, b) => a.priceClp - b.priceClp);
+  }
+
+  // ============================ SUSCRIPCIÓN RECURRENTE ============================
+  // La API INICIA (registrar tarjeta, primer cobro, pago manual); el worker (engine +
+  // reconciliación) APLICA las transiciones de estado leyendo payment_attempts. Requiere
+  // la migración 20260818000000 aplicada y credenciales de Flow.
+
+  /** Monto a cobrar: base de la cadencia + facturables a medida (misma regla que el engine). */
+  private subAmount(plan: { priceClp: unknown; priceUsd: unknown; priceClpYearly: unknown; priceUsdYearly: unknown }, interval: string, currency: string, org: { settings?: unknown } | null): number {
+    const yearly = interval === "yearly";
+    const base = currency === "CLP"
+      ? Number(yearly && plan.priceClpYearly != null ? plan.priceClpYearly : plan.priceClp)
+      : Number(yearly && plan.priceUsdYearly != null ? plan.priceUsdYearly : plan.priceUsd);
+    return base + this.readBillables(org).reduce((a, b) => a + b.amount, 0);
+  }
+
+  private async flowCfg() {
+    const s = await this.paymentSettings.get();
+    if (!s.flow?.apiKey || !s.flow?.secretKey || !s.flow?.baseUrl) throw new BadRequestException("Flow no está configurado para suscripciones.");
+    return s.flow;
+  }
+
+  /** Alta: elige plan+cadencia y devuelve la URL de Flow para registrar la tarjeta. */
+  @Post("subscription/start")
+  async subscriptionStart(@Body() body: unknown) {
+    const ctx = requirePermission("billing:write");
+    const parsed = z.object({ planCode: z.string(), billingInterval: z.enum(["monthly", "yearly"]).default("monthly") }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("planCode requerido");
+    const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
+    if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true, name: true } });
+    const cfg = await this.flowCfg();
+    // Cliente Flow (reutiliza el existente si ya lo hay en una suscripción previa).
+    const existing = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    let customerRef = existing?.providerCustomerRef ?? null;
+    if (!customerRef) {
+      customerRef = await flowCustomerCreate(cfg, { name: org?.name ?? "Cliente", email: user?.email ?? "facturacion@tubot.cl", organizationId: ctx.organizationId });
+    }
+    // Registra/actualiza la suscripción (aún sin cobrar; estado TRIALING hasta la tarjeta).
+    const data = { planId: plan.id, interval: parsed.data.billingInterval, providerCustomerRef: customerRef, cancelAtPeriodEnd: false };
+    if (existing) await this.prisma.admin.subscription.update({ where: { id: existing.id }, data });
+    else await this.prisma.admin.subscription.create({ data: { organizationId: ctx.organizationId, status: "TRIALING", ...data } });
+    const reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${getEnv().WEB_URL}/billing?card=1` });
+    await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.subscription_start", entityType: "subscription", after: { planCode: plan.code, interval: parsed.data.billingInterval } } }));
+    return { url: reg.url, token: reg.token };
+  }
+
+  /** Tras volver del registro de tarjeta: si quedó registrada, guarda el medio y COBRA el primer período. */
+  @Post("subscription/confirm-card")
+  async subscriptionConfirmCard(@Body() body: unknown) {
+    const ctx = requirePermission("billing:write");
+    const parsed = z.object({ token: z.string().min(6) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("token requerido");
+    const cfg = await this.flowCfg();
+    const st = await flowRegisterStatus(cfg, parsed.data.token);
+    if (!st.registered) return { registered: false };
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    if (!sub?.providerCustomerRef) throw new BadRequestException("No hay suscripción iniciada");
+    const plan = await this.prisma.admin.plan.findUnique({ where: { id: sub.planId } });
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
+    const currency = org?.currency ?? "CLP";
+    const amount = plan ? this.subAmount(plan, sub.interval, currency, org) : 0;
+    // Guarda el medio de pago (solo token/brand/last4 — nunca datos de tarjeta).
+    const pm = await this.prisma.admin.paymentMethod.create({ data: { organizationId: ctx.organizationId, provider: "flow", kind: "card", brand: st.brand, last4: st.last4, providerRef: sub.providerCustomerRef, isDefault: true } });
+    await this.prisma.admin.subscription.update({ where: { id: sub.id }, data: { paymentMethodId: pm.id, nextChargeAt: new Date() } });
+    // Primer cobro (collect). El worker aplica el resultado por reconciliación.
+    await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "auto", 1);
+    return { registered: true };
+  }
+
+  /** Pago MANUAL del monto adeudado (dentro de la ventana de 48 h o estando suspendido). */
+  @Post("subscription/manual-pay")
+  async subscriptionManualPay() {
+    const ctx = requirePermission("billing:write");
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    if (!sub?.providerCustomerRef) throw new BadRequestException("No hay suscripción con medio de pago");
+    const plan = await this.prisma.admin.plan.findUnique({ where: { id: sub.planId } });
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
+    const currency = org?.currency ?? "CLP";
+    const amount = plan ? this.subAmount(plan, sub.interval, currency, org) : 0;
+    await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "manual", (sub.retriesDone ?? 0) + 1);
+    return { ok: true, amount };
+  }
+
+  /** Cancelar: sigue activa hasta el fin del período pagado y ahí se suspende. */
+  @Post("subscription/cancel")
+  async subscriptionCancel() {
+    const ctx = requirePermission("billing:write");
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    if (!sub) throw new BadRequestException("Sin suscripción");
+    await this.prisma.admin.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: true } });
+    await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.subscription_cancel", entityType: "subscription", entityId: sub.id } }));
+    return { ok: true, activeUntil: sub.periodEnd };
+  }
+
+  /** Reactivar antes del fin del período: quita la cancelación. */
+  @Post("subscription/reactivate")
+  async subscriptionReactivate() {
+    const ctx = requirePermission("billing:write");
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } });
+    if (!sub) throw new BadRequestException("Sin suscripción");
+    await this.prisma.admin.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: false } });
+    return { ok: true };
+  }
+
+  /** Historial de cobros (intentos) + comprobantes. */
+  @Get("subscription/history")
+  async subscriptionHistory() {
+    const ctx = requireContext();
+    const [attempts, invoices, sub] = await Promise.all([
+      this.prisma.admin.paymentAttempt.findMany({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" }, take: 50 }),
+      this.prisma.withTenant(ctx.organizationId, (tx) => tx.invoice.findMany({ orderBy: { createdAt: "desc" }, take: 50 })),
+      this.prisma.admin.subscription.findFirst({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" } }),
+    ]);
+    return {
+      subscription: sub ? { status: sub.status, interval: sub.interval, periodEnd: sub.periodEnd, nextChargeAt: sub.nextChargeAt, cancelAtPeriodEnd: sub.cancelAtPeriodEnd } : null,
+      attempts: attempts.map((a) => ({ id: a.id, amount: Number(a.amount), currency: a.currency, kind: a.kind, status: a.status, reason: a.reason, createdAt: a.createdAt })),
+      invoices: invoices.map((i) => ({ number: i.number, amountDue: Number(i.amountDue), currency: i.currency, status: i.status, paidAt: i.paidAt, createdAt: i.createdAt })),
+    };
+  }
+
+  /** Inicia un cobro (collect) y registra el intento PENDIENTE; el worker aplica el resultado. */
+  private async startCollect(organizationId: string, subId: string, customerRef: string, amount: number, currency: string, planName: string, interval: string, kind: "auto" | "manual", attemptNumber: number) {
+    const cfg = await this.flowCfg();
+    const commerceOrder = `sub-${subId}-${Date.now()}`;
+    await this.prisma.admin.paymentAttempt.create({ data: { organizationId, subscriptionId: subId, commerceOrder, amount, currency, kind, attemptNumber, status: "pending", provider: "flow" } });
+    const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: `${getEnv().WEB_URL}/billing` });
+    await this.prisma.admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
   }
 
   /** Bolsa de mensajes del tenant: saldo, incluido y paquetes disponibles. */
