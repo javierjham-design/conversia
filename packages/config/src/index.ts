@@ -22,6 +22,14 @@ const envSchema = z.object({
   // solo las métricas de Postgres (que salen por SQL).
   RAILWAY_API_TOKEN: z.string().optional(),
 
+  // Interruptor MAESTRO del cobro recurrente de suscripciones. Apagado por defecto:
+  // se enciende SOLO tras aplicar la migración 20260818000000 y configurar Flow. Al
+  // encenderlo, el tick de suscripciones opera y el dunning legacy de 7 días se apaga.
+  RECURRING_BILLING_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+
   API_PORT: z.coerce.number().default(4000),
   WEB_URL: z.string().default("http://localhost:3000"),
   API_URL: z.string().default("http://localhost:4000"),

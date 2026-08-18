@@ -59,6 +59,10 @@ export function planDunningAction(input: DunningInput): { action: DunningAction;
 export function startBillingDunning(): () => void {
   const run = async () => {
     try {
+      // Si el cobro RECURRENTE (ventana de 48 h) está encendido, el dunning legacy de
+      // 7 días NO corre: evita dos lógicas de suspensión conviviendo.
+      const { getEnv } = await import("@conversia/config");
+      if (getEnv().RECURRING_BILLING_ENABLED) return;
       const { getAdminPrisma, withTenant } = await import("@conversia/database");
       const prisma = getAdminPrisma();
       const now = new Date();
