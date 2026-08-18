@@ -19,6 +19,10 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
   ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);
 
+-- Búsqueda semántica del catálogo comercial (mismo esquema pgvector).
+CREATE INDEX IF NOT EXISTS catalog_items_embedding_idx
+  ON catalog_items USING hnsw (embedding vector_cosine_ops);
+
 -- 2. Rol de aplicación (cambiar password vía ALTER ROLE en producción)
 DO $$
 BEGIN
