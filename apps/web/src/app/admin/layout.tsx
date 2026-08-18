@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, AlertTriangle, Building2, Calculator, CreditCard, Gauge, KeyRound, LayoutDashboard, LifeBuoy, LogOut, Menu, Package, PackagePlus, Rocket, ScrollText, ShieldCheck, Ticket, TrendingUp, X } from "lucide-react";
+import { Activity, AlertTriangle, Building2, Calculator, CreditCard, Gauge, KeyRound, LayoutDashboard, LifeBuoy, LogOut, Menu, Package, PackagePlus, Repeat, Rocket, ScrollText, ShieldCheck, Ticket, TrendingUp, X } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 import { ToastProvider, cn } from "@/components/ui";
 
@@ -18,6 +18,7 @@ const NAV = [
   { href: "/admin/packages", label: "Paquetes de mensajes", icon: PackagePlus },
   { href: "/admin/coupons", label: "Cupones", icon: Ticket },
   { href: "/admin/billing", label: "Facturación", icon: CreditCard },
+  { href: "/admin/recurring", label: "Cobro recurrente", icon: Repeat },
   { href: "/admin/alerts", label: "Alertas", icon: AlertTriangle },
   { href: "/admin/support", label: "Soporte", icon: LifeBuoy },
   { href: "/admin/infra", label: "Infraestructura", icon: Activity },
