@@ -1210,6 +1210,69 @@ model Service {
   @@map("services")
 }
 
+// Catálogo comercial NORMALIZADO por tenant: sirve igual para un producto de tienda
+// (WooCommerce/Shopify/…) y para un plato de restaurante (Fudo), y unifica el catálogo
+// manual de Servicios (source="manual", kind="service"). El agente consulta SIEMPRE este
+// modelo, sin saber de qué fuente vienen los datos.
+model CatalogItem {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  source         String   @default("manual") // manual | csv | woocommerce | shopify | fudo | jumpseller | bsale | ...
+  externalId     String?  @map("external_id") // id en la fuente (null para manual)
+  kind           String   @default("product") // product | dish | service
+  sku            String?
+  name           String
+  description    String?
+  botDescription String?  @map("bot_description") // descripción optimizada para el bot (override; no toca la tienda)
+  category       String?
+  subcategory    String?
+  price          Decimal? @db.Decimal(12, 2)
+  compareAtPrice Decimal? @map("compare_at_price") @db.Decimal(12, 2) // precio antes de descuento
+  currency       String   @default("CLP")
+  stock          Int?
+  trackStock     Boolean  @default(false) @map("track_stock")
+  available      Boolean  @default(true) // disponible en la fuente
+  active         Boolean  @default(true) // el bot lo ofrece (toggle del tenant)
+  variants       Json     @default("[]") // variantes / modificadores (tamaños, agregados, sin cebolla…)
+  imageUrl       String?  @map("image_url")
+  productUrl     String?  @map("product_url")
+  buyUrl         String?  @map("buy_url") // enlace de compra / carrito armado donde el proveedor lo permita
+  tags           Json     @default("[]")
+  // Restaurante: sección de menú, ventanas de disponibilidad por horario y precios por canal.
+  menuSection    String?  @map("menu_section")
+  availability   Json     @default("{}") // { windows: [...], channelPrices: {...} }
+  serviceId      String?  @map("service_id") // enlace al Servicio de agenda cuando kind="service"
+  raw            Json     @default("{}") // objeto crudo original de la fuente (por si se necesita después)
+  embedding      Unsupported("vector(1536)")? // búsqueda semántica (pgvector)
+  syncedAt       DateTime? @map("synced_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, source, externalId])
+  @@index([organizationId, kind, active])
+  @@index([organizationId, category])
+  @@map("catalog_items")
+}
+
+// Registro de cada sincronización de catálogo (para la UI y el diagnóstico).
+model CatalogSyncRun {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  source         String
+  mode           String // full | incremental | webhook
+  status         String    @default("running") // running | success | error
+  created        Int       @default(0)
+  updated        Int       @default(0)
+  deactivated    Int       @default(0)
+  failed         Int       @default(0)
+  error          String?
+  startedAt      DateTime  @default(now()) @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  @@index([organizationId, startedAt])
+  @@map("catalog_sync_runs")
+}
+
 model ClinicService {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
