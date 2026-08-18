@@ -34,7 +34,7 @@ import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDraw
 interface CatalogItem {
   key: string;
   name: string;
-  category: "meta" | "agenda" | "datos" | "crm";
+  category: "meta" | "agenda" | "datos" | "crm" | "comercio";
   status: "disponible" | "beta" | "proximamente" | "config_pendiente";
   description: string;
   capabilities: string[];
@@ -73,6 +73,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   agenda: "Agenda y reservas",
   datos: "Productividad y datos",
   crm: "CRM y analítica",
+  comercio: "Catálogo y comercio",
 };
 
 const CATALOG_ICONS: Record<string, React.ReactNode> = {
@@ -483,7 +484,7 @@ export default function IntegrationsPage() {
                 </button>
               ))}
               <span className="mx-1 w-px bg-line" aria-hidden />
-              {(["todas", "meta", "agenda", "datos", "crm"] as const).map((value) => (
+              {(["todas", "meta", "agenda", "datos", "crm", "comercio"] as const).map((value) => (
                 <button
                   key={value}
                   onClick={() => setCategoryFilter(value)}
@@ -585,7 +586,7 @@ export default function IntegrationsPage() {
           ) : filteredCatalog.length === 0 ? (
             <EmptyState title="Sin resultados" description="Prueba con otros filtros o términos de búsqueda." />
           ) : (
-            (["meta", "agenda", "datos", "crm"] as const).map((cat) => {
+            (["meta", "agenda", "datos", "crm", "comercio"] as const).map((cat) => {
               const items = filteredCatalog.filter((c) => c.category === cat);
               if (items.length === 0) return null;
               return (

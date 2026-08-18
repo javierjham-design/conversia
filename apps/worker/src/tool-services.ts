@@ -161,6 +161,28 @@ async function resolveAssistedClientOrg(
   return grant ? { orgId: grant.organizationId, scopeChannelId: grant.scopeChannelId } : null;
 }
 
+/** Mapea una fila de catalog_items a lo que el bot necesita (usa botDescription si existe). */
+function toCatalogHit(c: {
+  name: string; sku: string | null; price: unknown; compareAtPrice: unknown; currency: string;
+  available: boolean; stock: number | null; category: string | null; description: string | null;
+  botDescription: string | null; variants: unknown; productUrl: string | null; buyUrl: string | null;
+}) {
+  return {
+    name: c.name,
+    sku: c.sku ?? null,
+    price: c.price != null ? Number(c.price) : null,
+    compareAtPrice: c.compareAtPrice != null ? Number(c.compareAtPrice) : null,
+    currency: c.currency,
+    available: c.available,
+    stock: c.stock ?? null,
+    category: c.category ?? null,
+    description: c.botDescription || c.description || null,
+    variants: Array.isArray(c.variants) ? c.variants : [],
+    productUrl: c.productUrl ?? null,
+    buyUrl: c.buyUrl ?? null,
+  };
+}
+
 export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
   const scheduling = await getSchedulingProviderFor(orgId);
   const knowledgeSources = opts.knowledgeSources;
@@ -488,6 +510,44 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null,
           templateMessages: typeof tm === "number" ? tm : null,
         };
+      });
+    },
+
+    async searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }) {
+      return withTenant(orgId, async (tx) => {
+        const words = input.query.split(/\s+/).filter((w) => w.length > 2).slice(0, 6);
+        const items = await tx.catalogItem.findMany({
+          where: {
+            active: true, // solo lo que el tenant dejó ofrecer
+            ...(input.onlyAvailable ? { available: true } : {}),
+            ...(input.category ? { category: { equals: input.category, mode: "insensitive" as const } } : {}),
+            ...(input.maxPrice ? { price: { lte: input.maxPrice } } : {}),
+            ...(words.length
+              ? {
+                  OR: words.flatMap((w) => [
+                    { name: { contains: w, mode: "insensitive" as const } },
+                    { description: { contains: w, mode: "insensitive" as const } },
+                    { botDescription: { contains: w, mode: "insensitive" as const } },
+                    { category: { contains: w, mode: "insensitive" as const } },
+                    { brand: { contains: w, mode: "insensitive" as const } },
+                  ]),
+                }
+              : {}),
+          },
+          take: 8,
+          orderBy: [{ available: "desc" }, { updatedAt: "desc" }],
+        });
+        return items.map(toCatalogHit);
+      });
+    },
+
+    async getCatalogItem(idOrSku: string) {
+      return withTenant(orgId, async (tx) => {
+        const item = await tx.catalogItem.findFirst({
+          where: { active: true, OR: [{ id: idOrSku }, { sku: { equals: idOrSku, mode: "insensitive" } }, { name: { equals: idOrSku, mode: "insensitive" } }, { name: { contains: idOrSku, mode: "insensitive" } }] },
+          orderBy: { available: "desc" },
+        });
+        return item ? toCatalogHit(item) : null;
       });
     },
 

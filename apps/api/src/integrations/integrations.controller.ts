@@ -262,6 +262,13 @@ export class IntegrationsController {
           { key: "hubspot", name: "HubSpot", category: "crm", status: platformHubspotReady ? "disponible" : "config_pendiente", description: "Sincroniza tus contactos de Conversia a HubSpot (unidireccional, sin duplicados, con mapeo de campos).", capabilities: ["OAuth", "Contactos", "Backfill", "Sin duplicados"] },
           { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "disponible", description: "Métricas de los eventos CAPI: envíos por día y por tipo, tasa de éxito y últimos rechazos de Meta.", capabilities: ["Métricas", "Errores", "Link directo"] },
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
+          // Catálogo comercial: el bot vende con productos/precios/stock reales de la tienda o el menú.
+          { key: "woocommerce", name: "WooCommerce", category: "comercio", status: "beta", description: "Sincroniza los productos, precios y stock reales de tu tienda WooCommerce para que el bot venda con datos vivos.", capabilities: ["Productos", "Precios", "Stock", "Búsqueda por IA"] },
+          { key: "shopify", name: "Shopify", category: "comercio", status: "proximamente", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
+          { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "proximamente", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
+          { key: "bsale", name: "Bsale", category: "comercio", status: "proximamente", description: "Productos y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
+          { key: "fudo", name: "Fudo", category: "comercio", status: "proximamente", description: "El menú de tu restaurante en Fudo (secciones, productos, modificadores y disponibilidad) para que el bot tome pedidos.", capabilities: ["Menú", "Modificadores", "Disponibilidad"] },
+          { key: "catalog_csv", name: "Importar por CSV", category: "comercio", status: "proximamente", description: "¿Sin tienda conectada? Sube tu catálogo por planilla con una plantilla y mapeo de columnas.", capabilities: ["Plantilla", "Mapeo", "Manual"] },
         ],
       };
     });
