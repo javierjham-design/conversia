@@ -23,6 +23,7 @@ import { PaymentSettingsService } from "../billing/payment-settings.service";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
+import { getRailwayInfra } from "./railway-metrics";
 
 // ---------------------------------------------------------------------------
 // Evaluador (solo lectura) del gate de envío de plantillas — MISMA lógica y
@@ -732,6 +733,36 @@ export class PlatformController {
   @Get("plans")
   plans() {
     return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
+  }
+
+  /**
+   * Monitor de infraestructura para el Super Admin: conexiones y tamaño de Postgres
+   * (por SQL, el cuello de botella #1) + métricas de Railway (CPU/RAM por servicio y
+   * uso mensual estimado) si hay RAILWAY_API_TOKEN. Solo lecturas.
+   */
+  @Get("infra")
+  async infra() {
+    const token = getEnv().RAILWAY_API_TOKEN;
+    const rows = await this.prisma.admin.$queryRawUnsafe<Array<{ total: number; active: number; max_conn: number; db_size: bigint }>>(
+      `SELECT (SELECT count(*)::int FROM pg_stat_activity) AS total,
+              (SELECT count(*)::int FROM pg_stat_activity WHERE state = 'active') AS active,
+              current_setting('max_connections')::int AS max_conn,
+              pg_database_size(current_database())::bigint AS db_size`,
+    );
+    const r = rows[0];
+    const postgres = {
+      connections: Number(r?.total ?? 0),
+      active: Number(r?.active ?? 0),
+      maxConnections: Number(r?.max_conn ?? 0),
+      dbSizeBytes: Number(r?.db_size ?? 0),
+    };
+    if (!token) return { configured: false, postgres };
+    try {
+      const railway = await getRailwayInfra(token);
+      return { configured: true, postgres, railway };
+    } catch (e) {
+      return { configured: true, postgres, error: (e as Error).message };
+    }
   }
 
   /** Precio de activación de mensajes de plantilla (servicio adicional), editable. */

@@ -17,6 +17,11 @@ const envSchema = z.object({
   DIRECT_DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().default("redis://localhost:6379"),
 
+  // Token de la API de Railway (workspace) para el monitor de infraestructura del
+  // Super Admin. Se setea como variable en Railway; si falta, el monitor muestra
+  // solo las métricas de Postgres (que salen por SQL).
+  RAILWAY_API_TOKEN: z.string().optional(),
+
   API_PORT: z.coerce.number().default(4000),
   WEB_URL: z.string().default("http://localhost:3000"),
   API_URL: z.string().default("http://localhost:4000"),
