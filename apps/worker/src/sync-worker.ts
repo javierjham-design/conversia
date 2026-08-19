@@ -26,6 +26,10 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
       const { syncContactToHubspot } = await import("./hubspot.js");
       return syncContactToHubspot(job.organizationId, job.payload as { contactId: string });
     }
+    case "catalog_sync": {
+      const { runCatalogSyncJob } = await import("./catalog/sync-job.js");
+      return runCatalogSyncJob(job.organizationId, job.payload as { source: string; mode?: "full" | "incremental" });
+    }
     case "meta_ads_sync": {
       const { syncMetaAds, fanOutMetaAdsSync } = await import("./meta-ads-sync.js");
       // Job diario con {all:true} → abanica un sync por tenant conectado.

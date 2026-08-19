@@ -754,6 +754,77 @@ export class IntegrationsController {
     });
   }
 
+  // ============================ CATÁLOGO COMERCIAL ============================
+  // El bot vende con productos/precios/stock reales. La API guarda la conexión y dispara
+  // el sync; el motor pesado (paginado) corre en el worker (cola catalog_sync).
+
+  /** Prueba la conexión (feedback inmediato: cuántos productos ve). */
+  @Post("catalog/test")
+  async catalogTest(@Body() body: unknown) {
+    requirePermission("integrations:write");
+    const input = parse(z.object({ source: z.enum(["woocommerce"]), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }), body);
+    await validateOutboundUrl(input.baseUrl); // guarda anti-SSRF
+    const basic = Buffer.from(`${input.consumerKey}:${input.consumerSecret}`).toString("base64");
+    try {
+      const res = await fetch(`${input.baseUrl.replace(/\/$/, "")}/wp-json/wc/v3/products?per_page=1`, { headers: { authorization: `Basic ${basic}`, accept: "application/json" } });
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+      const total = Number(res.headers.get("x-wp-total"));
+      return { ok: true, count: Number.isFinite(total) ? total : null };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message.slice(0, 200) };
+    }
+  }
+
+  /** Guarda la conexión (credenciales cifradas) y dispara la primera sincronización. */
+  @Post("catalog/connect")
+  async catalogConnect(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ source: z.enum(["woocommerce"]), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }), body);
+    await validateOutboundUrl(input.baseUrl);
+    const provider = `catalog_${input.source}`;
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const credential = await tx.integrationCredential.create({
+        data: { organizationId: ctx.organizationId, provider, label: `Credenciales ${input.source}`, ciphertext: encryptSecret(JSON.stringify({ consumerKey: input.consumerKey, consumerSecret: input.consumerSecret })) },
+      });
+      const existing = await tx.integrationConnection.findFirst({ where: { provider } });
+      const config = { baseUrl: input.baseUrl.replace(/\/$/, "") } as object;
+      if (existing) await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, credentialId: credential.id, status: "active", lastError: null } });
+      else await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider, config, credentialId: credential.id } });
+      await tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.catalog_connect", entityType: "integration_connection", after: { source: input.source } } });
+    });
+    await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: "full" } });
+    return { ok: true };
+  }
+
+  /** Re-sincroniza ahora. */
+  @Post("catalog/sync")
+  async catalogSync(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ source: z.enum(["woocommerce"]), mode: z.enum(["full", "incremental"]).optional() }), body);
+    const conn = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.integrationConnection.findFirst({ where: { provider: `catalog_${input.source}` } }));
+    if (!conn) throw new BadRequestException("Ese catálogo no está conectado");
+    await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: input.mode ?? "full" } });
+    return { ok: true };
+  }
+
+  /** Estado de las conexiones de catálogo + últimas sincronizaciones + total de productos. */
+  @Get("catalog/status")
+  catalogStatus() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [conns, runs, totalItems] = await Promise.all([
+        tx.integrationConnection.findMany({ where: { provider: { startsWith: "catalog_" } } }),
+        tx.catalogSyncRun.findMany({ orderBy: { startedAt: "desc" }, take: 5 }),
+        tx.catalogItem.count({ where: { active: true } }),
+      ]);
+      return {
+        connections: conns.map((c) => ({ source: c.provider.replace("catalog_", ""), status: c.status, baseUrl: (c.config as any)?.baseUrl ?? null, lastSyncAt: c.lastSyncAt, lastError: c.lastError })),
+        lastRuns: runs.map((r) => ({ source: r.source, mode: r.mode, status: r.status, created: r.created, updated: r.updated, deactivated: r.deactivated, failed: r.failed, startedAt: r.startedAt, finishedAt: r.finishedAt })),
+        totalItems,
+      };
+    });
+  }
+
   // ------------------------ Meta Events Manager (métricas CAPI) ------------------------
 
   /** Métricas de lo que CAPI ya envía: por día, por evento, errores recientes. */
