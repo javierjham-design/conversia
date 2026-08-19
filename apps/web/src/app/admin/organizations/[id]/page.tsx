@@ -33,6 +33,9 @@ export default function OrgDetailPage() {
   const [billables, setBillables] = useState<Array<{ concept: string; amount: number }>>([]);
   const [adminEmail, setAdminEmail] = useState("");
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
+  // Renombrar la organización en sitio (ordena cuentas multi-org sin entrar a cada tenant)
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   const load = useCallback(async () => {
     const [detail, cm] = await Promise.all([padmin<any>(`/platform/organizations/${id}`), padmin<any>("/platform/cost-model")]);
@@ -160,7 +163,43 @@ export default function OrgDetailPage() {
     <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8">
       <Link href="/admin/organizations" className="text-xs text-slate-400 hover:text-brand-600">← Organizaciones</Link>
       <div className="mt-1 flex items-start justify-between">
-        <PageHeader title={d.organization.name} description={`${d.organization.slug} · ${d.organization.country ?? "—"} · creada ${new Date(d.organization.createdAt).toLocaleDateString("es-CL")}`} />
+        {editingName ? (
+          <div className="mb-6 flex items-center gap-2">
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditingName(false);
+              }}
+              autoFocus
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xl font-semibold outline-none focus:border-brand-500"
+            />
+            <Button
+              disabled={saving || nameDraft.trim().length < 2}
+              onClick={async () => {
+                await saveConfig({ name: nameDraft.trim() });
+                setEditingName(false);
+              }}
+            >
+              Guardar
+            </Button>
+            <Button variant="ghost" onClick={() => setEditingName(false)}>Cancelar</Button>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2">
+            <PageHeader title={d.organization.name} description={`${d.organization.slug} · ${d.organization.country ?? "—"} · creada ${new Date(d.organization.createdAt).toLocaleDateString("es-CL")}`} />
+            <button
+              onClick={() => {
+                setNameDraft(d.organization.name);
+                setEditingName(true);
+              }}
+              title="Renombrar organización"
+              className="mt-1.5 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-brand-600"
+            >
+              ✏️
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-2 pt-1">
           <StatusBadge kind={STATUS_KIND[d.organization.status] ?? "disconnected"} label={d.organization.status.toLowerCase()} />
           {expired && <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">vencido</span>}
