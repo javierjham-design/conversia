@@ -401,6 +401,7 @@ export class PlatformController {
     if (parsed.data.country) data.country = parsed.data.country;
     await this.prisma.admin.organization.update({ where: { id }, data });
     await this.audit(req, "platform.org.config", "organization", id, {
+      ...(parsed.data.name ? { name: parsed.data.name, previousName: org.name } : {}),
       validUntil: settings.validUntil ?? null,
       aiKillSwitch: settings.aiKillSwitch ?? false,
       limits: settings.limits ?? {},
