@@ -167,14 +167,19 @@ export class MetaCrmController {
   async connectPage(@Param("pageId") pageId: string) {
     const ctx = requirePermission("integrations:write");
     const token = await this.crmToken(ctx.organizationId);
-    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token`, token);
+    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account`, token);
     const pageToken: string | undefined = page.access_token;
     if (!pageToken) {
       throw new BadRequestException(
         "El token no da acceso de administración a esa página. Asigna la página al Usuario del Sistema (o autoriza la página al conectar) y reintenta.",
       );
     }
-    const sub = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen`, pageToken, { method: "POST" });
+    // leadgen (CRM de leads) + messages (omnicanal Messenger/IG). Si el token
+    // aún no trae pages_messaging, Meta ignora esos campos sin romper leadgen.
+    const sub = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen,messages,messaging_postbacks`, pageToken, {
+      method: "POST",
+    }).catch(() => this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen`, pageToken, { method: "POST" }));
+    const igId: string | null = page.instagram_business_account?.id ? String(page.instagram_business_account.id) : null;
     const formsJson = await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
     const forms: Array<{ id: string; name: string; status: string }> = (formsJson.data ?? []).map((f: any) => ({
       id: String(f.id),
@@ -203,6 +208,14 @@ export class MetaCrmController {
           where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "lead_form", externalId: f.id } },
           update: { name: f.name },
           create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "lead_form", externalId: f.id, name: f.name },
+        });
+      }
+      // Cuenta de Instagram vinculada a la página → rutea los DMs de IG al tenant
+      if (igId) {
+        await tx.metaAsset.upsert({
+          where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "instagram", externalId: igId } },
+          update: { name: `IG de ${page.name ?? pageId}`, enabled: true },
+          create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "instagram", externalId: igId, name: `IG de ${page.name ?? pageId}`, enabled: true },
         });
       }
       await tx.integrationEvent.create({
