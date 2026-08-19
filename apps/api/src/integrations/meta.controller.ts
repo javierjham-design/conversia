@@ -14,7 +14,7 @@ import { getEnv, withAppSecretProof } from "@conversia/config";
 import { QUEUE_NAMES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
-import { encryptSecret } from "../common/crypto";
+import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -444,6 +444,107 @@ export class MetaController {
       internal: true,
     });
     return { ok: true, detail: "Lead de prueba encolado — revisa Contactos, la actividad y los workflows con trigger lead_created" };
+  }
+
+  // ---------------- Lead Ads: páginas y formularios ----------------
+
+  /** Token de la conexión Meta del tenant (Usuario del Sistema o manual). */
+  private async metaToken(orgId: string): Promise<string> {
+    const token = await this.prisma.withTenant(orgId, async (tx) => {
+      const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId: orgId } });
+      if (connection?.credentialId) {
+        const cred = await tx.integrationCredential.findUnique({ where: { id: connection.credentialId } });
+        if (cred) return decryptSecret(cred.ciphertext);
+      }
+      return getEnv().META_ACCESS_TOKEN || null;
+    });
+    if (!token) throw new BadRequestException("Conecta Meta primero (token de Usuario del Sistema) en este centro.");
+    return token;
+  }
+
+  private async graph(path: string, token: string, init?: RequestInit): Promise<any> {
+    const v = getEnv().META_GRAPH_VERSION;
+    const url = withAppSecretProof(
+      `https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`,
+      token,
+    );
+    const res = await fetch(url, init);
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Graph ${res.status}`);
+    return json;
+  }
+
+  /** Páginas accesibles con el token + si ya están conectadas (asset registrado). */
+  @Get("lead-ads/pages")
+  async leadAdsPages() {
+    const ctx = requirePermission("integrations:read");
+    const token = await this.metaToken(ctx.organizationId);
+    const json = await this.graph("me/accounts?fields=id,name&limit=100", token);
+    const pages: Array<{ id: string; name: string }> = (json.data ?? []).map((p: any) => ({ id: String(p.id), name: String(p.name ?? p.id) }));
+    const registered = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaAsset.findMany({ where: { kind: "page" }, select: { externalId: true } }),
+    );
+    const connectedIds = new Set(registered.map((r) => r.externalId));
+    return { pages: pages.map((p) => ({ ...p, connected: connectedIds.has(p.id) })) };
+  }
+
+  /**
+   * Conecta una página para Lead Ads: registra la página y sus formularios como
+   * activos (ruteo del webhook leadgen → este tenant) y suscribe la app a la
+   * página (`subscribed_apps` con el campo leadgen, token de página derivado).
+   */
+  @Post("lead-ads/pages/:pageId/connect")
+  async leadAdsConnectPage(@Param("pageId") pageId: string) {
+    const ctx = requirePermission("integrations:write");
+    const token = await this.metaToken(ctx.organizationId);
+    // Token de página (necesario para subscribed_apps y leadgen_forms)
+    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token`, token);
+    const pageToken: string | undefined = page.access_token;
+    if (!pageToken) {
+      throw new BadRequestException(
+        "El token no da acceso de administración a esa página. Asigna la página al Usuario del Sistema en Business Manager y reintenta.",
+      );
+    }
+    // Suscripción de la app a la página (campo leadgen) — idempotente en Graph.
+    const sub = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen`, pageToken, { method: "POST" });
+    // Formularios activos de la página
+    const formsJson = await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
+    const forms: Array<{ id: string; name: string; status: string }> = (formsJson.data ?? []).map((f: any) => ({
+      id: String(f.id),
+      name: String(f.name ?? f.id),
+      status: String(f.status ?? ""),
+    }));
+
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId: ctx.organizationId } });
+      if (!connection) throw new BadRequestException("Conecta Meta primero en este centro (el token queda asociado a la conexión).");
+      await tx.metaAsset.upsert({
+        where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "page", externalId: String(page.id) } },
+        update: { name: page.name ?? pageId, enabled: true },
+        create: { organizationId: ctx.organizationId, connectionId: connection.id, kind: "page", externalId: String(page.id), name: page.name ?? pageId, enabled: true },
+      });
+      for (const f of forms) {
+        await tx.metaAsset.upsert({
+          where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "lead_form", externalId: f.id } },
+          update: { name: f.name },
+          create: { organizationId: ctx.organizationId, connectionId: connection.id, kind: "lead_form", externalId: f.id, name: f.name },
+        });
+      }
+      await tx.integrationEvent.create({
+        data: {
+          organizationId: ctx.organizationId,
+          provider: "lead_ads",
+          type: "page.connected",
+          status: "ok",
+          message: `Página «${page.name ?? pageId}» conectada para Lead Ads: app suscrita (leadgen) + ${forms.length} formulario(s) registrados`,
+          payload: { pageId: String(page.id), forms: forms.length, subscribed: Boolean(sub?.success ?? true) } as object,
+        },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "meta.leadads.page_connect", entityType: "meta_asset", entityId: String(page.id), after: { forms: forms.length } },
+      });
+    });
+    return { ok: true, page: { id: String(page.id), name: page.name ?? pageId }, forms };
   }
 
   // ---------------- Conversions API: mapeo de eventos ----------------

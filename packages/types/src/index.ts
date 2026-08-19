@@ -547,6 +547,10 @@ export interface CapiJob {
   currency?: string | null;
   /** click id del anuncio Click-to-WhatsApp (atribución del conversion). */
   ctwaClid?: string | null;
+  /** El worker resuelve teléfono/email/leadgen_id del contacto (mejor match). */
+  contactId?: string | null;
+  /** leadgen_id de Meta Lead Ads → user_data.lead_id (integración CRM). */
+  leadgenId?: string | null;
 }
 
 export interface InboundJob {

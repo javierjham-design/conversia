@@ -46,7 +46,7 @@ export async function emitPlatformEvent(
   organizationId: string,
   type: string,
   data: Record<string, unknown> = {},
-  opts: { contactPhone?: string | null; leadId?: string | null } = {},
+  opts: { contactPhone?: string | null; leadId?: string | null; contactId?: string | null } = {},
 ): Promise<void> {
   const clean = sanitize(data);
   try {
@@ -90,11 +90,15 @@ export async function emitPlatformEvent(
     }
     if (result.capiMatch) {
       const source = typeof clean.statusCode === "string" ? `${type}:${clean.statusCode}` : type;
+      // contactId permite al worker CAPI resolver email/teléfono/leadgen_id del
+      // contacto (mejor match y lead_id para la integración CRM de Meta).
+      const contactId = opts.contactId ?? (typeof clean.contactId === "string" ? clean.contactId : null);
       await capiQueue.add("send", {
         organizationId,
         source,
         contactPhone: opts.contactPhone ?? null,
         leadId: opts.leadId ?? null,
+        contactId,
         occurredAt: new Date().toISOString(),
       });
     }

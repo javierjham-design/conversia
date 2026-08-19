@@ -8,6 +8,7 @@ import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
 import { MetaAppController } from "./channels/meta-app.controller";
 import { ContactsController } from "./contacts/contacts.controller";
+import { CrmController } from "./contacts/crm.controller";
 import { LifecycleController } from "./contacts/lifecycle.controller";
 import { ContactFieldsController } from "./contacts/fields.controller";
 import { TagsController } from "./contacts/tags.controller";
@@ -58,6 +59,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ConversationsController,
     InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA
     ContactsController,
+    CrmController, // tablero CRM de leads (pipeline por etapa)
     LifecycleController, // etapas del ciclo de vida editables por tenant
     ContactFieldsController, // campos personalizados de contacto (/settings)
     TagsController, // etiquetas del tenant (/settings)
