@@ -40,6 +40,7 @@ import { startSubscriptionBilling } from "./subscription-billing/start";
 import { startTrialLifecycle } from "./trial-lifecycle";
 import { startAnnualWalletRefill } from "./annual-wallet-refill";
 import { startRetentionPurge } from "./retention-purge";
+import { startCatalogSync } from "./catalog/scheduler";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
 
 async function main() {
@@ -169,6 +170,7 @@ async function main() {
   const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
   const stopAnnualRefill = startAnnualWalletRefill(); // anual: acredita el cupo mes a mes (no 12 de una)
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
+  const stopCatalogSync = startCatalogSync(); // sync incremental del catálogo cada 6 h
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
@@ -192,6 +194,7 @@ async function main() {
     stopTrialLifecycle();
     stopAnnualRefill();
     stopRetentionPurge();
+    stopCatalogSync();
     stopOrphanWaba();
     stopScheduler();
     stopTemplateSync();
