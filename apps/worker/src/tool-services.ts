@@ -166,6 +166,7 @@ function toCatalogHit(c: {
   name: string; sku: string | null; price: unknown; compareAtPrice: unknown; currency: string;
   available: boolean; stock: number | null; category: string | null; description: string | null;
   botDescription: string | null; variants: unknown; productUrl: string | null; buyUrl: string | null;
+  syncedAt?: Date | null;
 }) {
   return {
     name: c.name,
@@ -180,7 +181,29 @@ function toCatalogHit(c: {
     variants: Array.isArray(c.variants) ? c.variants : [],
     productUrl: c.productUrl ?? null,
     buyUrl: c.buyUrl ?? null,
+    syncedAt: c.syncedAt ? c.syncedAt.toISOString() : null,
   };
+}
+
+/** Fuentes con proveedor en vivo (se pueden re-sincronizar). Manual/CSV no. */
+const LIVE_CATALOG_SOURCES = new Set(["woocommerce", "jumpseller", "shopify", "bsale", "fudo"]);
+const CATALOG_FRESHNESS_MS = 20 * 60 * 1000; // 20 min
+
+/** Tiempo real capa 3 (self-heal): si un producto leído está viejo y viene de un proveedor
+ * en vivo, dispara un sync incremental debounced para refrescarlo (no bloquea la respuesta). */
+async function refreshIfStale(orgId: string, source: string, syncedAt: Date | null): Promise<void> {
+  if (!LIVE_CATALOG_SOURCES.has(source)) return;
+  if (syncedAt && Date.now() - syncedAt.getTime() < CATALOG_FRESHNESS_MS) return;
+  try {
+    const { getSyncQueue } = await import("./ga4.js");
+    await getSyncQueue().add(
+      "catalog",
+      { organizationId: orgId, kind: "catalog_sync", payload: { source, mode: "incremental" } },
+      { jobId: `catalog_livecheck:${orgId}:${source}`, delay: 3000, removeOnComplete: true, removeOnFail: 200 },
+    );
+  } catch {
+    /* refresco best-effort: nunca romper la respuesta del agente */
+  }
 }
 
 export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
@@ -547,7 +570,10 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           where: { active: true, OR: [{ id: idOrSku }, { sku: { equals: idOrSku, mode: "insensitive" } }, { name: { equals: idOrSku, mode: "insensitive" } }, { name: { contains: idOrSku, mode: "insensitive" } }] },
           orderBy: { available: "desc" },
         });
-        return item ? toCatalogHit(item) : null;
+        if (!item) return null;
+        // Capa 3: refresca en segundo plano si el dato quedó viejo (proveedor en vivo).
+        await refreshIfStale(orgId, item.source, item.syncedAt);
+        return toCatalogHit(item);
       });
     },
 
