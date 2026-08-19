@@ -115,6 +115,19 @@ export async function processInbound(job: InboundJob): Promise<void> {
     console.error("✖ Error en monitoreo de salud WhatsApp:", (err as Error).message),
   );
 
+  // Omnicanal: DMs de Messenger (object=page) e Instagram (object=instagram)
+  {
+    const { parseMessagingEvents } = await import("./messaging-events.js");
+    const { processMessagingEvent } = await import("./messaging-inbound.js");
+    for (const ev of parseMessagingEvents(job.raw)) {
+      try {
+        await processMessagingEvent(ev);
+      } catch (err) {
+        console.error(`✖ Error procesando DM ${ev.platform}/${ev.externalId}:`, (err as Error).message);
+      }
+    }
+  }
+
   const { messages, statuses } = parseWebhook(job.raw);
 
   for (const status of statuses) {

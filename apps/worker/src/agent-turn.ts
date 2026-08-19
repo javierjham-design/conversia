@@ -336,7 +336,15 @@ export async function runAgentTurn(opts: {
     await publishRealtime(organizationId, { type: "message.created", conversationId });
   }
 
-  // 5. Enviar por el canal (token por-WABA del tenant; fallback al global)
+  // 5. Enviar por el canal. Contactos SIN teléfono (Messenger/IG) van por la
+  // mensajería de página; si el canal no es de redes, no hay a dónde enviar.
+  if (persisted && !conversation.contact.phone) {
+    const { trySendMessagingReply } = await import("./messaging-send.js");
+    await trySendMessagingReply(organizationId, conversationId, persisted.id, persisted.body ?? "").catch((err) =>
+      console.error(`✖ Envío de mensajería (${conversationId}):`, (err as Error).message),
+    );
+  }
+  // (token por-WABA del tenant; fallback al global)
   if (persisted && conversation.contact.phone) {
     const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
     try {
