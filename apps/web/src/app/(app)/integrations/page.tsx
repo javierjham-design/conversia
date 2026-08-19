@@ -397,6 +397,8 @@ export default function IntegrationsPage() {
   function catalogAction(item: CatalogItem) {
     switch (item.key) {
       case "meta_crm":
+      case "instagram":
+      case "messenger":
         return router.push("/integrations/meta-crm");
       case "meta":
       case "meta_leads":
