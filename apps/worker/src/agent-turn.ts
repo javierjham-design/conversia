@@ -371,11 +371,11 @@ export async function runAgentTurn(opts: {
 
   // 6. Transferencia entre agentes (conserva contexto, registra evento)
   if (result.transferToAgentSlug && result.transferToAgentSlug !== agent.slug && depth < 1) {
-    await withTenant(organizationId, async (tx) => {
+    const targetSlug = await withTenant(organizationId, async (tx) => {
       const target = await tx.agent.findUnique({
         where: { organizationId_slug: { organizationId, slug: result.transferToAgentSlug! } },
       });
-      if (!target) return;
+      if (!target || !target.active) return null;
       await tx.conversation.update({ where: { id: conversationId }, data: { activeAgentId: target.id } });
       await tx.agentHandoff.create({
         data: {
@@ -387,7 +387,17 @@ export async function runAgentTurn(opts: {
           contextSummary: result.reply?.slice(0, 500) ?? null,
         },
       });
+      return target.slug;
     });
+    // El agente NUEVO toma el turno DE INMEDIATO y continúa la conversación
+    // (antes quedaba mudo esperando el próximo mensaje del contacto, y el
+    // cliente —que ya fue anunciado con la derivación— no recibía nada).
+    // depth+1 acota a un salto por turno (sin cadenas A→B→C en el mismo ciclo).
+    if (targetSlug) {
+      await runAgentTurn({ organizationId, conversationId, agentSlug: targetSlug, depth: depth + 1 }).catch((err) =>
+        console.error(`✖ Turno del agente derivado (${targetSlug}) falló:`, (err as Error).message),
+      );
+    }
   }
 }
 
