@@ -869,6 +869,40 @@ export class IntegrationsController {
     });
   }
 
+  /** Importa un catálogo por CSV (para clientes sin tienda conectada). Idempotente por SKU/nombre. */
+  @Post("catalog/import-csv")
+  async catalogImportCsv(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        items: z.array(z.object({
+          name: z.string().min(1).max(300),
+          sku: z.string().max(100).optional(),
+          price: z.coerce.number().min(0).optional(),
+          category: z.string().max(120).optional(),
+          stock: z.coerce.number().int().optional(),
+          description: z.string().max(2000).optional(),
+        })).min(1).max(1000),
+      }),
+      body,
+    );
+    const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { currency: true } }));
+    const currency = org?.currency ?? "CLP";
+    let created = 0;
+    let updated = 0;
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      for (const it of input.items) {
+        const externalId = (it.sku || it.name).trim().toLowerCase().slice(0, 120);
+        const data = { name: it.name, sku: it.sku ?? null, price: it.price ?? null, category: it.category ?? null, stock: it.stock ?? null, trackStock: it.stock != null, description: it.description ?? null, currency, available: it.stock == null || it.stock > 0 };
+        const existing = await tx.catalogItem.findFirst({ where: { source: "csv", externalId }, select: { id: true } });
+        if (existing) { await tx.catalogItem.updateMany({ where: { id: existing.id }, data }); updated++; }
+        else { await tx.catalogItem.create({ data: { organizationId: ctx.organizationId, source: "csv", externalId, kind: "product", ...data } }); created++; }
+      }
+    });
+    await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "catalog.import_csv", entityType: "catalog_item", after: { created, updated } } }));
+    return { ok: true, created, updated };
+  }
+
   // ------------------------ Meta Events Manager (métricas CAPI) ------------------------
 
   /** Métricas de lo que CAPI ya envía: por día, por evento, errores recientes. */

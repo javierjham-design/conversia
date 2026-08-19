@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Button, PageHeader, Skeleton, useToast } from "@/components/ui";
+import { CsvImport } from "./csv-import";
 
 interface Item {
   id: string; name: string; sku: string | null; source: string; kind: string; category: string | null;
@@ -24,6 +25,7 @@ export default function CatalogPage() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     const p = new URLSearchParams();
@@ -43,7 +45,8 @@ export default function CatalogPage() {
 
   return (
     <div className="mx-auto max-w-[1100px] px-6 py-6">
-      <PageHeader title="Catálogo" description="Lo que el bot puede vender: productos de tu tienda, tu menú o lo que cargaste a mano. Desactiva lo que no quieras que ofrezca y ajusta la descripción para WhatsApp." />
+      <PageHeader title="Catálogo" description="Lo que el bot puede vender: productos de tu tienda, tu menú o lo que cargaste a mano. Desactiva lo que no quieras que ofrezca y ajusta la descripción para WhatsApp." actions={<Button variant="secondary" onClick={() => setImporting(true)}>Importar CSV</Button>} />
+      <CsvImport open={importing} onClose={() => setImporting(false)} onDone={() => void load()} />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Buscar producto o SKU…" className="w-64 rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm" />
