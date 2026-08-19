@@ -358,6 +358,7 @@ function makeDeps(): EngineDeps {
         source: "workflow",
         occurredAt: new Date().toISOString(),
         contactPhone: contact?.phone ?? null,
+        contactId: ctx.contactId ?? null,
         eventName: config.eventName,
         value: config.value ?? null,
         currency: config.currency ?? null,

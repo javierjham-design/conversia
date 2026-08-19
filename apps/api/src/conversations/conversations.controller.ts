@@ -436,12 +436,14 @@ export class ConversationsController {
       };
     });
     if (result.changed) {
+      // statusCode habilita las reglas CAPI por etapa ("lead.status_changed:<code>");
+      // sin él, el cambio desde la bandeja no reportaba conversiones a Meta.
       await this.queues.events.add("emit", {
         organizationId: ctx.organizationId,
         type: "lead.status_changed",
         conversationId: id,
         contactId: result.contactId,
-        data: { from: result.from, to: result.to, via: "inbox" },
+        data: { from: result.from, to: result.to, statusCode: result.to, via: "inbox", contactId: result.contactId },
         occurredAt: new Date().toISOString(),
       });
       await this.publish(ctx.organizationId, id);
@@ -462,12 +464,13 @@ export class ConversationsController {
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
       const mapping = await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } });
       if (!mapping?.datasetId) throw new BadRequestException("Conecta Meta Conversions API en Integraciones primero");
-      return { phone: conversation.contact.phone };
+      return { phone: conversation.contact.phone, contactId: conversation.contactId };
     });
     await this.queues.capi.add("send", {
       organizationId: ctx.organizationId,
       source: "inbox.manual",
       contactPhone: info.phone,
+      contactId: info.contactId,
       eventName: parsed.data.eventName,
       value: parsed.data.value ?? null,
       currency: parsed.data.currency ?? null,

@@ -145,7 +145,9 @@ async function main() {
         }
         return;
       }
-      await emitPlatformEvent(job.data.organizationId, job.data.type, job.data.data ?? {});
+      await emitPlatformEvent(job.data.organizationId, job.data.type, job.data.data ?? {}, {
+        contactId: job.data.contactId ?? null,
+      });
       const triggerType = job.data.type.replace(/\./g, "_");
       if ((TRIGGER_TYPES as readonly string[]).includes(triggerType)) {
         await dispatchEvent({ ...job.data, type: triggerType });

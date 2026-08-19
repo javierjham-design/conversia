@@ -1,13 +1,27 @@
-import { createHash } from "node:crypto";
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
+import { actionSourceFor, buildUserData, type CapiIdentity } from "./capi-payload";
 import type { CapiJob } from "@conversia/types";
 
-/** Normaliza y hashea PII según la especificación de Meta CAPI (SHA-256). */
-function hashPhone(phone: string): string {
-  const normalized = phone.replace(/[^\d]/g, "");
-  return createHash("sha256").update(normalized).digest("hex");
+/** Completa la identidad del evento con los datos del contacto (email,
+ *  teléfono y leadgen_id de Meta Lead Ads si vino de un formulario). */
+async function resolveIdentity(job: CapiJob): Promise<CapiIdentity> {
+  const identity: CapiIdentity = {
+    phone: job.contactPhone ?? null,
+    leadgenId: job.leadgenId ?? null,
+    ctwaClid: job.ctwaClid ?? null,
+  };
+  if (!job.contactId) return identity;
+  const contact = await withTenant(job.organizationId, (tx) =>
+    tx.contact.findUnique({ where: { id: job.contactId! }, select: { phone: true, email: true, attributes: true } }),
+  ).catch(() => null);
+  if (!contact) return identity;
+  identity.phone = identity.phone ?? contact.phone;
+  identity.email = contact.email;
+  const metaLead = (contact.attributes as Record<string, any> | null)?.metaLead;
+  identity.leadgenId = identity.leadgenId ?? (metaLead?.leadgenId ? String(metaLead.leadgenId) : null);
+  return identity;
 }
 
 /**
@@ -67,15 +81,15 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
 
   const value = job.eventName ? job.value ?? null : config.rule?.value ?? null;
   const currency = (job.eventName ? job.currency : config.rule?.currency) ?? "CLP";
+  // Identidad con el máximo de señales: ph+em hasheados y, si el contacto vino
+  // de un formulario de Lead Ads, lead_id (integración CRM → system_generated).
+  const identity = await resolveIdentity(job);
   const eventPayload: Record<string, unknown> = {
     event_name: eventName,
     event_time: Math.floor(new Date(job.occurredAt).getTime() / 1000),
-    action_source: "chat",
-    event_id: `${organizationId}:${source}:${job.leadId ?? job.contactPhone ?? "anon"}:${job.occurredAt}`,
-    user_data: {
-      ...(job.contactPhone ? { ph: [hashPhone(job.contactPhone)] } : {}),
-      ...(job.ctwaClid ? { ctwa_clid: job.ctwaClid } : {}),
-    },
+    action_source: actionSourceFor(identity),
+    event_id: `${organizationId}:${source}:${job.leadId ?? job.contactId ?? job.contactPhone ?? "anon"}:${job.occurredAt}`,
+    user_data: buildUserData(identity),
     ...(value ? { custom_data: { value, currency } } : {}),
   };
   const body: Record<string, unknown> = { data: [eventPayload] };

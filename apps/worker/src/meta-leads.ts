@@ -28,11 +28,14 @@ async function resolveLeadTenant(change: LeadgenChange, internal: boolean): Prom
   return internal ? (change.organization_hint ?? null) : null;
 }
 
-/** Obtiene los campos del lead desde Graph (camino real, requiere token). */
-async function fetchLeadFromGraph(
-  organizationId: string,
-  leadgenId: string,
-): Promise<Array<{ name: string; values: string[] }> | null> {
+interface GraphLead {
+  fieldData: Array<{ name: string; values: string[] }>;
+  campaignId: string | null;
+  adId: string | null;
+}
+
+/** Obtiene el lead completo desde Graph (campos + atribución de campaña). */
+async function fetchLeadFromGraph(organizationId: string, leadgenId: string): Promise<GraphLead | null> {
   const env = getEnv();
   const token = await withTenant(organizationId, async (tx) => {
     const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId } });
@@ -48,7 +51,11 @@ async function fetchLeadFromGraph(
   );
   if (!res.ok) throw new Error(`Graph ${res.status}`);
   const json: any = await res.json();
-  return json.field_data ?? [];
+  return {
+    fieldData: json.field_data ?? [],
+    campaignId: json.campaign_id ? String(json.campaign_id) : null,
+    adId: json.ad_id ? String(json.ad_id) : null,
+  };
 }
 
 /**
@@ -65,9 +72,14 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
 
   // Datos del formulario: embebidos (prueba) o vía Graph (real)
   let fieldData = change.field_data ?? null;
+  let campaignId: string | null = null;
+  let adId: string | null = null;
   if (!fieldData) {
     try {
-      fieldData = await fetchLeadFromGraph(organizationId, change.leadgen_id);
+      const graphLead = await fetchLeadFromGraph(organizationId, change.leadgen_id);
+      fieldData = graphLead?.fieldData ?? null;
+      campaignId = graphLead?.campaignId ?? null;
+      adId = graphLead?.adId ?? null;
     } catch (err) {
       await withTenant(organizationId, (tx) =>
         tx.integrationEvent.create({
@@ -127,6 +139,14 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
     }
     const phone = (contactData.phone ?? "").replace(/[^\d+]/g, "").replace(/^\+/, "");
 
+    // Atribución estructurada del formulario (alimenta CAPI lead_id + filtros CRM)
+    const metaLead = {
+      leadgenId: change.leadgen_id,
+      formId: change.form_id,
+      ...(campaignId ? { campaignId } : {}),
+      ...(adId ? { adId } : {}),
+      ...custom,
+    };
     // Contacto: dedupe por teléfono
     let contact = phone ? await tx.contact.findFirst({ where: { phone } }) : null;
     if (!contact) {
@@ -139,8 +159,10 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
           phone: phone || null,
           email: contactData.email ?? null,
           source: "meta_lead_ads",
+          acquisitionSource: "ad",
+          ...(adId ? { adId } : {}),
           firstContactAt: new Date(),
-          attributes: { metaLead: { leadgenId: change.leadgen_id, formId: change.form_id, ...custom } },
+          attributes: { metaLead },
         },
       });
     } else {
@@ -148,9 +170,10 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
         where: { id: contact.id },
         data: {
           email: contact.email ?? contactData.email ?? null,
+          ...(adId && !contact.adId ? { adId, acquisitionSource: "ad" } : {}),
           attributes: {
             ...((contact.attributes as object) ?? {}),
-            metaLead: { leadgenId: change.leadgen_id, formId: change.form_id, ...custom },
+            metaLead,
           },
         },
       });
@@ -168,7 +191,12 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
     let leadId: string | null = null;
     if (status) {
       const lead = await tx.lead.create({
-        data: { organizationId, contactId: contact.id, statusId: status.id, meta: { source: "meta_lead_ads", formId: change.form_id } },
+        data: {
+          organizationId,
+          contactId: contact.id,
+          statusId: status.id,
+          meta: { source: "meta_lead_ads", formId: change.form_id, leadgenId: change.leadgen_id, ...(campaignId ? { campaignId } : {}), ...(adId ? { adId } : {}) },
+        },
       });
       leadId = lead.id;
     }
@@ -240,7 +268,7 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
     organizationId,
     "lead.created",
     { source: "meta_lead_ads", formId: change.form_id, contactId: result.contactId },
-    { contactPhone: result.phone || null, leadId: result.leadId },
+    { contactPhone: result.phone || null, leadId: result.leadId, contactId: result.contactId },
   );
   // Aviso al equipo del tenant: con una campaña activa, un lead sin respuesta
   // rápida es un lead perdido. El catálogo define canales y audiencia.
