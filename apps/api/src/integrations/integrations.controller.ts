@@ -64,6 +64,12 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return r.data;
 }
 
+/** Conexión de catálogo por proveedor: cada uno con su forma de credenciales. */
+const CATALOG_CONNECT_SCHEMA = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("woocommerce"), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }),
+  z.object({ source: z.literal("jumpseller"), login: z.string().min(2), authtoken: z.string().min(8) }),
+]);
+
 function assertUrlAllowed(url: string) {
   const check = validateOutboundUrl(url, { allowLocalhost: getEnv().NODE_ENV !== "production" });
   if (!check.ok) throw new BadRequestException(`URL rechazada: ${check.reason}`);
@@ -265,7 +271,7 @@ export class IntegrationsController {
           // Catálogo comercial: el bot vende con productos/precios/stock reales de la tienda o el menú.
           { key: "woocommerce", name: "WooCommerce", category: "comercio", status: "beta", description: "Sincroniza los productos, precios y stock reales de tu tienda WooCommerce para que el bot venda con datos vivos.", capabilities: ["Productos", "Precios", "Stock", "Búsqueda por IA"] },
           { key: "shopify", name: "Shopify", category: "comercio", status: "proximamente", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
-          { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "proximamente", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
+          { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "beta", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
           { key: "bsale", name: "Bsale", category: "comercio", status: "proximamente", description: "Productos y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
           { key: "fudo", name: "Fudo", category: "comercio", status: "proximamente", description: "El menú de tu restaurante en Fudo (secciones, productos, modificadores y disponibilidad) para que el bot tome pedidos.", capabilities: ["Menú", "Modificadores", "Disponibilidad"] },
           { key: "catalog_csv", name: "Importar por CSV", category: "comercio", status: "proximamente", description: "¿Sin tienda conectada? Sube tu catálogo por planilla con una plantilla y mapeo de columnas.", capabilities: ["Plantilla", "Mapeo", "Manual"] },
@@ -762,14 +768,25 @@ export class IntegrationsController {
   @Post("catalog/test")
   async catalogTest(@Body() body: unknown) {
     requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce"]), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }), body);
-    await validateOutboundUrl(input.baseUrl); // guarda anti-SSRF
-    const basic = Buffer.from(`${input.consumerKey}:${input.consumerSecret}`).toString("base64");
+    const input = parse(CATALOG_CONNECT_SCHEMA, body);
     try {
-      const res = await fetch(`${input.baseUrl.replace(/\/$/, "")}/wp-json/wc/v3/products?per_page=1`, { headers: { authorization: `Basic ${basic}`, accept: "application/json" } });
+      if (input.source === "woocommerce") {
+        await validateOutboundUrl(input.baseUrl); // guarda anti-SSRF
+        const basic = Buffer.from(`${input.consumerKey}:${input.consumerSecret}`).toString("base64");
+        const res = await fetch(`${input.baseUrl.replace(/\/$/, "")}/wp-json/wc/v3/products?per_page=1`, { headers: { authorization: `Basic ${basic}`, accept: "application/json" } });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+        const total = Number(res.headers.get("x-wp-total"));
+        return { ok: true, count: Number.isFinite(total) ? total : null };
+      }
+      // jumpseller (host fijo de la API central; no requiere validateOutboundUrl)
+      const u = new URL("https://api.jumpseller.com/v1/products/count.json");
+      u.searchParams.set("login", input.login);
+      u.searchParams.set("authtoken", input.authtoken);
+      const res = await fetch(u.toString(), { headers: { accept: "application/json" } });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-      const total = Number(res.headers.get("x-wp-total"));
-      return { ok: true, count: Number.isFinite(total) ? total : null };
+      const json = (await res.json()) as { count?: number };
+      const count = Number(json?.count);
+      return { ok: true, count: Number.isFinite(count) ? count : null };
     } catch (e) {
       return { ok: false, error: (e as Error).message.slice(0, 200) };
     }
@@ -779,15 +796,23 @@ export class IntegrationsController {
   @Post("catalog/connect")
   async catalogConnect(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce"]), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }), body);
-    await validateOutboundUrl(input.baseUrl);
+    const input = parse(CATALOG_CONNECT_SCHEMA, body);
     const provider = `catalog_${input.source}`;
+    let creds: Record<string, string>;
+    let config: object;
+    if (input.source === "woocommerce") {
+      await validateOutboundUrl(input.baseUrl);
+      creds = { consumerKey: input.consumerKey, consumerSecret: input.consumerSecret };
+      config = { baseUrl: input.baseUrl.replace(/\/$/, "") };
+    } else {
+      creds = { login: input.login, authtoken: input.authtoken };
+      config = {};
+    }
     await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const credential = await tx.integrationCredential.create({
-        data: { organizationId: ctx.organizationId, provider, label: `Credenciales ${input.source}`, ciphertext: encryptSecret(JSON.stringify({ consumerKey: input.consumerKey, consumerSecret: input.consumerSecret })) },
+        data: { organizationId: ctx.organizationId, provider, label: `Credenciales ${input.source}`, ciphertext: encryptSecret(JSON.stringify(creds)) },
       });
       const existing = await tx.integrationConnection.findFirst({ where: { provider } });
-      const config = { baseUrl: input.baseUrl.replace(/\/$/, "") } as object;
       if (existing) await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, credentialId: credential.id, status: "active", lastError: null } });
       else await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider, config, credentialId: credential.id } });
       await tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.catalog_connect", entityType: "integration_connection", after: { source: input.source } } });
@@ -800,7 +825,7 @@ export class IntegrationsController {
   @Post("catalog/sync")
   async catalogSync(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce"]), mode: z.enum(["full", "incremental"]).optional() }), body);
+    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller"]), mode: z.enum(["full", "incremental"]).optional() }), body);
     const conn = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.integrationConnection.findFirst({ where: { provider: `catalog_${input.source}` } }));
     if (!conn) throw new BadRequestException("Ese catálogo no está conectado");
     await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: input.mode ?? "full" } });
