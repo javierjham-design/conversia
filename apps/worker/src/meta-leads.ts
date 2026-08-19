@@ -1,5 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
-import { getEnv, withAppSecretProof } from "@conversia/config";
+import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { decryptCredential } from "./credentials";
 import { dispatchEvent } from "./workflow-runtime";
 import { emitPlatformEvent } from "./platform-events";
@@ -46,8 +46,10 @@ async function fetchLeadFromGraph(organizationId: string, leadgenId: string): Pr
     return env.META_ACCESS_TOKEN || null;
   });
   if (!token) return null;
-  const res = await fetch(
-    withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${leadgenId}?fields=field_data,campaign_id,ad_id,form_id,created_time&access_token=${encodeURIComponent(token)}`, token),
+  // Con dos apps (principal + TuBot CRM) el proof se resuelve con fallback.
+  const res = await fetchGraphWithProof(
+    `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${leadgenId}?fields=field_data,campaign_id,ad_id,form_id,created_time&access_token=${encodeURIComponent(token)}`,
+    token,
   );
   if (!res.ok) throw new Error(`Graph ${res.status}`);
   const json: any = await res.json();

@@ -61,26 +61,17 @@ Orden recomendado: activar **después** de un deploy con este cambio ya en prod
 > `whatsapp_business_management`, `business_management`. Rechazados (no críticos):
 > `whatsapp_business_manage_events`, `email`. Ya se puede tocar la app.
 
-## 6. Suscripción `page/leadgen` (CRM de Lead Ads)
+## 6. CRM de Lead Ads → app SEPARADA «TuBot CRM» (decisión 2026-08-19)
 
-La app hoy solo está suscrita al topic `whatsapp_business_account` (verificado
-por MCP). Para que los leads de formularios lleguen al CRM hay que suscribir el
-topic **`page`** con el campo **`leadgen`**:
+Los leads de formularios NO van por esta app: se creará una **segunda app de
+Meta «TuBot CRM»** (patrón Cláriva CRM) con su propio App Secret y verify
+token, suscrita a `page`/`leadgen` con callback **`/webhooks/meta-crm`**
+(endpoint dedicado). Esta app (TuBot) queda solo para WhatsApp.
 
-- **Dashboard**: App → Webhooks → agregar suscripción `page`, campo `leadgen`,
-  callback `https://api-production-cf8e.up.railway.app/webhooks/whatsapp`
-  (el MISMO endpoint: ya verifica `hub.challenge` con `META_VERIFY_TOKEN` y el
-  worker parsea los payloads `object=page/leadgen`), verify token = valor de
-  `META_VERIFY_TOKEN` en Railway (servicio api).
-- **O por MCP**: `devtools_webhook_manage subscribe` con `topic=page`,
-  `fields=["leadgen"]`, ese callback y el mismo verify token.
-
-Luego, **desde el panel del tenant** (Centro Meta → Lead Ads → "Páginas
-conectadas"): conectar la página de las campañas — eso suscribe la app a la
-página (`subscribed_apps`) y registra página+formularios para el ruteo. El
-token del Usuario del Sistema debe tener la página asignada en Business
-Manager. Con eso el circuito queda: formulario → webhook → CRM (`/crm`) →
-reglas CAPI por etapa → dataset de Meta (`lead_id` incluido).
+Checklist completo de la app TuBot CRM: ver `docs/META_LEADS_CRM.md`
+(crear app → envs `META_CRM_APP_SECRET`/`META_CRM_VERIFY_TOKEN` en Railway →
+suscripción page/leadgen → token de Usuario del Sistema bajo TuBot CRM →
+"Conectar página" en el panel → dataset + reglas CAPI).
 
 ---
 

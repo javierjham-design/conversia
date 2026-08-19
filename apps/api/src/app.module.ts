@@ -18,6 +18,7 @@ import { RealtimeService } from "./common/realtime.service";
 import { HealthController } from "./health.controller";
 import { DevelopersController } from "./integrations/developers.controller";
 import { InboundHookController } from "./integrations/inbound-hook.controller";
+import { MetaCrmWebhookController } from "./integrations/meta-crm-webhook.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
 import { MetaController } from "./integrations/meta.controller";
 import { OAuthController } from "./integrations/oauth.controller";
@@ -76,6 +77,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     BillingController,
     WhatsappController,
     MetaAppController,
+    MetaCrmWebhookController, // webhook page/leadgen de la app separada TuBot CRM
     ClarivaWebhookController,
     PublicController, // API pública de precios (sin auth)
     // Plataforma (super-admin) — autenticación y audiencia separadas

@@ -1,4 +1,4 @@
-import { getEnv, withAppSecretProof } from "@conversia/config";
+import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
 import { actionSourceFor, buildUserData, type CapiIdentity } from "./capi-payload";
@@ -96,8 +96,10 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   if (job.test && config.mapping.testEventCode) body.test_event_code = config.mapping.testEventCode;
 
   try {
-    const res = await fetch(
-      withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(config.token)}`, config.token),
+    // fallback de appsecret_proof: el token puede ser de la app TuBot CRM
+    const res = await fetchGraphWithProof(
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(config.token)}`,
+      config.token,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     );
     const json: any = await res.json().catch(() => ({}));

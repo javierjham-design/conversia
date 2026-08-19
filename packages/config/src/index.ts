@@ -125,6 +125,10 @@ const envSchema = z.object({
   // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
   // compartir una WABA existente), "whatsapp_business_app_onboarding".
   META_ES_FEATURE_TYPE: z.string().optional().default(""),
+  // App de Meta SEPARADA "TuBot CRM" (Lead Ads + dataset): webhook page/leadgen
+  // propio con su secret y verify token. Vacíos = se usa la app principal.
+  META_CRM_APP_SECRET: z.string().optional().default(""),
+  META_CRM_VERIFY_TOKEN: z.string().optional().default(""),
 
   SCHEDULING_PROVIDER: z.enum(["mock", "clariva"]).default("mock"),
   CLARIVA_BASE_URL: z.string().default("http://localhost:4010"),
@@ -188,4 +192,38 @@ export function withAppSecretProof(url: string, accessToken: string, appSecret?:
   if (!proof || url.includes("appsecret_proof=")) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}appsecret_proof=${proof}`;
+}
+
+// El proof debe calcularse con el secret de la APP DUEÑA del token. Con dos
+// apps (TuBot principal + TuBot CRM) no sabemos de cuál viene el token de cada
+// tenant, así que: probamos con la principal y, si Graph acusa proof inválido,
+// reintentamos con la de CRM. El secret ganador se cachea por token.
+const proofSecretByToken = new Map<string, string>();
+
+/**
+ * fetch a Graph con `appsecret_proof` y fallback entre los secrets de las apps
+ * configuradas (principal y TuBot CRM). Reintenta SOLO ante error de proof;
+ * cualquier otro error se devuelve tal cual.
+ */
+export async function fetchGraphWithProof(rawUrl: string, accessToken: string, init?: RequestInit): Promise<Response> {
+  const env = getEnv();
+  const secrets = [env.META_APP_SECRET, env.META_CRM_APP_SECRET].filter(Boolean);
+  if (secrets.length === 0) return fetch(rawUrl, init);
+  const cachedSecret = proofSecretByToken.get(accessToken);
+  const order = cachedSecret ? [cachedSecret, ...secrets.filter((s) => s !== cachedSecret)] : secrets;
+  let last: Response | undefined;
+  for (const secret of order) {
+    const res = await fetch(withAppSecretProof(rawUrl, accessToken, secret), init);
+    if (res.ok) {
+      proofSecretByToken.set(accessToken, secret);
+      return res;
+    }
+    const body = await res
+      .clone()
+      .json()
+      .catch(() => ({}) as any);
+    if (!/appsecret_proof/i.test(String((body as any)?.error?.message ?? ""))) return res;
+    last = res;
+  }
+  return last!;
 }

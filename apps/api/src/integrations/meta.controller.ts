@@ -10,7 +10,7 @@ import {
   Query,
 } from "@nestjs/common";
 import { z } from "zod";
-import { getEnv, withAppSecretProof } from "@conversia/config";
+import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { QUEUE_NAMES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -281,7 +281,8 @@ export class MetaController {
   private async inspectToken(token: string): Promise<{ scopes: string[]; adAccounts: { id: string; name: string; status: number }[]; name: string | null }> {
     const v = getEnv().META_GRAPH_VERSION;
     const g = async (path: string) => {
-      const res = await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`, token));
+      // proof con fallback: el token puede ser de la app principal o de TuBot CRM
+      const res = await fetchGraphWithProof(`https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`, token);
       const json: any = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error?.message ?? `Graph ${res.status}`);
       return json;
@@ -464,11 +465,12 @@ export class MetaController {
 
   private async graph(path: string, token: string, init?: RequestInit): Promise<any> {
     const v = getEnv().META_GRAPH_VERSION;
-    const url = withAppSecretProof(
+    // proof con fallback entre apps (principal / TuBot CRM)
+    const res = await fetchGraphWithProof(
       `https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`,
       token,
+      init,
     );
-    const res = await fetch(url, init);
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) throw new BadRequestException(json?.error?.message ?? `Graph ${res.status}`);
     return json;
