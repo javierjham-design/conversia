@@ -19,6 +19,7 @@ import {
   Plug,
   Rocket,
   Settings,
+  ShoppingBag,
   Smartphone,
   Users,
   Workflow,
@@ -222,6 +223,7 @@ const NAV_GROUPS: Array<{
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
       { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read", term: "contacts" },
+      { href: "/catalog", label: "Catálogo", icon: ShoppingBag, perm: "integrations:read" },
       { label: "Agenda", icon: CalendarDays, soon: true, moduleKey: "agenda" },
     ],
   },

@@ -825,6 +825,50 @@ export class IntegrationsController {
     });
   }
 
+  /** Lista el catálogo del tenant (para el módulo de Catálogo): buscar, ver, gestionar. */
+  @Get("catalog/items")
+  catalogItems(@Query("query") query?: string, @Query("category") category?: string, @Query("page") page?: string) {
+    const ctx = requireContext();
+    const take = 40;
+    const skip = Math.max(0, (Number(page) || 1) - 1) * take;
+    const words = (query ?? "").split(/\s+/).filter((w) => w.length > 2).slice(0, 4);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const where = {
+        ...(category ? { category: { equals: category, mode: "insensitive" as const } } : {}),
+        ...(words.length ? { OR: words.flatMap((w) => [{ name: { contains: w, mode: "insensitive" as const } }, { sku: { contains: w, mode: "insensitive" as const } }, { category: { contains: w, mode: "insensitive" as const } }]) } : {}),
+      };
+      const [rows, total, categories] = await Promise.all([
+        tx.catalogItem.findMany({ where, orderBy: [{ available: "desc" }, { name: "asc" }], take, skip }),
+        tx.catalogItem.count({ where }),
+        tx.catalogItem.findMany({ where: { category: { not: null } }, select: { category: true }, distinct: ["category"], take: 100 }),
+      ]);
+      return {
+        total,
+        page: Number(page) || 1,
+        categories: categories.map((c) => c.category).filter(Boolean),
+        items: rows.map((c) => ({
+          id: c.id, name: c.name, sku: c.sku, source: c.source, kind: c.kind, category: c.category,
+          price: c.price != null ? Number(c.price) : null, currency: c.currency, available: c.available,
+          active: c.active, stock: c.stock, botDescription: c.botDescription, description: c.description, imageUrl: c.imageUrl, productUrl: c.productUrl,
+        })),
+      };
+    });
+  }
+
+  /** Gestiona un ítem del catálogo: activar/desactivar para el bot + descripción para el bot. */
+  @Patch("catalog/items/:id")
+  async updateCatalogItem(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ active: z.boolean().optional(), botDescription: z.string().max(1000).nullable().optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const data: Record<string, unknown> = {};
+      if (input.active !== undefined) data.active = input.active;
+      if (input.botDescription !== undefined) data.botDescription = input.botDescription || null;
+      await tx.catalogItem.updateMany({ where: { id }, data });
+      return { ok: true };
+    });
+  }
+
   // ------------------------ Meta Events Manager (métricas CAPI) ------------------------
 
   /** Métricas de lo que CAPI ya envía: por día, por evento, errores recientes. */
