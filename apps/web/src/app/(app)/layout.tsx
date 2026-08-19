@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Contact2,
   CreditCard,
+  KanbanSquare,
   LogOut,
   Menu,
   MessageSquare,
@@ -222,6 +223,7 @@ const NAV_GROUPS: Array<{
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
       { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read", term: "contacts" },
+      { href: "/crm", label: "CRM", icon: KanbanSquare, perm: "leads:read" },
       { label: "Agenda", icon: CalendarDays, soon: true, moduleKey: "agenda" },
     ],
   },
@@ -253,6 +255,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/onboarding/plantillas": ["Inicio", "Primeros pasos", "Plantillas"],
   "/inbox": ["Operación", "Bandeja"],
   "/contacts": ["Operación", "Contactos"],
+  "/crm": ["Operación", "CRM"],
   "/agents": ["Automatización", "Agentes IA"],
   "/workflows": ["Automatización", "Flujos"],
   "/reports": ["Análisis", "Reportes"],
