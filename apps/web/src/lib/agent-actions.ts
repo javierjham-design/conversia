@@ -2,14 +2,25 @@
 // tools reales del orquestador. Al activar una acción, sus tools quedan
 // disponibles y su instrucción en lenguaje natural se inyecta en el prompt.
 
+export type AgentActionGroup = "atencion" | "comercio" | "tubot";
+
 export interface AgentActionDef {
   key: string;
   label: string;
   description: string;
   tools: string[];
   placeholder: string;
+  group: AgentActionGroup; // agrupa la acción en la UI para no mezclar rubros
   mentions?: boolean; // muestra autocompletado @ (usuarios/equipos/agentes)
 }
+
+/** Grupos de acciones (orden y encabezado en la UI). "comercio" solo aplica a
+ * negocios que venden productos/menú; se muestra aparte para no mezclarlo. */
+export const ACTION_GROUPS: { key: AgentActionGroup; label: string; description: string }[] = [
+  { key: "atencion", label: "Atención y CRM", description: "Lo que todo agente puede hacer al conversar: agendar, etiquetar, mover el lead, derivar…" },
+  { key: "comercio", label: "Venta con catálogo (comercio)", description: "Solo para negocios que venden productos o tienen menú. Actívalo si tu rubro trabaja con catálogo." },
+  { key: "tubot", label: "TuBot (interno)", description: "Acciones propias de los agentes de TuBot (cotizar planes, montaje asistido)." },
+];
 
 export const AGENT_ACTIONS: AgentActionDef[] = [
   {
@@ -18,6 +29,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Consultar servicios y disponibilidad real, y crear citas en la agenda.",
     tools: ["getServices", "getServicePrice", "getProfessionals", "getAvailability", "createAppointment"],
     placeholder: "Cuando el cliente quiera reservar, ofrece horarios reales desde la agenda y confirma la cita con sus datos.",
+    group: "atencion",
   },
   {
     key: "lifecycle",
@@ -25,6 +37,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Mover el lead entre etapas (Nuevo, Caliente, Agendado, Cliente…).",
     tools: ["updateLeadStatus"],
     placeholder: "Marca 'Caliente' cuando muestre interés real; 'Agendado' cuando reserve una hora.",
+    group: "atencion",
   },
   {
     key: "tags",
@@ -32,6 +45,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Agregar etiquetas para segmentar (interés, campaña, urgencia…).",
     tools: ["addTag"],
     placeholder: "Etiqueta según el tema que plantee el cliente (p. ej. 'implantes', 'urgencia', 'financiamiento').",
+    group: "atencion",
   },
   {
     key: "contactFields",
@@ -39,6 +53,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Guardar nombre, apellido o email cuando el cliente los proporciona.",
     tools: ["updateContactFields"],
     placeholder: "Guarda el nombre y el email cuando el cliente los comparta, para personalizar la atención.",
+    group: "atencion",
   },
   {
     key: "note",
@@ -46,6 +61,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Dejar una nota para el equipo humano (el cliente no la ve).",
     tools: ["addInternalNote"],
     placeholder: "Deja una nota si detectas algo relevante para el equipo (p. ej. 'cliente molesto por la demora').",
+    group: "atencion",
   },
   {
     key: "close",
@@ -53,6 +69,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Cerrar la conversación cuando el asunto quedó resuelto.",
     tools: ["closeConversation"],
     placeholder: "Cierra la conversación cuando el cliente confirme que no necesita nada más.",
+    group: "atencion",
   },
   {
     key: "assign",
@@ -61,6 +78,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     tools: ["assignConversation", "transferToAgent", "transferToHuman"],
     mentions: true,
     placeholder: "Si el tema es de ventas, deriva al equipo @Ventas. Si hay urgencia o molestia, escala a un humano.",
+    group: "atencion",
   },
   {
     key: "workflow",
@@ -68,13 +86,15 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Iniciar un workflow de automatización por su nombre.",
     tools: ["triggerWorkflow"],
     placeholder: "Dispara el flujo 'Seguimiento 24h' cuando el cliente no confirme la cita.",
+    group: "atencion",
   },
   {
     key: "catalog",
     label: "Vender con el catálogo",
-    description: "Buscar en el catálogo real del negocio (productos de la tienda o platos del menú), consultar precio/stock/disponibilidad y enviar el enlace de compra.",
+    description: "Buscar en el catálogo real del negocio (productos de la tienda o platos del menú), consultar precio/stock/disponibilidad y enviar el enlace de compra. Requiere tener un catálogo cargado o una tienda conectada.",
     tools: ["buscarProductos", "verProducto"],
     placeholder: "Cuando pregunten por un producto, búscalo en el catálogo y responde con precio y disponibilidad reales; si está agotado ofrece alternativas; manda el enlace para comprar.",
+    group: "comercio",
   },
   {
     key: "pricing",
@@ -82,6 +102,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Consultar los planes y precios actuales de TuBot desde el sistema, para cotizar sin inventar ni memorizar valores.",
     tools: ["getPlanes"],
     placeholder: "Antes de dar un precio, consulta los planes vigentes con el sistema (getPlanes); nunca inventes ni repitas valores de memoria.",
+    group: "tubot",
   },
   {
     key: "assistedSetup",
@@ -89,6 +110,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     description: "Configurar la cuenta del cliente por él: pedirle que autorice y te dicte su código, vincular su cuenta, ver en qué paso va y crearle su agente. Solo para el agente de implementación de TuBot.",
     tools: ["requestAssistedSetup", "vincularMontajeCliente", "getClientSetupState", "upsertClientAgent"],
     placeholder: "Pídele que autorice en su panel y te dicte el código; canjéalo para vincular su cuenta; revisa en qué paso va; y créale su agente con las instrucciones que redactaste desde su entrevista de negocio.",
+    group: "tubot",
   },
 ];
 

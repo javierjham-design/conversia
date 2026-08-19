@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
-import { AGENT_ACTIONS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
+import { AGENT_ACTIONS, ACTION_GROUPS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 
 type ActionState = Record<string, { enabled: boolean; instructions: string }>;
@@ -435,17 +435,29 @@ export default function AgentEditorPage() {
 
             {/* Acciones */}
             <Section title="Acciones" subtitle="Qué puede hacer el agente. Activa una acción y explica en tus palabras cuándo y cómo usarla." helpKey="acciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
-              <div className="space-y-2">
-                {AGENT_ACTIONS.map((a) => (
-                  <ActionCard
-                    key={a.key}
-                    def={a}
-                    state={actions[a.key]}
-                    onToggle={(en) => setAction(a.key, { enabled: en })}
-                    onInstructions={(v) => setAction(a.key, { instructions: v })}
-                    mentions={a.mentions ? mentions : undefined}
-                  />
-                ))}
+              <div className="space-y-5">
+                {ACTION_GROUPS.map((g) => {
+                  const items = AGENT_ACTIONS.filter((a) => a.group === g.key);
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={g.key} className="space-y-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{g.label}</p>
+                        <p className="text-[11px] text-ink-subtle">{g.description}</p>
+                      </div>
+                      {items.map((a) => (
+                        <ActionCard
+                          key={a.key}
+                          def={a}
+                          state={actions[a.key]}
+                          onToggle={(en) => setAction(a.key, { enabled: en })}
+                          onInstructions={(v) => setAction(a.key, { instructions: v })}
+                          mentions={a.mentions ? mentions : undefined}
+                        />
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             </Section>
 
