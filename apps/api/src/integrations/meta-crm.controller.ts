@@ -1,9 +1,11 @@
-import { BadRequestException, Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { z } from "zod";
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requirePermission } from "../tenancy/permissions";
+import { signState, verifyState } from "./oauth.controller";
 
 // Scopes que necesita el CRM de Lead Ads (acceso estándar alcanza para los
 // activos del propio Business del token).
@@ -69,6 +71,28 @@ export class MetaCrmController {
         datasetReady: Boolean(eventMapping?.datasetId && eventMapping?.active !== false),
       };
     });
+  }
+
+  // ---------- OAuth "Conectar con Meta" (sin pegar tokens) ----------
+
+  /** URL del diálogo de autorización de la app CRM (el tenant hace 1 clic). */
+  @Get("oauth/authorize")
+  oauthAuthorize() {
+    const ctx = requirePermission("integrations:write");
+    const env = getEnv();
+    if (!env.META_CRM_APP_ID) {
+      throw new BadRequestException("OAuth de Meta CRM no configurado en la plataforma (META_CRM_APP_ID). Usa el token manual mientras tanto.");
+    }
+    const params = new URLSearchParams({
+      client_id: env.META_CRM_APP_ID,
+      redirect_uri: `${env.API_URL}/public/oauth/meta-crm/callback`,
+      state: signState(ctx.organizationId),
+      response_type: "code",
+    });
+    // Con configuración de Login for Business, los scopes los define la config.
+    if (env.META_CRM_CONFIG_ID) params.set("config_id", env.META_CRM_CONFIG_ID);
+    else params.set("scope", [...REQUIRED_SCOPES, ...RECOMMENDED_SCOPES, "pages_messaging", "instagram_basic", "instagram_manage_messages"].join(","));
+    return { url: `https://www.facebook.com/${env.META_GRAPH_VERSION}/dialog/oauth?${params.toString()}` };
   }
 
   /** Valida un token contra Graph SIN guardarlo (dry-run con scopes de leads). */
@@ -233,5 +257,74 @@ export class MetaCrmController {
       });
     });
     return { ok: true, page: { id: String(page.id), name: page.name ?? pageId }, forms };
+  }
+}
+
+/**
+ * Callback PÚBLICO del OAuth de Meta CRM (fuera del prefijo del controller de
+ * arriba para caer bajo /public, exento de JWT — el state firmado es la auth).
+ */
+@Controller("public/oauth/meta-crm")
+export class MetaCrmOauthCallbackController {
+  constructor(private prisma: PrismaService) {}
+
+  private async graph(path: string, token: string): Promise<any> {
+    const v = getEnv().META_GRAPH_VERSION;
+    const res = await fetchGraphWithProof(
+      `https://graph.facebook.com/${v}/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(token)}`,
+      token,
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error?.message ?? `Graph ${res.status}`);
+    return json;
+  }
+
+  @Get("callback")
+  async callback(@Query("code") code: string | undefined, @Query("state") state: string | undefined, @Res() res: Response) {
+    const env = getEnv();
+    const back = (q: string) => res.redirect(`${env.WEB_URL}/integrations/meta-crm?${q}`);
+    const orgId = verifyState(state ?? "");
+    if (!orgId) return back("oauth=invalid");
+    if (!code) return back("oauth=denied");
+    try {
+      const v = env.META_GRAPH_VERSION;
+      const redirectUri = `${env.API_URL}/public/oauth/meta-crm/callback`;
+      const tokenRes = await fetch(
+        `https://graph.facebook.com/${v}/oauth/access_token?client_id=${env.META_CRM_APP_ID}&client_secret=${encodeURIComponent(env.META_CRM_APP_SECRET)}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(code)}`,
+      );
+      const tokenJson: any = await tokenRes.json().catch(() => ({}));
+      if (!tokenRes.ok || !tokenJson.access_token) throw new Error(tokenJson?.error?.message ?? "sin access_token");
+      // Token de larga duración (los tokens de integración de negocio duran 60 d o no expiran)
+      const longRes = await fetch(
+        `https://graph.facebook.com/${v}/oauth/access_token?grant_type=fb_exchange_token&client_id=${env.META_CRM_APP_ID}&client_secret=${encodeURIComponent(env.META_CRM_APP_SECRET)}&fb_exchange_token=${encodeURIComponent(tokenJson.access_token)}`,
+      );
+      const longJson: any = await longRes.json().catch(() => ({}));
+      const accessToken: string = longJson.access_token ?? tokenJson.access_token;
+
+      const [me, perms] = await Promise.all([
+        this.graph("me?fields=name", accessToken).catch(() => ({})),
+        this.graph("me/permissions", accessToken).catch(() => ({ data: [] })),
+      ]);
+      const scopes: string[] = (perms.data ?? []).filter((p: any) => p.status === "granted").map((p: any) => String(p.permission));
+      if (REQUIRED_SCOPES.some((s) => !scopes.includes(s))) return back("oauth=permisos");
+
+      await this.prisma.withTenant(orgId, async (tx) => {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: orgId, provider: "meta_crm", label: "OAuth Meta CRM (Conectar con Meta)", ciphertext: encryptSecret(accessToken) },
+        });
+        await tx.metaCrmConnection.upsert({
+          where: { organizationId: orgId },
+          update: { status: "CONNECTED", mode: "OAUTH", businessName: me.name ?? "Cuenta Meta", appScopes: scopes, credentialId: credential.id, lastError: null },
+          create: { organizationId: orgId, status: "CONNECTED", mode: "OAUTH", businessName: me.name ?? "Cuenta Meta", appScopes: scopes, credentialId: credential.id },
+        });
+        await tx.integrationEvent.create({
+          data: { organizationId: orgId, provider: "meta_crm", type: "connection.oauth", status: "ok", message: `Meta CRM conectado con OAuth (${scopes.length} permisos)` },
+        });
+      });
+      return back("oauth=connected");
+    } catch (err) {
+      console.error("✖ OAuth Meta CRM:", (err as Error).message);
+      return back("oauth=error");
+    }
   }
 }

@@ -129,6 +129,11 @@ const envSchema = z.object({
   // propio con su secret y verify token. Vacíos = se usa la app principal.
   META_CRM_APP_SECRET: z.string().optional().default(""),
   META_CRM_VERIFY_TOKEN: z.string().optional().default(""),
+  // OAuth "Conectar con Meta" (Login for Business de la app TuBot CRM): el
+  // tenant autoriza con un clic, sin pegar tokens. config_id = configuración
+  // de login creada en la app (opcional; sin ella se piden scopes sueltos).
+  META_CRM_APP_ID: z.string().optional().default(""),
+  META_CRM_CONFIG_ID: z.string().optional().default(""),
 
   SCHEDULING_PROVIDER: z.enum(["mock", "clariva"]).default("mock"),
   CLARIVA_BASE_URL: z.string().default("http://localhost:4010"),
