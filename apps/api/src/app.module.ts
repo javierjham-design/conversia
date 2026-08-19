@@ -18,6 +18,7 @@ import { RealtimeService } from "./common/realtime.service";
 import { HealthController } from "./health.controller";
 import { DevelopersController } from "./integrations/developers.controller";
 import { InboundHookController } from "./integrations/inbound-hook.controller";
+import { CatalogWebhookController } from "./integrations/catalog-webhook.controller";
 import { MetaCrmController } from "./integrations/meta-crm.controller";
 import { MetaCrmWebhookController } from "./integrations/meta-crm-webhook.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
@@ -73,6 +74,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     OAuthController, // OAuth por tenant (Google/HubSpot); callback en /public/oauth
     DevelopersController,
     InboundHookController,
+    CatalogWebhookController,
     PublicApiController, // API pública v1 (auth por API key del tenant)
     WorkflowsController,
     ReportsController,
