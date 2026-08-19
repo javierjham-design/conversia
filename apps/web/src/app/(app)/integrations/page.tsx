@@ -30,6 +30,7 @@ import {
   type StatusKind,
 } from "@/components/ui";
 import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, HubspotDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type HubspotState, type WebhookRow } from "./drawers";
+import { CatalogDrawer } from "./catalog-drawer";
 
 interface CatalogItem {
   key: string;
@@ -104,6 +105,7 @@ export default function IntegrationsPage() {
   const [automationOpen, setAutomationOpen] = useState<"zapier" | "make" | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
+  const [catalogSource, setCatalogSource] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -410,6 +412,8 @@ export default function IntegrationsPage() {
       case "zapier":
       case "make":
         return setAutomationOpen(item.key);
+      case "woocommerce":
+        return setCatalogSource("woocommerce");
       default:
         return void notifyInterest(item.key);
     }
@@ -642,6 +646,7 @@ export default function IntegrationsPage() {
       </div>
 
       {/* Drawers */}
+      <CatalogDrawer open={catalogSource !== null} source={catalogSource ?? ""} onClose={() => setCatalogSource(null)} onChanged={() => void load()} />
       <ClarivaDrawer open={clarivaOpen} onClose={() => setClarivaOpen(false)} state={data?.clariva ?? null} onChanged={() => void load()} />
       <EmailDrawer
         open={emailOpen}
