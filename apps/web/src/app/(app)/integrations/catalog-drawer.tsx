@@ -37,12 +37,21 @@ const HELP: Record<string, { title: string; steps: string[] }> = {
       "Pégalos aquí. Leemos tu menú (productos y secciones); nunca modificamos tu Fudo.",
     ],
   },
+  shopify: {
+    title: "Shopify",
+    steps: [
+      "En tu admin de Shopify: Configuración → Apps y canales de venta → Desarrollar apps → Crear una app.",
+      "En «Configuración de la API de Admin» agrega el permiso read_products e instala la app.",
+      "Copia el «Token de acceso de la API de Admin» (empieza con shpat_) y pega aquí tu dominio (tutienda.myshopify.com) + el token.",
+    ],
+  },
 };
 
 export function CatalogDrawer({ open, onClose, source, onChanged }: { open: boolean; onClose: () => void; source: string; onChanged: () => void }) {
   const toast = useToast();
   const isJumpseller = source === "jumpseller";
   const isFudo = source === "fudo";
+  const isShopify = source === "shopify";
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   // WooCommerce
   const [baseUrl, setBaseUrl] = useState("");
@@ -54,6 +63,9 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   // Fudo
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  // Shopify
+  const [shop, setShop] = useState("");
+  const [token, setToken] = useState("");
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; count?: number | null; error?: string } | null>(null);
@@ -68,8 +80,8 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   const inputCls = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
 
   // ¿Están completos los campos del proveedor activo?
-  const filled = isFudo ? !!apiKey && !!apiSecret : isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
-  const payload = () => (isFudo ? { source, apiKey, apiSecret } : isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
+  const filled = isShopify ? !!shop && !!token : isFudo ? !!apiKey && !!apiSecret : isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
+  const payload = () => (isShopify ? { source, shop, token } : isFudo ? { source, apiKey, apiSecret } : isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
 
   async function test() {
     setTesting(true); setTestResult(null);
@@ -82,7 +94,7 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
     try {
       await api("/integrations/catalog/connect", { method: "POST", body: JSON.stringify(payload()) });
       toast.push("Conectado ✔ — sincronizando tu catálogo…", "ok");
-      setConsumerKey(""); setConsumerSecret(""); setAuthtoken(""); setApiSecret("");
+      setConsumerKey(""); setConsumerSecret(""); setAuthtoken(""); setApiSecret(""); setToken("");
       onChanged(); await load();
     } catch (e) { toast.push((e as Error).message, "error"); } finally { setSaving(false); }
   }
@@ -109,7 +121,16 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
         <ol className="mt-1 list-decimal space-y-0.5 pl-4">{help.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
       </div>
 
-      {isFudo ? (
+      {isShopify ? (
+        <>
+          <label className="mt-4 block text-sm">Dominio de tu tienda
+            <input value={shop} onChange={(e) => setShop(e.target.value)} placeholder="tutienda.myshopify.com" className={inputCls} autoComplete="off" />
+          </label>
+          <label className="mt-3 block text-sm">Admin API access token
+            <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="shpat_…" className={inputCls} autoComplete="off" />
+          </label>
+        </>
+      ) : isFudo ? (
         <>
           <label className="mt-4 block text-sm">API Key
             <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="tu API Key de Fudo" className={inputCls} autoComplete="off" />

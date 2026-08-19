@@ -69,7 +69,15 @@ const CATALOG_CONNECT_SCHEMA = z.discriminatedUnion("source", [
   z.object({ source: z.literal("woocommerce"), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }),
   z.object({ source: z.literal("jumpseller"), login: z.string().min(2), authtoken: z.string().min(8) }),
   z.object({ source: z.literal("fudo"), apiKey: z.string().min(4), apiSecret: z.string().min(4) }),
+  z.object({ source: z.literal("shopify"), shop: z.string().min(3), token: z.string().min(10) }),
 ]);
+
+/** Normaliza el dominio de una tienda Shopify a https://{tienda}.myshopify.com. */
+function shopifyBaseUrl(shop: string): string {
+  const host = shop.replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim().toLowerCase();
+  if (!host.endsWith(".myshopify.com")) throw new BadRequestException("El dominio debe ser tutienda.myshopify.com");
+  return `https://${host}`;
+}
 
 function assertUrlAllowed(url: string) {
   const check = validateOutboundUrl(url, { allowLocalhost: getEnv().NODE_ENV !== "production" });
@@ -277,7 +285,7 @@ export class IntegrationsController {
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
           // Catálogo comercial: el bot vende con productos/precios/stock reales de la tienda o el menú.
           { key: "woocommerce", name: "WooCommerce", category: "comercio", status: "beta", description: "Sincroniza los productos, precios y stock reales de tu tienda WooCommerce para que el bot venda con datos vivos.", capabilities: ["Productos", "Precios", "Stock", "Búsqueda por IA"] },
-          { key: "shopify", name: "Shopify", category: "comercio", status: "proximamente", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
+          { key: "shopify", name: "Shopify", category: "comercio", status: "beta", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
           { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "beta", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
           { key: "bsale", name: "Bsale", category: "comercio", status: "proximamente", description: "Productos y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
           { key: "fudo", name: "Fudo", category: "comercio", status: "beta", description: "El menú de tu restaurante en Fudo (secciones, productos y disponibilidad) para que el bot venda con datos reales.", capabilities: ["Menú", "Secciones", "Disponibilidad"] },
@@ -796,6 +804,19 @@ export class IntegrationsController {
         const count = Number(json?.count);
         return { ok: true, count: Number.isFinite(count) ? count : null };
       }
+      if (input.source === "shopify") {
+        const baseUrl = shopifyBaseUrl(input.shop);
+        await validateOutboundUrl(baseUrl); // guarda anti-SSRF
+        const res = await fetch(`${baseUrl}/admin/api/2025-04/graphql.json`, {
+          method: "POST",
+          headers: { "X-Shopify-Access-Token": input.token, "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ query: "{ shop { name } }" }),
+        });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+        const json = (await res.json()) as { data?: { shop?: { name?: string } }; errors?: unknown };
+        if (json.errors || !json.data?.shop) return { ok: false, error: "Token o permisos inválidos" };
+        return { ok: true, count: null };
+      }
       // fudo: intercambia apiKey/apiSecret por token y consulta el menú
       const auth = await fetch("https://auth.fu.do/api", {
         method: "POST",
@@ -830,6 +851,11 @@ export class IntegrationsController {
     } else if (input.source === "jumpseller") {
       creds = { login: input.login, authtoken: input.authtoken };
       config = {};
+    } else if (input.source === "shopify") {
+      const baseUrl = shopifyBaseUrl(input.shop);
+      await validateOutboundUrl(baseUrl);
+      creds = { token: input.token };
+      config = { baseUrl };
     } else {
       creds = { apiKey: input.apiKey, apiSecret: input.apiSecret };
       config = {};
@@ -851,7 +877,7 @@ export class IntegrationsController {
   @Post("catalog/sync")
   async catalogSync(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller", "fudo"]), mode: z.enum(["full", "incremental"]).optional() }), body);
+    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller", "fudo", "shopify"]), mode: z.enum(["full", "incremental"]).optional() }), body);
     const conn = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.integrationConnection.findFirst({ where: { provider: `catalog_${input.source}` } }));
     if (!conn) throw new BadRequestException("Ese catálogo no está conectado");
     await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: input.mode ?? "full" } });
