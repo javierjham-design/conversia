@@ -39,6 +39,8 @@ enum SubscriptionStatus {
 enum ChannelType {
   WHATSAPP_CLOUD
   MOCK
+  INSTAGRAM
+  MESSENGER
 }
 
 enum ConversationStatus {
