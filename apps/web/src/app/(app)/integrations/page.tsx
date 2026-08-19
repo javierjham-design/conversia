@@ -436,6 +436,8 @@ export default function IntegrationsPage() {
         return setCatalogSource("fudo");
       case "shopify":
         return setCatalogSource("shopify");
+      case "bsale":
+        return setCatalogSource("bsale");
       default:
         return void notifyInterest(item.key);
     }

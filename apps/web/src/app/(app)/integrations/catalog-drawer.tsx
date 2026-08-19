@@ -45,6 +45,14 @@ const HELP: Record<string, { title: string; steps: string[] }> = {
       "Copia el «Token de acceso de la API de Admin» (empieza con shpat_) y pega aquí tu dominio (tutienda.myshopify.com) + el token.",
     ],
   },
+  bsale: {
+    title: "Bsale",
+    steps: [
+      "En Bsale: Configuración → Integraciones / Token de acceso.",
+      "Genera un token con permiso de lectura y cópialo.",
+      "Pégalo aquí. Tomamos precios de tu lista por defecto y el stock sumado de tus sucursales.",
+    ],
+  },
 };
 
 export function CatalogDrawer({ open, onClose, source, onChanged }: { open: boolean; onClose: () => void; source: string; onChanged: () => void }) {
@@ -52,6 +60,7 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   const isJumpseller = source === "jumpseller";
   const isFudo = source === "fudo";
   const isShopify = source === "shopify";
+  const isBsale = source === "bsale";
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   // WooCommerce
   const [baseUrl, setBaseUrl] = useState("");
@@ -80,8 +89,8 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   const inputCls = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
 
   // ¿Están completos los campos del proveedor activo?
-  const filled = isShopify ? !!shop && !!token : isFudo ? !!apiKey && !!apiSecret : isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
-  const payload = () => (isShopify ? { source, shop, token } : isFudo ? { source, apiKey, apiSecret } : isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
+  const filled = isBsale ? !!token : isShopify ? !!shop && !!token : isFudo ? !!apiKey && !!apiSecret : isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
+  const payload = () => (isBsale ? { source, token } : isShopify ? { source, shop, token } : isFudo ? { source, apiKey, apiSecret } : isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
 
   async function test() {
     setTesting(true); setTestResult(null);
@@ -121,7 +130,11 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
         <ol className="mt-1 list-decimal space-y-0.5 pl-4">{help.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
       </div>
 
-      {isShopify ? (
+      {isBsale ? (
+        <label className="mt-4 block text-sm">Token de acceso
+          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="tu token de Bsale" className={inputCls} autoComplete="off" />
+        </label>
+      ) : isShopify ? (
         <>
           <label className="mt-4 block text-sm">Dominio de tu tienda
             <input value={shop} onChange={(e) => setShop(e.target.value)} placeholder="tutienda.myshopify.com" className={inputCls} autoComplete="off" />
