@@ -70,6 +70,7 @@ const CATALOG_CONNECT_SCHEMA = z.discriminatedUnion("source", [
   z.object({ source: z.literal("jumpseller"), login: z.string().min(2), authtoken: z.string().min(8) }),
   z.object({ source: z.literal("fudo"), apiKey: z.string().min(4), apiSecret: z.string().min(4) }),
   z.object({ source: z.literal("shopify"), shop: z.string().min(3), token: z.string().min(10) }),
+  z.object({ source: z.literal("bsale"), token: z.string().min(10) }),
 ]);
 
 /** Normaliza el dominio de una tienda Shopify a https://{tienda}.myshopify.com. */
@@ -287,7 +288,7 @@ export class IntegrationsController {
           { key: "woocommerce", name: "WooCommerce", category: "comercio", status: "beta", description: "Sincroniza los productos, precios y stock reales de tu tienda WooCommerce para que el bot venda con datos vivos.", capabilities: ["Productos", "Precios", "Stock", "Búsqueda por IA"] },
           { key: "shopify", name: "Shopify", category: "comercio", status: "beta", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
           { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "beta", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
-          { key: "bsale", name: "Bsale", category: "comercio", status: "proximamente", description: "Productos y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
+          { key: "bsale", name: "Bsale", category: "comercio", status: "beta", description: "Productos, precios y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
           { key: "fudo", name: "Fudo", category: "comercio", status: "beta", description: "El menú de tu restaurante en Fudo (secciones, productos y disponibilidad) para que el bot venda con datos reales.", capabilities: ["Menú", "Secciones", "Disponibilidad"] },
           { key: "catalog_csv", name: "Importar por CSV", category: "comercio", status: "proximamente", description: "¿Sin tienda conectada? Sube tu catálogo por planilla con una plantilla y mapeo de columnas.", capabilities: ["Plantilla", "Mapeo", "Manual"] },
         ],
@@ -817,6 +818,13 @@ export class IntegrationsController {
         if (json.errors || !json.data?.shop) return { ok: false, error: "Token o permisos inválidos" };
         return { ok: true, count: null };
       }
+      if (input.source === "bsale") {
+        const res = await fetch("https://api.bsale.io/v1/products.json?limit=1", { headers: { access_token: input.token, accept: "application/json" } });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+        const json = (await res.json()) as { count?: number };
+        const count = Number(json?.count);
+        return { ok: true, count: Number.isFinite(count) ? count : null };
+      }
       // fudo: intercambia apiKey/apiSecret por token y consulta el menú
       const auth = await fetch("https://auth.fu.do/api", {
         method: "POST",
@@ -856,6 +864,9 @@ export class IntegrationsController {
       await validateOutboundUrl(baseUrl);
       creds = { token: input.token };
       config = { baseUrl };
+    } else if (input.source === "bsale") {
+      creds = { token: input.token };
+      config = {};
     } else {
       creds = { apiKey: input.apiKey, apiSecret: input.apiSecret };
       config = {};
@@ -877,7 +888,7 @@ export class IntegrationsController {
   @Post("catalog/sync")
   async catalogSync(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller", "fudo", "shopify"]), mode: z.enum(["full", "incremental"]).optional() }), body);
+    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller", "fudo", "shopify", "bsale"]), mode: z.enum(["full", "incremental"]).optional() }), body);
     const conn = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.integrationConnection.findFirst({ where: { provider: `catalog_${input.source}` } }));
     if (!conn) throw new BadRequestException("Ese catálogo no está conectado");
     await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: input.mode ?? "full" } });

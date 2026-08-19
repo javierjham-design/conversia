@@ -9,6 +9,7 @@ import { WooCommerceAdapter } from "./woocommerce";
 import { JumpsellerAdapter } from "./jumpseller";
 import { FudoAdapter } from "./fudo";
 import { ShopifyAdapter } from "./shopify";
+import { BsaleAdapter } from "./bsale";
 import { createDbCatalogPort } from "./db-port";
 import { runCatalogSync } from "./sync-engine";
 import type { CatalogAdapter } from "./types";
@@ -28,7 +29,8 @@ function buildAdapter(source: string, config: Record<string, unknown>, creds: Re
       return new FudoAdapter({ baseUrl: "", auth: creds, currency });
     case "shopify":
       return new ShopifyAdapter({ baseUrl: String(config.baseUrl ?? ""), auth: creds, currency });
-    // TODO: bsale…
+    case "bsale":
+      return new BsaleAdapter({ baseUrl: "", auth: creds, currency });
     default:
       throw new Error(`Proveedor de catálogo no soportado: ${source}`);
   }
