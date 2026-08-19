@@ -264,6 +264,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/channels": ["Configuración", "Canales"],
   "/integrations": ["Configuración", "Integraciones"],
   "/integrations/meta": ["Configuración", "Integraciones", "Meta Business Suite"],
+  "/integrations/meta-crm": ["Configuración", "Integraciones", "Meta CRM (Lead Ads)"],
   "/users": ["Configuración", "Usuarios"],
   "/settings": ["Configuración"],
   "/settings/profile": ["Configuración", "Mi perfil"],

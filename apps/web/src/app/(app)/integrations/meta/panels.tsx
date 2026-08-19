@@ -1,106 +1,14 @@
 "use client";
 
 /** Wizard de conexión Meta + editores de mapeo (Lead Ads y Conversions API). */
-import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronRight, Circle, FlaskConical, Link2, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, ChevronRight, Circle, FlaskConical, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
 import type { MetaOverview } from "./page";
 
-// --------------------- Lead Ads: conexión de páginas ---------------------
-
-interface LeadAdsPage {
-  id: string;
-  name: string;
-  connected: boolean;
-}
-
-/**
- * Conecta páginas para Lead Ads sin salir del panel: registra la página y sus
- * formularios como activos (el webhook leadgen rutea a este tenant) y suscribe
- * la app a la página (subscribed_apps con leadgen, token de página derivado).
- */
-export function LeadAdsPagesPanel({ onConnected }: { onConnected?: () => void }) {
-  const toast = useToast();
-  const [pages, setPages] = useState<LeadAdsPage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  async function load() {
-    setError(null);
-    setPages(null);
-    try {
-      const r = await api<{ pages: LeadAdsPage[] }>("/integrations/meta/lead-ads/pages");
-      setPages(r.pages);
-    } catch (e: any) {
-      setError(e.message ?? "No se pudieron listar las páginas");
-      setPages([]);
-    }
-  }
-  useEffect(() => {
-    void load();
-  }, []);
-
-  async function connect(page: LeadAdsPage) {
-    setBusy(page.id);
-    try {
-      const r = await api<{ ok: boolean; forms: Array<{ id: string; name: string }> }>(
-        `/integrations/meta/lead-ads/pages/${encodeURIComponent(page.id)}/connect`,
-        { method: "POST" },
-      );
-      toast.push(`Página «${page.name}» conectada: ${r.forms.length} formulario(s) registrados`, "ok");
-      await load();
-      onConnected?.();
-    } catch (e: any) {
-      toast.push(e.message ?? "No se pudo conectar la página", "error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="font-semibold">Páginas conectadas</h2>
-        <button onClick={() => void load()} className="rounded p-1 text-ink-subtle hover:bg-app" title="Actualizar">
-          <RefreshCw size={14} />
-        </button>
-      </div>
-      <p className="mb-3 text-[13px] text-ink-muted">
-        Conecta la página de Facebook de tus campañas: registramos sus formularios y suscribimos la app al evento{" "}
-        <code className="text-xs">leadgen</code> para que cada lead entre al CRM al instante.
-      </p>
-      {!pages ? (
-        <p className="py-4 text-center text-sm text-ink-subtle">Cargando páginas…</p>
-      ) : error ? (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">{error}</p>
-      ) : pages.length === 0 ? (
-        <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">
-          El token no lista páginas. Asigna la página al Usuario del Sistema en Business Manager (Activos → Páginas) y
-          vuelve a intentar.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {pages.map((p) => (
-            <div key={p.id} className="flex items-center justify-between rounded-xl border border-line p-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{p.name}</p>
-                <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
-              </div>
-              {p.connected ? (
-                <StatusBadge kind="connected" label="Conectada" />
-              ) : (
-                <Button variant="secondary" disabled={busy === p.id} onClick={() => void connect(p)}>
-                  <Link2 size={14} /> {busy === p.id ? "Conectando…" : "Conectar"}
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// La conexión de páginas de Lead Ads vive en /integrations/meta-crm
+// (integración separada con su propia app y token).
 
 // ------------------------------ Checklist ------------------------------
 

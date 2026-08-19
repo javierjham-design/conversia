@@ -1,0 +1,337 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { CheckCircle2, ExternalLink, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Unplug } from "lucide-react";
+import { api } from "@/lib/api";
+import { Button, ConfirmDialog, PageHeader, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
+import { FieldMappingEditor } from "../meta/panels";
+
+// Integración «Meta CRM (Lead Ads)»: conexión SEPARADA de Meta Business Suite.
+// Conectar/desconectar acá jamás toca WhatsApp, anuncios ni la conexión Meta general.
+
+interface CrmStatus {
+  connection: { status: string; mode: string; businessName: string | null; scopes: string[]; lastError: string | null } | null;
+  pages: Array<{ externalId: string; name: string; enabled: boolean }>;
+  forms: Array<{ externalId: string; name: string }>;
+  mappingActive: boolean;
+  datasetReady: boolean;
+}
+
+interface GraphPage {
+  id: string;
+  name: string;
+  connected: boolean;
+}
+
+export default function MetaCrmPage() {
+  const toast = useToast();
+  const [data, setData] = useState<CrmStatus | null>(null);
+  const [mapping, setMapping] = useState<any>(null);
+  const [leadStatuses, setLeadStatuses] = useState<Array<{ code: string; name: string }>>([]);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [status, map, stages] = await Promise.all([
+        api<CrmStatus>("/integrations/meta-crm"),
+        api<any>("/integrations/meta/lead-mapping").catch(() => null),
+        api<Array<{ code: string; name: string }>>("/lifecycle-stages").catch(() => []),
+      ]);
+      setData(status);
+      setMapping(map);
+      setLeadStatuses(stages.map((s) => ({ code: s.code, name: s.name })));
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al cargar", "error");
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const connected = data?.connection?.status === "CONNECTED";
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Meta CRM (Lead Ads)"
+        description="Leads de tus formularios de clientes potenciales directo al CRM, y la calidad del embudo de vuelta a tus campañas (dataset). Conexión propia — independiente de WhatsApp y de la conexión Meta general."
+        actions={
+          connected ? (
+            <Button variant="secondary" onClick={() => setDisconnectOpen(true)}>
+              <Unplug size={14} /> Desconectar
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {!data ? (
+        <Skeleton className="h-64" />
+      ) : (
+        <>
+          {/* Pasos del circuito */}
+          <div className="grid gap-3 md:grid-cols-4">
+            {[
+              ["1 · Conexión", connected, data.connection?.businessName ?? "Token de la app CRM"],
+              ["2 · Página y formularios", data.pages.length > 0, data.pages.length ? `${data.pages.length} página(s) · ${data.forms.length} formulario(s)` : "Conecta tu página"],
+              ["3 · Mapeo de campos", data.mappingActive, data.mappingActive ? "Activo" : "Configúralo abajo"],
+              ["4 · Dataset (reportes a Meta)", data.datasetReady, data.datasetReady ? "Reglas activas" : "Configura las reglas por etapa"],
+            ].map(([label, ok, detail]) => (
+              <div key={label as string} className={cn("rounded-card border p-3", ok ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900 dark:bg-emerald-950/20" : "border-line bg-panel")}>
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 size={14} className={ok ? "text-emerald-600" : "text-ink-subtle"} />
+                  <p className="text-xs font-medium">{label as string}</p>
+                </div>
+                <p className="mt-1 text-[11px] text-ink-muted">{detail as string}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-4">
+              {/* Conexión */}
+              <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="font-semibold">Conexión</h2>
+                  {connected && <StatusBadge kind="connected" label={data.connection!.businessName ?? "Conectada"} />}
+                </div>
+                {connected ? (
+                  <p className="text-[13px] text-ink-muted">
+                    Token activo con {data.connection!.scopes.length} permisos. Para rotarlo, pega uno nuevo abajo.
+                  </p>
+                ) : (
+                  <p className="text-[13px] text-ink-muted">
+                    Pega el token de <b>Usuario del Sistema generado bajo la app CRM</b> (no el de WhatsApp). Permisos
+                    mínimos: <code className="text-xs">pages_show_list</code> + <code className="text-xs">leads_retrieval</code>;
+                    recomendados además: <code className="text-xs">pages_manage_metadata</code>, <code className="text-xs">pages_manage_ads</code>.
+                  </p>
+                )}
+                <TokenConnect onConnected={() => void load()} />
+              </div>
+
+              {/* Páginas */}
+              <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+                <PagesPanel enabled={connected} onConnected={() => void load()} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Mapeo */}
+              <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+                <h2 className="mb-1 font-semibold">Mapeo de campos</h2>
+                <p className="mb-4 text-[13px] text-ink-muted">
+                  Cómo se transforma cada campo del formulario en datos del CRM (etapa inicial, etiquetas, workflows{" "}
+                  <code className="text-xs">lead_created</code>).
+                </p>
+                {mapping !== null && <FieldMappingEditor initial={mapping} leadStatuses={leadStatuses} onSaved={() => void load()} />}
+              </div>
+
+              {/* Prueba + accesos */}
+              <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+                <h2 className="mb-2 font-semibold">Probar y operar</h2>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      const r = await api<{ detail: string }>("/integrations/meta/lead-test", { method: "POST" });
+                      toast.push(r.detail, "ok");
+                    }}
+                  >
+                    <Send size={14} /> Simular lead entrante
+                  </Button>
+                  <Link href="/crm">
+                    <Button variant="secondary">
+                      <KanbanSquare size={14} /> Abrir el CRM
+                    </Button>
+                  </Link>
+                  <Link href="/integrations/meta">
+                    <Button variant="ghost">
+                      <Megaphone size={14} /> Reglas del dataset (Conversions API) <ExternalLink size={12} />
+                    </Button>
+                  </Link>
+                </div>
+                <p className="mt-3 text-[11px] text-ink-subtle">
+                  Las reglas por etapa (p. ej. «cliente» → Purchase) viven en la pestaña Conversions API del Centro Meta;
+                  los envíos usan automáticamente esta conexión CRM cuando existe.
+                </p>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={disconnectOpen}
+        title="¿Desconectar Meta CRM?"
+        description="Se elimina el token del CRM. No afecta WhatsApp, anuncios ni la conexión Meta general. Los leads dejarán de leerse de Graph hasta reconectar."
+        confirmLabel="Desconectar"
+        onConfirm={async () => {
+          setDisconnectOpen(false);
+          await api("/integrations/meta-crm/disconnect", { method: "POST" });
+          toast.push("Meta CRM desconectado", "ok");
+          void load();
+        }}
+        onClose={() => setDisconnectOpen(false)}
+      />
+    </div>
+  );
+}
+
+// ------------------------- Conexión por token -------------------------
+
+function TokenConnect({ onConnected }: { onConnected: () => void }) {
+  const toast = useToast();
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<{ ok: boolean; name?: string | null; scopes?: string[]; missing?: string[]; recommendedMissing?: string[]; error?: string } | null>(null);
+
+  async function validate() {
+    setBusy(true);
+    setCheck(null);
+    try {
+      const r = await api<typeof check>("/integrations/meta-crm/token/validate", { method: "POST", body: JSON.stringify({ accessToken: token }) });
+      setCheck(r);
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al validar", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const r = await api<{ ok: boolean; scopes: string[]; recommendedMissing: string[] }>("/integrations/meta-crm/token/connect", {
+        method: "POST",
+        body: JSON.stringify({ accessToken: token }),
+      });
+      toast.push(`Meta CRM conectado (${r.scopes.length} permisos)`, "ok");
+      if (r.recommendedMissing.length) toast.push(`Sugerencia: faltan permisos recomendados (${r.recommendedMissing.join(", ")})`, "info");
+      setToken("");
+      setCheck(null);
+      onConnected();
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al conectar", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="Token de Usuario del Sistema (app CRM)"
+          className="w-full rounded-lg border border-line bg-app px-3 py-2 text-sm outline-none focus:border-brand-500"
+        />
+        <Button variant="secondary" disabled={busy || token.trim().length < 20} onClick={() => void validate()}>
+          <KeyRound size={14} /> Validar
+        </Button>
+      </div>
+      {check && (
+        <div className={cn("rounded-lg p-2.5 text-xs", check.ok ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" : "bg-amber-50 text-amber-700")}>
+          {check.ok ? (
+            <>✓ Token válido{check.name ? ` (${check.name})` : ""} · {check.scopes?.length ?? 0} permisos{(check.recommendedMissing?.length ?? 0) > 0 ? ` · faltan recomendados: ${check.recommendedMissing!.join(", ")}` : ""}</>
+          ) : (
+            <>✖ {check.error ?? `Faltan permisos: ${(check.missing ?? []).join(", ")}`}</>
+          )}
+        </div>
+      )}
+      {check?.ok && (
+        <Button disabled={busy} onClick={() => void connect()}>
+          Conectar Meta CRM
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ------------------------- Páginas conectadas -------------------------
+
+function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: () => void }) {
+  const toast = useToast();
+  const [pages, setPages] = useState<GraphPage[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!enabled) return;
+    setError(null);
+    setPages(null);
+    try {
+      const r = await api<{ pages: GraphPage[] }>("/integrations/meta-crm/pages");
+      setPages(r.pages);
+    } catch (e: any) {
+      setError(e.message ?? "No se pudieron listar las páginas");
+      setPages([]);
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function connect(page: GraphPage) {
+    setBusy(page.id);
+    try {
+      const r = await api<{ forms: Array<{ id: string }> }>(`/integrations/meta-crm/pages/${encodeURIComponent(page.id)}/connect`, { method: "POST" });
+      toast.push(`Página «${page.name}» conectada: ${r.forms.length} formulario(s)`, "ok");
+      await load();
+      onConnected();
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo conectar la página", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-semibold">Páginas conectadas</h2>
+        {enabled && (
+          <button onClick={() => void load()} className="rounded p-1 text-ink-subtle hover:bg-app" title="Actualizar">
+            <RefreshCw size={14} />
+          </button>
+        )}
+      </div>
+      <p className="mb-3 text-[13px] text-ink-muted">
+        Conecta la página de tus campañas: registramos sus formularios y suscribimos la app CRM al evento{" "}
+        <code className="text-xs">leadgen</code> — cada lead entra al CRM al instante.
+      </p>
+      {!enabled ? (
+        <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">Conecta primero el token (arriba).</p>
+      ) : !pages ? (
+        <p className="py-3 text-center text-sm text-ink-subtle">Cargando páginas…</p>
+      ) : error ? (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">{error}</p>
+      ) : pages.length === 0 ? (
+        <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">
+          El token no lista páginas. Asigna la página al Usuario del Sistema en Business Manager y reintenta.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {pages.map((p) => (
+            <div key={p.id} className="flex items-center justify-between rounded-xl border border-line p-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{p.name}</p>
+                <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
+              </div>
+              {p.connected ? (
+                <StatusBadge kind="connected" label="Conectada" />
+              ) : (
+                <Button variant="secondary" disabled={busy === p.id} onClick={() => void connect(p)}>
+                  <Link2 size={14} /> {busy === p.id ? "Conectando…" : "Conectar"}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

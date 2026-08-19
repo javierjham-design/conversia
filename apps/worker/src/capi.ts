@@ -1,6 +1,6 @@
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
-import { decryptCredential } from "./credentials";
+import { resolveMetaLeadToken } from "./meta-token";
 import { actionSourceFor, buildUserData, type CapiIdentity } from "./capi-payload";
 import type { CapiJob } from "@conversia/types";
 
@@ -38,13 +38,10 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     const rules = (mapping.rules as any[]) ?? [];
     const rule = rules.find((r) => r?.active && r?.source === source);
     const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId } });
-    let token = env.META_ACCESS_TOKEN || "";
-    if (connection?.credentialId) {
-      const cred = await tx.integrationCredential.findUnique({ where: { id: connection.credentialId } });
-      if (cred) token = decryptCredential(cred.ciphertext);
-    }
-    return { mapping, rule, token, mode: connection?.mode ?? null };
+    return { mapping, rule, mode: connection?.mode ?? null };
   });
+  // Token: prefiere la conexión Meta CRM (app separada); cae a la general/env.
+  const token = (await resolveMetaLeadToken(organizationId)) ?? "";
 
   const log = (status: string, message: string, payload: Record<string, unknown> = {}) =>
     withTenant(organizationId, (tx) =>
@@ -74,8 +71,8 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     });
     return;
   }
-  if (!config.token) {
-    await log("error", "Sin access token de Meta: conecta Meta o define META_ACCESS_TOKEN");
+  if (!token) {
+    await log("error", "Sin access token de Meta: conecta Meta CRM (o Meta) o define META_ACCESS_TOKEN");
     return;
   }
 
@@ -98,8 +95,8 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   try {
     // fallback de appsecret_proof: el token puede ser de la app TuBot CRM
     const res = await fetchGraphWithProof(
-      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(config.token)}`,
-      config.token,
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(token)}`,
+      token,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     );
     const json: any = await res.json().catch(() => ({}));

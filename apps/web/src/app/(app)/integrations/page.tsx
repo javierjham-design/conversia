@@ -51,6 +51,7 @@ interface Overview {
     lastSyncAt: string | null;
   };
   meta: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
+  metaCrm: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
   clariva: ClarivaState | null;
   email: EmailState | null;
   platformEmailReady: boolean;
@@ -186,6 +187,18 @@ export default function IntegrationsPage() {
       health: "ok" | "warn" | "error";
       onManage: () => void;
     }> = [];
+    if (data.metaCrm && data.metaCrm.status !== "DISCONNECTED") {
+      rows.push({
+        key: "meta-crm",
+        name: "Meta CRM (Lead Ads)",
+        category: "Meta y mensajería",
+        icon: <MetaLogo size={22} />,
+        status: data.metaCrm.status === "CONNECTED" ? "connected" : data.metaCrm.status === "ERROR" ? "error" : "incomplete",
+        detail: data.metaCrm.businessName ?? "Leads de formularios → CRM",
+        health: data.metaCrm.status === "ERROR" ? "error" : "ok",
+        onManage: () => router.push("/integrations/meta-crm"),
+      });
+    }
     if (data.meta && data.meta.status !== "DISCONNECTED") {
       rows.push({
         key: "meta",
@@ -345,6 +358,7 @@ export default function IntegrationsPage() {
       s.add("meta");
       s.add("whatsapp");
     }
+    if (data.metaCrm && data.metaCrm.status === "CONNECTED") s.add("meta_crm");
     if (data.capiConfigured) s.add("meta_capi");
     if (data.clariva?.status === "active") s.add("clariva");
     if (data.webhooks.length > 0) s.add("webhooks");
@@ -382,6 +396,8 @@ export default function IntegrationsPage() {
 
   function catalogAction(item: CatalogItem) {
     switch (item.key) {
+      case "meta_crm":
+        return router.push("/integrations/meta-crm");
       case "meta":
       case "meta_leads":
       case "meta_capi":
