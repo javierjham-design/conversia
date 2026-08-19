@@ -432,6 +432,8 @@ export default function IntegrationsPage() {
         return setCatalogSource("woocommerce");
       case "jumpseller":
         return setCatalogSource("jumpseller");
+      case "fudo":
+        return setCatalogSource("fudo");
       default:
         return void notifyInterest(item.key);
     }

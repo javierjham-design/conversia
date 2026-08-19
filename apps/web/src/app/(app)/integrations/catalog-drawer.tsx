@@ -29,11 +29,20 @@ const HELP: Record<string, { title: string; steps: string[] }> = {
       "Pégalos aquí. Solo leemos tu catálogo; nunca modificamos tu tienda.",
     ],
   },
+  fudo: {
+    title: "Fudo",
+    steps: [
+      "Pídele a soporte de Fudo que habilite la API para tu cuenta.",
+      "En Fudo: Ajustes → API (o Integraciones). Genera y copia tu API Key y tu API Secret.",
+      "Pégalos aquí. Leemos tu menú (productos y secciones); nunca modificamos tu Fudo.",
+    ],
+  },
 };
 
 export function CatalogDrawer({ open, onClose, source, onChanged }: { open: boolean; onClose: () => void; source: string; onChanged: () => void }) {
   const toast = useToast();
   const isJumpseller = source === "jumpseller";
+  const isFudo = source === "fudo";
   const [status, setStatus] = useState<CatalogStatus | null>(null);
   // WooCommerce
   const [baseUrl, setBaseUrl] = useState("");
@@ -42,6 +51,9 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   // Jumpseller
   const [login, setLogin] = useState("");
   const [authtoken, setAuthtoken] = useState("");
+  // Fudo
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; count?: number | null; error?: string } | null>(null);
@@ -56,8 +68,8 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
   const inputCls = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
 
   // ¿Están completos los campos del proveedor activo?
-  const filled = isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
-  const payload = () => (isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
+  const filled = isFudo ? !!apiKey && !!apiSecret : isJumpseller ? !!login && !!authtoken : !!baseUrl && !!consumerKey && !!consumerSecret;
+  const payload = () => (isFudo ? { source, apiKey, apiSecret } : isJumpseller ? { source, login, authtoken } : { source, baseUrl, consumerKey, consumerSecret });
 
   async function test() {
     setTesting(true); setTestResult(null);
@@ -70,7 +82,7 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
     try {
       await api("/integrations/catalog/connect", { method: "POST", body: JSON.stringify(payload()) });
       toast.push("Conectado ✔ — sincronizando tu catálogo…", "ok");
-      setConsumerKey(""); setConsumerSecret(""); setAuthtoken("");
+      setConsumerKey(""); setConsumerSecret(""); setAuthtoken(""); setApiSecret("");
       onChanged(); await load();
     } catch (e) { toast.push((e as Error).message, "error"); } finally { setSaving(false); }
   }
@@ -97,7 +109,16 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
         <ol className="mt-1 list-decimal space-y-0.5 pl-4">{help.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
       </div>
 
-      {isJumpseller ? (
+      {isFudo ? (
+        <>
+          <label className="mt-4 block text-sm">API Key
+            <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="tu API Key de Fudo" className={inputCls} autoComplete="off" />
+          </label>
+          <label className="mt-3 block text-sm">API Secret
+            <input type="password" value={apiSecret} onChange={(e) => setApiSecret(e.target.value)} placeholder="••••••••" className={inputCls} autoComplete="off" />
+          </label>
+        </>
+      ) : isJumpseller ? (
         <>
           <label className="mt-4 block text-sm">Login
             <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="tu-login" className={inputCls} autoComplete="off" />

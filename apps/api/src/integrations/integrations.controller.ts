@@ -68,6 +68,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 const CATALOG_CONNECT_SCHEMA = z.discriminatedUnion("source", [
   z.object({ source: z.literal("woocommerce"), baseUrl: z.string().url(), consumerKey: z.string().min(4), consumerSecret: z.string().min(4) }),
   z.object({ source: z.literal("jumpseller"), login: z.string().min(2), authtoken: z.string().min(8) }),
+  z.object({ source: z.literal("fudo"), apiKey: z.string().min(4), apiSecret: z.string().min(4) }),
 ]);
 
 function assertUrlAllowed(url: string) {
@@ -279,7 +280,7 @@ export class IntegrationsController {
           { key: "shopify", name: "Shopify", category: "comercio", status: "proximamente", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
           { key: "jumpseller", name: "Jumpseller", category: "comercio", status: "beta", description: "Tu catálogo de Jumpseller (muy usado en Chile) conectado al bot.", capabilities: ["Productos", "Precios", "Stock"] },
           { key: "bsale", name: "Bsale", category: "comercio", status: "proximamente", description: "Productos y stock de Bsale para cotizar y vender con datos reales.", capabilities: ["Productos", "Stock", "Precios"] },
-          { key: "fudo", name: "Fudo", category: "comercio", status: "proximamente", description: "El menú de tu restaurante en Fudo (secciones, productos, modificadores y disponibilidad) para que el bot tome pedidos.", capabilities: ["Menú", "Modificadores", "Disponibilidad"] },
+          { key: "fudo", name: "Fudo", category: "comercio", status: "beta", description: "El menú de tu restaurante en Fudo (secciones, productos y disponibilidad) para que el bot venda con datos reales.", capabilities: ["Menú", "Secciones", "Disponibilidad"] },
           { key: "catalog_csv", name: "Importar por CSV", category: "comercio", status: "proximamente", description: "¿Sin tienda conectada? Sube tu catálogo por planilla con una plantilla y mapeo de columnas.", capabilities: ["Plantilla", "Mapeo", "Manual"] },
         ],
       };
@@ -784,15 +785,31 @@ export class IntegrationsController {
         const total = Number(res.headers.get("x-wp-total"));
         return { ok: true, count: Number.isFinite(total) ? total : null };
       }
-      // jumpseller (host fijo de la API central; no requiere validateOutboundUrl)
-      const u = new URL("https://api.jumpseller.com/v1/products/count.json");
-      u.searchParams.set("login", input.login);
-      u.searchParams.set("authtoken", input.authtoken);
-      const res = await fetch(u.toString(), { headers: { accept: "application/json" } });
+      if (input.source === "jumpseller") {
+        // host fijo de la API central; no requiere validateOutboundUrl
+        const u = new URL("https://api.jumpseller.com/v1/products/count.json");
+        u.searchParams.set("login", input.login);
+        u.searchParams.set("authtoken", input.authtoken);
+        const res = await fetch(u.toString(), { headers: { accept: "application/json" } });
+        if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+        const json = (await res.json()) as { count?: number };
+        const count = Number(json?.count);
+        return { ok: true, count: Number.isFinite(count) ? count : null };
+      }
+      // fudo: intercambia apiKey/apiSecret por token y consulta el menú
+      const auth = await fetch("https://auth.fu.do/api", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ apiKey: input.apiKey, apiSecret: input.apiSecret }),
+      });
+      if (!auth.ok) return { ok: false, error: `Auth Fudo: HTTP ${auth.status}` };
+      const token = ((await auth.json()) as { token?: string })?.token;
+      if (!token) return { ok: false, error: "Fudo no devolvió token" };
+      const res = await fetch("https://api.fu.do/v1alpha1/products?page[size]=1", { headers: { authorization: `Bearer ${token}`, accept: "application/json" } });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-      const json = (await res.json()) as { count?: number };
-      const count = Number(json?.count);
-      return { ok: true, count: Number.isFinite(count) ? count : null };
+      const json = (await res.json()) as { data?: unknown[]; meta?: { totalCount?: number; count?: number } };
+      const count = Number(json?.meta?.totalCount ?? json?.meta?.count);
+      return { ok: true, count: Number.isFinite(count) ? count : Array.isArray(json?.data) ? json!.data!.length : null };
     } catch (e) {
       return { ok: false, error: (e as Error).message.slice(0, 200) };
     }
@@ -810,8 +827,11 @@ export class IntegrationsController {
       await validateOutboundUrl(input.baseUrl);
       creds = { consumerKey: input.consumerKey, consumerSecret: input.consumerSecret };
       config = { baseUrl: input.baseUrl.replace(/\/$/, "") };
-    } else {
+    } else if (input.source === "jumpseller") {
       creds = { login: input.login, authtoken: input.authtoken };
+      config = {};
+    } else {
+      creds = { apiKey: input.apiKey, apiSecret: input.apiSecret };
       config = {};
     }
     await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -831,7 +851,7 @@ export class IntegrationsController {
   @Post("catalog/sync")
   async catalogSync(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller"]), mode: z.enum(["full", "incremental"]).optional() }), body);
+    const input = parse(z.object({ source: z.enum(["woocommerce", "jumpseller", "fudo"]), mode: z.enum(["full", "incremental"]).optional() }), body);
     const conn = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.integrationConnection.findFirst({ where: { provider: `catalog_${input.source}` } }));
     if (!conn) throw new BadRequestException("Ese catálogo no está conectado");
     await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: input.mode ?? "full" } });
