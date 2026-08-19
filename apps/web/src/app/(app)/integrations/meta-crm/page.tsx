@@ -50,6 +50,27 @@ export default function MetaCrmPage() {
     void load();
   }, [load]);
 
+  // Retorno del OAuth "Conectar con Meta" (?oauth=connected|denied|permisos|error)
+  useEffect(() => {
+    const r = new URLSearchParams(window.location.search).get("oauth");
+    if (!r) return;
+    if (r === "connected") toast.push("Cuenta de Meta conectada ✔", "ok");
+    else if (r === "denied") toast.push("Conexión con Meta cancelada", "info");
+    else if (r === "permisos") toast.push("Faltaron permisos en la autorización — acepta todos los permisos solicitados", "error");
+    else toast.push("No se pudo conectar con Meta — intenta de nuevo", "error");
+    window.history.replaceState(null, "", "/integrations/meta-crm");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function connectWithMeta() {
+    try {
+      const r = await api<{ url: string }>("/integrations/meta-crm/oauth/authorize");
+      window.location.href = r.url;
+    } catch (e: any) {
+      toast.push(e.message ?? "OAuth no disponible — usa el token manual", "error");
+    }
+  }
+
   const connected = data?.connection?.status === "CONNECTED";
 
   return (
@@ -98,16 +119,26 @@ export default function MetaCrmPage() {
                 </div>
                 {connected ? (
                   <p className="text-[13px] text-ink-muted">
-                    Token activo con {data.connection!.scopes.length} permisos. Para rotarlo, pega uno nuevo abajo.
+                    Conexión activa ({data.connection!.mode === "OAUTH" ? "autorizada con Meta" : "token manual"}) con{" "}
+                    {data.connection!.scopes.length} permisos. Para renovarla, vuelve a conectar.
                   </p>
                 ) : (
                   <p className="text-[13px] text-ink-muted">
-                    Pega el token de <b>Usuario del Sistema generado bajo la app CRM</b> (no el de WhatsApp). Permisos
-                    mínimos: <code className="text-xs">pages_show_list</code> + <code className="text-xs">leads_retrieval</code>;
-                    recomendados además: <code className="text-xs">pages_manage_metadata</code>, <code className="text-xs">pages_manage_ads</code>.
+                    Autoriza tu cuenta de Meta con un clic — sin copiar tokens. Acepta todos los permisos del diálogo
+                    (páginas, leads y mensajería).
                   </p>
                 )}
-                <TokenConnect onConnected={() => void load()} />
+                <Button className="mt-3" onClick={() => void connectWithMeta()}>
+                  <Link2 size={14} /> {connected ? "Volver a conectar con Meta" : "Conectar con Meta"}
+                </Button>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-ink-subtle">Avanzado: conectar con token de Usuario del Sistema</summary>
+                  <p className="mt-2 text-[12px] text-ink-muted">
+                    Permisos mínimos: <code className="text-xs">pages_show_list</code> + <code className="text-xs">leads_retrieval</code>;
+                    recomendados: <code className="text-xs">pages_manage_metadata</code>, <code className="text-xs">pages_manage_ads</code>, mensajería.
+                  </p>
+                  <TokenConnect onConnected={() => void load()} />
+                </details>
               </div>
 
               {/* Páginas */}

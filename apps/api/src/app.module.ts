@@ -19,7 +19,7 @@ import { HealthController } from "./health.controller";
 import { DevelopersController } from "./integrations/developers.controller";
 import { InboundHookController } from "./integrations/inbound-hook.controller";
 import { CatalogWebhookController } from "./integrations/catalog-webhook.controller";
-import { MetaCrmController } from "./integrations/meta-crm.controller";
+import { MetaCrmController, MetaCrmOauthCallbackController } from "./integrations/meta-crm.controller";
 import { MetaCrmWebhookController } from "./integrations/meta-crm-webhook.controller";
 import { IntegrationsController } from "./integrations/integrations.controller";
 import { MetaController } from "./integrations/meta.controller";
@@ -71,6 +71,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     IntegrationsController,
     MetaController,
     MetaCrmController, // integración Meta CRM (Lead Ads) — conexión separada por tenant
+    MetaCrmOauthCallbackController, // callback público del "Conectar con Meta" del CRM
     OAuthController, // OAuth por tenant (Google/HubSpot); callback en /public/oauth
     DevelopersController,
     InboundHookController,
