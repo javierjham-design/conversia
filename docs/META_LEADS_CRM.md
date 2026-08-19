@@ -44,11 +44,35 @@ conexión: listar páginas del Business, registrar página + formularios como
 (`{page}/subscribed_apps` con `leadgen`, token de página derivado). Todo desde
 el panel, sin pasos manuales en Graph Explorer.
 
-**Producción TuBot (operacional):** suscripción app-level `page/leadgen` al
-webhook existente (`/webhooks/whatsapp`, ya parsea leadgen y verifica firma) —
-se hace vía MCP devtools; luego, desde el panel del tenant TuBot: cargar token
-de Usuario del Sistema, conectar la página, elegir formularios, configurar
-dataset + reglas por etapa.
+**Producción TuBot (operacional) — DECISIÓN 2026-08-19: app de Meta SEPARADA
+«TuBot CRM»** (patrón Cláriva CRM: la app de WhatsApp y la app de CRM son
+distintas). La plataforma soporta ambas a la vez:
+
+- **Webhook dedicado**: `POST /webhooks/meta-crm` (topic `page`, campo
+  `leadgen`) con `META_CRM_APP_SECRET` + `META_CRM_VERIFY_TOKEN` propios; el
+  payload entra al MISMO pipeline inbound. Sin esas envs cae a las de la app
+  principal (setup de una sola app sigue funcionando).
+- **`appsecret_proof` multi-app**: `fetchGraphWithProof` (config) prueba el
+  secret de la app principal y, si Graph acusa proof inválido, reintenta con el
+  de TuBot CRM (cachea el ganador por token). Aplica a lectura de leads,
+  envío CAPI, inspección de tokens y setup de páginas.
+
+Checklist de alta de la app TuBot CRM (usuario):
+1. developers.facebook.com → Crear app (tipo Negocio) «TuBot CRM» en el
+   portafolio TuBot. Copiar App ID + App Secret.
+2. Railway (api + worker): `META_CRM_APP_SECRET` = secret de la app;
+   `META_CRM_VERIFY_TOKEN` = valor nuevo cualquiera (p. ej. UUID).
+3. Webhooks de la app: suscribir topic `page`, campo `leadgen`, callback
+   `https://api-production-cf8e.up.railway.app/webhooks/meta-crm`, verify token
+   = el mismo `META_CRM_VERIFY_TOKEN` (o vía MCP `devtools_webhook_manage`
+   cuando la app esté concedida al MCP).
+4. Business Manager: Usuario del Sistema con la página asignada → generar token
+   BAJO LA APP TuBot CRM (scopes `pages_show_list`, `pages_manage_metadata`,
+   `leads_retrieval`, `pages_read_engagement`, `business_management`; para la
+   página propia basta acceso estándar) → cargarlo en el panel del tenant
+   (Centro Meta → token) y **Conectar la página** en Lead Ads.
+5. Conversions API: dataset + reglas por etapa (el dataset puede vivir en
+   cualquiera de las dos apps; el envío usa el token del tenant).
 
 ## Decisiones
 
