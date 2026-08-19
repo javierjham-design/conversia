@@ -24,7 +24,7 @@ import {
   cn,
   useToast,
 } from "@/components/ui";
-import { EventMappingEditor, FieldMappingEditor, MetaWizard, PermissionChecklist } from "./panels";
+import { EventMappingEditor, FieldMappingEditor, LeadAdsPagesPanel, MetaWizard, PermissionChecklist } from "./panels";
 
 interface Asset {
   id: string;
@@ -246,6 +246,9 @@ export default function MetaCenterPage() {
                     <FieldMappingEditor initial={data.leadMapping} leadStatuses={leadStatuses} onSaved={() => void load()} />
                   </div>
                   <div className="space-y-4">
+                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+                      <LeadAdsPagesPanel onConnected={() => void load()} />
+                    </div>
                     <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Probar recepción</h2>
                       <p className="mb-3 text-[13px] text-ink-muted">
