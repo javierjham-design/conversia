@@ -59,7 +59,7 @@ export function OrgSwitcher({ currentName }: { currentName?: string | null }) {
           <Building2 size={14} className="shrink-0 text-accent-400" />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-[13px] font-medium text-white">{name}</p>
-            <p className="text-[10px] uppercase tracking-wide text-navy-300">Entorno piloto</p>
+            <p className="text-[10px] uppercase tracking-wide text-navy-300">Organización</p>
           </div>
         </div>
       </div>
