@@ -67,6 +67,10 @@ export async function withTenant<T>(
   orgId: string,
   fn: (tx: TenantTx) => Promise<T>,
   client: PrismaClient = getPrisma(),
+  // Solo para jobs de LOTE (p. ej. import de contactos): el default de 5 s de
+  // Prisma se mantiene para todo el resto — es una red sana contra
+  // transacciones largas accidentales.
+  options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
   if (!orgId || typeof orgId !== "string") {
     throw new Error("withTenant: organizationId requerido");
@@ -74,7 +78,7 @@ export async function withTenant<T>(
   return client.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT set_config('app.org_id', ${orgId}, true)`;
     return fn(tx);
-  });
+  }, options);
 }
 
 /** Registra un evento de consumo (tokens, mensajes, ejecuciones) del tenant. */

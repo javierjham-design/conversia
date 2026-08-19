@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-19 — fix: import de contactos ya no muere por timeout de transacción
+
+Bug real (Digital-Dent, 3.763 filas de Respond.io): cada lote de 200 filas corría
+en UNA transacción interactiva con el default de 5 s de Prisma, y el bucle por
+fila releía etapas y definiciones de campos (~11 consultas/fila ≈ 10 filas/s) →
+con >50 filas la transacción expiraba y el import fallaba entero sin escribir.
+Fix en `apps/worker/src/contact-import.ts`: lecturas invariantes UNA vez por job
+(withTenant corto), lotes de 50 con `{ timeout: 30 s, maxWait: 10 s }` (nuevo
+parámetro opcional de `withTenant` que pasa opciones a `$transaction` SIN cambiar
+el default global), y un lote fallido registra su rango en `errors` y el import
+continúa (created/updated/skipped/errors reales). Test de regresión con 320 filas
++ lote fallido aislado (2 tests). Sin cambios de semántica: dedupe por teléfono,
+updateExisting solo rellena vacíos, y el import sigue SIN disparar `tag_added`.
+
 ## [0.1.0] — 2026-07-25
 
 Fundación del proyecto: monorepo, esquema multi-tenant con RLS, auth+tenancy, pipeline WhatsApp E2E (mock/real), capa de agentes IA con tools y orquestador, motor de workflows v0 con timers persistentes, proveedores de agenda (mock + cliente Cláriva + servidor mock del contrato), panel web v0 (login + bandeja con control humano), seeds de 2 tenants (Digital Dent + demo), documentación completa y CI. Detalle en docs/PROGRESS.md.
