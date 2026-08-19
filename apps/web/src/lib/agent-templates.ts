@@ -75,6 +75,25 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     },
   },
   {
+    key: "vendedor",
+    emoji: "🛍️",
+    name: "Vendedor (catálogo)",
+    kind: "ventas",
+    description: "Ofrece tus productos con precio y stock reales desde tu catálogo y manda el enlace de compra.",
+    systemPrompt:
+      `Eres {{agent.name}}, del equipo de ventas de {{organization.name}}. ${BASE_STYLE}\n\n` +
+      `Ayuda a {{contact.firstName}} a encontrar lo que busca en el catálogo, responde con precio y disponibilidad REALES ` +
+      `(nunca inventes productos ni precios), recomienda alternativas si algo está agotado y envía el enlace de compra. ` +
+      `Toma sus datos para el seguimiento y deriva a una persona si el caso lo requiere.`,
+    actions: {
+      catalog: { enabled: true, instructions: "Cuando pregunten por un producto, búscalo en el catálogo y responde con precio y disponibilidad reales; si está agotado ofrece alternativas; manda el enlace para comprar. Confirma con naturalidad si el dato tiene algunas horas." },
+      lifecycle: { enabled: true, instructions: "Marca 'Caliente' cuando muestre intención real de compra." },
+      contactFields: { enabled: true, instructions: "Captura nombre y email para el seguimiento y el despacho." },
+      tags: { enabled: true, instructions: "Etiqueta el producto o la categoría de interés." },
+      assign: { enabled: true, instructions: "Deriva a una persona para casos especiales (mayoristas, pedidos grandes o reclamos)." },
+    },
+  },
+  {
     key: "soporte",
     emoji: "🛟",
     name: "Soporte y atención",
