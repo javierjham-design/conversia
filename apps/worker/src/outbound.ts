@@ -16,11 +16,25 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       where: { id: message.conversationId },
       include: { contact: true },
     });
-    if (!conversation?.contact.phone) return null;
-    return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
+    if (!conversation) return null;
+    return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId, conversationId: conversation.id };
   });
 
   if (!data) return;
+
+  // Contacto sin teléfono → canal de redes (Messenger/IG): envío por página.
+  if (!data.phone) {
+    const { trySendMessagingReply } = await import("./messaging-send.js");
+    const handled = await trySendMessagingReply(organizationId, data.conversationId, data.message.id, data.message.body ?? "");
+    if (!handled) {
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: "Contacto sin teléfono ni canal de mensajería" } }),
+      );
+    }
+    const { publishRealtime } = await import("./realtime.js");
+    await publishRealtime(organizationId, { type: "message.updated", conversationId: data.conversationId });
+    return;
+  }
   const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId });
 
   // Plantilla HSM (fuera de la ventana de 24 h): parámetros resueltos con los
