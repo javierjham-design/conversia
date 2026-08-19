@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { Button, Drawer, useToast } from "@/components/ui";
 
 interface CatalogStatus {
-  connections: Array<{ source: string; status: string; baseUrl: string | null; lastSyncAt: string | null; lastError: string | null }>;
+  connections: Array<{ source: string; status: string; baseUrl: string | null; lastSyncAt: string | null; lastError: string | null; webhookUrl: string | null }>;
   lastRuns: Array<{ source: string; status: string; created: number; updated: number; deactivated: number; failed: number; startedAt: string; finishedAt: string | null }>;
   totalItems: number;
 }
@@ -53,6 +53,15 @@ const HELP: Record<string, { title: string; steps: string[] }> = {
       "Pégalo aquí. Tomamos precios de tu lista por defecto y el stock sumado de tus sucursales.",
     ],
   },
+};
+
+/** Dónde pega el cliente la URL de webhook en cada proveedor (tiempo real). */
+const WEBHOOK_HINTS: Record<string, string> = {
+  woocommerce: "En WooCommerce: Ajustes → Avanzado → Webhooks → Añadir webhook, tema «Producto actualizado» (repite para creado/eliminado), y pega esta URL de entrega.",
+  jumpseller: "En Jumpseller: Configuración → Notificaciones/Webhooks, evento de producto, y pega esta URL.",
+  shopify: "En Shopify: Configuración → Notificaciones → Webhooks, evento «Actualización de producto», y pega esta URL.",
+  bsale: "En Bsale: Configuración → Webhooks/Notificaciones, tópico de productos, y pega esta URL.",
+  fudo: "En Fudo: pídele a soporte activar notificaciones de productos hacia esta URL.",
 };
 
 export function CatalogDrawer({ open, onClose, source, onChanged }: { open: boolean; onClose: () => void; source: string; onChanged: () => void }) {
@@ -122,6 +131,18 @@ export function CatalogDrawer({ open, onClose, source, onChanged }: { open: bool
           {conn.lastError && <p className="mt-1 text-red-600">{conn.lastError}</p>}
           {status?.lastRuns[0] && <p className="mt-1 text-ink-subtle">Última corrida: {status.lastRuns[0].created} nuevos, {status.lastRuns[0].updated} actualizados, {status.lastRuns[0].deactivated} sin stock{status.lastRuns[0].failed ? `, ${status.lastRuns[0].failed} con error` : ""}.</p>}
           <Button className="mt-2" variant="secondary" onClick={() => void syncNow()}>Sincronizar ahora</Button>
+
+          {conn.webhookUrl && (
+            <div className="mt-3 border-t border-line pt-2">
+              <p className="font-medium text-ink">Actualización en tiempo real (opcional)</p>
+              <p className="mt-0.5 text-ink-subtle">{WEBHOOK_HINTS[source] ?? "Pega esta URL en la sección de webhooks de tu proveedor (eventos de productos) para que los cambios lleguen al instante."}</p>
+              <div className="mt-1 flex items-center gap-1">
+                <input readOnly value={conn.webhookUrl} className="flex-1 rounded border border-line-strong bg-panel px-2 py-1 font-mono text-[11px] text-ink-muted" onFocus={(e) => e.currentTarget.select()} />
+                <button onClick={() => { void navigator.clipboard.writeText(conn.webhookUrl!); toast.push("URL copiada", "ok"); }} className="rounded border border-line-strong px-2 py-1 text-[11px] hover:bg-panel">Copiar</button>
+              </div>
+              <p className="mt-1 text-ink-subtle">Si no lo configuras, igual sincronizamos tu catálogo automáticamente cada pocas horas.</p>
+            </div>
+          )}
         </div>
       )}
 

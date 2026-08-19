@@ -876,8 +876,11 @@ export class IntegrationsController {
         data: { organizationId: ctx.organizationId, provider, label: `Credenciales ${input.source}`, ciphertext: encryptSecret(JSON.stringify(creds)) },
       });
       const existing = await tx.integrationConnection.findFirst({ where: { provider } });
-      if (existing) await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, credentialId: credential.id, status: "active", lastError: null } });
-      else await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider, config, credentialId: credential.id } });
+      // Token de webhook (tiempo real capa 1): estable entre reconexiones para no invalidar la URL.
+      const prevToken = (existing?.config as { webhookToken?: string } | null)?.webhookToken;
+      const cfg = { ...config, webhookToken: prevToken ?? randomBytes(24).toString("base64url") };
+      if (existing) await tx.integrationConnection.update({ where: { id: existing.id }, data: { config: cfg, credentialId: credential.id, status: "active", lastError: null } });
+      else await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider, config: cfg, credentialId: credential.id } });
       await tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.catalog_connect", entityType: "integration_connection", after: { source: input.source } } });
     });
     await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_sync", payload: { source: input.source, mode: "full" } });
@@ -905,8 +908,20 @@ export class IntegrationsController {
         tx.catalogSyncRun.findMany({ orderBy: { startedAt: "desc" }, take: 5 }),
         tx.catalogItem.count({ where: { active: true } }),
       ]);
+      const apiUrl = getEnv().API_URL.replace(/\/$/, "");
       return {
-        connections: conns.map((c) => ({ source: c.provider.replace("catalog_", ""), status: c.status, baseUrl: (c.config as any)?.baseUrl ?? null, lastSyncAt: c.lastSyncAt, lastError: c.lastError })),
+        connections: conns.map((c) => {
+          const cfg = (c.config as { baseUrl?: string; webhookToken?: string } | null) ?? {};
+          return {
+            source: c.provider.replace("catalog_", ""),
+            status: c.status,
+            baseUrl: cfg.baseUrl ?? null,
+            lastSyncAt: c.lastSyncAt,
+            lastError: c.lastError,
+            // URL de webhook (tiempo real): el cliente la pega en su proveedor para actualizaciones al instante.
+            webhookUrl: cfg.webhookToken ? `${apiUrl}/hooks/catalog/${cfg.webhookToken}` : null,
+          };
+        }),
         lastRuns: runs.map((r) => ({ source: r.source, mode: r.mode, status: r.status, created: r.created, updated: r.updated, deactivated: r.deactivated, failed: r.failed, startedAt: r.startedAt, finishedAt: r.finishedAt })),
         totalItems,
       };
