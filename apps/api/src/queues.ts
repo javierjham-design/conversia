@@ -45,10 +45,14 @@ export class QueueService implements OnModuleDestroy {
 
   /** Corre un turno del agente de IA para una conversación (p. ej. tras una indicación). */
   async enqueueAgentTurn(job: AgentTurnJob): Promise<void> {
-    // jobId por conversación: coalesce disparos casi simultáneos (asignar + indicar)
-    // para no responder dos veces. Al completar se remueve, así un turno posterior sí corre.
+    // jobId por conversación EN VENTANA DE 5s: coalesce disparos casi simultáneos
+    // (asignar + indicar) sin responder dos veces. OJO: el jobId fijo anterior
+    // (`turn:<convId>`) se ENVENENABA — un turno fallido quedaba retenido en la
+    // cola de fallidos con ese id y BullMQ ignoraba en silencio TODOS los
+    // encolados futuros de esa conversación ("devolver a la IA" mudo en prod).
+    const bucket = Math.floor(Date.now() / 5000);
     await this.agentTurn.add("turn", job, {
-      jobId: `turn:${job.conversationId}`,
+      jobId: `turn:${job.conversationId}:${bucket}`,
       attempts: 2,
       backoff: { type: "fixed", delay: 3000 },
       removeOnComplete: true,
