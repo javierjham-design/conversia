@@ -1,6 +1,6 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
-import { decryptCredential } from "./credentials";
+import { resolveMetaLeadToken } from "./meta-token";
 import { dispatchEvent } from "./workflow-runtime";
 import { emitPlatformEvent } from "./platform-events";
 
@@ -37,14 +37,8 @@ interface GraphLead {
 /** Obtiene el lead completo desde Graph (campos + atribución de campaña). */
 async function fetchLeadFromGraph(organizationId: string, leadgenId: string): Promise<GraphLead | null> {
   const env = getEnv();
-  const token = await withTenant(organizationId, async (tx) => {
-    const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId } });
-    if (connection?.credentialId) {
-      const cred = await tx.integrationCredential.findUnique({ where: { id: connection.credentialId } });
-      if (cred) return decryptCredential(cred.ciphertext);
-    }
-    return env.META_ACCESS_TOKEN || null;
-  });
+  // Prefiere el token de la conexión Meta CRM del tenant (app separada).
+  const token = await resolveMetaLeadToken(organizationId);
   if (!token) return null;
   // Con dos apps (principal + TuBot CRM) el proof se resuelve con fallback.
   const res = await fetchGraphWithProof(

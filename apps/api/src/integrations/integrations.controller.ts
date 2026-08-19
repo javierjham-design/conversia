@@ -98,6 +98,7 @@ export class IntegrationsController {
         tx.integrationEvent.findFirst({ orderBy: { createdAt: "desc" } }),
         tx.integrationConnection.findUnique({ where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "email" } } }),
       ]);
+      const metaCrm = await tx.metaCrmConnection.findUnique({ where: { organizationId: ctx.organizationId } });
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
@@ -150,6 +151,10 @@ export class IntegrationsController {
         },
         meta: meta
           ? { status: meta.status, mode: meta.mode, businessName: meta.businessName, lastError: meta.lastError }
+          : null,
+        // Integración SEPARADA: CRM de Lead Ads (app Meta propia, token propio)
+        metaCrm: metaCrm
+          ? { status: metaCrm.status, mode: metaCrm.mode, businessName: metaCrm.businessName, lastError: metaCrm.lastError }
           : null,
         clariva: scheduling
           ? {
@@ -245,6 +250,7 @@ export class IntegrationsController {
         catalog: [
           { key: "meta", name: "Meta Business Suite", category: "meta", status: "disponible", description: "WhatsApp, Lead Ads, Conversions API, Messenger e Instagram desde una sola conexión.", capabilities: ["WhatsApp Cloud", "Lead Ads", "Conversions API"] },
           { key: "whatsapp", name: "WhatsApp Cloud API", category: "meta", status: "disponible", description: "Recibe y responde mensajes con agentes IA en tu número oficial.", capabilities: ["Mensajes", "Plantillas", "Multi-número"] },
+          { key: "meta_crm", name: "Meta CRM (Lead Ads)", category: "meta", status: "disponible", description: "Leads de formularios directo al CRM y calidad del embudo de vuelta a tus campañas (dataset). Conexión propia, separada de la de WhatsApp/anuncios.", capabilities: ["Formularios → CRM", "lead_id al dataset", "Páginas y formularios"] },
           { key: "meta_leads", name: "Meta Lead Ads", category: "meta", status: "beta", description: "Convierte formularios instantáneos en leads con seguimiento automático.", capabilities: ["Formularios", "Mapeo de campos", "Workflows"] },
           { key: "meta_capi", name: "Meta Conversions API", category: "meta", status: "beta", description: "Devuelve conversiones reales (citas, tratamientos) a tus campañas.", capabilities: ["Eventos", "Deduplicación", "Test events"] },
           { key: "instagram", name: "Instagram Direct", category: "meta", status: "proximamente", description: "Atiende los DM de Instagram con los mismos agentes.", capabilities: ["Mensajes"] },

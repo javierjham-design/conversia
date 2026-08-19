@@ -67,12 +67,14 @@ Checklist de alta de la app TuBot CRM (usuario):
    = el mismo `META_CRM_VERIFY_TOKEN` (o vía MCP `devtools_webhook_manage`
    cuando la app esté concedida al MCP).
 4. Business Manager: Usuario del Sistema con la página asignada → generar token
-   BAJO LA APP TuBot CRM (scopes `pages_show_list`, `pages_manage_metadata`,
-   `leads_retrieval`, `pages_read_engagement`, `business_management`; para la
-   página propia basta acceso estándar) → cargarlo en el panel del tenant
-   (Centro Meta → token) y **Conectar la página** en Lead Ads.
-5. Conversions API: dataset + reglas por etapa (el dataset puede vivir en
-   cualquiera de las dos apps; el envío usa el token del tenant).
+   BAJO LA APP TuBot CRM (scopes `pages_show_list`, `leads_retrieval` +
+   recomendados `pages_manage_metadata`, `pages_manage_ads`,
+   `pages_read_engagement`, `business_management`; para la página propia basta
+   acceso estándar) → cargarlo en **Integraciones → Meta CRM (Lead Ads)**
+   (integración SEPARADA, tabla `meta_crm_connections` — NO pisa la conexión
+   Meta general de ads/CAPI) y **Conectar la página** ahí mismo.
+5. Conversions API: dataset + reglas por etapa (pestaña del Centro Meta); el
+   envío usa automáticamente el token CRM cuando existe (fallback al general).
 
 ## Decisiones
 

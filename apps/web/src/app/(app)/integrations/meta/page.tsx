@@ -24,7 +24,7 @@ import {
   cn,
   useToast,
 } from "@/components/ui";
-import { EventMappingEditor, FieldMappingEditor, LeadAdsPagesPanel, MetaWizard, PermissionChecklist } from "./panels";
+import { EventMappingEditor, FieldMappingEditor, MetaWizard, PermissionChecklist } from "./panels";
 
 interface Asset {
   id: string;
@@ -246,8 +246,15 @@ export default function MetaCenterPage() {
                     <FieldMappingEditor initial={data.leadMapping} leadStatuses={leadStatuses} onSaved={() => void load()} />
                   </div>
                   <div className="space-y-4">
-                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-                      <LeadAdsPagesPanel onConnected={() => void load()} />
+                    <div className="rounded-card border border-brand-200 bg-brand-50/40 p-5 shadow-card dark:border-brand-900 dark:bg-brand-950/20">
+                      <h2 className="mb-1 font-semibold">Conexión de páginas → Meta CRM</h2>
+                      <p className="mb-3 text-[13px] text-ink-muted">
+                        La conexión de páginas y formularios ahora vive en la integración <b>Meta CRM (Lead Ads)</b>,
+                        separada de esta conexión (usa su propia app y token — no interfiere con WhatsApp ni anuncios).
+                      </p>
+                      <a href="/integrations/meta-crm" className="text-sm font-medium text-brand-600 hover:underline">
+                        Ir a Meta CRM →
+                      </a>
                     </div>
                     <div className="rounded-card border border-line bg-panel p-5 shadow-card">
                       <h2 className="mb-2 font-semibold">Probar recepción</h2>

@@ -1586,6 +1586,26 @@ model MetaBusinessConnection {
   @@map("meta_business_connections")
 }
 
+// Conexión SEPARADA para el CRM de Lead Ads (app de Meta "TuBot CRM"):
+// token propio por tenant, independiente de la conexión Meta general
+// (ads/CAPI/WhatsApp) para no pisarla ni romperla.
+model MetaCrmConnection {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  status         String   @default("CONNECTED") // CONNECTED | ERROR | DISCONNECTED
+  mode           String   @default("MANUAL") // MANUAL (token) | OAUTH (Conectar con Meta)
+  businessName   String?  @map("business_name")
+  appScopes      Json     @default("[]") @map("app_scopes")
+  credentialId   String?  @map("credential_id")
+  connectedById  String?  @map("connected_by_id")
+  lastError      String?  @map("last_error")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId])
+  @@map("meta_crm_connections")
+}
+
 // Activos de Meta del tenant: páginas, ad accounts, WABA, números,
 // instagram, datasets y formularios de Lead Ads (kind=lead_form).
 model MetaAsset {
