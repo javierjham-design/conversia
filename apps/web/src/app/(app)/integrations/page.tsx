@@ -430,6 +430,8 @@ export default function IntegrationsPage() {
         return setAutomationOpen(item.key);
       case "woocommerce":
         return setCatalogSource("woocommerce");
+      case "jumpseller":
+        return setCatalogSource("jumpseller");
       default:
         return void notifyInterest(item.key);
     }

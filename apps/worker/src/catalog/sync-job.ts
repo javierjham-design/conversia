@@ -6,6 +6,7 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { decryptCredential } from "../credentials";
 import { WooCommerceAdapter } from "./woocommerce";
+import { JumpsellerAdapter } from "./jumpseller";
 import { createDbCatalogPort } from "./db-port";
 import { runCatalogSync } from "./sync-engine";
 import type { CatalogAdapter } from "./types";
@@ -19,7 +20,9 @@ function buildAdapter(source: string, config: Record<string, unknown>, creds: Re
   switch (source) {
     case "woocommerce":
       return new WooCommerceAdapter({ baseUrl: String(config.baseUrl ?? ""), auth: creds, currency });
-    // TODO: shopify, jumpseller, bsale, fudo…
+    case "jumpseller":
+      return new JumpsellerAdapter({ baseUrl: "", auth: creds, currency });
+    // TODO: shopify, bsale, fudo…
     default:
       throw new Error(`Proveedor de catálogo no soportado: ${source}`);
   }
