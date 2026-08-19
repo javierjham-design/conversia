@@ -41,6 +41,7 @@ function sandboxCatalogHit(c: any) {
     currency: c.currency, available: c.available, stock: c.stock ?? null, category: c.category ?? null,
     description: c.botDescription || c.description || null,
     variants: Array.isArray(c.variants) ? c.variants : [], productUrl: c.productUrl ?? null, buyUrl: c.buyUrl ?? null,
+    syncedAt: c.syncedAt ? new Date(c.syncedAt).toISOString() : null,
   };
 }
 

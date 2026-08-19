@@ -27,6 +27,7 @@ export interface CatalogHit {
   variants: unknown[];
   productUrl: string | null;
   buyUrl: string | null;
+  syncedAt?: string | null; // cuándo se sincronizó por última vez desde la tienda (frescura)
 }
 
 export interface ToolServices {
@@ -322,7 +323,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "verProducto",
       description:
-        "Trae el detalle de un producto/plato por su nombre, SKU o código: precio, precio antes de descuento, descripción, variantes/modificadores, disponibilidad, stock y enlace de compra. Úsalo antes de confirmarle un precio o disponibilidad al cliente.",
+        "Trae el detalle de un producto/plato por su nombre, SKU o código: precio, precio antes de descuento, descripción, variantes/modificadores, disponibilidad, stock y enlace de compra. Úsalo antes de confirmarle un precio o disponibilidad al cliente. El campo syncedAt indica cuándo se sincronizó desde la tienda: si es reciente, afirma con seguridad; si tiene varias horas, confírmalo con naturalidad ('según lo último que tengo…').",
       inputSchema: z.object({ idOrSku: z.string() }),
       async execute(ctx, input: { idOrSku: string }) {
         const item = await services(ctx).getCatalogItem(input.idOrSku);
