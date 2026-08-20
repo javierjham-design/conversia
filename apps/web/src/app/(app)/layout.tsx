@@ -113,8 +113,8 @@ function NotificationsBell() {
   async function activatePush() {
     const toast = (window as any);
     const res = await enablePush();
-    if (res === "granted") setPushCta("hidden");
-    else if (res === "denied") {
+    if (res.status === "granted") setPushCta("hidden");
+    else if (res.status === "denied") {
       setPushCta("hidden");
       localStorage.setItem("pushCtaDismissed", "1");
     }

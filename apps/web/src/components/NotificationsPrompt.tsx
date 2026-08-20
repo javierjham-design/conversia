@@ -35,10 +35,10 @@ export function NotificationsPrompt() {
     const r = await enablePush();
     setBusy(false);
     setShow(false);
-    if (r === "granted") toast.push("Notificaciones activadas ✔", "ok");
-    else if (r === "denied") toast.push("Quedaron bloqueadas. Puedes habilitarlas en los permisos del navegador (candado junto a la URL).", "error");
-    else if (r === "unsupported") toast.push("Este dispositivo no puede recibir notificaciones todavía.", "info");
-    else toast.push("No se pudo activar. Prueba desde Ajustes → Notificaciones.", "error");
+    if (r.status === "granted") toast.push("Notificaciones activadas ✔", "ok");
+    else if (r.status === "denied") toast.push("Quedaron bloqueadas. Puedes habilitarlas en los permisos del navegador (candado junto a la URL).", "error");
+    else if (r.status === "unsupported") toast.push(r.detail ?? "Este dispositivo no puede recibir notificaciones todavía.", "info");
+    else toast.push(`No se pudo activar${r.detail ? `: ${r.detail}` : ". Prueba desde Ajustes → Notificaciones."}`, "error");
   }
   function notNow() { sessionStorage.setItem(SNOOZE, "1"); setShow(false); }
   function never() { localStorage.setItem(NEVER, "1"); setShow(false); }
