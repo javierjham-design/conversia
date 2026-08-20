@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
+import { InstagramIcon, MessengerIcon, TikTokIcon, WhatsAppIcon } from "@/components/brand-icons";
 import { TemplatesPanel } from "./templates-panel";
 
 interface Channel {
@@ -317,7 +318,7 @@ export default function ChannelsPage() {
     key: string;
     label: string;
     desc: string;
-    emoji: string;
+    icon: ReactNode;
     chip: string;
     connected: boolean;
     count: number;
@@ -327,8 +328,8 @@ export default function ChannelsPage() {
       key: "whatsapp",
       label: "WhatsApp",
       desc: "Meta Cloud API",
-      emoji: "📱",
-      chip: "bg-[#25D366]",
+      icon: <WhatsAppIcon size={20} />,
+      chip: "bg-[#25D366] text-white",
       connected: hasActive("WHATSAPP_CLOUD"),
       count: countOf("WHATSAPP_CLOUD"),
       action: { label: hasActive("WHATSAPP_CLOUD") ? "Conectar otro número" : "Conectar con Meta", run: () => void connectWithMeta() },
@@ -337,8 +338,8 @@ export default function ChannelsPage() {
       key: "instagram",
       label: "Instagram",
       desc: "DMs de tu cuenta profesional",
-      emoji: "📸",
-      chip: "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600",
+      icon: <InstagramIcon size={20} />,
+      chip: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white",
       connected: hasActive("INSTAGRAM"),
       count: countOf("INSTAGRAM"),
       action: { label: hasActive("INSTAGRAM") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
@@ -347,8 +348,8 @@ export default function ChannelsPage() {
       key: "messenger",
       label: "Messenger",
       desc: "Mensajes de tu página de Facebook",
-      emoji: "💬",
-      chip: "bg-[#0084FF]",
+      icon: <MessengerIcon size={20} />,
+      chip: "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white",
       connected: hasActive("MESSENGER"),
       count: countOf("MESSENGER"),
       action: { label: hasActive("MESSENGER") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
@@ -357,8 +358,8 @@ export default function ChannelsPage() {
       key: "tiktok",
       label: "TikTok",
       desc: "Business Messaging",
-      emoji: "🎵",
-      chip: "bg-neutral-900",
+      icon: <TikTokIcon size={20} />,
+      chip: "bg-black text-white",
       connected: false,
       count: 0,
       action: null, // próximamente
@@ -397,7 +398,7 @@ export default function ChannelsPage() {
           <div key={n.key} className="flex flex-col rounded-xl border border-line bg-panel p-4 shadow-card transition-shadow hover:shadow-pop">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${n.chip}`}>{n.emoji}</div>
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${n.chip}`}>{n.icon}</div>
                 <div>
                   <p className="text-sm font-semibold">{n.label}</p>
                   <p className="text-[11px] text-ink-subtle">{n.desc}</p>
@@ -495,17 +496,25 @@ export default function ChannelsPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
                 <div
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
                     c.type === "WHATSAPP_CLOUD"
-                      ? "bg-[#25D366]"
+                      ? "bg-[#25D366] text-white"
                       : c.type === "MESSENGER"
-                        ? "bg-[#0084FF]"
+                        ? "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white"
                         : c.type === "INSTAGRAM"
-                          ? "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600"
-                          : "bg-app"
+                          ? "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          : "bg-app text-lg"
                   }`}
                 >
-                  {c.type === "WHATSAPP_CLOUD" ? "📱" : c.type === "MESSENGER" ? "💬" : c.type === "INSTAGRAM" ? "📸" : "🧪"}
+                  {c.type === "WHATSAPP_CLOUD" ? (
+                    <WhatsAppIcon size={20} />
+                  ) : c.type === "MESSENGER" ? (
+                    <MessengerIcon size={20} />
+                  ) : c.type === "INSTAGRAM" ? (
+                    <InstagramIcon size={20} />
+                  ) : (
+                    "🧪"
+                  )}
                 </div>
                 <div>
                   <h3 className="flex items-center gap-2 font-medium">
