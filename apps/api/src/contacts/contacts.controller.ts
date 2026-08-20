@@ -584,6 +584,48 @@ export class ContactsController {
     return { queued: true, jobId: job.id, total: b.rows.length };
   }
 
+  /** Import de HISTORIAL de mensajes (migración Respond.io): valida y encola.
+   *  Máx 5000 filas por request — el cliente envía el archivo en tandas; la
+   *  idempotencia por externalId hace seguro repetir/reintentar. El worker
+   *  escribe y NO dispara nada (ni agentes, ni flujos, ni webhooks, ni consumo). */
+  @Post("import-messages")
+  async importMessages(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const rowSchema = z.object({
+      dateTime: z.string().min(10),
+      senderType: z.string().max(30),
+      contactId: z.string().min(1).max(40),
+      messageId: z.string().min(1).max(80),
+      contentType: z.string().max(30),
+      messageType: z.string().max(20),
+      content: z.string().max(20_000),
+      channelId: z.string().max(40),
+    });
+    const parsed = z.object({ rows: z.array(rowSchema).min(1).max(5000) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? "rows inválidas");
+    const job = await this.queues.messageImports.add(
+      "import",
+      { organizationId: ctx.organizationId, userId: ctx.userId, rows: parsed.data.rows },
+      { removeOnComplete: { age: 3600 }, removeOnFail: { age: 3600 } },
+    );
+    return { queued: true, jobId: job.id, total: parsed.data.rows.length };
+  }
+
+  /** Estado del import de mensajes (mismo contrato que el de contactos). */
+  @Get("import-messages/:jobId")
+  async importMessagesStatus(@Param("jobId") jobId: string) {
+    const ctx = requirePermission("contacts:write");
+    const job = await this.queues.messageImports.getJob(jobId);
+    if (!job || job.data.organizationId !== ctx.organizationId) throw new NotFoundException("Import no encontrado");
+    const state = await job.getState();
+    return {
+      state,
+      progress: typeof job.progress === "object" ? job.progress : { processed: 0, total: job.data.rows.length },
+      result: state === "completed" ? job.returnvalue : null,
+      error: state === "failed" ? (job.failedReason ?? "Error desconocido") : null,
+    };
+  }
+
   /** Estado del import encolado. Solo el tenant dueño del job puede verlo. */
   @Get("import/:jobId")
   async importStatus(@Param("jobId") jobId: string) {

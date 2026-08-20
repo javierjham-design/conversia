@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-19 — feat: importador de historial de mensajes (migración Respond.io)
+
+Nuevo circuito para traer los 32.660 mensajes históricos de Digital-Dent (y de
+cualquier migración futura): botón "Historial" en Contactos sube el CSV de
+Data export → Messages de Respond.io; el cliente lo envía en tandas de 5.000
+al endpoint `POST /contacts/import-messages` y el worker (cola
+`message-imports`) escribe por lotes de 500 con timeout explícito. Cruce por el
+campo `id_respond_io`; conversación por (contacto, canal Respond) CLOSED y con
+aiEnabled=false; `Message ID → externalId` con `skipDuplicates` = idempotente
+(correr dos veces no duplica); hora convertida de America/Santiago a UTC con
+DST correcto; OUTBOUND entra como SENT. REGLA DE ORO (comentada en el código):
+escribe en la base y NADA más — sin agentes, sin flujos, sin webhooks, sin
+consumo, sin envíos. Resultado: importados / duplicados / sin contacto /
+conversaciones creadas + errores por lote. 5 tests del mapper y la TZ.
+Pendiente decidido aparte: adjuntos de cdn.chatapi.net (recomendación:
+descargarlos pronto en un job de respaldo; el payload conserva las URLs).
+
 ## 2026-08-19 — fix: import de contactos ya no muere por timeout de transacción
 
 Bug real (Digital-Dent, 3.763 filas de Respond.io): cada lote de 200 filas corría

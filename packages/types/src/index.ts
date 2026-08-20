@@ -408,7 +408,35 @@ export const QUEUE_NAMES = {
   notifications: "notifications",
   whatsappEscalation: "whatsapp-escalation",
   agentTurn: "agent-turn",
+  messageImports: "message-imports",
 } as const;
+
+/** Fila del export de MENSAJES de Respond.io (histórico, ya parseada). */
+export interface MessageImportRow {
+  dateTime: string; // "2026-08-18 21:05:56" en America/Santiago
+  senderType: string; // contact | ai_agent | workflow | user | echo
+  contactId: string; // id de Respond.io (cruza con el campo id_respond_io)
+  messageId: string; // → externalId (idempotencia)
+  contentType: string; // text | attachment | sticker | ...
+  messageType: string; // incoming | outgoing
+  content: string; // JSON crudo
+  channelId: string;
+}
+
+/** Import de historial de mensajes en 2.º plano (escritura pura, sin triggers). */
+export interface MessageImportJob {
+  organizationId: string;
+  userId: string;
+  rows: MessageImportRow[];
+}
+
+export interface MessageImportResult {
+  imported: number;
+  skippedDuplicate: number;
+  skippedNoContact: number;
+  conversationsCreated: number;
+  errors: { row: number; reason: string }[];
+}
 
 /** Correr un turno del agente de IA para una conversación (sin mensaje entrante nuevo). */
 export interface AgentTurnJob {

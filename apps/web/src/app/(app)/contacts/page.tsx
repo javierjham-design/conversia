@@ -26,7 +26,7 @@ import {
 import { api, getToken } from "@/lib/api";
 import { Button, ConfirmDialog, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
 import { ContactDrawer } from "./contact-drawer";
-import { DuplicatesModal, ImportModal } from "./contact-import-merge";
+import { DuplicatesModal, ImportMessagesModal, ImportModal } from "./contact-import-merge";
 
 // ------------------------------- Tipos -------------------------------
 
@@ -174,6 +174,7 @@ export default function ContactsPage() {
   const [confirmBulkDel, setConfirmBulkDel] = useState(false);
   const [saveSegOpen, setSaveSegOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importMsgsOpen, setImportMsgsOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -447,6 +448,9 @@ export default function ContactsPage() {
           <Button variant="secondary" onClick={() => setImportOpen(true)}>
             <Upload size={15} /> Importar
           </Button>
+          <Button variant="secondary" onClick={() => setImportMsgsOpen(true)}>
+            <Upload size={15} /> Historial
+          </Button>
           <Button onClick={() => setAddOpen(true)}>
             <Plus size={15} /> Añadir contacto
           </Button>
@@ -706,6 +710,7 @@ export default function ContactsPage() {
       <SaveSegmentModal open={saveSegOpen} onClose={() => setSaveSegOpen(false)} definition={currentDefinition} onSaved={() => { setSaveSegOpen(false); loadMeta(); }} />
 
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} onDone={refresh} />
+      <ImportMessagesModal open={importMsgsOpen} onClose={() => setImportMsgsOpen(false)} />
       <DuplicatesModal open={dupOpen} onClose={() => setDupOpen(false)} onDone={refresh} />
     </div>
   );
