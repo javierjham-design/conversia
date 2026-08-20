@@ -442,8 +442,5 @@ export async function processInbound(job: InboundJob): Promise<void> {
       }
     }
 
-    // Si la IA quedó apagada (la lleva un humano), avísale que el contacto escribió.
-    const { notifyHumanOnPausedInbound } = await import("./notify-inbound.js");
-    await notifyHumanOnPausedInbound(organizationId, result.conversationId, text);
   }
 }
