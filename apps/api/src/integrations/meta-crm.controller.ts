@@ -204,6 +204,13 @@ export class MetaCrmController {
       method: "POST",
     }).catch(() => this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen`, pageToken, { method: "POST" }));
     const igId: string | null = page.instagram_business_account?.id ? String(page.instagram_business_account.id) : null;
+    // El canal IG se nombra por su @usuario real (no por la página): la cuenta
+    // que ve el cliente es @usuario, y así aparece en Canales y en la bandeja.
+    let igUsername: string | null = null;
+    if (igId) {
+      const ig = await this.graph(`${encodeURIComponent(igId)}?fields=username`, pageToken).catch(() => null);
+      igUsername = ig?.username ? String(ig.username) : null;
+    }
     const formsJson = await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
     const forms: Array<{ id: string; name: string; status: string }> = (formsJson.data ?? []).map((f: any) => ({
       id: String(f.id),
@@ -236,24 +243,35 @@ export class MetaCrmController {
       }
       // Cuenta de Instagram vinculada a la página → rutea los DMs de IG al tenant
       if (igId) {
+        const igAssetName = igUsername ? `@${igUsername}` : `IG de ${page.name ?? pageId}`;
         await tx.metaAsset.upsert({
           where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "instagram", externalId: igId } },
-          update: { name: `IG de ${page.name ?? pageId}`, enabled: true },
-          create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "instagram", externalId: igId, name: `IG de ${page.name ?? pageId}`, enabled: true },
+          update: { name: igAssetName, enabled: true },
+          create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "instagram", externalId: igId, name: igAssetName, enabled: true },
         });
       }
       // Canales visibles en Canales desde ya (no esperar el primer DM)
       const chans = await tx.channelConnection.findMany({ where: { type: { in: ["MESSENGER", "INSTAGRAM"] as any } } });
-      const hasChan = (t: string) => chans.some((c) => c.type === (t as any) && String((c.config as any)?.pageId ?? "") === String(page.id));
-      if (!hasChan("MESSENGER")) {
+      const findChan = (t: string) => chans.find((c) => c.type === (t as any) && String((c.config as any)?.pageId ?? "") === String(page.id));
+      if (!findChan("MESSENGER")) {
         await tx.channelConnection.create({
           data: { organizationId: ctx.organizationId, type: "MESSENGER" as any, name: `Messenger · ${page.name ?? pageId}`, status: "active", config: { pageId: String(page.id) } as object },
         });
       }
-      if (igId && !hasChan("INSTAGRAM")) {
-        await tx.channelConnection.create({
-          data: { organizationId: ctx.organizationId, type: "INSTAGRAM" as any, name: `Instagram · ${page.name ?? pageId}`, status: "active", config: { pageId: String(page.id), igId } as object },
-        });
+      if (igId) {
+        const igChanName = igUsername ? `Instagram · @${igUsername}` : `Instagram · ${page.name ?? pageId}`;
+        const existingIg = findChan("INSTAGRAM");
+        if (!existingIg) {
+          await tx.channelConnection.create({
+            data: { organizationId: ctx.organizationId, type: "INSTAGRAM" as any, name: igChanName, status: "active", config: { pageId: String(page.id), igId } as object },
+          });
+        } else if (existingIg.name !== igChanName || String((existingIg.config as any)?.igId ?? "") !== igId) {
+          // Re-conectar corrige el nombre (p. ej. quedó con el de la página) y el igId
+          await tx.channelConnection.update({
+            where: { id: existingIg.id },
+            data: { name: igChanName, config: { ...((existingIg.config as any) ?? {}), pageId: String(page.id), igId } as object },
+          });
+        }
       }
       await tx.integrationEvent.create({
         data: {
