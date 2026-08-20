@@ -187,4 +187,8 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       console.error(`✖ Turno de agente (${e.platform} ${result.conversationId}):`, (err as Error).message);
     }
   }
+
+  // Si la IA quedó apagada (la lleva un humano), avísale que el contacto escribió.
+  const { notifyHumanOnPausedInbound } = await import("./notify-inbound.js");
+  await notifyHumanOnPausedInbound(organizationId, result.conversationId, result.text);
 }

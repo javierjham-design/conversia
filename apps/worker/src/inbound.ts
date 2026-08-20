@@ -439,5 +439,9 @@ export async function processInbound(job: InboundJob): Promise<void> {
         console.error(`✖ Error en turno de agente (${result.conversationId}):`, (err as Error).message);
       }
     }
+
+    // Si la IA quedó apagada (la lleva un humano), avísale que el contacto escribió.
+    const { notifyHumanOnPausedInbound } = await import("./notify-inbound.js");
+    await notifyHumanOnPausedInbound(organizationId, result.conversationId, text);
   }
 }
