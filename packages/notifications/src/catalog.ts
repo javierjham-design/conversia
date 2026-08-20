@@ -14,7 +14,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "conversation.unanswered",
@@ -24,7 +24,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "critical",
     channels: ["in_app", "web_push", "whatsapp"],
     defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "ai.escalation",
@@ -34,7 +34,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "critical",
     channels: ["in_app", "web_push", "email", "whatsapp"],
     defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "lead.created",
@@ -56,7 +56,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     // Mensaje entrante que ATIENDE LA IA (aiEnabled=true). Útil al SETEAR la IA para ver cómo
@@ -69,7 +69,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push"],
     defaultChannels: [],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "comment.mention",
@@ -79,7 +79,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "appointment.created",
@@ -89,7 +89,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "appointment.cancelled",
@@ -99,7 +99,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "appointment.rescheduled",
@@ -109,7 +109,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     urgency: "info",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app"],
-    link: "/inbox/{conversationId}",
+    link: "/inbox?c={conversationId}",
   },
   {
     key: "integration.error",

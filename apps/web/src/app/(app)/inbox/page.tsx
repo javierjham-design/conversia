@@ -151,14 +151,15 @@ export default function InboxPage() {
     void loadCounters();
   }, [loadCounters]);
 
-  // Deep-link desde Configuración → Equipos: /inbox?team=<id>
+  // Deep-links: /inbox?team=<id> (desde Ajustes → Equipos) y /inbox?c=<id> (al tocar una
+  // notificación push abre esa conversación). Limpiamos la URL para no re-abrir al refrescar.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const teamId = params.get("team");
-    if (teamId) {
-      setFilter({ kind: "team", id: teamId, label: "Equipo" });
-      window.history.replaceState(null, "", "/inbox");
-    }
+    const convId = params.get("c");
+    if (teamId) setFilter({ kind: "team", id: teamId, label: "Equipo" });
+    if (convId) setSelectedId(convId);
+    if (teamId || convId) window.history.replaceState(null, "", "/inbox");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
