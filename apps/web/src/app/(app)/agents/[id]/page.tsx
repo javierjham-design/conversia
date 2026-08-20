@@ -107,37 +107,55 @@ function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: A
   );
 }
 
+// Etiqueta legible + estilo del badge por tipo de mención. El agente de IA se distingue
+// claramente ("IA") para asegurar que la derivación va a ESE agente, no a una persona.
+const MENTION_BADGE: Record<Mention["type"], { label: string; className: string }> = {
+  agente: { label: "IA", className: "bg-brand-100 text-brand-700 dark:bg-brand-500/20 dark:text-brand-300" },
+  usuario: { label: "persona", className: "bg-app text-ink-subtle" },
+  equipo: { label: "equipo", className: "bg-app text-ink-subtle" },
+};
+
+// Disparador del @: acepta letras con acento, números, espacios, guiones y guion bajo
+// (antes solo \w\s → un nombre con "ó" cortaba el menú a mitad de tipeo).
+const MENTION_RE = /@([\p{L}\p{N}\s_-]{0,30})$/u;
+
 function MentionTextarea({ value, onChange, placeholder, mentions }: { value: string; onChange: (v: string) => void; placeholder?: string; mentions: Mention[] }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [query, setQuery] = useState<string | null>(null);
   function handle(v: string) {
     onChange(v);
     const pos = ref.current?.selectionStart ?? v.length;
-    const m = v.slice(0, pos).match(/@([\w\s]{0,20})$/);
+    const m = v.slice(0, pos).match(MENTION_RE);
     setQuery(m ? m[1] : null);
   }
-  const filtered = query != null ? mentions.filter((mm) => mm.label.toLowerCase().includes(query.toLowerCase())).slice(0, 6) : [];
+  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const filtered = query != null ? mentions.filter((mm) => norm(mm.label).includes(norm(query))).slice(0, 8) : [];
   function pick(label: string) {
     const pos = ref.current?.selectionStart ?? value.length;
-    const before = value.slice(0, pos).replace(/@([\w\s]{0,20})$/, `@${label} `);
+    const before = value.slice(0, pos).replace(MENTION_RE, `@${label} `);
     onChange(before + value.slice(pos));
     setQuery(null);
     ref.current?.focus();
   }
+  const empty = query != null && filtered.length === 0;
   return (
     <div className="relative">
       <textarea ref={ref} value={value} onChange={(e) => handle(e.target.value)} rows={2} placeholder={placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
-      {query != null && filtered.length > 0 && (
-        <div className="absolute z-20 mt-1 w-56 rounded-lg border border-line bg-panel p-1 shadow-pop">
-          {filtered.map((mm) => (
-            <button key={`${mm.type}-${mm.label}`} type="button" onClick={() => pick(mm.label)} className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-app">
-              <span>{mm.label}</span>
-              <span className="text-[10px] text-ink-subtle">{mm.type}</span>
-            </button>
-          ))}
+      {query != null && (filtered.length > 0 || empty) && (
+        <div className="absolute z-20 mt-1 w-64 rounded-lg border border-line bg-panel p-1 shadow-pop">
+          {filtered.map((mm) => {
+            const badge = MENTION_BADGE[mm.type];
+            return (
+              <button key={`${mm.type}-${mm.label}`} type="button" onMouseDown={(e) => { e.preventDefault(); pick(mm.label); }} className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-app">
+                <span className="truncate">{mm.label}</span>
+                <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", badge.className)}>{badge.label}</span>
+              </button>
+            );
+          })}
+          {empty && <p className="px-2 py-1.5 text-xs text-ink-subtle">Sin coincidencias</p>}
         </div>
       )}
-      <p className="mt-1 text-[10px] text-ink-subtle">Escribe @ para mencionar equipos, usuarios u otros agentes.</p>
+      <p className="mt-1 text-[10px] text-ink-subtle">Escribe @ y elige de la lista (evita errores de tipeo).</p>
     </div>
   );
 }
@@ -452,7 +470,15 @@ export default function AgentEditorPage() {
                           state={actions[a.key]}
                           onToggle={(en) => setAction(a.key, { enabled: en })}
                           onInstructions={(v) => setAction(a.key, { instructions: v })}
-                          mentions={a.mentions ? mentions : undefined}
+                          mentions={
+                            a.mentions
+                              ? a.key === "transfer"
+                                ? mentions.filter((m) => m.type === "agente") // derivar SOLO a otros agentes de IA
+                                : a.key === "assign"
+                                  ? mentions.filter((m) => m.type !== "agente") // asignar/escalar a personas o equipos
+                                  : mentions
+                              : undefined
+                          }
                         />
                       ))}
                     </div>
