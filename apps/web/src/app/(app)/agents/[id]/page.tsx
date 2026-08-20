@@ -474,9 +474,7 @@ export default function AgentEditorPage() {
                             a.mentions
                               ? a.key === "transfer"
                                 ? mentions.filter((m) => m.type === "agente") // derivar SOLO a otros agentes de IA
-                                : a.key === "assign"
-                                  ? mentions.filter((m) => m.type !== "agente") // asignar/escalar a personas o equipos
-                                  : mentions
+                                : mentions // asignar/escalar: personas, equipos Y agentes (assignConversation también deriva a agentes)
                               : undefined
                           }
                         />
