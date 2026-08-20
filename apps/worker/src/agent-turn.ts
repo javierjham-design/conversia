@@ -230,6 +230,14 @@ export async function runAgentTurn(opts: {
   }
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return;
+  // En una DERIVACIÓN (re-ejecución del agente destino, depth>0) el historial termina en los
+  // mensajes del agente que derivó (assistant): el destino no tendría a qué responder y
+  // devolvería vacío → se quedaría MUDO. Recortamos los assistant finales para que responda
+  // al ÚLTIMO mensaje del cliente y tome la conversación de inmediato.
+  if (depth > 0) {
+    while (history.length && history[history.length - 1].role !== "user") history.pop();
+    if (!history.length) return;
+  }
 
   // Indicaciones del equipo para ESTA conversación (panel derecho de la Bandeja).
   const { buildConversationInstructions, getActiveConversationInstructions } = await import("./ai-notes.js");
@@ -424,9 +432,14 @@ export async function runAgentTurn(opts: {
       // (antes quedaba mudo esperando el próximo mensaje del contacto, y el
       // cliente —que ya fue anunciado con la derivación— no recibía nada).
       // depth+1 acota a un salto por turno (sin cadenas A→B→C en el mismo ciclo).
-      await runAgentTurn({ organizationId, conversationId, agentSlug: outcome.slug, depth: depth + 1 }).catch((err) =>
-        console.error(`✖ Turno del agente derivado (${outcome.slug}) falló:`, (err as Error).message),
-      );
+      await runAgentTurn({
+        organizationId,
+        conversationId,
+        agentSlug: outcome.slug,
+        depth: depth + 1,
+        objective:
+          "Acabas de RECIBIR esta conversación derivada desde otro agente. Preséntate en una sola línea breve y CONTINÚA de inmediato ayudando al cliente con lo último que pidió (su último mensaje). No repitas el saludo inicial ni digas que la conversación fue derivada.",
+      }).catch((err) => console.error(`✖ Turno del agente derivado (${outcome.slug}) falló:`, (err as Error).message));
     } else if (outcome.kind === "notfound") {
       // El modelo intentó derivar a un agente que no existe (ya no puede pasar por nombre/slug,
       // pero por si inventa uno): deja un incidente VISIBLE en la Bandeja para que un humano
