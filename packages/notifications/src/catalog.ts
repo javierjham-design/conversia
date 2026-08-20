@@ -205,6 +205,19 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     defaultChannels: ["in_app", "email"],
     link: "/settings/ia",
   },
+  {
+    // Notificación de PRUEBA (botón "Enviar prueba" en Ajustes → Notificaciones). El test la
+    // manda solo a uno mismo (userIds override). hidden: no aparece en la matriz de preferencias.
+    key: "system.test",
+    title: "Notificación de prueba",
+    body: "Si ves esto, las notificaciones funcionan ✔",
+    audience: ["assigned_user"],
+    urgency: "info",
+    channels: ["in_app", "web_push"],
+    defaultChannels: ["in_app", "web_push"],
+    link: "/settings/notifications",
+    hidden: true,
+  },
 ];
 
 const BY_KEY = new Map(NOTIF_EVENTS.map((e) => [e.key, e]));
