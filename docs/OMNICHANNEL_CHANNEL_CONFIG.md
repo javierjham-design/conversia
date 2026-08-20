@@ -48,6 +48,13 @@ identidad, envío — arquitectura análoga a IG/Messenger.
    requests no llegan (documentarlo en la UI).
 4. **Zona de peligro**: eliminar canal (mensajes/contactos permanecen).
 
+## Requisito transversal: ELIMINACIÓN SEGURA de canales (pedido explícito)
+Al eliminar CUALQUIER canal (WhatsApp/IG/Messenger/TikTok/mock): diálogo de
+confirmación que exige **escribir el nombre del canal** para habilitar el botón
+Eliminar (patrón Respond), con el aviso "los mensajes y contactos permanecen,
+pero ya no podrás interactuar por este canal". Aplicar en Canales y en
+cualquier otra vía de borrado.
+
 ## Requisito transversal de BANDEJA (pedido explícito)
 El **nombre del canal** (editable por el tenant, p. ej. "TikTok Business
 messaging", "Instagram · Digital-Dent") debe **figurar en la bandeja**: en la
