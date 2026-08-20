@@ -17,19 +17,6 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/inbox/{conversationId}",
   },
   {
-    // Mensaje entrante cuando la IA está APAGADA (la lleva un humano): que el equipo se entere
-    // al instante. La IA encendida NO dispara esto (el bot responde solo). El despachador omite
-    // el push de la conversación que el usuario está mirando en ese momento.
-    key: "message.received",
-    title: "Nuevo mensaje",
-    body: "{contactName}: {preview}",
-    audience: ["assigned_user", "team"],
-    urgency: "info",
-    channels: ["in_app", "web_push"],
-    defaultChannels: ["in_app", "web_push"],
-    link: "/inbox/{conversationId}",
-  },
-  {
     key: "conversation.unanswered",
     title: "Conversación sin responder",
     body: "{contactName} lleva {minutes} min esperando respuesta.",
