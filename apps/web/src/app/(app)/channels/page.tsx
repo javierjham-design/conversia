@@ -6,7 +6,7 @@ import { TemplatesPanel } from "./templates-panel";
 
 interface Channel {
   id: string;
-  type: "WHATSAPP_CLOUD" | "MOCK";
+  type: "WHATSAPP_CLOUD" | "MOCK" | "MESSENGER" | "INSTAGRAM";
   name: string;
   status: string;
   defaultAgentId: string | null;
@@ -397,7 +397,7 @@ export default function ChannelsPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="font-medium">
-                  {c.type === "WHATSAPP_CLOUD" ? "📱" : "🧪"} {c.name}{" "}
+                  {c.type === "WHATSAPP_CLOUD" ? "📱" : c.type === "MESSENGER" ? "💬" : c.type === "INSTAGRAM" ? "📸" : "🧪"} {c.name}{" "}
                   <span
                     className={`text-[10px] ${
                       c.status === "active" ? "text-emerald-600" : c.status === "error" ? "text-red-600" : "text-ink-subtle"
@@ -409,7 +409,9 @@ export default function ChannelsPage() {
                 <p className="text-xs text-ink-subtle">
                   {c.type === "WHATSAPP_CLOUD"
                     ? `phone_number_id: ${c.phoneNumberId ?? "—"} · ${c.displayPhone ?? ""}`
-                    : "Canal de prueba: usa el simulador para enviar mensajes"}
+                    : c.type === "MESSENGER" || c.type === "INSTAGRAM"
+                      ? "Mensajería de la página (Meta CRM) · diagnóstico en Integraciones → Meta CRM"
+                      : "Canal de prueba: usa el simulador para enviar mensajes"}
                 </p>
               </div>
               <div className="flex items-center gap-2">

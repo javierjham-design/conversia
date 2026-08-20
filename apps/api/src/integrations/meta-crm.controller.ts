@@ -242,6 +242,19 @@ export class MetaCrmController {
           create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "instagram", externalId: igId, name: `IG de ${page.name ?? pageId}`, enabled: true },
         });
       }
+      // Canales visibles en Canales desde ya (no esperar el primer DM)
+      const chans = await tx.channelConnection.findMany({ where: { type: { in: ["MESSENGER", "INSTAGRAM"] as any } } });
+      const hasChan = (t: string) => chans.some((c) => c.type === (t as any) && String((c.config as any)?.pageId ?? "") === String(page.id));
+      if (!hasChan("MESSENGER")) {
+        await tx.channelConnection.create({
+          data: { organizationId: ctx.organizationId, type: "MESSENGER" as any, name: `Messenger · ${page.name ?? pageId}`, status: "active", config: { pageId: String(page.id) } as object },
+        });
+      }
+      if (igId && !hasChan("INSTAGRAM")) {
+        await tx.channelConnection.create({
+          data: { organizationId: ctx.organizationId, type: "INSTAGRAM" as any, name: `Instagram · ${page.name ?? pageId}`, status: "active", config: { pageId: String(page.id), igId } as object },
+        });
+      }
       await tx.integrationEvent.create({
         data: {
           organizationId: ctx.organizationId,
@@ -257,6 +270,101 @@ export class MetaCrmController {
       });
     });
     return { ok: true, page: { id: String(page.id), name: page.name ?? pageId }, forms };
+  }
+
+  /**
+   * Diagnóstico de mensajería de una página (estilo "Probar conexión" de
+   * WhatsApp): consulta a Graph CADA eslabón y devuelve qué está bien y qué
+   * falta, con el arreglo sugerido — sin adivinar por qué no llegan los DMs.
+   */
+  @Get("pages/:pageId/diagnose")
+  async diagnosePage(@Param("pageId") pageId: string) {
+    const ctx = requirePermission("integrations:read");
+    const env = getEnv();
+    const checks: Array<{ key: string; label: string; ok: boolean; detail: string; fix?: string }> = [];
+    const push = (key: string, label: string, ok: boolean, detail: string, fix?: string) => checks.push({ key, label, ok, detail, fix });
+
+    // 1. Conexión + scopes de mensajería
+    let token: string | null = null;
+    try {
+      token = await this.crmToken(ctx.organizationId);
+    } catch {
+      push("token", "Conexión Meta CRM", false, "Sin token de la conexión CRM", "Conecta con Meta (o token manual) en esta página");
+      return { checks };
+    }
+    const conn = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaCrmConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
+    );
+    const scopes: string[] = Array.isArray(conn?.appScopes) ? (conn!.appScopes as string[]) : [];
+    const needMsg = ["pages_messaging", "instagram_basic", "instagram_manage_messages"].filter((s) => !scopes.includes(s));
+    push(
+      "scopes",
+      "Permisos de mensajería en el token",
+      needMsg.length === 0,
+      needMsg.length ? `Faltan: ${needMsg.join(", ")}` : `${scopes.length} permisos, mensajería incluida`,
+      needMsg.length ? "Vuelve a Conectar con Meta y acepta TODOS los permisos" : undefined,
+    );
+
+    // 2. Token de página + vínculo IG
+    let pageToken: string | null = null;
+    let igId: string | null = null;
+    try {
+      const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account`, token);
+      pageToken = page.access_token ?? null;
+      igId = page.instagram_business_account?.id ? String(page.instagram_business_account.id) : null;
+      push("page_token", "Acceso de administración a la página", Boolean(pageToken), pageToken ? `Página «${page.name}» accesible` : "El token no devuelve access_token de la página", pageToken ? undefined : "Autoriza la página al Conectar con Meta (o asígnala al Usuario del Sistema)");
+      push("ig_link", "Instagram vinculado a la página", Boolean(igId), igId ? `Cuenta IG ${igId} vinculada` : "La página no tiene cuenta de Instagram vinculada", igId ? undefined : "Vincula la cuenta IG a la página en Meta Business (Cuentas → Instagram)");
+    } catch (err) {
+      push("page_token", "Acceso de administración a la página", false, (err as Error).message, "Revisa que la página esté autorizada en la conexión");
+    }
+
+    // 3. Suscripción de la app a la página (EL eslabón que entrega los webhooks)
+    if (pageToken) {
+      try {
+        const subs = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps`, pageToken);
+        const mine = (subs.data ?? []).find((a: any) => String(a.id) === env.META_CRM_APP_ID);
+        const fields: string[] = mine?.subscribed_fields ?? [];
+        push(
+          "subscribed",
+          "App suscrita a la página",
+          Boolean(mine),
+          mine ? `Suscrita con campos: ${fields.join(", ") || "(ninguno)"}` : "La app CRM NO está suscrita a esta página",
+          mine ? undefined : "Aprieta «Conectar» sobre la página en esta pantalla",
+        );
+        if (mine) {
+          const missing = ["leadgen", "messages"].filter((f) => !fields.includes(f));
+          push(
+            "fields",
+            "Campos leadgen + messages suscritos",
+            missing.length === 0,
+            missing.length ? `Faltan campos: ${missing.join(", ")}` : "leadgen y messages activos",
+            missing.length ? "Re-conecta la página (el token debe traer pages_messaging para suscribir messages)" : undefined,
+          );
+        }
+      } catch (err) {
+        push("subscribed", "App suscrita a la página", false, (err as Error).message);
+      }
+    }
+
+    // 4. Ruteo interno: assets registrados (webhook → tenant)
+    const assets = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaAsset.findMany({ where: { OR: [{ kind: "page", externalId: pageId }, ...(igId ? [{ kind: "instagram", externalId: igId }] : [])] } }),
+    );
+    push("route_page", "Ruteo de la página al tenant", assets.some((a) => a.kind === "page"), assets.some((a) => a.kind === "page") ? "Página registrada" : "Página sin registrar en la plataforma", assets.some((a) => a.kind === "page") ? undefined : "Aprieta «Conectar» sobre la página");
+    if (igId) {
+      const igOk = assets.some((a) => a.kind === "instagram");
+      push("route_ig", "Ruteo de Instagram al tenant", igOk, igOk ? "Cuenta IG registrada" : "Cuenta IG sin registrar", igOk ? undefined : "Re-conecta la página (registra el IG automáticamente)");
+    }
+
+    // 5. Recordatorio no-verificable por API
+    push(
+      "ig_toggle",
+      "Acceso a mensajes en la app de Instagram (manual)",
+      true,
+      "Meta no expone este ajuste por API: en la app de IG (cuenta profesional) → Configuración → Mensajes → Herramientas conectadas → «Permitir acceso a los mensajes». Suele venir activado.",
+    );
+
+    return { checks };
   }
 }
 
