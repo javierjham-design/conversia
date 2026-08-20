@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { CheckCircle2, ExternalLink, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Settings2, Unplug } from "lucide-react";
 import { api } from "@/lib/api";
+import { InstagramIcon, MessengerIcon } from "@/components/brand-icons";
 import { Button, ConfirmDialog, PageHeader, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
 import { FieldMappingEditor } from "../meta/panels";
 
@@ -348,14 +349,14 @@ function MessagingTab({ data, onConnect, onChanged }: { data: CrmStatus; onConne
     {
       type: "INSTAGRAM",
       label: "Instagram Direct",
-      icon: <span className="text-lg">📸</span>,
-      chipClass: "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 text-white",
+      icon: <InstagramIcon size={20} />,
+      chipClass: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white",
     },
     {
       type: "MESSENGER",
       label: "Facebook Messenger",
-      icon: <span className="text-lg">💬</span>,
-      chipClass: "bg-[#0084FF] text-white",
+      icon: <MessengerIcon size={20} />,
+      chipClass: "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white",
     },
   ];
 
