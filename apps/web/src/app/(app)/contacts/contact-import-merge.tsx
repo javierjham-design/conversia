@@ -194,6 +194,108 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "ok"
   );
 }
 
+// ==================== Historial de mensajes (Respond.io) ====================
+
+/** Import del export de MENSAJES de Respond.io: tandas de 5000, idempotente. */
+export function ImportMessagesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [result, setResult] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setRows(null);
+      setResult(null);
+      setProgress(null);
+    }
+  }, [open]);
+
+  function onFile(file: File) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const p = parseCSV(String(reader.result ?? ""));
+      const idx = (name: string) => p.headers.findIndex((h) => h.trim().toLowerCase() === name);
+      const map = {
+        dateTime: idx("date & time"), senderType: idx("sender type"), contactId: idx("contact id"),
+        messageId: idx("message id"), contentType: idx("content type"), messageType: idx("message type"),
+        content: idx("content"), channelId: idx("channel id"),
+      };
+      if (map.messageId < 0 || map.contactId < 0 || map.dateTime < 0) {
+        toast.push("No parece el export de mensajes de Respond.io (faltan columnas)", "error");
+        return;
+      }
+      setRows(p.rows.map((r) => ({
+        dateTime: r[map.dateTime] ?? "", senderType: r[map.senderType] ?? "", contactId: r[map.contactId] ?? "",
+        messageId: r[map.messageId] ?? "", contentType: r[map.contentType] ?? "", messageType: r[map.messageType] ?? "",
+        content: r[map.content] ?? "", channelId: r[map.channelId] ?? "",
+      })).filter((r) => r.messageId && r.contactId));
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  async function run() {
+    if (!rows) return;
+    setBusy(true);
+    const totals = { imported: 0, skippedDuplicate: 0, skippedNoContact: 0, conversationsCreated: 0, errors: [] as any[] };
+    try {
+      for (let i = 0; i < rows.length; i += 5000) {
+        const slice = rows.slice(i, i + 5000);
+        setProgress(`Tanda ${Math.floor(i / 5000) + 1} de ${Math.ceil(rows.length / 5000)} — enviando ${slice.length} mensajes…`);
+        const q = await api<{ jobId: string }>("/contacts/import-messages", { method: "POST", body: JSON.stringify({ rows: slice }) });
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const st = await api<any>(`/contacts/import-messages/${q.jobId}`);
+          if (st.state === "completed" && st.result) {
+            for (const k of ["imported", "skippedDuplicate", "skippedNoContact", "conversationsCreated"] as const) (totals as any)[k] += st.result[k] ?? 0;
+            totals.errors.push(...(st.result.errors ?? []));
+            break;
+          }
+          if (st.state === "failed") { totals.errors.push({ row: i + 1, reason: st.error ?? "job falló" }); break; }
+          if (st.progress?.processed != null) setProgress(`Tanda ${Math.floor(i / 5000) + 1}: ${st.progress.processed}/${st.progress.total} procesados…`);
+        }
+      }
+      setResult(totals);
+    } catch (e: any) {
+      toast.push(e.message ?? "Error al importar", "error");
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Importar historial de mensajes (Respond.io)" wide>
+      {result ? (
+        <div className="space-y-3">
+          <p className="text-sm">✅ Importados: <b>{result.imported}</b> · Duplicados omitidos: {result.skippedDuplicate} · Sin contacto: {result.skippedNoContact} · Conversaciones creadas: {result.conversationsCreated}</p>
+          {result.errors.length > 0 && <p className="text-xs text-amber-700">{result.errors.length} error(es): {result.errors.slice(0, 5).map((e: any) => e.reason).join(" · ")}</p>}
+          <div className="flex justify-end"><Button onClick={onClose}>Listo</Button></div>
+        </div>
+      ) : !rows ? (
+        <div>
+          <p className="mb-3 text-sm text-slate-500">Sube el CSV de <b>Data export → Messages</b> de Respond.io. Es seguro correrlo más de una vez (los duplicados se omiten) y NO dispara agentes, flujos ni webhooks.</p>
+          <button onClick={() => fileRef.current?.click()} className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 py-10 text-slate-500 hover:border-brand-400">
+            <FileUp size={28} /><span className="font-medium">Selecciona el CSV de mensajes</span>
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">{rows.length.toLocaleString("es-CL")} mensajes detectados. Se envían en tandas de 5.000.</p>
+          {progress && <p className="text-xs text-brand-600">{progress}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setRows(null)} disabled={busy}>Volver</Button>
+            <Button onClick={() => void run()} disabled={busy}><Upload size={15} /> {busy ? "Importando…" : "Importar historial"}</Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ============================= Duplicados / fusión =============================
 
 interface DupItem { id: string; firstName: string | null; lastName: string | null; phone: string | null; email: string | null; profileName: string | null; createdAt: string; lastContactAt: string | null }

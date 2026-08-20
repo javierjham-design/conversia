@@ -8,6 +8,7 @@ import {
   type AgentTurnJob,
   type CapiJob,
   type ContactImportJob,
+  type MessageImportJob,
   type EmailJob,
   type EventJob,
   type InboundJob,
@@ -19,6 +20,7 @@ import {
 import { processCapiJob } from "./capi";
 import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
 import { processContactImport } from "./contact-import";
+import { processMessageImport } from "./respond-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
 import { runAgentTurn } from "./agent-turn";
@@ -74,6 +76,12 @@ async function main() {
   const importsWorker = new Worker<ContactImportJob>(
     QUEUE_NAMES.imports,
     async (job) => processContactImport(job),
+    { connection, concurrency: 1 },
+  );
+  // Historial de mensajes (migración Respond.io): escritura pura, sin triggers.
+  const messageImportsWorker = new Worker<MessageImportJob>(
+    QUEUE_NAMES.messageImports,
+    async (job) => processMessageImport(job),
     { connection, concurrency: 1 },
   );
   // Correos internos del tenant (escalamientos, resúmenes, alertas, workflows).
@@ -157,7 +165,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, messageImportsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 

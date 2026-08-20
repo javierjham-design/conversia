@@ -10,6 +10,7 @@ import {
   type EmailJob,
   type EventJob,
   type InboundJob,
+  type MessageImportJob,
   type OutboundJob,
   type SyncJob,
   type WebhookDeliveryJob,
@@ -27,6 +28,7 @@ export class QueueService implements OnModuleDestroy {
   readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection });
   readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });
   readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
+  readonly messageImports = new Queue<MessageImportJob>(QUEUE_NAMES.messageImports, { connection: this.connection });
   readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
   readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
   readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
