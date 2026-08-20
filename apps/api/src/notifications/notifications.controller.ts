@@ -72,14 +72,16 @@ export class NotificationsController {
   catalog() {
     requireContext();
     return {
-      events: listEvents().map((e) => ({
-        key: e.key,
-        title: e.title,
-        urgency: e.urgency,
-        channels: e.channels,
-        defaultChannels: e.defaultChannels,
-        lockedChannels: e.lockedChannels ?? [],
-      })),
+      events: listEvents()
+        .filter((e) => !e.hidden)
+        .map((e) => ({
+          key: e.key,
+          title: e.title,
+          urgency: e.urgency,
+          channels: e.channels,
+          defaultChannels: e.defaultChannels,
+          lockedChannels: e.lockedChannels ?? [],
+        })),
     };
   }
 
@@ -159,6 +161,38 @@ export class NotificationsController {
   vapidKey() {
     requireContext();
     return { publicKey: getEnv().VAPID_PUBLIC_KEY || null };
+  }
+
+  /** Dispositivos de Web Push suscritos por el usuario (para diagnóstico en Ajustes). */
+  @Get("devices")
+  listDevices() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const devices = await tx.pushDevice.findMany({
+        where: { userId: ctx.userId, kind: "web_push", active: true },
+        orderBy: { lastSeenAt: "desc" },
+        select: { id: true, platform: true, label: true, lastSeenAt: true, createdAt: true },
+      });
+      const vapid = Boolean(getEnv().VAPID_PUBLIC_KEY && getEnv().VAPID_PRIVATE_KEY);
+      return { vapidConfigured: vapid, count: devices.length, devices };
+    });
+  }
+
+  /** Envía una notificación de PRUEBA al propio usuario (para verificar el push). */
+  @Post("test")
+  async test() {
+    const ctx = requireContext();
+    const webDevices = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.pushDevice.count({ where: { userId: ctx.userId, kind: "web_push", active: true } }),
+    );
+    await this.queues.notify({
+      eventKey: "system.test",
+      organizationId: ctx.organizationId,
+      userIds: [ctx.userId!],
+      data: { at: new Date().toLocaleTimeString("es-CL") },
+    });
+    const vapid = Boolean(getEnv().VAPID_PUBLIC_KEY && getEnv().VAPID_PRIVATE_KEY);
+    return { ok: true, webDevices, vapidConfigured: vapid };
   }
 
   /** Registra (o refresca) una suscripción de Web Push como dispositivo. */

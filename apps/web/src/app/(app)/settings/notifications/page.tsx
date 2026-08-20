@@ -36,6 +36,19 @@ function PushActivation() {
     setState("default");
     toast.push("Notificaciones desactivadas en este dispositivo", "info");
   }
+  async function sendTest() {
+    setBusy(true);
+    try {
+      const r = await api<{ ok: boolean; webDevices: number; vapidConfigured: boolean }>("/notifications/test", { method: "POST" });
+      if (!r.vapidConfigured) toast.push("El servidor no tiene VAPID configurado — el push no puede salir.", "error");
+      else if (r.webDevices === 0) toast.push("Este navegador no aparece suscrito. Toca «Activar» y permite las notificaciones.", "error");
+      else toast.push(`Prueba enviada a ${r.webDevices} dispositivo(s). Si no llega en unos segundos, revisa los permisos del navegador y del sistema (No molestar / Focus).`, "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const active = state === "granted";
   return (
@@ -55,7 +68,10 @@ function PushActivation() {
         </div>
       </div>
       {active ? (
-        <button onClick={() => void deactivate()} disabled={busy} className="shrink-0 rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app disabled:opacity-50">Desactivar</button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button onClick={() => void sendTest()} disabled={busy} className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{busy ? "…" : "Enviar prueba"}</button>
+          <button onClick={() => void deactivate()} disabled={busy} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app disabled:opacity-50">Desactivar</button>
+        </div>
       ) : (state === "default" || state === "denied") ? (
         <button onClick={() => void activate()} disabled={busy} className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{busy ? "Activando…" : "Activar"}</button>
       ) : null}

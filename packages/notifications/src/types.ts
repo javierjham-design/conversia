@@ -25,6 +25,8 @@ export interface NotifEventDef {
   lockedChannels?: NotifChannel[];
   /** Deep-link al tocar la notificación (con variables {var}). */
   link?: string;
+  /** Uso interno (p. ej. prueba): no se muestra en la matriz de preferencias. */
+  hidden?: boolean;
 }
 
 /** Contexto para resolver la audiencia del evento a usuarios concretos. */
