@@ -30,6 +30,13 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
       const { runCatalogSyncJob } = await import("./catalog/sync-job.js");
       return runCatalogSyncJob(job.organizationId, job.payload as { source: string; mode?: "full" | "incremental" });
     }
+    case "catalog_embed": {
+      // Embebe los ítems del catálogo sin vector (p. ej. tras importar por CSV).
+      const { embedMissingCatalogItems } = await import("./catalog/embeddings.js");
+      const n = await embedMissingCatalogItems(job.organizationId);
+      if (n) console.log(`[catalog] embebidos ${n} ítems nuevos (embed job)`);
+      return;
+    }
     case "meta_ads_sync": {
       const { syncMetaAds, fanOutMetaAdsSync } = await import("./meta-ads-sync.js");
       // Job diario con {all:true} → abanica un sync por tenant conectado.

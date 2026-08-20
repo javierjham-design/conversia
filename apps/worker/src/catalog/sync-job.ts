@@ -55,6 +55,14 @@ export async function runCatalogSyncJob(orgId: string, payload: { source: string
     await withTenant(orgId, (tx) =>
       tx.integrationEvent.create({ data: { organizationId: orgId, provider, type: "catalog.synced", status: "ok", message: `Sincronizados ${r.created + r.updated} productos (${r.created} nuevos, ${r.updated} actualizados, ${r.deactivated} sin stock, ${r.failed} con error).` } }).catch(() => undefined),
     );
+    // Búsqueda semántica: embebe los ítems nuevos (sin vector). Best-effort, no rompe el sync.
+    try {
+      const { embedMissingCatalogItems } = await import("./embeddings.js");
+      const n = await embedMissingCatalogItems(orgId);
+      if (n) console.log(`[catalog] embebidos ${n} ítems nuevos (${source})`);
+    } catch (e) {
+      console.warn(`[catalog] embeddings omitidos (${source}): ${(e as Error).message}`);
+    }
   } catch (e) {
     await withTenant(orgId, (tx) => tx.integrationConnection.update({ where: { id: conn.id }, data: { status: "error", lastError: (e as Error).message.slice(0, 300) } }));
     throw e;

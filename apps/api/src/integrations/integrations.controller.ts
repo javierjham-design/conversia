@@ -1003,6 +1003,8 @@ export class IntegrationsController {
       }
     });
     await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "catalog.import_csv", entityType: "catalog_item", after: { created, updated } } }));
+    // Búsqueda semántica: embebe los ítems importados (si los embeddings están habilitados).
+    await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_embed", payload: {} }, { jobId: `catalog_embed:${ctx.organizationId}`, delay: 4000, removeOnComplete: true, removeOnFail: 200 }).catch(() => undefined);
     return { ok: true, created, updated };
   }
 
