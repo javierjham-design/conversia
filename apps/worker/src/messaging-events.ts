@@ -31,7 +31,16 @@ export function parseMessagingEvents(raw: any): MessagingEvent[] {
   if (!platform) return events;
 
   for (const entry of raw?.entry ?? []) {
-    for (const m of entry?.messaging ?? []) {
+    // Forma A: entry.messaging[] (Messenger clásico y muestras de página).
+    // Forma B: entry.changes[] con field="messages" (topic instagram y tests
+    // del dashboard envuelven el mismo value ahí) — mismo contenido adentro.
+    const items: any[] = [
+      ...(entry?.messaging ?? []),
+      ...((entry?.changes ?? [])
+        .filter((c: any) => c?.field === "messages" && c?.value)
+        .map((c: any) => c.value)),
+    ];
+    for (const m of items) {
       const msg = m?.message;
       if (!msg?.mid) continue; // postbacks/read/delivery: fuera del v1
       events.push({
