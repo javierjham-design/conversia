@@ -59,6 +59,19 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/inbox/{conversationId}",
   },
   {
+    // Mensaje entrante que ATIENDE LA IA (aiEnabled=true). Útil al SETEAR la IA para ver cómo
+    // responde. OPT-IN: apagado por defecto (defaultChannels vacío) para no saturar — se enciende
+    // desde Ajustes → Notificaciones. Va a admins/owner (quien monitorea el arranque).
+    key: "message.received_ai",
+    title: "Mensaje atendido por la IA",
+    body: "{contactName}: {excerpt}",
+    audience: ["tenant_admins", "owner"],
+    urgency: "info",
+    channels: ["in_app", "web_push"],
+    defaultChannels: [],
+    link: "/inbox/{conversationId}",
+  },
+  {
     key: "comment.mention",
     title: "Te mencionaron",
     body: "{authorName} te mencionó: {excerpt}",
