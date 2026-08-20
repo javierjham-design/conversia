@@ -537,6 +537,22 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }) {
+      // 1) Búsqueda SEMÁNTICA (si hay embeddings): encuentra por significado. Maneja su
+      //    propia conexión, así que no anidamos withTenant. Si no trae nada, cae a textual.
+      try {
+        const { semanticCatalogSearch } = await import("./catalog/embeddings.js");
+        const ids = await semanticCatalogSearch(orgId, input.query, { category: input.category, maxPrice: input.maxPrice, onlyAvailable: input.onlyAvailable, limit: 8 });
+        if (ids.length) {
+          return await withTenant(orgId, async (tx) => {
+            const found = await tx.catalogItem.findMany({ where: { id: { in: ids }, active: true } });
+            const byId = new Map(found.map((f) => [f.id, f]));
+            return ids.map((id) => byId.get(id)).filter((x): x is (typeof found)[number] => !!x).map(toCatalogHit);
+          });
+        }
+      } catch {
+        /* proveedor de embeddings no disponible → búsqueda textual */
+      }
+      // 2) Búsqueda TEXTUAL (respaldo siempre disponible).
       return withTenant(orgId, async (tx) => {
         const words = input.query.split(/\s+/).filter((w) => w.length > 2).slice(0, 6);
         const items = await tx.catalogItem.findMany({
