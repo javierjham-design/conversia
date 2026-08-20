@@ -310,12 +310,67 @@ export default function ChannelsPage() {
     );
   }
 
+  // -------- Grilla de canales disponibles (estado por red) --------
+  const hasActive = (t: Channel["type"]) => channels.some((c) => c.type === t && c.status === "active");
+  const countOf = (t: Channel["type"]) => channels.filter((c) => c.type === t).length;
+  const availableNets: Array<{
+    key: string;
+    label: string;
+    desc: string;
+    emoji: string;
+    chip: string;
+    connected: boolean;
+    count: number;
+    action: { label: string; run: () => void } | { label: string; href: string } | null;
+  }> = [
+    {
+      key: "whatsapp",
+      label: "WhatsApp",
+      desc: "Meta Cloud API",
+      emoji: "📱",
+      chip: "bg-[#25D366]",
+      connected: hasActive("WHATSAPP_CLOUD"),
+      count: countOf("WHATSAPP_CLOUD"),
+      action: { label: hasActive("WHATSAPP_CLOUD") ? "Conectar otro número" : "Conectar con Meta", run: () => void connectWithMeta() },
+    },
+    {
+      key: "instagram",
+      label: "Instagram",
+      desc: "DMs de tu cuenta profesional",
+      emoji: "📸",
+      chip: "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600",
+      connected: hasActive("INSTAGRAM"),
+      count: countOf("INSTAGRAM"),
+      action: { label: hasActive("INSTAGRAM") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
+    },
+    {
+      key: "messenger",
+      label: "Messenger",
+      desc: "Mensajes de tu página de Facebook",
+      emoji: "💬",
+      chip: "bg-[#0084FF]",
+      connected: hasActive("MESSENGER"),
+      count: countOf("MESSENGER"),
+      action: { label: hasActive("MESSENGER") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
+    },
+    {
+      key: "tiktok",
+      label: "TikTok",
+      desc: "Business Messaging",
+      emoji: "🎵",
+      chip: "bg-neutral-900",
+      connected: false,
+      count: 0,
+      action: null, // próximamente
+    },
+  ];
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Canales</h1>
-          <p className="text-sm text-ink-muted">Números de WhatsApp (Meta Cloud API) y canales de prueba.</p>
+          <p className="text-sm text-ink-muted">WhatsApp, Instagram, Messenger y canales de prueba — todos a la misma bandeja.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -335,6 +390,49 @@ export default function ChannelsPage() {
       </div>
 
       {msg && <p className="mb-4 rounded-lg bg-app px-3 py-2 text-sm">{msg}</p>}
+
+      {/* Redes disponibles: estado de cada una de un vistazo (verde/rojo) */}
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {availableNets.map((n) => (
+          <div key={n.key} className="flex flex-col rounded-xl border border-line bg-panel p-4 shadow-card transition-shadow hover:shadow-pop">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${n.chip}`}>{n.emoji}</div>
+                <div>
+                  <p className="text-sm font-semibold">{n.label}</p>
+                  <p className="text-[11px] text-ink-subtle">{n.desc}</p>
+                </div>
+              </div>
+              {n.action === null ? (
+                <span className="shrink-0 rounded-full border border-line bg-app px-2 py-0.5 text-[10px] font-medium text-ink-subtle">Próximamente</span>
+              ) : (
+                <span
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                    n.connected
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
+                      : "border-red-200 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+                  }`}
+                >
+                  {n.connected ? `● Conectado${n.count > 1 ? ` (${n.count})` : ""}` : "● No conectado"}
+                </span>
+              )}
+            </div>
+            {n.action && (
+              <div className="mt-3 border-t border-line pt-2.5">
+                {"href" in n.action ? (
+                  <a href={n.action.href} className="text-xs font-medium text-brand-600 hover:underline">
+                    {n.action.label} →
+                  </a>
+                ) : (
+                  <button onClick={n.action.run} className="text-xs font-medium text-brand-600 hover:underline">
+                    {n.action.label} →
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
 
       <p className="mb-4 rounded-lg border border-line bg-panel px-3 py-2 text-xs text-ink-muted">
         Al pulsar <b>Conectar con Meta</b> podrás <b>elegir el negocio</b> (si administras varios) y <b>crear una cuenta de WhatsApp nueva</b> o usar una existente, con su número. Si no ves esas opciones, revisa que tu <span className="font-mono">META_CONFIG_ID</span> sea una configuración de <b>Embedded Signup de WhatsApp</b> (no un login genérico) y que la app tenga acceso avanzado a <span className="font-mono">whatsapp_business_management</span>.
@@ -393,26 +491,45 @@ export default function ChannelsPage() {
 
       <div className="space-y-3">
         {channels.map((c) => (
-          <div key={c.id} className="rounded-xl border border-line bg-panel p-4">
+          <div key={c.id} className="rounded-xl border border-line bg-panel p-4 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="font-medium">
-                  {c.type === "WHATSAPP_CLOUD" ? "📱" : c.type === "MESSENGER" ? "💬" : c.type === "INSTAGRAM" ? "📸" : "🧪"} {c.name}{" "}
-                  <span
-                    className={`text-[10px] ${
-                      c.status === "active" ? "text-emerald-600" : c.status === "error" ? "text-red-600" : "text-ink-subtle"
-                    } dark:text-emerald-400 dark:text-red-400`}
-                  >
-                    {c.status === "active" ? "● activo" : c.status === "error" ? "⚠ requiere reautorización" : "○ inactivo"}
-                  </span>
-                </h3>
-                <p className="text-xs text-ink-subtle">
-                  {c.type === "WHATSAPP_CLOUD"
-                    ? `phone_number_id: ${c.phoneNumberId ?? "—"} · ${c.displayPhone ?? ""}`
-                    : c.type === "MESSENGER" || c.type === "INSTAGRAM"
-                      ? "Mensajería de la página (Meta CRM) · diagnóstico en Integraciones → Meta CRM"
-                      : "Canal de prueba: usa el simulador para enviar mensajes"}
-                </p>
+              <div className="flex items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${
+                    c.type === "WHATSAPP_CLOUD"
+                      ? "bg-[#25D366]"
+                      : c.type === "MESSENGER"
+                        ? "bg-[#0084FF]"
+                        : c.type === "INSTAGRAM"
+                          ? "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600"
+                          : "bg-app"
+                  }`}
+                >
+                  {c.type === "WHATSAPP_CLOUD" ? "📱" : c.type === "MESSENGER" ? "💬" : c.type === "INSTAGRAM" ? "📸" : "🧪"}
+                </div>
+                <div>
+                  <h3 className="flex items-center gap-2 font-medium">
+                    {c.name}
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                        c.status === "active"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
+                          : c.status === "error"
+                            ? "border-red-200 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+                            : "border-line bg-app text-ink-subtle"
+                      }`}
+                    >
+                      {c.status === "active" ? "● activo" : c.status === "error" ? "⚠ requiere reautorización" : "○ inactivo"}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-ink-subtle">
+                    {c.type === "WHATSAPP_CLOUD"
+                      ? `phone_number_id: ${c.phoneNumberId ?? "—"} · ${c.displayPhone ?? ""}`
+                      : c.type === "MESSENGER" || c.type === "INSTAGRAM"
+                        ? "Mensajería de la página · configuración y diagnóstico en su menú propio"
+                        : "Canal de prueba: usa el simulador para enviar mensajes"}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <select
@@ -430,6 +547,15 @@ export default function ChannelsPage() {
                     <input type="checkbox" checked={c.defaultProactive ?? false} onChange={(e) => void setDefaultProactive(c.id, e.target.checked)} />
                     Por defecto para recordatorios
                   </label>
+                )}
+                {(c.type === "MESSENGER" || c.type === "INSTAGRAM") && (
+                  <a
+                    href="/integrations/meta-crm?tab=mensajeria"
+                    className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app"
+                    title="Menú de configuración de mensajería (diagnóstico, página, suscripción)"
+                  >
+                    Configurar
+                  </a>
                 )}
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app">
                   Probar conexión

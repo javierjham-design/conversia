@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckCircle2, ExternalLink, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Unplug } from "lucide-react";
+import { CheckCircle2, ExternalLink, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Settings2, Unplug } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, ConfirmDialog, PageHeader, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
 import { FieldMappingEditor } from "../meta/panels";
@@ -24,12 +24,26 @@ interface GraphPage {
   connected: boolean;
 }
 
+type MetaCrmTab = "crm" | "mensajeria";
+
 export default function MetaCrmPage() {
   const toast = useToast();
   const [data, setData] = useState<CrmStatus | null>(null);
   const [mapping, setMapping] = useState<any>(null);
   const [leadStatuses, setLeadStatuses] = useState<Array<{ code: string; name: string }>>([]);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [tab, setTab] = useState<MetaCrmTab>("crm");
+
+  // Pestaña por URL (?tab=mensajeria) — así Canales puede enlazar directo a la
+  // configuración de mensajería sin pasar por el bloque de CRM.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "mensajeria") setTab("mensajeria");
+  }, []);
+
+  function switchTab(t: MetaCrmTab) {
+    setTab(t);
+    window.history.replaceState(null, "", t === "mensajeria" ? "/integrations/meta-crm?tab=mensajeria" : "/integrations/meta-crm");
+  }
 
   const load = useCallback(async () => {
     try {
@@ -58,7 +72,8 @@ export default function MetaCrmPage() {
     else if (r === "denied") toast.push("Conexión con Meta cancelada", "info");
     else if (r === "permisos") toast.push("Faltaron permisos en la autorización — acepta todos los permisos solicitados", "error");
     else toast.push("No se pudo conectar con Meta — intenta de nuevo", "error");
-    window.history.replaceState(null, "", "/integrations/meta-crm");
+    const keepTab = new URLSearchParams(window.location.search).get("tab");
+    window.history.replaceState(null, "", keepTab === "mensajeria" ? "/integrations/meta-crm?tab=mensajeria" : "/integrations/meta-crm");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -76,8 +91,8 @@ export default function MetaCrmPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Meta CRM (Lead Ads)"
-        description="Leads de tus formularios de clientes potenciales directo al CRM, y la calidad del embudo de vuelta a tus campañas (dataset). Conexión propia — independiente de WhatsApp y de la conexión Meta general."
+        title="Centro Meta CRM"
+        description="Una sola conexión con Meta, dos capacidades con configuración independiente: Lead Ads al CRM y mensajería de Instagram/Messenger. No toca WhatsApp ni la conexión Meta general."
         actions={
           connected ? (
             <Button variant="secondary" onClick={() => setDisconnectOpen(true)}>
@@ -87,8 +102,31 @@ export default function MetaCrmPage() {
         }
       />
 
+      {/* Pestañas: cada capacidad tiene su propio menú de configuración */}
+      <div className="flex w-fit gap-1 rounded-xl border border-line bg-panel p-1">
+        {(
+          [
+            ["crm", "📊 Lead Ads (CRM)"],
+            ["mensajeria", "💬 Mensajería · Instagram y Messenger"],
+          ] as Array<[MetaCrmTab, string]>
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => switchTab(key)}
+            className={cn(
+              "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+              tab === key ? "bg-navy-900 text-white shadow-card" : "text-ink-muted hover:bg-app",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {!data ? (
         <Skeleton className="h-64" />
+      ) : tab === "mensajeria" ? (
+        <MessagingTab data={data} onConnect={() => void connectWithMeta()} onChanged={() => void load()} />
       ) : (
         <>
           {/* Pasos del circuito */}
@@ -281,9 +319,120 @@ function TokenConnect({ onConnected }: { onConnected: () => void }) {
   );
 }
 
+// ------------------------- Pestaña Mensajería -------------------------
+
+interface MessagingChannel {
+  id: string;
+  type: string;
+  name: string;
+  status: string;
+  defaultAgentName: string | null;
+}
+
+/**
+ * Configuración de mensajería (Instagram Direct + Messenger) SEPARADA del CRM:
+ * estado por red, diagnóstico de la página y accesos de operación. La conexión
+ * subyacente es la misma (token Meta CRM), pero cada capacidad tiene su menú.
+ */
+function MessagingTab({ data, onConnect, onChanged }: { data: CrmStatus; onConnect: () => void; onChanged: () => void }) {
+  const [channels, setChannels] = useState<MessagingChannel[] | null>(null);
+  const connected = data.connection?.status === "CONNECTED";
+
+  useEffect(() => {
+    api<MessagingChannel[]>("/channels")
+      .then((all) => setChannels(all.filter((c) => c.type === "INSTAGRAM" || c.type === "MESSENGER")))
+      .catch(() => setChannels([]));
+  }, []);
+
+  const nets: Array<{ type: "INSTAGRAM" | "MESSENGER"; label: string; icon: ReactNode; chipClass: string }> = [
+    {
+      type: "INSTAGRAM",
+      label: "Instagram Direct",
+      icon: <span className="text-lg">📸</span>,
+      chipClass: "bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 text-white",
+    },
+    {
+      type: "MESSENGER",
+      label: "Facebook Messenger",
+      icon: <span className="text-lg">💬</span>,
+      chipClass: "bg-[#0084FF] text-white",
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {!connected && (
+        <div className="rounded-card border border-amber-200 bg-amber-50/50 p-5 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-sm font-medium">Primero conecta tu cuenta de Meta</p>
+          <p className="mt-1 text-[13px] text-ink-muted">
+            La mensajería usa la misma autorización que Lead Ads. Un clic, sin copiar tokens.
+          </p>
+          <Button className="mt-3" onClick={onConnect}>
+            <Link2 size={14} /> Conectar con Meta
+          </Button>
+        </div>
+      )}
+
+      {/* Estado por red */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {nets.map((n) => {
+          const mine = (channels ?? []).filter((c) => c.type === n.type);
+          const active = mine.some((c) => c.status === "active");
+          return (
+            <div key={n.type} className="rounded-card border border-line bg-panel p-5 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl", n.chipClass)}>{n.icon}</div>
+                  <div>
+                    <p className="font-semibold">{n.label}</p>
+                    <p className="text-xs text-ink-subtle">
+                      {mine.length ? mine.map((c) => c.name).join(" · ") : "Se crea al conectar tu página (abajo)"}
+                    </p>
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                    active
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300"
+                      : "border-red-200 bg-red-50 text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400",
+                  )}
+                >
+                  {active ? "● Conectado" : "● No conectado"}
+                </span>
+              </div>
+              {mine.length > 0 && (
+                <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-xs text-ink-muted">
+                  <span>Agente: {mine[0].defaultAgentName ?? "sin agente por defecto"}</span>
+                  <Link href="/channels" className="inline-flex items-center gap-1 font-medium text-brand-600 hover:underline">
+                    <Settings2 size={12} /> Gestionar en Canales
+                  </Link>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Diagnóstico y suscripción de la página (compartido con la conexión) */}
+      {connected && (
+        <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+          <PagesPanel enabled={connected} onConnected={onChanged} messaging />
+        </div>
+      )}
+
+      <p className="rounded-card border border-line bg-app p-4 text-xs leading-relaxed text-ink-muted">
+        <b>Importante mientras la revisión de Meta está pendiente:</b> con acceso estándar, Meta solo entrega los DMs de
+        cuentas con rol en la app. Los mensajes del público llegan cuando la App Review de mensajería quede aprobada —
+        no hay que cambiar nada más aquí.
+      </p>
+    </div>
+  );
+}
+
 // ------------------------- Páginas conectadas -------------------------
 
-function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: () => void }) {
+function PagesPanel({ enabled, onConnected, messaging }: { enabled: boolean; onConnected: () => void; messaging?: boolean }) {
   const toast = useToast();
   const [pages, setPages] = useState<GraphPage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -338,7 +487,7 @@ function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: (
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="font-semibold">Páginas conectadas</h2>
+        <h2 className="font-semibold">{messaging ? "Página y diagnóstico de mensajería" : "Páginas conectadas"}</h2>
         {enabled && (
           <button onClick={() => void load()} className="rounded p-1 text-ink-subtle hover:bg-app" title="Actualizar">
             <RefreshCw size={14} />
@@ -346,8 +495,18 @@ function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: (
         )}
       </div>
       <p className="mb-3 text-[13px] text-ink-muted">
-        Conecta la página de tus campañas: registramos sus formularios y suscribimos la app CRM al evento{" "}
-        <code className="text-xs">leadgen</code> — cada lead entra al CRM al instante.
+        {messaging ? (
+          <>
+            La página de Facebook es la puerta de entrada de Messenger y de su cuenta de Instagram vinculada.{" "}
+            <b>Re-conectar</b> re-suscribe los webhooks de mensajes y registra la cuenta IG; <b>Diagnosticar</b> revisa
+            los 12 puntos del circuito.
+          </>
+        ) : (
+          <>
+            Conecta la página de tus campañas: registramos sus formularios y suscribimos la app CRM al evento{" "}
+            <code className="text-xs">leadgen</code> — cada lead entra al CRM al instante.
+          </>
+        )}
       </p>
       {!enabled ? (
         <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">Conecta primero el token (arriba).</p>

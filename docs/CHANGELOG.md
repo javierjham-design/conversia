@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-20 — ux: orden de canales y menús independientes en Meta CRM
+
+Entrar a conectar Instagram/Messenger mostraba TODO el bloque de CRM junto (leads, mapeo,
+dataset) — desordenado y confuso. Ahora:
+- `/integrations/meta-crm` tiene DOS pestañas con menús de configuración independientes
+  (misma conexión subyacente): «Lead Ads (CRM)» y «Mensajería · Instagram y Messenger»
+  (deep-link `?tab=mensajeria`). La de mensajería trae estado por red (verde/rojo), agente
+  por defecto, diagnóstico/re-conexión de la página, y la nota del acceso estándar.
+- `/channels` abre con la grilla de redes disponibles: WhatsApp / Instagram / Messenger con
+  pill verde «Conectado» o rojo «No conectado» + acción (conectar/configurar), y TikTok como
+  «Próximamente». Tarjetas renovadas: avatar con color de marca, pill de estado, shadow.
+- Los canales IG/Messenger del listado ganan botón «Configurar» → su menú de mensajería.
+Paridad completa con Respond (historias, respuestas privadas, menú del chat, plantillas,
+eliminación segura) sigue especificada en docs/OMNICHANNEL_CHANNEL_CONFIG.md.
+
 ## 2026-08-20 — feat: push por mensaje nuevo en conversaciones atendidas por humanos
 
 Faltaba el aviso «por mensaje» cuando la IA NO va a responder (aiEnabled=false: escalada,
