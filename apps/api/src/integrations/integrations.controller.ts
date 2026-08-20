@@ -172,6 +172,11 @@ export class IntegrationsController {
         metaCrm: metaCrm
           ? { status: metaCrm.status, mode: metaCrm.mode, businessName: metaCrm.businessName, lastError: metaCrm.lastError }
           : null,
+        // Canales de mensajería de página activos (para mostrarlos como Conectadas)
+        messagingChannels: {
+          messenger: channels.some((c) => c.type === ("MESSENGER" as any) && c.status === "active"),
+          instagram: channels.some((c) => c.type === ("INSTAGRAM" as any) && c.status === "active"),
+        },
         clariva: scheduling
           ? {
               status: scheduling.status,
