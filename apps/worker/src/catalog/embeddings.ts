@@ -64,6 +64,16 @@ export async function semanticCatalogSearch(
 ): Promise<string[]> {
   if (!embeddingsEnabled() || !query.trim()) return [];
   try {
+    // Guard: si el tenant aún no tiene NINGÚN ítem con vector, no gastamos una llamada de
+    // embeddings en la consulta — el caller cae directo a la búsqueda textual.
+    const hasVectors = await withTenant(orgId, async (tx) => {
+      const rows = await tx.$queryRawUnsafe<Array<{ one: number }>>(
+        `SELECT 1 AS one FROM catalog_items WHERE organization_id = $1 AND embedding IS NOT NULL AND active = true LIMIT 1`,
+        orgId,
+      );
+      return rows.length > 0;
+    });
+    if (!hasVectors) return [];
     const { vectors } = await ai().embed([query], MODEL);
     const qv = vectors[0];
     if (!qv || qv.length !== DIM) return [];
