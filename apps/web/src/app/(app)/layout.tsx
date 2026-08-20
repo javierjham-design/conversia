@@ -33,6 +33,7 @@ import { BillingBanner } from "@/components/BillingBanner";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
+import { NotificationsPrompt } from "@/components/NotificationsPrompt";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 
 interface Me {
@@ -498,6 +499,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <SupportWidget />
           <PwaManager />
+          <NotificationsPrompt />
         </div>
       </MeContext.Provider>
     </ToastProvider>
