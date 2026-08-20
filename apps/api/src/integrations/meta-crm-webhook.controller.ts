@@ -36,13 +36,18 @@ export class MetaCrmWebhookController {
   async receive(@Req() req: Request & { rawBody?: Buffer }) {
     const env = getEnv();
     const secret = env.META_CRM_APP_SECRET || env.META_APP_SECRET;
+    const object = String((req.body as any)?.object ?? "?");
     if (secret) {
       const signature = req.headers["x-hub-signature-256"] as string | undefined;
       const raw = req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}), "utf-8");
       if (!verifyMetaSignature(raw, signature, secret)) {
+        // Log SIEMPRE: si el secret de Railway no coincide con el de la app,
+        // todos los webhooks morirían acá en silencio (403) — hacerlo visible.
+        console.warn(`📥 meta-crm webhook RECHAZADO (firma inválida) object=${object} — revisa META_CRM_APP_SECRET`);
         throw new ForbiddenException("Firma de webhook inválida");
       }
     }
+    console.log(`📥 meta-crm webhook OK object=${object} entries=${((req.body as any)?.entry ?? []).length}`);
     await this.queues.inbound.add(
       "inbound",
       { raw: req.body, receivedAt: new Date().toISOString() },
