@@ -47,7 +47,12 @@ export interface ToolServices {
   requestHumanHandoff(reason: string): Promise<void>;
   // Acciones adicionales (Fase 3)
   closeConversation(): Promise<void>;
-  assignConversation(target: string, reason?: string): Promise<{ assignedTo: string } | { error: string }>;
+  // Asigna a un EQUIPO/PERSONA (apaga la IA) o, si el destino es otro AGENTE de IA, devuelve
+  // { handoffToAgentSlug } para que el runtime haga la transferencia. Lanza si no resuelve a nada.
+  assignConversation(
+    target: string,
+    reason?: string,
+  ): Promise<{ assignedTo: string } | { handoffToAgentSlug: string; message: string }>;
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;

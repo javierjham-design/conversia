@@ -19,6 +19,7 @@ import {
   type AgentRuntime,
 } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
+import { resolveAgentByNameOrSlug } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
@@ -29,6 +30,18 @@ import { buildSandboxServices, type SandboxState } from "./agent-sandbox";
 // Registro de tools compartido para el probador (una sola vez por proceso).
 const sandboxRegistry = new ToolRegistry();
 for (const tool of buildCoreTools()) sandboxRegistry.register(tool);
+
+/** Extrae el slug de agente destino cuando el modelo derivó vía assignConversation (marcador). */
+function sandboxHandoffSlug(events: ReadonlyArray<{ name: string; output?: unknown; isError?: boolean }> | undefined): string | undefined {
+  const ev = events?.find((e) => e.name === "assignConversation" && !e.isError);
+  if (!ev || typeof ev.output !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(ev.output) as { handoffToAgentSlug?: unknown };
+    return typeof parsed.handoffToAgentSlug === "string" ? parsed.handoffToAgentSlug : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const createAgentSchema = z.object({
   name: z.string().min(2).max(60),
@@ -380,6 +393,39 @@ export class AgentsController {
     try {
       const result = await orchestrate(ai, sandboxRegistry, { ctx: toolCtx, agent: runtime, history, vars });
 
+      // Paridad con PRODUCCIÓN: si el turno derivó a otro agente (por transferToAgent o por
+      // assignConversation con destino-agente), resolvemos el destino IGUAL que el runtime
+      // (nombre/slug) y SIMULAMOS su respuesta inmediata. Así el probador no miente: si en prod
+      // el destino no existiera, acá tampoco aparece transferencia.
+      const transferRaw = result.transferToAgentSlug ?? sandboxHandoffSlug(result.toolEvents);
+      let transfer: { slug: string; name: string; reply: string | null; toolEvents: unknown[] } | null = null;
+      if (transferRaw) {
+        const target = await this.prisma.withTenant(orgId, (tx) => resolveAgentByNameOrSlug(tx, transferRaw));
+        if (target && target.active && target.slug !== agent.slug) {
+          const tv = await this.prisma.withTenant(orgId, (tx) =>
+            tx.agentVersion.findFirst({ where: { agentId: target.id, status: "PUBLISHED" }, orderBy: { version: "desc" } }),
+          );
+          if (tv) {
+            const tRuntime: AgentRuntime = {
+              agentId: target.id,
+              agentVersionId: "sandbox",
+              slug: target.slug,
+              name: target.name,
+              systemPrompt: assembleSystemPrompt(tv.systemPrompt, (tv.config as { actions?: Record<string, { enabled: boolean; instructions?: string }> } | null)?.actions),
+              model: aiCfg.model ?? env.AI_DEFAULT_MODEL,
+              maxTokens: aiCfg.maxTokens ?? 400,
+              maxToolRounds: aiCfg.maxToolRounds ?? 5,
+              tools: Array.isArray(tv.tools) ? (tv.tools as string[]) : [],
+            };
+            const tResult = await orchestrate(ai, sandboxRegistry, { ctx: toolCtx, agent: tRuntime, history, vars: { ...vars, "agent.name": target.name } });
+            result.usage.inputTokens += tResult.usage.inputTokens;
+            result.usage.outputTokens += tResult.usage.outputTokens;
+            result.usage.costUsd += tResult.usage.costUsd;
+            transfer = { slug: target.slug, name: target.name, reply: tResult.reply, toolEvents: tResult.toolEvents };
+          }
+        }
+      }
+
       // La prueba consumió tokens reales del proveedor: se contabiliza para que
       // el tope diario sea fiel. Se marca como test para no confundir métricas.
       await this.prisma.withTenant(orgId, (tx) =>
@@ -403,7 +449,10 @@ export class AgentsController {
         usage: result.usage,
         latencyMs: result.latencyMs,
         stopReason: result.stopReason,
-        transferToAgentSlug: result.transferToAgentSlug ?? null,
+        // Slug REAL resuelto del destino (null si no se derivó o el destino no existe).
+        transferToAgentSlug: transfer?.slug ?? null,
+        // Respuesta del agente destino (lo que el cliente recibiría en el mismo turno).
+        transfer,
         humanHandoff: result.humanHandoff ?? false,
       };
     } catch (e: any) {

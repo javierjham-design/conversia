@@ -100,3 +100,36 @@ export async function recordUsage(
     },
   });
 }
+
+/**
+ * Normaliza un nombre/slug de agente para comparar sin acentos, sin distinción de
+ * mayúsculas y tratando guiones/guiones_bajos/espacios como equivalentes. Así
+ * "@RESP IMPLANTES", "RESP IMPLANTES" y el slug "resp-implantes" resuelven al mismo agente.
+ */
+export function normalizeAgentKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/@/g, "")
+    .replace(/[\s_-]+/g, " ")
+    .trim();
+}
+
+/**
+ * Resuelve un agente por SLUG o NOMBRE (insensible a mayúsculas/acentos/guiones).
+ * `tx` ya está acotado al tenant por withTenant (RLS), así que la búsqueda es por org.
+ * Devuelve null si no hay match. NO filtra por `active` (el caller decide).
+ */
+export async function resolveAgentByNameOrSlug(
+  tx: TenantTx,
+  raw: string,
+): Promise<{ id: string; slug: string; name: string; active: boolean } | null> {
+  const key = normalizeAgentKey(raw ?? "");
+  if (!key) return null;
+  const agents = await tx.agent.findMany({
+    where: { deletedAt: null },
+    select: { id: true, slug: true, name: true, active: true },
+  });
+  return agents.find((a) => normalizeAgentKey(a.slug) === key || normalizeAgentKey(a.name) === key) ?? null;
+}

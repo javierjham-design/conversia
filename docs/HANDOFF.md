@@ -1,29 +1,34 @@
 # Handoff (se SOBRESCRIBE en cada cierre de tarea)
 
-**Última tarea (2026-08-19): importador de historial de mensajes de Respond.io.**
+**Última tarea (2026-08-19): fix de la derivación entre agentes de IA (Digital-Dent, prod).**
 
-- Flujo: Contactos → botón **"Historial"** → CSV de Data export → Messages →
-  tandas de 5.000 a `POST /contacts/import-messages` → job `message-imports`
-  (worker `respond-import.ts`) → lotes de 500 con `{timeout:30s, maxWait:10s}`.
-- Cruce por campo personalizado `id_respond_io`; sin match → `skippedNoContact`
-  (los 186 contactos de IG/Msgr/TikTok sin teléfono se omiten y reportan —
-  propuesta pendiente: crearles ficha sin teléfono, hoy el modelo YA lo permite
-  post-omnicanal; decidir con el usuario antes).
-- Conversación por (contacto, canal Respond) con status CLOSED + aiEnabled
-  false + meta.importedFrom; lastMessageAt/preview del último mensaje real.
-- Idempotencia: externalId=Message ID + `createMany skipDuplicates` (correr 2
-  veces no duplica — verificarlo en la prueba real). Hora America/Santiago→UTC
-  con DST (`santiagoToUtc`, testeada invierno/verano).
-- REGLA DE ORO comentada en respond-import.ts: escribe y NADA más (sin
-  agent-turn, dispatchEvent, webhooks, recordUsage ni envíos). No "arreglar".
-- **Adjuntos (318 con URL de cdn.chatapi.net)**: recomendación dada al usuario
-  = descargarlos PRONTO a nuestro storage en un job aparte (las URLs morirán
-  al cerrar la cuenta); el payload ya conserva las URLs para ese job.
-- **Verificación pendiente (usuario, post-deploy)**: importar el archivo
-  completo, abrir en Bandeja un contacto con conversación larga (hilo completo
-  en orden), correr el import 2.ª vez y confirmar 0 nuevos.
+- Síntoma: Recepción (`recepcion-digital-dent`) no derivaba las consultas de implantes a
+  RESP IMPLANTES (`resp-implantes`); le decía al paciente «te derivé» y nadie contestaba;
+  `activeAgentId` seguía en Recepción y caía al agente por defecto del canal en cada mensaje.
+- Causa: (1) el modelo llamaba `assignConversation` (solo equipos/personas) en vez de
+  `transferToAgent`; (2) `transferToAgent` resolvía SOLO por slug y los prompts usan el
+  nombre «@RESP IMPLANTES»; (3) un `{error}` devuelto por la tool NO se marcaba isError, así
+  el modelo lo tapaba.
+- Fix (archivos):
+  - `@conversia/database`: `normalizeAgentKey` + `resolveAgentByNameOrSlug` (nombre O slug,
+    sin acentos/mayúsculas/guiones/@).
+  - `apps/worker/src/agent-turn.ts`: transferencia unificada (destino de `transferToAgent` o de
+    `assignConversation`-agente), resuelve nombre/slug, mantiene `aiEnabled`, el destino responde
+    en el MISMO turno (`depth+1`, sin loops); nota-incidente si el destino no existe.
+  - `apps/worker/src/tool-services.ts`: `assignConversation` → equipo/persona (apaga IA) |
+    agente (`handoffToAgentSlug`, no apaga IA) | nada (throw isError + nota-incidente en Bandeja).
+  - `apps/api/src/agents/agents.controller.ts` + `agent-sandbox.ts`: el probador resuelve/valida
+    el destino igual que el runtime y SIMULA la respuesta del agente destino (paridad con prod).
+  - `apps/web/src/lib/agent-actions.ts`: dos tarjetas — «Derivar a otro agente de IA» y
+    «Asignar / escalar a persona o equipo».
+  - Test: `apps/worker/src/agent-transfer.test.ts`.
+- **PENDIENTE de verificación E2E en prod** (lo hace el usuario, o con token del tenant
+  Digital-Dent): mandar «necesito hora para implante» por WhatsApp y comprobar que la cabecera
+  pasa a RESP IMPLANTES, que queda la fila en `agentHandoff`, y que responde el agente de
+  implantes con su prompt (link de agendamiento de implantes, precio desde $599.900).
+- Nota de entorno local: `vitest`/`vite` quedó roto en el temp (CLIENT_ENTRY) → los tests
+  corren en CI (instalación limpia). Typecheck de worker/api/web: verde.
 
-**Contexto de la línea paralela (worktree conversia-crm):** Meta CRM operativo
-(OAuth 1-clic + diagnóstico de mensajería por página); omnicanal IG/Messenger
-B1-B4 en prod — pendiente del usuario: diagnóstico de la página TuBot para
-destrabar los DMs (ver memoria del agente y docs/OMNICHANNEL.md).
+**Contexto de la rama paralela (worktree `conversia-crm`):** omnicanal IG/Messenger B1–B4
+mergeados (PRs #158/#159/#161) — activación del tenant TuBot pendiente de token con scopes de
+mensajería + reconectar página (ver docs/OMNICHANNEL.md y memoria del agente).

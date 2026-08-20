@@ -597,6 +597,7 @@ type TestResponse = {
   latencyMs?: number;
   stopReason?: string;
   transferToAgentSlug?: string | null;
+  transfer?: { slug: string; name: string; reply: string | null; toolEvents?: { name: string; input: unknown; output: string; isError: boolean }[] } | null;
   humanHandoff?: boolean;
 };
 
@@ -658,7 +659,15 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
       }
       const extras: TestMsg[] = [];
       if (r.humanHandoff) extras.push({ role: "system", content: "El agente escaló a un humano — en producción dejaría de responder." });
-      if (r.transferToAgentSlug) extras.push({ role: "system", content: `El agente transfirió la conversación a "${r.transferToAgentSlug}".` });
+      if (r.transfer) {
+        // Igual que en producción: el agente destino responde en el mismo turno.
+        extras.push({ role: "system", content: `Derivado a «${r.transfer.name}» — responde ahora:` });
+        extras.push({
+          role: "assistant",
+          content: r.transfer.reply || "(el agente destino no devolvió texto en este turno)",
+          meta: { toolEvents: r.transfer.toolEvents },
+        });
+      }
       setMessages((m) => [
         ...m,
         {

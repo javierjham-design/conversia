@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-08-19 — fix: la derivación entre agentes de IA ahora funciona (y el probador no miente)
+
+Bug real (Digital-Dent, WhatsApp con pacientes): Recepción debía derivar las consultas de
+implantes a RESP IMPLANTES y no lo hacía — le decía al paciente «te derivé» y nadie contestaba;
+`activeAgentId` seguía en Recepción. Causa: el modelo llamaba `assignConversation` (solo resuelve
+equipos/personas, nunca agentes) o `transferToAgent` con el NOMBRE visible mientras la resolución
+era solo por slug; y un `{error}` devuelto por la tool no se marcaba como error, así el modelo lo tapaba.
+Fix:
+- `normalizeAgentKey` + `resolveAgentByNameOrSlug` en `@conversia/database`: resuelve por nombre O
+  slug, insensible a mayúsculas/acentos/guiones/@ («@RESP IMPLANTES» == «resp-implantes»).
+- `agent-turn.ts`: la transferencia acepta destino de `transferToAgent` O de `assignConversation`
+  (cuando el destino resultó ser otro agente); resuelve por nombre/slug, MANTIENE `aiEnabled` y el
+  agente destino responde en el MISMO turno (`depth+1`, un salto por turno, sin loops); registra
+  `agentHandoff`. Deja nota-incidente si el destino no existe.
+- `assignConversation` (tool-services): equipo/persona → asigna y apaga la IA; agente → marcador de
+  transferencia sin apagar la IA; nada → LANZA (isError, el modelo no puede tapar el fallo) y deja una
+  NOTA INTERNA de incidente visible en la Bandeja.
+- Probador = producción: el sandbox resuelve/valida el destino igual que el runtime y SIMULA la
+  respuesta del agente destino; si no funcionaría en prod, tampoco aparece la transferencia.
+- UI: la tarjeta «Asignar / derivar» se separó en «Derivar a otro agente de IA» (transferToAgent) y
+  «Asignar / escalar a persona o equipo» (assignConversation + transferToHuman).
+- Test: `apps/worker/src/agent-transfer.test.ts` cubre el caso que falló (derivar a un target que es
+  otro agente por nombre/slug/mención/acentos; null si es equipo/persona).
+
 ## 2026-08-19 — feat: importador de historial de mensajes (migración Respond.io)
 
 Nuevo circuito para traer los 32.660 mensajes históricos de Digital-Dent (y de
