@@ -216,7 +216,10 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
         rows={2}
         placeholder={placeholder}
         spellCheck={false}
-        className={cn(BOX, "relative resize-none bg-transparent text-transparent caret-ink placeholder:text-ink-subtle")}
+        // Inline (beats the unlayered `textarea{color/background}` in globals.css): texto y fondo
+        // transparentes para que se vea SOLO el backdrop resaltado; el cursor queda visible.
+        style={{ color: "transparent", backgroundColor: "transparent", caretColor: "var(--ink)" }}
+        className={cn(BOX, "relative resize-none")}
       />
       {query != null && (filtered.length > 0 || empty) && (
         <div className="absolute z-20 mt-1 w-64 rounded-lg border border-line bg-panel p-1 shadow-pop">
