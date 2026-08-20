@@ -2,8 +2,66 @@
 
 /** Preferencias de notificaciones (personales — solo te afectan a ti). */
 import { useEffect, useState } from "react";
+import { Bell, BellOff } from "lucide-react";
 import { api } from "@/lib/api";
 import { Skeleton, useToast } from "@/components/ui";
+import { disablePush, enablePush, permissionState, pushSupport } from "@/lib/push";
+
+/** Activar/desactivar Web Push EN ESTE DISPOSITIVO (navegador o PWA del celular). */
+function PushActivation() {
+  const toast = useToast();
+  const [state, setState] = useState<"granted" | "default" | "denied" | "unsupported" | "ios-needs-install" | "loading">("loading");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const s = pushSupport();
+    if (!s.supported) { setState(s.reason === "ios-needs-install" ? "ios-needs-install" : "unsupported"); return; }
+    const p = permissionState();
+    setState(p === "unsupported" ? "unsupported" : p);
+  }, []);
+
+  async function activate() {
+    setBusy(true);
+    const r = await enablePush();
+    setBusy(false);
+    if (r === "granted") { setState("granted"); toast.push("Notificaciones activadas en este dispositivo ✔", "ok"); }
+    else if (r === "denied") { setState("denied"); toast.push("Bloqueaste las notificaciones. Habilítalas en los permisos del navegador para este sitio.", "error"); }
+    else if (r === "unsupported") toast.push("Este dispositivo no puede recibir notificaciones (o el servidor no tiene VAPID configurado).", "error");
+    else toast.push("No se pudo activar. Intenta de nuevo.", "error");
+  }
+  async function deactivate() {
+    setBusy(true);
+    await disablePush();
+    setBusy(false);
+    setState("default");
+    toast.push("Notificaciones desactivadas en este dispositivo", "info");
+  }
+
+  const active = state === "granted";
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3 rounded-card border border-line bg-panel p-4 shadow-card">
+      <div className="flex items-start gap-3">
+        <span className={active ? "text-brand-600 dark:text-brand-400" : "text-ink-subtle"}>{active ? <Bell size={20} /> : <BellOff size={20} />}</span>
+        <div>
+          <p className="text-sm font-medium text-ink">Notificaciones en este dispositivo</p>
+          <p className="text-xs text-ink-subtle">
+            {active && "Activadas ✔ — recibirás avisos aquí cuando lleguen mensajes o escalamientos."}
+            {state === "default" && "Actívalas para que te avisemos cuando llegue un mensaje que necesita a un humano."}
+            {state === "denied" && "Están bloqueadas. Habilítalas en los permisos del navegador (candado junto a la URL) y vuelve a intentar."}
+            {state === "ios-needs-install" && "En iPhone/iPad primero instala la app: Compartir → «Agregar a inicio», luego actívalas desde la app."}
+            {state === "unsupported" && "Este navegador no soporta notificaciones push."}
+            {state === "loading" && "…"}
+          </p>
+        </div>
+      </div>
+      {active ? (
+        <button onClick={() => void deactivate()} disabled={busy} className="shrink-0 rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app disabled:opacity-50">Desactivar</button>
+      ) : (state === "default" || state === "denied") ? (
+        <button onClick={() => void activate()} disabled={busy} className="shrink-0 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">{busy ? "Activando…" : "Activar"}</button>
+      ) : null}
+    </div>
+  );
+}
 
 type Channel = "in_app" | "web_push" | "email";
 interface EventDef {
@@ -104,7 +162,10 @@ export default function NotificationsSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h2 className="text-lg font-semibold">Notificaciones</h2>
-      <p className="mt-1 text-xs text-ink-muted">Preferencias personales — solo te afectan a ti. Algunos avisos críticos no se pueden apagar.</p>
+      <p className="mt-1 mb-4 text-xs text-ink-muted">Preferencias personales — solo te afectan a ti. Algunos avisos críticos no se pueden apagar.</p>
+
+      {/* Activar Web Push en este dispositivo (navegador o PWA del celular) */}
+      <PushActivation />
 
       {/* Matriz evento × canal */}
       <div className="mt-4 overflow-hidden rounded-card border border-line bg-panel shadow-card">

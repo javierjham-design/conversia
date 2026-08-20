@@ -462,6 +462,27 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         conversationId: t.conversationId,
         reason,
       });
+      // Push/campana al equipo: la IA escaló a un humano (evento crítico del catálogo).
+      try {
+        const conv = await withTenant(orgId, (tx) =>
+          tx.conversation.findUnique({
+            where: { id: t.conversationId },
+            select: { assignedUserId: true, assignedTeamId: true, contact: { select: { firstName: true, lastName: true, profileName: true, phone: true } } },
+          }),
+        );
+        const c = conv?.contact;
+        const contactName = [c?.firstName, c?.lastName].filter(Boolean).join(" ") || c?.profileName || c?.phone || "Un contacto";
+        const { enqueueNotification } = await import("./notifications/queue.js");
+        await enqueueNotification({
+          eventKey: "ai.escalation",
+          organizationId: orgId,
+          context: { assignedUserId: conv?.assignedUserId ?? null, teamId: conv?.assignedTeamId ?? null, conversationId: t.conversationId },
+          conversationId: t.conversationId,
+          data: { contactName, reason: reason.slice(0, 120), conversationId: t.conversationId },
+        });
+      } catch (err) {
+        console.error(`✖ Aviso de escalamiento (${t.conversationId}):`, (err as Error).message);
+      }
       // Aviso por correo si nadie la toma en X min (config de correo del tenant).
       await enqueueEscalationEmail(orgId, handoff.id, t.conversationId);
     },
