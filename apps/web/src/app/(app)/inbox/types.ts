@@ -141,6 +141,24 @@ export function displayName(c: { firstName?: string | null; lastName?: string | 
   return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.profileName || c.phone || "Sin nombre";
 }
 
+/**
+ * Marca de tiempo de la LISTA de conversaciones: HORA si es hoy, "Ayer" si es ayer, y la
+ * FECHA si es más atrás (día+mes; agrega el año si no es el año en curso). Antes se mostraba
+ * siempre la hora, y un mensaje de días previos parecía de hoy.
+ */
+export function formatListTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const t = d.getTime();
+  if (t >= startOfToday) return d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+  if (t >= startOfToday - 86_400_000) return "Ayer";
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString("es-CL", { day: "2-digit", month: "short" });
+  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 export function initials(c: { firstName?: string | null; lastName?: string | null; profileName?: string | null; phone?: string | null }): string {
   const name = displayName(c);
   const parts = name.split(" ").filter(Boolean);

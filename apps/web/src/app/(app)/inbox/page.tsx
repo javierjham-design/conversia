@@ -12,7 +12,7 @@ import { EmptyState, Modal, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
-import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
+import { avatarColor, displayName, formatListTime, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
 
 function filterParams(filter: InboxFilter): Record<string, string> {
   switch (filter.kind) {
@@ -381,7 +381,7 @@ export default function InboxPage() {
                         {c.unreadCount > 0 && c.lastMessageAt && Date.now() - new Date(c.lastMessageAt).getTime() > (counters?.firstResponseTargetMinutes ?? 15) * 60_000 && (
                           <span className="text-red-500" title="Supera el tiempo objetivo de primera respuesta">⏱</span>
                         )}
-                        {c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }) : ""}
+                        <span title={c.lastMessageAt ? new Date(c.lastMessageAt).toLocaleString("es-CL") : ""}>{formatListTime(c.lastMessageAt)}</span>
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
