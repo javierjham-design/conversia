@@ -288,6 +288,21 @@ function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: (
   const [pages, setPages] = useState<GraphPage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [diag, setDiag] = useState<{ pageId: string; checks: Array<{ key: string; label: string; ok: boolean; detail: string; fix?: string }> } | null>(null);
+  const [diagBusy, setDiagBusy] = useState<string | null>(null);
+
+  async function diagnose(page: GraphPage) {
+    setDiagBusy(page.id);
+    setDiag(null);
+    try {
+      const r = await api<{ checks: any[] }>(`/integrations/meta-crm/pages/${encodeURIComponent(page.id)}/diagnose`);
+      setDiag({ pageId: page.id, checks: r.checks });
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo diagnosticar", "error");
+    } finally {
+      setDiagBusy(null);
+    }
+  }
 
   const load = useCallback(async () => {
     if (!enabled) return;
@@ -352,15 +367,38 @@ function PagesPanel({ enabled, onConnected }: { enabled: boolean; onConnected: (
                 <p className="truncate text-sm font-medium">{p.name}</p>
                 <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
               </div>
-              {p.connected ? (
-                <StatusBadge kind="connected" label="Conectada" />
-              ) : (
-                <Button variant="secondary" disabled={busy === p.id} onClick={() => void connect(p)}>
-                  <Link2 size={14} /> {busy === p.id ? "Conectando…" : "Conectar"}
-                </Button>
-              )}
+              <div className="flex shrink-0 items-center gap-2">
+                {p.connected && (
+                  <Button variant="ghost" disabled={diagBusy === p.id} onClick={() => void diagnose(p)}>
+                    {diagBusy === p.id ? "Revisando…" : "🩺 Diagnosticar"}
+                  </Button>
+                )}
+                {p.connected ? (
+                  <Button variant="secondary" disabled={busy === p.id} onClick={() => void connect(p)}>
+                    <RefreshCw size={14} /> {busy === p.id ? "Conectando…" : "Re-conectar"}
+                  </Button>
+                ) : (
+                  <Button variant="secondary" disabled={busy === p.id} onClick={() => void connect(p)}>
+                    <Link2 size={14} /> {busy === p.id ? "Conectando…" : "Conectar"}
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
+          {diag && (
+            <div className="rounded-xl border border-line bg-app p-3">
+              <p className="mb-2 text-xs font-medium text-ink-muted">Diagnóstico de mensajería (página {diag.pageId})</p>
+              <ul className="space-y-1.5">
+                {diag.checks.map((c) => (
+                  <li key={c.key} className="text-xs">
+                    <span className={c.ok ? "text-emerald-600" : "text-red-500"}>{c.ok ? "✓" : "✖"}</span>{" "}
+                    <span className="font-medium">{c.label}:</span> <span className="text-ink-muted">{c.detail}</span>
+                    {!c.ok && c.fix && <span className="block pl-4 text-amber-600">→ {c.fix}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

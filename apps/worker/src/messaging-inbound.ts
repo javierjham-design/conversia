@@ -39,7 +39,11 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
 
     // Canal auto-creado por página/cuenta (config.pageId rutea el envío)
     const candidates = await tx.channelConnection.findMany({ where: { type: channelType as any } });
-    let channel = candidates.find((c) => String((c.config as any)?.pageId ?? (c.config as any)?.igId ?? "") === e.channelExternalId) ?? null;
+    let channel =
+      candidates.find((c) => {
+        const cfg = (c.config as any) ?? {};
+        return String(cfg.pageId ?? "") === e.channelExternalId || String(cfg.igId ?? "") === e.channelExternalId;
+      }) ?? null;
     if (!channel) {
       channel = await tx.channelConnection.create({
         data: {
