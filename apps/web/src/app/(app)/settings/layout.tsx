@@ -7,8 +7,8 @@
  */
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { ExternalLink, Search, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ExternalLink, Search, Settings } from "lucide-react";
 import { can, useMe } from "../layout";
 import { cn } from "@/components/ui";
 
@@ -86,18 +86,41 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const me = useMe();
   const [q, setQ] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
+  // En móvil, cerrar el menú al navegar a otra página.
+  useEffect(() => setNavOpen(false), [pathname]);
   const perms = me?.permissions ?? null;
   const visible = (p: PageDef) => !p.perm || perms === null || can(perms, p.perm);
   const matches = (p: PageDef) => !q.trim() || `${p.label} ${p.keywords}`.toLowerCase().includes(q.trim().toLowerCase());
+  const currentLabel = GROUPS.flatMap((g) => g.pages).find((p) => p.href === pathname)?.label ?? "Configuración";
 
   return (
-    <div className="flex h-full min-h-0">
-      <nav className="flex w-60 shrink-0 flex-col border-r border-line bg-panel">
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      {/* Barra SOLO móvil: título de la página actual + botón para abrir el menú de ajustes. */}
+      <div className="flex items-center justify-between gap-2 border-b border-line bg-panel px-3 py-2 md:hidden">
+        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold">
+          <Settings size={15} className="shrink-0" /> {currentLabel}
+        </span>
+        <button
+          onClick={() => setNavOpen((v) => !v)}
+          className="flex shrink-0 items-center gap-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-xs font-medium"
+        >
+          Menú <ChevronDown size={14} className={cn("transition-transform", navOpen && "rotate-180")} />
+        </button>
+      </div>
+
+      {/* Nav: fijo a la izquierda en escritorio; desplegable a ancho completo en móvil. */}
+      <nav
+        className={cn(
+          "shrink-0 flex-col border-line bg-panel md:flex md:w-60 md:border-r",
+          navOpen ? "flex max-h-[65vh] overflow-y-auto border-b" : "hidden",
+        )}
+      >
         <div className="border-b border-line p-3">
-          <h1 className="flex items-center gap-1.5 text-sm font-semibold">
+          <h1 className="hidden items-center gap-1.5 text-sm font-semibold md:flex">
             <Settings size={15} /> Configuración
           </h1>
-          <div className="relative mt-2">
+          <div className="relative md:mt-2">
             <Search size={12} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
             <input
               value={q}
