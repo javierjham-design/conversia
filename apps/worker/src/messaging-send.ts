@@ -11,7 +11,7 @@ const pageTokenCache = new Map<string, { token: string; at: number }>();
 const PAGE_TOKEN_TTL = 60 * 60 * 1000;
 
 /** Token de página derivado del token del tenant (CRM primero), con caché 1 h. */
-async function pageToken(organizationId: string, pageId: string): Promise<string> {
+export async function pageToken(organizationId: string, pageId: string): Promise<string> {
   const cached = pageTokenCache.get(pageId);
   if (cached && Date.now() - cached.at < PAGE_TOKEN_TTL) return cached.token;
   const userToken = await resolveMetaLeadToken(organizationId);

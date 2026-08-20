@@ -1,8 +1,10 @@
+import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { MessagingEvent } from "./messaging-events";
 import { emitPlatformEvent } from "./platform-events";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
 import { runAgentTurn } from "./agent-turn";
+import { pageToken } from "./messaging-send";
 
 // Ingesta de Messenger / Instagram Direct: mismo pipeline que WhatsApp
 // (identidad → conversación → mensaje idempotente → triggers → turno del
@@ -20,6 +22,48 @@ async function resolveMessagingTenant(e: MessagingEvent): Promise<string | null>
     if (byPage) return byPage.organizationId;
   }
   return null;
+}
+
+/**
+ * Nombre del remitente vía Graph con token de PÁGINA (Messenger: first/last
+ * name; Instagram: name/username). Best-effort: si Graph lo niega (permiso
+ * pendiente de App Review, IG sin página vinculada) el contacto queda sin
+ * nombre y se reintenta en su próximo mensaje.
+ */
+async function enrichContactName(
+  organizationId: string,
+  contactId: string,
+  e: MessagingEvent,
+  pageId: string,
+): Promise<void> {
+  try {
+    const token = await pageToken(organizationId, pageId);
+    const v = getEnv().META_GRAPH_VERSION;
+    const fields = e.platform === "messenger" ? "first_name,last_name" : "name,username";
+    const res = await fetchGraphWithProof(
+      `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}?fields=${fields}&access_token=${encodeURIComponent(token)}`,
+      token,
+    );
+    const json: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.warn(`⚠ Perfil de ${e.platform} ${e.senderId} no disponible: ${json?.error?.message ?? res.status}`);
+      return;
+    }
+    const name: string | null =
+      [json.first_name, json.last_name].filter(Boolean).join(" ") || json.name || json.username || null;
+    if (!name) return;
+    const first = json.first_name ?? String(name).split(" ")[0];
+    const last = json.last_name ?? (String(name).split(" ").slice(1).join(" ") || null);
+    await withTenant(organizationId, async (tx) => {
+      const c = await tx.contact.findUnique({ where: { id: contactId }, select: { firstName: true } });
+      await tx.contact.update({
+        where: { id: contactId },
+        data: { profileName: name, ...(c?.firstName ? {} : { firstName: first, lastName: last }) },
+      });
+    });
+  } catch (err) {
+    console.warn(`⚠ Enriquecimiento de perfil ${e.platform} falló: ${(err as Error).message}`);
+  }
 }
 
 export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
@@ -104,10 +148,19 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       where: { id: conversation.id },
       data: { lastMessageAt: new Date(), lastMessagePreview: body.slice(0, 120), unreadCount: { increment: 1 } },
     });
-    return { conversationId: conversation.id, contactId: contact.id, started, text: e.text ?? "" };
+    return {
+      conversationId: conversation.id,
+      contactId: contact.id,
+      started,
+      text: e.text ?? "",
+      needsName: !contact.firstName && !contact.profileName,
+      pageId: String((channel.config as any)?.pageId ?? e.channelExternalId),
+    };
   });
 
   if (!result) return; // duplicado
+
+  if (result.needsName) await enrichContactName(organizationId, result.contactId, e, result.pageId);
 
   await cancelTimersOnReply(organizationId, result.conversationId);
 
