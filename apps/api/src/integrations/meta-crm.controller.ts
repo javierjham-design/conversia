@@ -356,7 +356,45 @@ export class MetaCrmController {
       push("route_ig", "Ruteo de Instagram al tenant", igOk, igOk ? "Cuenta IG registrada" : "Cuenta IG sin registrar", igOk ? undefined : "Re-conecta la página (registra el IG automáticamente)");
     }
 
-    // 5. Recordatorio no-verificable por API
+    // 5. Ejercicio REAL de cada permiso (además de diagnosticar, estas llamadas
+    // cuentan para Meta como "uso de la API" — requisito para poder solicitar
+    // acceso avanzado en la App Review).
+    if (pageToken) {
+      try {
+        const conv = await this.graph("me/conversations?limit=1", pageToken);
+        push("pages_messaging", "Bandeja de Messenger accesible (pages_messaging)", true, `${(conv.data ?? []).length ? "Conversaciones visibles" : "Sin conversaciones aún (OK)"}`);
+      } catch (err) {
+        push("pages_messaging", "Bandeja de Messenger accesible (pages_messaging)", false, (err as Error).message);
+      }
+      try {
+        const forms = await this.graph("me/leadgen_forms?limit=1", pageToken);
+        push("pages_manage_ads", "Formularios de Lead Ads accesibles (pages_manage_ads)", true, `${(forms.data ?? []).length ? "Formularios visibles" : "Sin formularios (OK)"}`);
+      } catch (err) {
+        push("pages_manage_ads", "Formularios de Lead Ads accesibles (pages_manage_ads)", false, (err as Error).message);
+      }
+      if (igId) {
+        try {
+          const ig = await this.graph(`${igId}?fields=username`, pageToken);
+          push("instagram_basic", "Perfil de Instagram accesible (instagram_basic)", true, `@${ig.username ?? igId}`);
+        } catch (err) {
+          push("instagram_basic", "Perfil de Instagram accesible (instagram_basic)", false, (err as Error).message);
+        }
+        try {
+          const media = await this.graph(`${igId}/media?limit=1`, pageToken);
+          const mediaId = media.data?.[0]?.id;
+          if (mediaId) {
+            const comments = await this.graph(`${mediaId}/comments?limit=1`, pageToken);
+            push("instagram_manage_comments", "Comentarios de IG accesibles (instagram_manage_comments)", true, `${(comments.data ?? []).length ? "Comentarios visibles" : "Sin comentarios (OK)"}`);
+          } else {
+            push("instagram_manage_comments", "Comentarios de IG accesibles (instagram_manage_comments)", true, "La cuenta no tiene publicaciones aún (no se pudo ejercitar)");
+          }
+        } catch (err) {
+          push("instagram_manage_comments", "Comentarios de IG accesibles (instagram_manage_comments)", false, (err as Error).message);
+        }
+      }
+    }
+
+    // 6. Recordatorio no-verificable por API
     push(
       "ig_toggle",
       "Acceso a mensajes en la app de Instagram (manual)",
