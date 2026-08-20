@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 import { getEnv } from "@conversia/config";
-import { getAdminPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import { openAssistedSetup } from "./assisted-setup";
 
 /** Firma un JWT HS256 estándar (sin dependencias) — lo verifica el API con jsonwebtoken. */
@@ -477,14 +477,18 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async assignConversation(target: string, reason?: string) {
-      return withTenant(orgId, async (tx) => {
+      // Resuelve el destino: equipo → persona → AGENTE de IA. Los dos primeros ASIGNAN a un
+      // humano y apagan la IA. El tercero NO toca la conversación: devuelve un marcador para
+      // que agent-turn haga la TRANSFERENCIA real (activeAgentId + handoff) manteniendo la IA
+      // encendida y respondiendo el agente destino en el mismo turno.
+      const outcome = await withTenant(orgId, async (tx) => {
         const team = await tx.team.findFirst({ where: { name: { equals: target, mode: "insensitive" } } });
         if (team) {
           await tx.conversation.update({ where: { id: t.conversationId }, data: { assignedTeamId: team.id, aiEnabled: false } });
           await tx.auditLog.create({
             data: { organizationId: orgId, actorType: "agent", action: "conversation.assigned_team", entityType: "conversation", entityId: t.conversationId, after: { team: team.name, reason } },
           });
-          return { assignedTo: `equipo ${team.name}` };
+          return { kind: "assigned" as const, label: `equipo ${team.name}` };
         }
         const members = await tx.organizationUser.findMany({ where: { active: true }, include: { user: true } });
         const m = members.find((mm) => mm.user.name.toLowerCase() === target.toLowerCase());
@@ -493,10 +497,39 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           await tx.auditLog.create({
             data: { organizationId: orgId, actorType: "agent", action: "conversation.assigned_user", entityType: "conversation", entityId: t.conversationId, after: { user: m.user.name, reason } },
           });
-          return { assignedTo: m.user.name };
+          return { kind: "assigned" as const, label: m.user.name };
         }
-        return { error: `No encontré un equipo o persona llamada "${target}"` };
+        const agent = await resolveAgentByNameOrSlug(tx, target);
+        if (agent && agent.active) {
+          return { kind: "agent" as const, slug: agent.slug, name: agent.name };
+        }
+        return { kind: "none" as const };
       });
+
+      if (outcome.kind === "assigned") return { assignedTo: outcome.label };
+      // Destino = otro agente de IA: agent-turn ejecuta la transferencia con este slug.
+      if (outcome.kind === "agent") return { handoffToAgentSlug: outcome.slug, message: `Derivando a ${outcome.name}` };
+
+      // No es equipo, ni persona, ni agente: NO se derivó a nadie. Deja un incidente VISIBLE
+      // en la Bandeja (nota interna) y lanza un error DURO para que el modelo no pueda tapar
+      // el fallo diciéndole al cliente que lo derivó.
+      await withTenant(orgId, (tx) =>
+        tx.message.create({
+          data: {
+            organizationId: orgId,
+            conversationId: t.conversationId,
+            direction: "OUTBOUND",
+            type: "NOTE",
+            visibility: "INTERNAL",
+            body: `⚠ El bot intentó derivar/asignar a «${target}» pero no existe ningún equipo, persona ni agente con ese nombre. El cliente NO fue derivado y quedó a la espera — requiere atención.`,
+            authorType: "AGENT",
+            status: "DELIVERED",
+          },
+        }).catch(() => undefined),
+      );
+      throw new Error(
+        `No existe ningún equipo, persona ni agente llamado "${target}". La conversación NO se derivó: NO le confirmes al cliente que lo derivaste. Discúlpate brevemente y dile que en un momento lo atienden, o intenta con otro destino válido.`,
+      );
     },
 
     async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {

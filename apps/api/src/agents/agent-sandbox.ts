@@ -1,4 +1,4 @@
-import { withTenant } from "@conversia/database";
+import { resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import { MockSchedulingProvider } from "@conversia/scheduling";
 import type { ToolServices } from "@conversia/agents";
 import type { SchedAppointment } from "@conversia/types";
@@ -177,17 +177,30 @@ export async function buildSandboxServices(
     },
 
     async assignConversation(target: string, reason?: string) {
-      // Lectura real para resolver el destino; sin persistir la asignación.
-      const found = await withTenant(orgId, async (tx) => {
+      // Lectura real para resolver el destino igual que producción (equipo → persona → AGENTE);
+      // sin persistir. Si el destino es un agente, devuelve el marcador de transferencia; si no
+      // resuelve a nada, LANZA (isError) tal como el runtime real, para que el probador no mienta.
+      const outcome = await withTenant(orgId, async (tx) => {
         const team = await tx.team.findFirst({ where: { name: { equals: target, mode: "insensitive" } } });
-        if (team) return `equipo ${team.name}`;
+        if (team) return { kind: "assigned" as const, label: `equipo ${team.name}` };
         const members = await tx.organizationUser.findMany({ where: { active: true }, include: { user: true } });
         const m = members.find((mm) => mm.user.name.toLowerCase() === target.toLowerCase());
-        return m ? m.user.name : null;
+        if (m) return { kind: "assigned" as const, label: m.user.name };
+        const agent = await resolveAgentByNameOrSlug(tx, target);
+        if (agent && agent.active) return { kind: "agent" as const, slug: agent.slug, name: agent.name };
+        return { kind: "none" as const };
       });
-      if (!found) return { error: `No encontré un equipo o persona llamada "${target}"` };
-      track("Asignar / derivar", `${found}${reason ? ` — ${reason}` : ""}`);
-      return { assignedTo: found };
+      if (outcome.kind === "assigned") {
+        track("Asignar / escalar", `${outcome.label}${reason ? ` — ${reason}` : ""}`);
+        return { assignedTo: outcome.label };
+      }
+      if (outcome.kind === "agent") {
+        track("Derivar a otro agente", outcome.name);
+        return { handoffToAgentSlug: outcome.slug, message: `Derivando a ${outcome.name}` };
+      }
+      throw new Error(
+        `No existe ningún equipo, persona ni agente llamado "${target}". La conversación NO se derivó: NO le confirmes al cliente que lo derivaste.`,
+      );
     },
 
     async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {

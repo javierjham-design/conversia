@@ -7,7 +7,7 @@ import {
   type AgentRuntime,
 } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
-import { getPrisma, withTenant } from "@conversia/database";
+import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
@@ -16,6 +16,21 @@ import { buildToolServices } from "./tool-services";
 
 const registry = new ToolRegistry();
 for (const tool of buildCoreTools()) registry.register(tool);
+
+/** Si el modelo llamó `assignConversation` y la tool detectó que el destino era un AGENTE
+ * de IA (no equipo/persona), devuelve el slug del agente a transferir; si no, undefined. */
+function extractHandoffSlug(
+  events: ReadonlyArray<{ name: string; output?: unknown; isError?: boolean }> | undefined,
+): string | undefined {
+  const ev = events?.find((e) => e.name === "assignConversation" && !e.isError);
+  if (!ev || typeof ev.output !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(ev.output) as { handoffToAgentSlug?: unknown };
+    return typeof parsed.handoffToAgentSlug === "string" ? parsed.handoffToAgentSlug : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // Router por modelo: gpt-* → OpenAI, claude-* → Anthropic (según las llaves).
 const ai = createAIRouter({
@@ -377,14 +392,20 @@ export async function runAgentTurn(opts: {
     }
   }
 
-  // 6. Transferencia entre agentes (conserva contexto, registra evento)
-  if (result.transferToAgentSlug && result.transferToAgentSlug !== agent.slug && depth < 1) {
-    const targetSlug = await withTenant(organizationId, async (tx) => {
-      const target = await tx.agent.findUnique({
-        where: { organizationId_slug: { organizationId, slug: result.transferToAgentSlug! } },
-      });
-      if (!target || !target.active) return null;
-      await tx.conversation.update({ where: { id: conversationId }, data: { activeAgentId: target.id } });
+  // 6. Transferencia entre agentes (conserva contexto, registra evento).
+  //    El destino puede venir por dos caminos: la tool `transferToAgent` (el orquestador
+  //    setea transferToAgentSlug) o `assignConversation` con un destino que resultó ser un
+  //    AGENTE (la tool devuelve el marcador handoffToAgentSlug sin tocar la conversación).
+  //    En ambos, resolvemos por NOMBRE o SLUG (insensible a mayúsculas/acentos/guiones): los
+  //    prompts usan el nombre visible ("@RESP IMPLANTES") y el registro es por slug.
+  const rawTransferTarget = result.transferToAgentSlug ?? extractHandoffSlug(result.toolEvents);
+  if (rawTransferTarget && depth < 1) {
+    const outcome = await withTenant(organizationId, async (tx) => {
+      const target = await resolveAgentByNameOrSlug(tx, rawTransferTarget);
+      if (!target || !target.active) return { kind: "notfound" as const };
+      if (target.slug === agent.slug) return { kind: "self" as const };
+      // Transferencia a otro agente de IA: la IA SIGUE respondiendo (no apagar aiEnabled).
+      await tx.conversation.update({ where: { id: conversationId }, data: { activeAgentId: target.id, aiEnabled: true } });
       await tx.agentHandoff.create({
         data: {
           organizationId,
@@ -395,15 +416,34 @@ export async function runAgentTurn(opts: {
           contextSummary: result.reply?.slice(0, 500) ?? null,
         },
       });
-      return target.slug;
+      return { kind: "ok" as const, slug: target.slug };
     });
-    // El agente NUEVO toma el turno DE INMEDIATO y continúa la conversación
-    // (antes quedaba mudo esperando el próximo mensaje del contacto, y el
-    // cliente —que ya fue anunciado con la derivación— no recibía nada).
-    // depth+1 acota a un salto por turno (sin cadenas A→B→C en el mismo ciclo).
-    if (targetSlug) {
-      await runAgentTurn({ organizationId, conversationId, agentSlug: targetSlug, depth: depth + 1 }).catch((err) =>
-        console.error(`✖ Turno del agente derivado (${targetSlug}) falló:`, (err as Error).message),
+
+    if (outcome.kind === "ok") {
+      // El agente NUEVO toma el turno DE INMEDIATO y continúa la conversación
+      // (antes quedaba mudo esperando el próximo mensaje del contacto, y el
+      // cliente —que ya fue anunciado con la derivación— no recibía nada).
+      // depth+1 acota a un salto por turno (sin cadenas A→B→C en el mismo ciclo).
+      await runAgentTurn({ organizationId, conversationId, agentSlug: outcome.slug, depth: depth + 1 }).catch((err) =>
+        console.error(`✖ Turno del agente derivado (${outcome.slug}) falló:`, (err as Error).message),
+      );
+    } else if (outcome.kind === "notfound") {
+      // El modelo intentó derivar a un agente que no existe (ya no puede pasar por nombre/slug,
+      // pero por si inventa uno): deja un incidente VISIBLE en la Bandeja para que un humano
+      // atienda al cliente que quedó a la espera.
+      await withTenant(organizationId, (tx) =>
+        tx.message.create({
+          data: {
+            organizationId,
+            conversationId,
+            direction: "OUTBOUND",
+            type: "NOTE",
+            visibility: "INTERNAL",
+            body: `⚠ El bot intentó derivar a un agente llamado «${rawTransferTarget}» que no existe o está inactivo. El cliente NO fue derivado y quedó a la espera — requiere atención.`,
+            authorType: "AGENT",
+            status: "DELIVERED",
+          },
+        }).catch(() => undefined),
       );
     }
   }
