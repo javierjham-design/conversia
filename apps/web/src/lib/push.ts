@@ -62,27 +62,43 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
  * Pide permiso (debe llamarse tras una acción del usuario), se suscribe y registra
  * el dispositivo en el backend. Devuelve el estado resultante.
  */
-export async function enablePush(): Promise<"granted" | "denied" | "unsupported" | "error"> {
+export type EnablePushResult = { status: "granted" | "denied" | "unsupported" | "error"; detail?: string };
+
+export async function enablePush(): Promise<EnablePushResult> {
   const support = pushSupport();
-  if (!support.supported) return "unsupported";
+  if (!support.supported) return { status: "unsupported" };
   const reg = await registerServiceWorker();
-  if (!reg) return "error";
+  if (!reg) return { status: "error", detail: "no se pudo registrar el service worker" };
   try {
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") return permission === "denied" ? "denied" : "error";
+    if (permission !== "granted") return { status: permission === "denied" ? "denied" : "error" };
 
     const { publicKey } = await api<{ publicKey: string | null }>("/notifications/vapid-public-key");
-    if (!publicKey) return "unsupported"; // servidor sin VAPID configurado
+    if (!publicKey) return { status: "unsupported", detail: "el servidor no tiene VAPID configurado" };
+    const appKey = urlBase64ToUint8Array(publicKey);
 
-    const existing = await reg.pushManager.getSubscription();
-    const sub =
-      existing ??
-      (await reg.pushManager.subscribe({
+    // Si ya hay una suscripción con OTRA applicationServerKey (VAPID rotado), Chrome rechaza
+    // re-suscribir con la nueva → la damos de baja y creamos una limpia.
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      const cur = new Uint8Array((sub.options?.applicationServerKey as ArrayBuffer | null) ?? new ArrayBuffer(0));
+      const same = cur.length === appKey.length && cur.every((b, i) => b === appKey[i]);
+      if (!same) {
+        await sub.unsubscribe().catch(() => {});
+        sub = null;
+      }
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,
-      }));
+        applicationServerKey: appKey as unknown as BufferSource,
+      });
+    }
 
     const json = sub.toJSON();
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      return { status: "error", detail: "el navegador no entregó las claves de la suscripción" };
+    }
     await api("/notifications/devices", {
       method: "POST",
       body: JSON.stringify({
@@ -92,9 +108,9 @@ export async function enablePush(): Promise<"granted" | "denied" | "unsupported"
         label: navigator.userAgent.slice(0, 80),
       }),
     });
-    return "granted";
-  } catch {
-    return "error";
+    return { status: "granted" };
+  } catch (e) {
+    return { status: "error", detail: ((e as Error)?.message ?? String(e)).slice(0, 200) };
   }
 }
 

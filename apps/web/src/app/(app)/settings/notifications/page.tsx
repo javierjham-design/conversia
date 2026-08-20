@@ -24,10 +24,10 @@ function PushActivation() {
     setBusy(true);
     const r = await enablePush();
     setBusy(false);
-    if (r === "granted") { setState("granted"); toast.push("Notificaciones activadas en este dispositivo ✔", "ok"); }
-    else if (r === "denied") { setState("denied"); toast.push("Bloqueaste las notificaciones. Habilítalas en los permisos del navegador para este sitio.", "error"); }
-    else if (r === "unsupported") toast.push("Este dispositivo no puede recibir notificaciones (o el servidor no tiene VAPID configurado).", "error");
-    else toast.push("No se pudo activar. Intenta de nuevo.", "error");
+    if (r.status === "granted") { setState("granted"); toast.push("Notificaciones activadas en este dispositivo ✔", "ok"); }
+    else if (r.status === "denied") { setState("denied"); toast.push("Bloqueaste las notificaciones. Habilítalas en los permisos del navegador para este sitio.", "error"); }
+    else if (r.status === "unsupported") toast.push(r.detail ?? "Este dispositivo no puede recibir notificaciones.", "error");
+    else toast.push(`No se pudo activar${r.detail ? `: ${r.detail}` : ". Intenta de nuevo."}`, "error");
   }
   async function deactivate() {
     setBusy(true);
