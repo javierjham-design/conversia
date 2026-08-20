@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-08-20 — feat: push por mensaje nuevo en conversaciones atendidas por humanos
+
+Faltaba el aviso «por mensaje» cuando la IA NO va a responder (aiEnabled=false: escalada,
+«atender yo», o importada con IA apagada) — el humano a cargo no se enteraba de mensajes nuevos
+salvo por la escalera de «sin responder». Ahora:
+- Evento nuevo de catálogo `message.received_human` («Nuevo mensaje de {contactName}»), canales
+  in_app + web_push (default) + email (opcional), link directo a la conversación. Aparece solo
+  en la matriz de preferencias; cada usuario puede apagarlo.
+- `notifyHumanAttendedMessage` (worker) enganchado en AMBAS ingestas (WhatsApp `inbound.ts` y
+  Messenger/IG `messaging-inbound.ts`): si la conversación tiene la IA apagada, avisa al usuario/
+  equipo asignado; sin asignación, a admins/owner del tenant (fallback explícito).
+- Reutiliza toda la infraestructura existente: presencia (no hay push de la conversación que ya
+  estás mirando), horario silencioso, dedup por tag de conversación y limpieza de dispositivos
+  caducados. VAPID verificado presente en worker+api de Railway.
+
 ## 2026-08-19 — fix: la derivación entre agentes de IA ahora funciona (y el probador no miente)
 
 Bug real (Digital-Dent, WhatsApp con pacientes): Recepción debía derivar las consultas de

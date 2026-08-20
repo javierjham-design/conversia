@@ -47,6 +47,18 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/contacts",
   },
   {
+    // Mensaje entrante en conversación atendida por un HUMANO (IA apagada):
+    // nadie va a responder automáticamente, así que se avisa por mensaje.
+    key: "message.received_human",
+    title: "Nuevo mensaje de {contactName}",
+    body: "{excerpt}",
+    audience: ["assigned_user", "team"],
+    urgency: "info",
+    channels: ["in_app", "web_push", "email"],
+    defaultChannels: ["in_app", "web_push"],
+    link: "/inbox/{conversationId}",
+  },
+  {
     key: "comment.mention",
     title: "Te mencionaron",
     body: "{authorName} te mencionó: {excerpt}",

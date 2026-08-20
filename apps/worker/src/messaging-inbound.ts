@@ -2,6 +2,7 @@ import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { MessagingEvent } from "./messaging-events";
 import { emitPlatformEvent } from "./platform-events";
+import { notifyHumanAttendedMessage } from "./notifications/human-message";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective } from "./workflow-runtime";
 import { runAgentTurn } from "./agent-turn";
 import { pageToken } from "./messaging-send";
@@ -177,6 +178,7 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
   }
   await dispatchEvent({ ...base, type: "message_received" });
   await emitPlatformEvent(organizationId, "message.received", { conversationId: result.conversationId, text: result.text.slice(0, 200), channel: e.platform });
+  await notifyHumanAttendedMessage(organizationId, result.conversationId, result.text);
 
   // Turno del agente (objetivo pendiente primero, igual que WhatsApp)
   const objectiveHandled = await handlePendingObjective(organizationId, result.conversationId).catch(() => false);

@@ -10,6 +10,7 @@ import { resolveChannelAuth } from "./channel-auth";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
+import { notifyHumanAttendedMessage } from "./notifications/human-message";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective, handleWaitReply } from "./workflow-runtime";
 import { handleAppointmentResponse } from "./appointment-responses";
 import { resolveAdContext } from "./meta-ads-sync";
@@ -369,6 +370,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
       conversationId: result.conversationId,
       text: (text ?? "").slice(0, 200),
     });
+    await notifyHumanAttendedMessage(organizationId, result.conversationId, text ?? "");
 
     // Anuncios Click-to-WhatsApp: la atribución (ctwa_clid/ad_id/referral crudo)
     // ya la guardó buildContactCreate/Update en columnas estructuradas + meta;
