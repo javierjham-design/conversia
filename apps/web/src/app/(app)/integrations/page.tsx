@@ -52,6 +52,7 @@ interface Overview {
   };
   meta: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
   metaCrm: { status: string; mode: string; businessName: string | null; lastError: string | null } | null;
+  messagingChannels?: { messenger: boolean; instagram: boolean };
   clariva: ClarivaState | null;
   email: EmailState | null;
   platformEmailReady: boolean;
@@ -197,6 +198,30 @@ export default function IntegrationsPage() {
         detail: data.metaCrm.businessName ?? "Leads de formularios → CRM",
         health: data.metaCrm.status === "ERROR" ? "error" : "ok",
         onManage: () => router.push("/integrations/meta-crm"),
+      });
+    }
+    if (data.messagingChannels?.instagram) {
+      rows.push({
+        key: "instagram",
+        name: "Instagram Direct",
+        category: "Meta y mensajería",
+        icon: <MessageCircle size={22} />,
+        status: "connected",
+        detail: "DMs en la bandeja con agentes IA",
+        health: "ok",
+        onManage: () => router.push("/channels"),
+      });
+    }
+    if (data.messagingChannels?.messenger) {
+      rows.push({
+        key: "messenger",
+        name: "Facebook Messenger",
+        category: "Meta y mensajería",
+        icon: <MessageCircle size={22} />,
+        status: "connected",
+        detail: "Mensajes de la página en la bandeja",
+        health: "ok",
+        onManage: () => router.push("/channels"),
       });
     }
     if (data.meta && data.meta.status !== "DISCONNECTED") {
@@ -359,6 +384,8 @@ export default function IntegrationsPage() {
       s.add("whatsapp");
     }
     if (data.metaCrm && data.metaCrm.status === "CONNECTED") s.add("meta_crm");
+    if (data.messagingChannels?.instagram) s.add("instagram");
+    if (data.messagingChannels?.messenger) s.add("messenger");
     if (data.capiConfigured) s.add("meta_capi");
     if (data.clariva?.status === "active") s.add("clariva");
     if (data.webhooks.length > 0) s.add("webhooks");

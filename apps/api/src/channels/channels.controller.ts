@@ -607,6 +607,11 @@ export class ChannelsController {
       const channel = await tx.channelConnection.findUnique({ where: { id } });
       if (!channel) throw new NotFoundException("Canal no encontrado");
       if (channel.type === "MOCK") return { mock: true as const };
+      // Canales de mensajería de página (sin número): prueba con el token de página.
+      if (channel.type === "MESSENGER" || channel.type === "INSTAGRAM") {
+        const cfg = (channel.config as Record<string, any>) ?? {};
+        return { messaging: true as const, pageId: String(cfg.pageId ?? cfg.igId ?? ""), channelType: channel.type };
+      }
       const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: id } });
       if (!number) throw new BadRequestException("El canal no tiene número asociado");
       const account = await tx.whatsappAccount.findUnique({ where: { id: number.accountId } });
@@ -621,6 +626,49 @@ export class ChannelsController {
     });
 
     if (data.mock) return { ok: true, detail: "Canal mock operativo (no requiere Meta)" };
+    if ("messaging" in data && data.messaging) {
+      // Deriva el token de página desde la conexión Meta CRM y verifica acceso
+      // + suscripción de la app (mismo criterio que el diagnóstico 🩺).
+      if (!data.pageId) return { ok: false, detail: "Canal sin pageId en su configuración — re-conecta la página en Integraciones → Meta CRM" };
+      try {
+        const crm = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+          const conn = await tx.metaCrmConnection.findUnique({ where: { organizationId: ctx.organizationId } });
+          if (conn?.status === "CONNECTED" && conn.credentialId) {
+            const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+            if (cred) return decryptSecret(cred.ciphertext);
+          }
+          return null;
+        });
+        if (!crm) return { ok: false, detail: "Conecta Meta CRM (Integraciones) — este canal usa su token" };
+        const { fetchGraphWithProof } = await import("@conversia/config");
+        const pageRes = await fetchGraphWithProof(
+          `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(data.pageId)}?fields=name,access_token&access_token=${encodeURIComponent(crm)}`,
+          crm,
+        );
+        const pageJson: any = await pageRes.json().catch(() => ({}));
+        if (!pageRes.ok || !pageJson.access_token) {
+          return { ok: false, detail: `Sin acceso de administración a la página: ${pageJson?.error?.message ?? pageRes.status}` };
+        }
+        const subsRes = await fetchGraphWithProof(
+          `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(data.pageId)}/subscribed_apps?access_token=${encodeURIComponent(pageJson.access_token)}`,
+          pageJson.access_token,
+        );
+        const subsJson: any = await subsRes.json().catch(() => ({}));
+        const mine = (subsJson.data ?? []).find((a: any) => String(a.id) === env.META_CRM_APP_ID);
+        const fields: string[] = mine?.subscribed_fields ?? [];
+        const others = (subsJson.data ?? []).filter((a: any) => String(a.id) !== env.META_CRM_APP_ID).map((a: any) => a.name ?? a.id);
+        if (!mine) return { ok: false, detail: `Página «${pageJson.name}» accesible, pero la app NO está suscrita — re-conecta la página en Integraciones → Meta CRM` };
+        if (!fields.includes("messages")) {
+          return { ok: false, detail: `Suscrita sin el campo messages (${fields.join(", ") || "sin campos"}) — re-conecta la página con la conexión OAuth actual` };
+        }
+        return {
+          ok: true,
+          detail: `Página «${pageJson.name}» OK · suscrita con ${fields.join(", ")}${others.length ? ` · ⚠ otras apps suscritas: ${others.join(", ")} (posible receptor principal)` : ""}`,
+        };
+      } catch (err) {
+        return { ok: false, detail: (err as Error).message };
+      }
+    }
     if (!data.token) return { ok: false, detail: "Sin token: carga el access token del canal" };
 
     try {
