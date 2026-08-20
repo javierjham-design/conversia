@@ -54,4 +54,20 @@ describe("parseMessagingEvents", () => {
     const raw = { object: "page", entry: [{ id: "P", changes: [{ field: "leadgen", value: { leadgen_id: "1" } }] }] };
     expect(parseMessagingEvents(raw)).toEqual([]);
   });
+
+  it("acepta la forma changes[field=messages] (topic instagram / tests del dashboard)", () => {
+    const raw = {
+      object: "instagram",
+      entry: [
+        {
+          id: "IG_9",
+          changes: [
+            { field: "messages", value: { sender: { id: "U1" }, recipient: { id: "IG_9" }, timestamp: 5, message: { mid: "m_chg", text: "hola por changes" } } },
+          ],
+        },
+      ],
+    };
+    const [e] = parseMessagingEvents(raw);
+    expect(e).toMatchObject({ platform: "instagram", channelExternalId: "IG_9", senderId: "U1", externalId: "m_chg", text: "hola por changes" });
+  });
 });
