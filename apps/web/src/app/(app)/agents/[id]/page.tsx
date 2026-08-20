@@ -119,9 +119,27 @@ const MENTION_BADGE: Record<Mention["type"], { label: string; className: string 
 // (antes solo \w\s → un nombre con "ó" cortaba el menú a mitad de tipeo).
 const MENTION_RE = /@([\p{L}\p{N}\s_-]{0,30})$/u;
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Textarea con menciones @ "vivas": al elegir de la lista, la mención queda marcada en AZUL
+ * (como un hipervínculo) y se comporta como una sola unidad — un Backspace/Suprimir la borra
+ * COMPLETA, no letra por letra. Técnica de overlay: un backdrop resalta las menciones conocidas
+ * detrás del textarea (texto transparente, cursor visible), alineado 1:1 con el mismo layout.
+ */
 function MentionTextarea({ value, onChange, placeholder, mentions }: { value: string; onChange: (v: string) => void; placeholder?: string; mentions: Mention[] }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState<string | null>(null);
+
+  // Alternancia de menciones conocidas (más largas primero para no cortar una dentro de otra).
+  const labelAlt = useMemo(
+    () => mentions.map((m) => m.label).filter(Boolean).sort((a, b) => b.length - a.length).map(escapeRegExp).join("|"),
+    [mentions],
+  );
+
   function handle(v: string) {
     onChange(v);
     const pos = ref.current?.selectionStart ?? v.length;
@@ -135,12 +153,71 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
     const before = value.slice(0, pos).replace(MENTION_RE, `@${label} `);
     onChange(before + value.slice(pos));
     setQuery(null);
-    ref.current?.focus();
+    requestAnimationFrame(() => ref.current?.focus());
   }
+
+  // Borrado ATÓMICO de la mención (Backspace hacia atrás, Suprimir hacia adelante).
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const el = ref.current;
+    if (!el || !labelAlt || el.selectionStart !== el.selectionEnd) return;
+    const pos = el.selectionStart;
+    if (e.key === "Backspace") {
+      const m = value.slice(0, pos).match(new RegExp(`@(?:${labelAlt})[ ]?$`, "u"));
+      if (m) {
+        e.preventDefault();
+        const start = pos - m[0].length;
+        onChange(value.slice(0, start) + value.slice(pos));
+        requestAnimationFrame(() => { if (ref.current) ref.current.selectionStart = ref.current.selectionEnd = start; });
+      }
+    } else if (e.key === "Delete") {
+      const m = value.slice(pos).match(new RegExp(`^[ ]?@(?:${labelAlt})`, "u"));
+      if (m) {
+        e.preventDefault();
+        onChange(value.slice(0, pos) + value.slice(pos + m[0].length));
+        requestAnimationFrame(() => { if (ref.current) ref.current.selectionStart = ref.current.selectionEnd = pos; });
+      }
+    }
+  }
+
+  // Backdrop: mismo texto que el textarea, con las menciones conocidas en azul.
+  const nodes = useMemo(() => {
+    if (!labelAlt) return [value] as React.ReactNode[];
+    const re = new RegExp(`@(?:${labelAlt})`, "gu");
+    const out: React.ReactNode[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(value))) {
+      if (m.index > last) out.push(value.slice(last, m.index));
+      out.push(
+        <span key={m.index} className="rounded bg-brand-50 text-brand-600 underline decoration-brand-400/60 dark:bg-brand-500/15 dark:text-brand-300">{m[0]}</span>,
+      );
+      last = m.index + m[0].length;
+    }
+    out.push(value.slice(last));
+    return out;
+  }, [value, labelAlt]);
+
   const empty = query != null && filtered.length === 0;
+  // Mismo box-model en backdrop y textarea para que el resaltado quede alineado 1:1.
+  const BOX = "w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm leading-5";
+
   return (
-    <div className="relative">
-      <textarea ref={ref} value={value} onChange={(e) => handle(e.target.value)} rows={2} placeholder={placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+    <div className="relative mt-1">
+      <div ref={backdropRef} aria-hidden className={cn(BOX, "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-ink")}>
+        {nodes}
+        {"​"}
+      </div>
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => handle(e.target.value)}
+        onKeyDown={onKeyDown}
+        onScroll={() => { if (backdropRef.current && ref.current) backdropRef.current.scrollTop = ref.current.scrollTop; }}
+        rows={2}
+        placeholder={placeholder}
+        spellCheck={false}
+        className={cn(BOX, "relative resize-none bg-transparent text-transparent caret-ink placeholder:text-ink-subtle")}
+      />
       {query != null && (filtered.length > 0 || empty) && (
         <div className="absolute z-20 mt-1 w-64 rounded-lg border border-line bg-panel p-1 shadow-pop">
           {filtered.map((mm) => {
@@ -155,7 +232,7 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
           {empty && <p className="px-2 py-1.5 text-xs text-ink-subtle">Sin coincidencias</p>}
         </div>
       )}
-      <p className="mt-1 text-[10px] text-ink-subtle">Escribe @ y elige de la lista (evita errores de tipeo).</p>
+      <p className="mt-1 text-[10px] text-ink-subtle">Escribe @, elige de la lista y la mención queda marcada; al borrar se elimina completa.</p>
     </div>
   );
 }
