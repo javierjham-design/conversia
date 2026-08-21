@@ -31,6 +31,21 @@ export default function BillingPage() {
   const [flowForm, setFlowForm] = useState({ apiKey: "", secretKey: "", baseUrl: "" });
   const [lsForm, setLsForm] = useState({ apiKey: "", storeId: "", webhookSecret: "" });
   const [saving, setSaving] = useState(false);
+  const [flowTest, setFlowTest] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  async function testFlow() {
+    setTesting(true);
+    setFlowTest(null);
+    try {
+      const r = await padmin<{ ok: boolean; detail: string }>("/platform/billing/flow/test", { method: "POST" });
+      setFlowTest(r);
+    } catch (e) {
+      setFlowTest({ ok: false, detail: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const [inv, o, prov] = await Promise.all([
@@ -119,7 +134,17 @@ export default function BillingPage() {
             <p className="mt-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-500">
               ✓ Flow no requiere configurar webhook en su panel: la URL de confirmación se envía automáticamente en cada pago. Con las dos llaves basta.
             </p>
-            <Button className="mt-3" disabled={saving} onClick={() => void saveProvider("flow")}>Guardar Flow</Button>
+            <div className="mt-3 flex items-center gap-2">
+              <Button disabled={saving} onClick={() => void saveProvider("flow")}>Guardar Flow</Button>
+              <Button variant="secondary" disabled={testing || !providers.flow.configured} onClick={() => void testFlow()}>
+                {testing ? "Probando…" : "Probar credenciales"}
+              </Button>
+            </div>
+            {flowTest && (
+              <p className={`mt-2 rounded-lg px-2 py-1.5 text-[12px] ${flowTest.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                {flowTest.ok ? "✓" : "✖"} {flowTest.detail}
+              </p>
+            )}
           </div>
 
           {/* Lemon Squeezy */}

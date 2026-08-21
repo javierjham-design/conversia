@@ -596,6 +596,21 @@ export class PlatformController {
     return { ok: true };
   }
 
+  /**
+   * Prueba EN VIVO las credenciales de Flow efectivas (BD cifrada o env) con
+   * una consulta inocua — sin crear clientes ni cobrar. Cierra el hueco del
+   * sandbox inservible: valida directo contra producción antes de vender.
+   */
+  @Post("billing/flow/test")
+  async testFlowCredentials(@Req() req: PlatformRequest) {
+    const s = await this.paymentSettings.get();
+    if (!s.flow) throw new BadRequestException("Faltan credenciales de Flow (API Key y Secret Key)");
+    const { flowTestCredentials } = await import("../billing/flow-subscriptions.js");
+    const r = await flowTestCredentials(s.flow);
+    await this.audit(req, "platform.billing.flow_test", "billing", r.ok ? "ok" : "fail");
+    return r;
+  }
+
   // ------------------------------ Alertas -------------------------------
 
   /** Alertas críticas cross-tenant: eventos de integración con status warning/error. */

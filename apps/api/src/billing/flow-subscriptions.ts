@@ -29,6 +29,26 @@ async function get(cfg: FlowConfig, path: string, params: Record<string, string>
   return res.json().catch(() => ({}));
 }
 
+/**
+ * Valida las credenciales contra Flow con una consulta inocua (pagos del día):
+ * no crea clientes ni cobra. Con llaves inválidas Flow responde con code/message
+ * — así se distingue llave mala de cuenta sin pagos. Reporta además si el
+ * ambiente apuntado es PRODUCCIÓN o SANDBOX (el sandbox de Flow es poco fiable).
+ */
+export async function flowTestCredentials(cfg: FlowConfig): Promise<{ ok: boolean; detail: string }> {
+  const env = cfg.baseUrl.includes("sandbox") ? "SANDBOX" : "PRODUCCIÓN";
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await get(cfg, "payment/getPayments", { date: today });
+    if (r && (Array.isArray(r.data) || typeof r.total === "number")) {
+      return { ok: true, detail: `Credenciales válidas en ${env} (${Array.isArray(r.data) ? r.data.length : 0} pagos hoy)` };
+    }
+    return { ok: false, detail: `${env}: ${r?.message ?? `respuesta inesperada de Flow (code ${r?.code ?? "?"})`}` };
+  } catch (err) {
+    return { ok: false, detail: `${env}: sin respuesta de Flow — ${(err as Error).message}` };
+  }
+}
+
 export async function flowCustomerCreate(cfg: FlowConfig, input: { name: string; email: string; organizationId: string }): Promise<string> {
   const r = await post(cfg, "customer/create", { name: input.name, email: input.email, externalId: input.organizationId });
   if (!r?.customerId) throw new Error(`Flow customer/create: ${r?.message ?? "sin customerId"}`);
