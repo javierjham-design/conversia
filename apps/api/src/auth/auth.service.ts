@@ -42,9 +42,20 @@ export class AuthService {
       slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     }
 
+    // La PRUEBA de 7 días queda fijada DESDE el registro (no espera el tick del
+    // worker): el banner de días restantes y el corte del día 7 valen desde ya.
+    const now = new Date();
+    const trial = {
+      startedAt: now.toISOString(),
+      endsAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+      purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
+      state: "active",
+      warnedDays: [],
+    };
+
     const result = await db.$transaction(async (tx) => {
       const org = await tx.organization.create({
-        data: { name: input.organizationName, slug },
+        data: { name: input.organizationName, slug, settings: { trial } as object },
       });
       // Habilita las políticas RLS para los inserts hijos de esta transacción.
       // (El INSERT en organizations requiere rol admin — ver docs/MULTITENANCY.md.)
