@@ -280,6 +280,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const [apiOk, setApiOk] = useState<boolean | null>(null);
+  // Cuenta suspendida (impago o prueba vencida): se esconde el menú lateral y
+  // Facturación queda como única vista (BillingBanner además redirige allí).
+  const [billingLocked, setBillingLocked] = useState(false);
 
   // Cierra el menú móvil al navegar.
   useEffect(() => {
@@ -335,6 +338,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               "fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col bg-navy-900 text-navy-200 transition-transform md:static md:z-auto md:translate-x-0 md:transition-[width] md:duration-200",
               mobileOpen ? "translate-x-0" : "-translate-x-full",
               collapsed ? "md:w-[68px]" : "md:w-60",
+              billingLocked && "!hidden",
             )}
             aria-label="Navegación principal"
           >
@@ -464,9 +468,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {/* Barra superior */}
             <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-panel px-4 md:px-5">
               <div className="flex items-center gap-2">
-                <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-ink md:hidden">
-                  <Menu size={22} />
-                </button>
+                {!billingLocked && (
+                  <button onClick={() => setMobileOpen(true)} aria-label="Abrir menú" className="text-ink md:hidden">
+                    <Menu size={22} />
+                  </button>
+                )}
                 <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-ink-subtle">
                   {crumbs.map((c, i) => (
                     <span key={i} className="flex items-center gap-1.5">
@@ -493,8 +499,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </header>
 
-            <BillingBanner />
-            <OnboardingBanner />
+            <BillingBanner onLocked={setBillingLocked} />
+            {!billingLocked && <OnboardingBanner />}
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
           <SupportWidget />
