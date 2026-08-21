@@ -371,7 +371,10 @@ export default function OrgDetailPage() {
             </label>
             <label className="text-xs text-slate-600">
               Máx. tokens/respuesta
-              <input type="number" min={50} max={4000} value={aiMaxTokens} onChange={(e) => setAiMaxTokens(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              <input type="number" min={50} max={8000} step={100} value={aiMaxTokens} onChange={(e) => setAiMaxTokens(Number(e.target.value))} className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+              <span className="mt-1 block text-[11px] leading-tight text-slate-400">
+                Largo máximo de cada respuesta. Corto (≤400) puede cortar mensajes largos (listas de planes, detalles). Recomendado 1200–2000; 3000+ para agentes muy detallistas. Si se corta, el sistema la reanuda solo, pero subirlo evita el «por partes».
+              </span>
             </label>
             <label className="text-xs text-slate-600">
               Máx. rondas de tools

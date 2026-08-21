@@ -372,7 +372,7 @@ export class PlatformController {
         ai: z
           .object({
             model: z.string().min(1).max(60),
-            maxTokens: z.coerce.number().int().min(50).max(4000),
+            maxTokens: z.coerce.number().int().min(50).max(8000),
             maxToolRounds: z.coerce.number().int().min(0).max(10),
           })
           .partial()
