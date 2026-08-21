@@ -96,11 +96,38 @@ export default function BillingPage() {
         window.history.replaceState(null, "", window.location.pathname);
         const target = catalog.find((p) => p.code === wanted && p.isPublic);
         if (!target || target.code === overview.plan?.code) return;
-        void checkout(target.code, wantedInterval);
+        pay(target.code, wantedInterval);
       })
       .catch(() => setData(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  /**
+   * Con FLOW, contratar un plan va SIEMPRE por la suscripción con tarjeta
+   * (registro + primer cobro + renovación automática): es la garantía de pago
+   * mensual y evita que la plataforma se corte por olvido. El checkout de pago
+   * único (Khipu/transferencias) NO sirve para cobro recurrente, así que no se
+   * ofrece como puerta de entrada.
+   */
+  async function subscribeWithCard(planCode: string, interval: "monthly" | "yearly" = billingInterval) {
+    setBusy(true);
+    try {
+      const r = await api<{ url: string }>("/billing/subscription/start", {
+        method: "POST",
+        body: JSON.stringify({ planCode, billingInterval: interval }),
+      });
+      window.location.href = r.url; // registro de tarjeta en Flow → vuelve con ?card=1
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+      setBusy(false);
+    }
+  }
+
+  /** Puerta única de pago: Flow → suscripción con tarjeta; otros → checkout clásico. */
+  function pay(planCode: string, interval: "monthly" | "yearly" = billingInterval) {
+    if (data?.paymentProvider === "flow") return void subscribeWithCard(planCode, interval);
+    return void checkout(planCode, interval);
+  }
 
   async function checkout(planCode: string, interval: "monthly" | "yearly" = billingInterval) {
     setBusy(true);
@@ -208,7 +235,7 @@ export default function BillingPage() {
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <Button onClick={() => (data.plan ? void checkout(data.plan.code) : undefined)} disabled={busy || !data.plan}>
+            <Button onClick={() => (data.plan ? pay(data.plan.code) : undefined)} disabled={busy || !data.plan}>
               <CreditCard size={14} /> Pagar ahora
             </Button>
             <span className="text-xs text-ink-subtle">
@@ -356,13 +383,17 @@ export default function BillingPage() {
       <ConfirmDialog
         open={changing !== null}
         onClose={() => setChanging(null)}
-        onConfirm={() => changing && void checkout(changing.code)}
+        onConfirm={() => changing && pay(changing.code)}
         title={`¿Cambiar al plan ${changing?.name}?`}
         description={
           changing
             ? `Pasarás de ${data.plan?.name ?? "sin plan"} a ${changing.name} por ${money(priceOf(changing), currency)}/${cadence} (facturación ${billingInterval === "yearly" ? "anual" : "mensual"}). Nuevos límites: ${Object.entries(changing.limits ?? {})
                 .map(([k, v]) => `${v == null || v === 0 ? "∞" : v} ${LIMIT_LABELS[k] ?? k}`)
-                .join(" · ")}. Si bajas de plan y excedes un límite, no podrás crear más elementos de ese tipo (lo existente no se borra). El pago se procesa con ${PROVIDER_LABELS[data.paymentProvider] ?? data.paymentProvider}.`
+                .join(" · ")}. Si bajas de plan y excedes un límite, no podrás crear más elementos de ese tipo (lo existente no se borra). ${
+                data.paymentProvider === "flow"
+                  ? "Registrarás tu tarjeta una sola vez (Webpay) y el cobro se renueva automáticamente cada período — tu servicio nunca se corta por un olvido de pago."
+                  : `El pago se procesa con ${PROVIDER_LABELS[data.paymentProvider] ?? data.paymentProvider}.`
+              }`
             : ""
         }
         confirmLabel="Continuar al pago"
