@@ -56,9 +56,28 @@ export class BillingController {
             ? "grace"
             : "ok";
 
+      // Prueba de 7 días: días restantes para el banner de cuenta regresiva.
+      // Si el registro/tick aún no fijó settings.trial, se calcula desde createdAt.
+      const trialSettings = ((org?.settings as Record<string, any>)?.trial ?? null) as
+        | { endsAt?: string; state?: string }
+        | null;
+      const trialEndsAt =
+        org?.status === "TRIAL"
+          ? new Date(trialSettings?.endsAt ?? org.createdAt.getTime() + 7 * 86_400_000)
+          : trialSettings?.state === "disabled" && trialSettings?.endsAt
+            ? new Date(trialSettings.endsAt)
+            : null;
+      const trial = trialEndsAt
+        ? {
+            state: trialSettings?.state === "disabled" ? ("disabled" as const) : ("active" as const),
+            endsAt: trialEndsAt.toISOString(),
+            daysLeft: Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86_400_000)),
+          }
+        : null;
+
       return {
         organization: { name: org?.name, status: org?.status, currency: org?.currency },
-        billing: { state: billingState, graceEndsAt: billingSettings.graceEndsAt ?? null },
+        billing: { state: billingState, graceEndsAt: billingSettings.graceEndsAt ?? null, trial },
         plan: plan
           ? {
               code: plan.code,
