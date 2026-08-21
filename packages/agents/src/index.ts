@@ -3,5 +3,6 @@ export * from "./providers.js";
 export * from "./transcription.js";
 export * from "./actions.js";
 export * from "./tools.js";
+export * from "./web-fetch.js";
 export * from "./sanitize.js";
 export * from "./orchestrator.js";

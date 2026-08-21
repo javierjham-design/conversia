@@ -98,6 +98,14 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     group: "atencion",
   },
   {
+    key: "web",
+    label: "Leer páginas web",
+    description: "Leer el sitio web de un prospecto/cliente (por su URL) para analizar su rubro, servicios y tono, y responder con datos reales.",
+    tools: ["leerWeb"],
+    placeholder: "Si el cliente menciona o comparte su sitio web, léelo para conocer su negocio antes de responder o cotizar.",
+    group: "atencion",
+  },
+  {
     key: "catalog",
     label: "Vender con el catálogo",
     description: "Buscar en el catálogo real del negocio (productos de la tienda o platos del menú), consultar precio/stock/disponibilidad y enviar el enlace de compra. Requiere tener un catálogo cargado o una tienda conectada.",
