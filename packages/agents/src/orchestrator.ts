@@ -80,6 +80,9 @@ export async function orchestrate(
   let humanHandoff = false;
   let finalText: string | null = null;
   let stopReason = "end_turn";
+  // Texto que el modelo dijo JUNTO a una llamada de herramienta (preámbulo). Si el
+  // turno termina sin texto final, lo usamos para no dejar al cliente sin respuesta.
+  let lastToolRoundText = "";
 
   for (let round = 0; round <= agent.maxToolRounds; round++) {
     const resp = await ai.chat({
@@ -113,6 +116,7 @@ export async function orchestrate(
       toolEvents.push({ name: call.name, input: call.input, output: result.content, isError: result.isError });
       results.push({ toolCallId: call.id, content: result.content, isError: result.isError });
     }
+    if (resp.text && resp.text.trim()) lastToolRoundText = resp.text;
     toolTranscript.push({ kind: "assistant_tool_calls", text: resp.text ?? undefined, calls: resp.toolCalls });
     toolTranscript.push({ kind: "tool_results", results });
 
@@ -154,6 +158,35 @@ export async function orchestrate(
     // Si al continuar el modelo decide usar una herramienta, no la ejecutamos en
     // esta fase de cierre textual: devolvemos lo acumulado y cortamos.
     if (resp.stopReason !== "max_tokens") break;
+  }
+
+  // Garantía de respuesta: si el turno terminó tras usar herramientas pero SIN texto
+  // para el cliente (p. ej. sólo dejó una nota interna o actualizó un dato), no lo
+  // dejamos en silencio. 1) Usamos el texto que el modelo dijo junto a la tool; 2) si
+  // no hubo, pedimos un cierre textual SIN herramientas (fuerza una respuesta). No
+  // aplica a derivaciones (transfer/humano): ahí el silencio es intencional.
+  if (!finalText?.trim() && !humanHandoff && !transferToAgentSlug && toolEvents.length > 0) {
+    if (lastToolRoundText.trim()) {
+      finalText = lastToolRoundText;
+    } else {
+      try {
+        const resp = await ai.chat({
+          model: agent.model,
+          system,
+          messages: input.history,
+          tools: [],
+          maxTokens: agent.maxTokens,
+          toolTranscript,
+        });
+        usage.inputTokens += resp.usage.inputTokens;
+        usage.outputTokens += resp.usage.outputTokens;
+        usage.costUsd += resp.usage.costUsd;
+        latencyMs += resp.latencyMs;
+        if (resp.text && resp.text.trim()) finalText = resp.text;
+      } catch {
+        // best-effort: si el cierre forzado falla, dejamos finalText como estaba
+      }
+    }
   }
 
   return {
