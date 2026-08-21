@@ -45,10 +45,24 @@ async function enrichContactName(
       `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}?fields=${fields}&access_token=${encodeURIComponent(token)}`,
       token,
     );
-    const json: any = await res.json().catch(() => ({}));
+    let json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
-      console.warn(`⚠ Perfil de ${e.platform} ${e.senderId} no disponible: ${json?.error?.message ?? res.status}`);
-      return;
+      // Acceso estándar: Meta niega el perfil directo del PSID/IGSID. Plan B
+      // permitido: el nombre viene en los PARTICIPANTES de la conversación de
+      // la página (mismo endpoint que el diagnóstico valida en verde).
+      const platformParam = e.platform === "instagram" ? "&platform=instagram" : "";
+      const conv = await fetchGraphWithProof(
+        `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=participants${platformParam}&access_token=${encodeURIComponent(token)}`,
+        token,
+      );
+      const cjson: any = await conv.json().catch(() => ({}));
+      const parts: any[] = cjson?.data?.[0]?.participants?.data ?? [];
+      const p = parts.find((x) => String(x?.id ?? "") === e.senderId);
+      if (!conv.ok || !p) {
+        console.warn(`⚠ Perfil de ${e.platform} ${e.senderId} no disponible: ${json?.error?.message ?? res.status}`);
+        return;
+      }
+      json = { name: p.name ?? p.username ?? null, username: p.username ?? null };
     }
     const name: string | null =
       [json.first_name, json.last_name].filter(Boolean).join(" ") || json.name || json.username || null;
