@@ -136,7 +136,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             if (!pages.length) return null;
             return (
               <div key={g.title} className="mb-3">
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">{g.title}</p>
+                {/* Encabezado de sección con fondo tipo resaltador: debe ubicarse
+                    a la primera (el bot instruye «Configuración → Datos → …»). */}
+                <p className="mx-2 mb-1.5 rounded-md border-l-2 border-brand-500 bg-app px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-wider text-ink">
+                  {g.title}
+                </p>
                 {pages.map((p) =>
                   p.ready === false || (!p.ready && !p.external) ? (
                     <span key={p.href} className="flex cursor-default items-center gap-1 px-3 py-1.5 text-[13px] text-ink-subtle" title="Disponible pronto">
