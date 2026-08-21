@@ -160,12 +160,14 @@ export async function orchestrate(
     if (resp.stopReason !== "max_tokens") break;
   }
 
-  // Garantía de respuesta: si el turno terminó tras usar herramientas pero SIN texto
-  // para el cliente (p. ej. sólo dejó una nota interna o actualizó un dato), no lo
-  // dejamos en silencio. 1) Usamos el texto que el modelo dijo junto a la tool; 2) si
-  // no hubo, pedimos un cierre textual SIN herramientas (fuerza una respuesta). No
-  // aplica a derivaciones (transfer/humano): ahí el silencio es intencional.
-  if (!finalText?.trim() && !humanHandoff && !transferToAgentSlug && toolEvents.length > 0) {
+  // Garantía de respuesta (CERO SILENCIOS): si el turno terminó SIN texto para el
+  // cliente —haya usado herramientas o no (nota interna, dato actualizado, o una
+  // respuesta vacía a secas)— no lo dejamos en silencio. 1) Usamos el texto que el
+  // modelo dijo junto a la tool; 2) si no hubo, pedimos un cierre textual SIN
+  // herramientas (fuerza una respuesta). No aplica a derivaciones (transfer/humano):
+  // ahí el silencio es intencional. Es una red de seguridad de PLATAFORMA: protege a
+  // todos los agentes de todos los tenants sin que nadie configure nada.
+  if (!finalText?.trim() && !humanHandoff && !transferToAgentSlug) {
     if (lastToolRoundText.trim()) {
       finalText = lastToolRoundText;
     } else {
