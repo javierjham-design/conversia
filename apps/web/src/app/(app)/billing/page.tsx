@@ -118,6 +118,13 @@ export default function BillingPage() {
       });
       window.location.href = r.url; // registro de tarjeta en Flow → vuelve con ?card=1
     } catch (err) {
+      // Cuenta de Flow sin cobro automático habilitado aún: no bloqueamos el
+      // pago — caemos al checkout de pago único mientras Flow activa el servicio.
+      if ((err as Error).message.includes("FLOW_NO_AUTO_CHARGE")) {
+        toast.push("Procesando como pago único (el cobro automático de Flow aún no está habilitado)", "info");
+        await checkout(planCode, interval);
+        return;
+      }
       toast.push((err as Error).message, "error");
       setBusy(false);
     }
