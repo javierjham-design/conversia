@@ -122,6 +122,40 @@ export async function orchestrate(
     }
   }
 
+  // Auto-continuación: si el modelo cortó por límite de tokens (max_tokens) en
+  // medio de una respuesta de TEXTO, la reanudamos para no dejar el mensaje a la
+  // mitad. Reenviamos el texto parcial como prefijo del asistente y concatenamos
+  // lo que siga, hasta cerrar el turno o agotar el presupuesto de continuaciones.
+  const MAX_CONTINUATIONS = 4;
+  let continuations = 0;
+  while (stopReason === "max_tokens" && finalText != null && continuations < MAX_CONTINUATIONS) {
+    continuations++;
+    // Prefijo del asistente = todo lo acumulado. Sin espacios al final: Anthropic
+    // rechaza un mensaje de asistente que termine en whitespace.
+    const prefix = finalText.replace(/\s+$/, "");
+    const contTranscript = [
+      ...toolTranscript,
+      { kind: "assistant_tool_calls" as const, text: prefix, calls: [] },
+    ];
+    const resp = await ai.chat({
+      model: agent.model,
+      system,
+      messages: input.history,
+      tools: specs,
+      maxTokens: agent.maxTokens,
+      toolTranscript: contTranscript,
+    });
+    usage.inputTokens += resp.usage.inputTokens;
+    usage.outputTokens += resp.usage.outputTokens;
+    usage.costUsd += resp.usage.costUsd;
+    latencyMs += resp.latencyMs;
+    stopReason = resp.stopReason;
+    finalText = prefix + (resp.text ?? "");
+    // Si al continuar el modelo decide usar una herramienta, no la ejecutamos en
+    // esta fase de cierre textual: devolvemos lo acumulado y cortamos.
+    if (resp.stopReason !== "max_tokens") break;
+  }
+
   return {
     reply: finalText,
     toolEvents,
