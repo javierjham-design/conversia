@@ -243,6 +243,14 @@ export async function runAgentTurn(opts: {
   const { buildConversationInstructions, getActiveConversationInstructions } = await import("./ai-notes.js");
   const aiNotes = await getActiveConversationInstructions(organizationId, conversationId);
 
+  // Ficha viva del contacto: memoria compartida entre agentes/conversaciones. Se
+  // recuerda semánticamente respecto del último mensaje del cliente (o por recencia).
+  const { recallContactMemory, formatMemoryForPrompt } = await import("./contact-memory.js");
+  const lastUserText = [...history].reverse().find((m) => m.role === "user")?.content ?? "";
+  const contactMemoryBlock = formatMemoryForPrompt(
+    await recallContactMemory(organizationId, conversation.contactId, lastUserText),
+  );
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -256,6 +264,7 @@ export async function runAgentTurn(opts: {
     systemPrompt:
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
       buildConversationInstructions(aiNotes) +
+      contactMemoryBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma
@@ -273,6 +282,7 @@ export async function runAgentTurn(opts: {
       conversationId,
       contactId: conversation.contactId,
       clinicId: conversation.clinicId,
+      agentId: agent.id,
     },
     { knowledgeSources: Array.isArray(cfg.knowledgeSources) ? (cfg.knowledgeSources as string[]) : null },
   );

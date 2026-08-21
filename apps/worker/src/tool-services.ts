@@ -123,6 +123,8 @@ export interface ToolTargets {
   conversationId: string;
   contactId: string;
   clinicId?: string | null;
+  /** Agente activo del turno (trazabilidad de quién anota en la memoria del contacto). */
+  agentId?: string | null;
 }
 
 export interface ToolOptions {
@@ -650,6 +652,18 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     async readWebPage(url: string) {
       const r = await fetchWebPageText(url);
       return r.ok ? { url: r.url, title: r.title, text: r.text } : { error: r.error };
+    },
+
+    async recordContactMemory(input: { category: string; content: string }) {
+      const { saveContactMemory } = await import("./contact-memory.js");
+      return saveContactMemory({
+        orgId,
+        contactId: t.contactId,
+        category: input.category,
+        content: input.content,
+        agentId: t.agentId ?? null,
+        sourceConversationId: t.conversationId,
+      });
     },
 
     async addInternalNote(note: string) {

@@ -62,6 +62,8 @@ export interface ToolServices {
   getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
   // Leer una página web (p. ej. el sitio del prospecto) y devolver su texto legible.
   readWebPage(url: string): Promise<{ url: string; title: string | null; text: string } | { error: string }>;
+  // Anotar un hecho duradero del cliente en su "ficha" (memoria compartida entre agentes).
+  recordContactMemory(input: { category: string; content: string }): Promise<{ saved: boolean; deduped?: boolean }>;
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
@@ -344,6 +346,20 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       inputSchema: z.object({ url: z.string().describe("URL del sitio, p. ej. https://miclinica.cl") }),
       async execute(ctx, input: { url: string }) {
         return services(ctx).readWebPage(input.url);
+      },
+    },
+    {
+      name: "recordarMemoria",
+      description:
+        "Anota un HECHO DURADERO del cliente en su ficha (memoria compartida entre TODOS los agentes y conversaciones). Úsalo cuando el cliente aporte información que valga la pena recordar a futuro: su intención, necesidades, presupuesto, objeciones, plazos, datos de su negocio, o cualquier preferencia. NO lo uses para charla trivial ni para repetir lo que ya está en la ficha. Escribe cada hecho breve y en tercera persona (p. ej. 'Tiene 4 profesionales y una sucursal en Temuco'). Así otro agente (p. ej. implementación) tendrá lo que te contó a ti sin volver a preguntarlo.",
+      inputSchema: z.object({
+        category: z
+          .enum(["intent", "need", "preference", "objection", "constraint", "timeline", "business", "other"])
+          .describe("Tipo de hecho: intent, need, preference, objection, constraint, timeline, business u other"),
+        content: z.string().describe("El hecho, breve y concreto, en tercera persona"),
+      }),
+      async execute(ctx, input: { category: string; content: string }) {
+        return services(ctx).recordContactMemory(input);
       },
     },
     {
