@@ -60,7 +60,7 @@ export class AnthropicProvider implements AIProvider {
 
     const params: any = {
       model: req.model,
-      max_tokens: req.maxTokens ?? 1024,
+      max_tokens: req.maxTokens ?? 2048,
       system: req.system,
       messages,
     };
@@ -133,15 +133,17 @@ export class OpenAIProvider implements AIProvider {
     for (const m of req.messages) messages.push({ role: m.role, content: toMultimodalContent(m, "openai") });
     for (const entry of req.toolTranscript ?? []) {
       if (entry.kind === "assistant_tool_calls") {
-        messages.push({
-          role: "assistant",
-          content: entry.text ?? null,
-          tool_calls: entry.calls.map((c) => ({
+        // Sin tool_calls (p. ej. prefijo de continuación de texto): mensaje de
+        // asistente plano; OpenAI rechaza un tool_calls vacío.
+        const msg: any = { role: "assistant", content: entry.text ?? null };
+        if (entry.calls.length) {
+          msg.tool_calls = entry.calls.map((c) => ({
             id: c.id,
             type: "function",
             function: { name: c.name, arguments: JSON.stringify(c.input ?? {}) },
-          })),
-        });
+          }));
+        }
+        messages.push(msg);
       } else {
         for (const r of entry.results) {
           messages.push({ role: "tool", tool_call_id: r.toolCallId, content: r.content });
@@ -149,7 +151,7 @@ export class OpenAIProvider implements AIProvider {
       }
     }
 
-    const params: any = { model: req.model, max_tokens: req.maxTokens ?? 1024, messages };
+    const params: any = { model: req.model, max_tokens: req.maxTokens ?? 2048, messages };
     if (req.tools?.length) {
       params.tools = req.tools.map((t) => ({
         type: "function",
