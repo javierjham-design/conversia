@@ -19,7 +19,7 @@ import { enqueueEscalationEmail } from "./mailer";
 import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
-import type { ToolServices } from "@conversia/agents";
+import { fetchWebPageText, type ToolServices } from "@conversia/agents";
 import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
@@ -645,6 +645,11 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         await refreshIfStale(orgId, item.source, item.syncedAt);
         return toCatalogHit(item);
       });
+    },
+
+    async readWebPage(url: string) {
+      const r = await fetchWebPageText(url);
+      return r.ok ? { url: r.url, title: r.title, text: r.text } : { error: r.error };
     },
 
     async addInternalNote(note: string) {

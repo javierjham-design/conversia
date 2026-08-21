@@ -60,6 +60,8 @@ export interface ToolServices {
   // Catálogo comercial real del negocio (tienda o menú). Vender con datos vivos.
   searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }): Promise<Array<CatalogHit>>;
   getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
+  // Leer una página web (p. ej. el sitio del prospecto) y devolver su texto legible.
+  readWebPage(url: string): Promise<{ url: string; title: string | null; text: string } | { error: string }>;
   // Montaje asistido — SOLO para el agente de implementación de TuBot. Actúan sobre
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
@@ -333,6 +335,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { idOrSku: string }) {
         const item = await services(ctx).getCatalogItem(input.idOrSku);
         return item ?? { error: "No encontré ese producto en el catálogo." };
+      },
+    },
+    {
+      name: "leerWeb",
+      description:
+        "Lee una PÁGINA WEB por su URL y devuelve su texto legible, para ANALIZARLA — p. ej. el sitio del prospecto para entender su rubro, servicios, precios y tono, y responder/cotizar con datos reales. Úsala cuando te compartan o mencionen un sitio web. Solo LEE (no navega ni envía formularios). Si no carga, dilo y sigue sin inventar.",
+      inputSchema: z.object({ url: z.string().describe("URL del sitio, p. ej. https://miclinica.cl") }),
+      async execute(ctx, input: { url: string }) {
+        return services(ctx).readWebPage(input.url);
       },
     },
     {

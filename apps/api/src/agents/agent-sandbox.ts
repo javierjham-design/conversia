@@ -1,6 +1,6 @@
 import { resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import { MockSchedulingProvider } from "@conversia/scheduling";
-import type { ToolServices } from "@conversia/agents";
+import { fetchWebPageText, type ToolServices } from "@conversia/agents";
 import type { SchedAppointment } from "@conversia/types";
 
 export interface SandboxContact {
@@ -256,6 +256,11 @@ export async function buildSandboxServices(
         const item = await tx.catalogItem.findFirst({ where: { active: true, OR: [{ id: idOrSku }, { sku: { equals: idOrSku, mode: "insensitive" } }, { name: { contains: idOrSku, mode: "insensitive" } }] }, orderBy: { available: "desc" } });
         return item ? sandboxCatalogHit(item) : null;
       });
+    },
+    async readWebPage(url: string) {
+      // Lectura REAL (misma que producción): el probador debe reflejar lo que verá el agente.
+      const r = await fetchWebPageText(url);
+      return r.ok ? { url: r.url, title: r.title, text: r.text } : { error: r.error };
     },
     // Montaje asistido: en el PROBADOR se simula (no toca ningún tenant real).
     async generateAssistedLink() {
