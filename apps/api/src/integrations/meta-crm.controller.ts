@@ -310,6 +310,25 @@ export class MetaCrmController {
       push("token", "Conexión Meta CRM", false, "Sin token de la conexión CRM", "Conecta con Meta (o token manual) en esta página");
       return { checks };
     }
+    // 0. ¿A qué APP pertenece el token? Crítico para App Review: las llamadas
+    // de prueba solo activan los botones de acceso avanzado de la app EMISORA.
+    // Un token de Usuario del Sistema generado bajo la app de WhatsApp haría
+    // que todo el diagnóstico cuente para la app equivocada.
+    try {
+      const app = await this.graph(`app?fields=id,name`, token);
+      const expected = env.META_CRM_APP_ID ?? null;
+      const okApp = !expected || String(app.id) === String(expected);
+      push(
+        "token_app",
+        "App emisora del token",
+        okApp,
+        `Token emitido por «${app.name ?? "?"}» (${app.id})${expected ? ` · esperada: ${expected}` : ""}`,
+        okApp ? undefined : "El token NO es de la app TuBot CRM: reconecta con «Conectar con Meta» (OAuth) o genera el token de Usuario del Sistema seleccionando la app TuBot CRM — si no, las llamadas de prueba de App Review cuentan para otra app",
+      );
+    } catch {
+      push("token_app", "App emisora del token", false, "No se pudo consultar /app con el token", "Reconecta la integración");
+    }
+
     const conn = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.metaCrmConnection.findUnique({ where: { organizationId: ctx.organizationId } }),
     );
