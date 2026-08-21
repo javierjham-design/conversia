@@ -23,6 +23,10 @@ CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_idx
 CREATE INDEX IF NOT EXISTS catalog_items_embedding_idx
   ON catalog_items USING hnsw (embedding vector_cosine_ops);
 
+-- Recuerdo semántico de la memoria por contacto ("ficha viva").
+CREATE INDEX IF NOT EXISTS contact_memories_embedding_idx
+  ON contact_memories USING hnsw (embedding vector_cosine_ops);
+
 -- 2. Rol de aplicación (cambiar password vía ALTER ROLE en producción)
 DO $$
 BEGIN

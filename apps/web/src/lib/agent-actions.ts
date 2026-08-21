@@ -106,6 +106,14 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     group: "atencion",
   },
   {
+    key: "memory",
+    label: "Memoria del cliente (ficha viva)",
+    description: "Anotar hechos duraderos del cliente (intención, necesidades, presupuesto, objeciones, datos del negocio) en una ficha compartida entre TODOS los agentes y conversaciones. Así lo que te cuenta a ti también lo tiene el resto, sin volver a preguntar. La ficha se inyecta sola en el prompt.",
+    tools: ["recordarMemoria"],
+    placeholder: "Anota lo importante que el cliente vaya contando (p. ej. 'tiene 4 profesionales', 'presupuesto acotado', 'quiere partir en enero') para no volver a preguntarlo y personalizar la atención.",
+    group: "atencion",
+  },
+  {
     key: "catalog",
     label: "Vender con el catálogo",
     description: "Buscar en el catálogo real del negocio (productos de la tienda o platos del menú), consultar precio/stock/disponibilidad y enviar el enlace de compra. Requiere tener un catálogo cargado o una tienda conectada.",

@@ -648,11 +648,36 @@ model Contact {
   conversations Conversation[]
   leads         Lead[]
   appointments  Appointment[]
+  memories      ContactMemory[]
 
   @@index([organizationId, phone])
   @@index([organizationId, lastContactAt])
   @@index([organizationId, createdAt])
   @@map("contacts")
+}
+
+// Memoria compartida por contacto: "ficha viva" que CUALQUIER agente escribe y que
+// se inyecta en el prompt de TODOS los agentes, en cualquier conversación. Resuelve
+// que lo que el cliente le contó a un agente (p. ej. comercial) lo tenga otro
+// (p. ej. implementación), aunque sea otra conversación o esté fuera de la ventana
+// de memoria corta. `embedding` habilita recuerdo semántico (pgvector, opcional).
+model ContactMemory {
+  id                   String                       @id @default(cuid())
+  organizationId       String                       @map("organization_id")
+  contactId            String                       @map("contact_id")
+  // intent | need | preference | objection | constraint | timeline | business | summary | other
+  category             String                       @default("other")
+  content              String
+  // Trazabilidad: qué agente y en qué conversación se anotó (null si fue humano/sistema).
+  agentId              String?                      @map("agent_id")
+  sourceConversationId String?                      @map("source_conversation_id")
+  embedding            Unsupported("vector(1536)")?
+  createdAt            DateTime                     @default(now()) @map("created_at")
+  updatedAt            DateTime                     @updatedAt @map("updated_at")
+  contact              Contact                      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, contactId])
+  @@map("contact_memories")
 }
 
 // Segmentos = filtros guardados por tenant (aparecen en el sidebar de Contactos).

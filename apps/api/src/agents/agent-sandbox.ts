@@ -262,6 +262,14 @@ export async function buildSandboxServices(
       const r = await fetchWebPageText(url);
       return r.ok ? { url: r.url, title: r.title, text: r.text } : { error: r.error };
     },
+    async recordContactMemory(input: { category: string; content: string }) {
+      // En el PROBADOR no hay contacto real: se registra la acción para verla en la
+      // traza, sin persistir en la ficha (evita ensuciar datos de un contacto real).
+      const content = (input.content ?? "").trim();
+      if (content.length < 2) return { saved: false };
+      track("Anotar en la ficha del contacto", `[${input.category}] ${content.length > 120 ? `${content.slice(0, 120)}…` : content}`);
+      return { saved: true };
+    },
     // Montaje asistido: en el PROBADOR se simula (no toca ningún tenant real).
     async generateAssistedLink() {
       track("Enlace de montaje asistido", "(simulado)");
