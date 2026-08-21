@@ -185,7 +185,19 @@ export class BillingController {
     const data = { planId: plan.id, interval: parsed.data.billingInterval, providerCustomerRef: customerRef, cancelAtPeriodEnd: false };
     if (existing) await this.prisma.admin.subscription.update({ where: { id: existing.id }, data });
     else await this.prisma.admin.subscription.create({ data: { organizationId: ctx.organizationId, status: "TRIALING", ...data } });
-    const reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${getEnv().WEB_URL}/billing?card=1` });
+    let reg: { url: string; token: string };
+    try {
+      reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${getEnv().WEB_URL}/billing?card=1` });
+    } catch (err) {
+      // El comercio aún no tiene contratado "cobro automático" en Flow: error
+      // claro y marcado para que el frontend caiga al checkout de pago único.
+      if (/automatic charge/i.test((err as Error).message)) {
+        throw new BadRequestException(
+          "FLOW_NO_AUTO_CHARGE: tu cuenta de Flow aún no tiene habilitado el cobro automático (suscripciones). Actívalo en el panel de Flow o contacta a Flow; mientras tanto procesamos un pago único.",
+        );
+      }
+      throw err;
+    }
     await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.subscription_start", entityType: "subscription", after: { planCode: plan.code, interval: parsed.data.billingInterval } } }));
     return { url: reg.url, token: reg.token };
   }
