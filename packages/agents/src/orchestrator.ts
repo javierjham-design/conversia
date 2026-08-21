@@ -141,14 +141,23 @@ export async function orchestrate(
       ...toolTranscript,
       { kind: "assistant_tool_calls" as const, text: prefix, calls: [] },
     ];
-    const resp = await ai.chat({
-      model: agent.model,
-      system,
-      messages: input.history,
-      tools: specs,
-      maxTokens: agent.maxTokens,
-      toolTranscript: contTranscript,
-    });
+    let resp: Awaited<ReturnType<typeof ai.chat>>;
+    try {
+      resp = await ai.chat({
+        model: agent.model,
+        system,
+        messages: input.history,
+        tools: specs,
+        maxTokens: agent.maxTokens,
+        toolTranscript: contTranscript,
+      });
+    } catch {
+      // Algunos modelos (p. ej. claude-opus-4-8) NO soportan el "prefill" de un
+      // mensaje de asistente y rechazan la reanudación con 400. NUNCA rompemos el
+      // turno por esto: devolvemos lo acumulado (parcial). Mejor un mensaje algo
+      // corto que un silencio. `finalText` ya tiene el texto hasta el corte.
+      break;
+    }
     usage.inputTokens += resp.usage.inputTokens;
     usage.outputTokens += resp.usage.outputTokens;
     usage.costUsd += resp.usage.costUsd;
