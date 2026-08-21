@@ -137,25 +137,31 @@ export async function orchestrate(
     // Prefijo del asistente = todo lo acumulado. Sin espacios al final: Anthropic
     // rechaza un mensaje de asistente que termine en whitespace.
     const prefix = finalText.replace(/\s+$/, "");
-    const contTranscript = [
-      ...toolTranscript,
-      { kind: "assistant_tool_calls" as const, text: prefix, calls: [] },
-    ];
+    // Reanudación SIN "prefill" (compatible con TODOS los modelos, incluido
+    // claude-opus-4-8, que NO soporta prefill de asistente): reenviamos el texto
+    // parcial como turno del asistente y, en un turno de USUARIO, le pedimos que
+    // continúe exactamente desde el corte. Así la conversación termina en un
+    // mensaje de usuario (lo que el modelo exige) y la respuesta sale COMPLETA.
     let resp: Awaited<ReturnType<typeof ai.chat>>;
     try {
       resp = await ai.chat({
         model: agent.model,
         system,
-        messages: input.history,
-        tools: specs,
+        messages: [
+          ...input.history,
+          { role: "assistant", content: prefix },
+          {
+            role: "user",
+            content:
+              "Sigue tu mensaje anterior EXACTAMENTE desde donde se cortó. No repitas lo ya dicho, no vuelvas a saludar ni agregues preámbulo; continúa el texto tal cual.",
+          },
+        ],
+        tools: [],
         maxTokens: agent.maxTokens,
-        toolTranscript: contTranscript,
       });
     } catch {
-      // Algunos modelos (p. ej. claude-opus-4-8) NO soportan el "prefill" de un
-      // mensaje de asistente y rechazan la reanudación con 400. NUNCA rompemos el
-      // turno por esto: devolvemos lo acumulado (parcial). Mejor un mensaje algo
-      // corto que un silencio. `finalText` ya tiene el texto hasta el corte.
+      // Cualquier fallo al reanudar: devolvemos lo acumulado (parcial). NUNCA
+      // rompemos el turno — mejor un mensaje algo corto que un silencio.
       break;
     }
     usage.inputTokens += resp.usage.inputTokens;
