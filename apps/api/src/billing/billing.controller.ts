@@ -115,20 +115,31 @@ export class BillingController {
 
   /** Catálogo público de planes para elegir/upgradear. */
   /** Catálogo para el tenant: TODOS los planes activos (Enterprise incluido), por precio. */
+  /** ¿Plan gratis/de prueba? (costo 0 en ambas monedas). No contratable desde el panel. */
+  private isFreePlan(plan: { priceClp: unknown; priceUsd: unknown }): boolean {
+    return Number(plan.priceClp) <= 0 && Number(plan.priceUsd) <= 0;
+  }
+
   @Get("plans")
   async plans() {
     requireContext();
     const rows = await this.prisma.admin.plan.findMany({ where: { active: true } });
-    return rows
-      .map((pl) => ({
-        ...pl,
-        priceClp: Number(pl.priceClp),
-        priceUsd: Number(pl.priceUsd),
-        priceClpYearly: pl.priceClpYearly != null ? Number(pl.priceClpYearly) : null,
-        priceUsdYearly: pl.priceUsdYearly != null ? Number(pl.priceUsdYearly) : null,
-        custom: (pl.features as any)?.custom === true,
-      }))
-      .sort((a, b) => a.priceClp - b.priceClp);
+    return (
+      rows
+        // FUSIBLE: el plan costo 0 (free/prueba) NO se muestra a los tenants —
+        // solo existe en el entorno externo (registro). Si fuera contratable
+        // aquí, un cliente podría renovar la prueba eternamente sin pagar.
+        .filter((pl) => !this.isFreePlan(pl))
+        .map((pl) => ({
+          ...pl,
+          priceClp: Number(pl.priceClp),
+          priceUsd: Number(pl.priceUsd),
+          priceClpYearly: pl.priceClpYearly != null ? Number(pl.priceClpYearly) : null,
+          priceUsdYearly: pl.priceUsdYearly != null ? Number(pl.priceUsdYearly) : null,
+          custom: (pl.features as any)?.custom === true,
+        }))
+        .sort((a, b) => a.priceClp - b.priceClp)
+    );
   }
 
   // ============================ SUSCRIPCIÓN RECURRENTE ============================
@@ -159,6 +170,8 @@ export class BillingController {
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
     if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
+    // FUSIBLE anti-prueba-eterna (mismo criterio que checkout): sin planes costo 0.
+    if (this.isFreePlan(plan)) throw new BadRequestException("Ese plan no es contratable — elige un plan de pago");
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true, name: true } });
     const cfg = await this.flowCfg();
@@ -287,6 +300,9 @@ export class BillingController {
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
     if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
+    // FUSIBLE anti-prueba-eterna: contratar un plan costo 0 activaría la org sin
+    // pago (escapando del ciclo de 7 días). El free solo existe en el registro.
+    if (this.isFreePlan(plan)) throw new BadRequestException("Ese plan no es contratable — elige un plan de pago");
 
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
     const currency = org?.currency ?? "CLP";
