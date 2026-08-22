@@ -56,6 +56,44 @@ const ai = new ResilientAIProvider(
  * respuesta por el canal. Registra trazabilidad completa (agente, versión,
  * tools, tokens, costo) en messages + ai_requests + usage_events.
  */
+/** Limpia un valor para inyectarlo en el prompt: sin saltos ni llaves de plantilla, acotado. */
+function sanitizeField(v: unknown): string {
+  return String(v ?? "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[{}]/g, "")
+    .trim()
+    .slice(0, 200);
+}
+
+/**
+ * Bloque "datos que YA conoces del contacto" a partir de lo guardado (nombre,
+ * email y el perfil de negocio en contact.attributes.profile). Se reinyecta
+ * SIEMPRE para que el bot no vuelva a preguntar lo ya respondido. "" si no hay nada.
+ */
+function buildKnownContactBlock(contact: {
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  attributes?: unknown;
+}): string {
+  const known: string[] = [];
+  const name = [contact.firstName, contact.lastName].filter(Boolean).map(sanitizeField).join(" ");
+  if (name) known.push(`Nombre: ${name}`);
+  if (contact.email) known.push(`Email: ${sanitizeField(contact.email)}`);
+  const profile = (contact.attributes as Record<string, unknown> | null | undefined)?.profile;
+  if (profile && typeof profile === "object") {
+    for (const [k, v] of Object.entries(profile as Record<string, unknown>)) {
+      const val = sanitizeField(v);
+      if (val) known.push(`${sanitizeField(k)}: ${val}`);
+    }
+  }
+  if (!known.length) return "";
+  return (
+    "\n\n## Datos que YA conoces de este contacto (NO los vuelvas a preguntar)\n" +
+    known.map((k) => `- ${k}`).join("\n")
+  );
+}
+
 export async function runAgentTurn(opts: {
   organizationId: string;
   conversationId: string;
@@ -264,6 +302,11 @@ export async function runAgentTurn(opts: {
     await recallContactMemory(organizationId, conversation.contactId, lastUserText),
   );
 
+  // Datos YA guardados del contacto: se reinyectan SIEMPRE para que el bot no
+  // vuelva a preguntar lo que ya sabe (email, apellido, y el perfil de negocio
+  // que se guarda en contact.attributes.profile). Saneado (sin saltos/llaves).
+  const knownContactBlock = buildKnownContactBlock(conversation.contact);
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -278,6 +321,7 @@ export async function runAgentTurn(opts: {
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
       buildConversationInstructions(aiNotes) +
       contactMemoryBlock +
+      knownContactBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma
