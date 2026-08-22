@@ -7,6 +7,7 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
+import { createHash } from "crypto";
 import type { Request } from "express";
 import { getEnv } from "@conversia/config";
 import { QueueService } from "../queues";
@@ -61,10 +62,14 @@ export class WhatsappController {
     // Reintentos en la RUTA CRÍTICA de ingreso: un fallo transitorio (DB/Redis/latencia)
     // no puede perder el mensaje entrante. El worker deduplica por wamid (external_id),
     // así que reprocesar es idempotente. Antes: attempts=1 (un fallo = mensaje perdido).
+    // jobId = hash del payload: si Meta RE-ENTREGA el mismo webhook (timeout), BullMQ
+    // ignora el duplicado mientras el job siga retenido (defensa en profundidad + dedup en BD).
+    const jobId = `wh_${createHash("sha256").update(rawText).digest("hex").slice(0, 32)}`;
     await this.queues.inbound.add(
       "inbound",
       { raw: req.body, receivedAt: new Date().toISOString() },
       {
+        jobId,
         attempts: 5,
         backoff: { type: "exponential", delay: 2000 },
         removeOnComplete: 1000,
