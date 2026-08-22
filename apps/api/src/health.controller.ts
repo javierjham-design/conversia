@@ -92,6 +92,21 @@ export class HealthController {
       checks.queues = { ok: false, detail: (e as Error).message };
     }
 
+    // 4. Canario del bot de TuBot: responde, completo y con sentido. Lo escribe el
+    //    worker (reliability-monitor) cada 15 min. Tolerante al arranque en frío.
+    try {
+      const raw = await this.queues.connection.get("conversia:health:canary");
+      if (!raw) {
+        checks.canary = { ok: true, detail: "sin datos aún" };
+      } else {
+        const c = JSON.parse(raw) as { ok: boolean; ts: number; detail: string };
+        const stale = Date.now() - c.ts > 25 * 60_000; // debería correr cada 15 min
+        checks.canary = { ok: c.ok && !stale, detail: stale ? `viejo ${Math.round((Date.now() - c.ts) / 60000)}min` : c.detail };
+      }
+    } catch (e) {
+      checks.canary = { ok: false, detail: (e as Error).message };
+    }
+
     const ok = Object.values(checks).every((c) => c.ok);
     if (!ok) throw new ServiceUnavailableException({ ok, checks });
     return { ok, checks };

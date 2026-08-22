@@ -44,9 +44,20 @@ import { startAnnualWalletRefill } from "./annual-wallet-refill";
 import { startRetentionPurge } from "./retention-purge";
 import { startCatalogSync } from "./catalog/scheduler";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
+import { startReliabilityMonitor } from "./reliability-monitor";
 
 async function main() {
   const env = getEnv();
+
+  // Guarda contra el "mock silencioso en producción": si no hay NINGUNA llave de IA
+  // real, el router respondería con texto de MOCK a clientes reales. Lo hacemos
+  // RUIDOSO para enterarnos en el deploy, no cuando un prospecto ve una respuesta falsa.
+  if (env.NODE_ENV === "production" && env.AI_PROVIDER !== "mock" && !env.ANTHROPIC_API_KEY && !env.OPENAI_API_KEY) {
+    console.error(
+      "‼ CRÍTICO: sin ANTHROPIC_API_KEY ni OPENAI_API_KEY en producción — el bot respondería con texto de MOCK. Carga una llave de IA YA.",
+    );
+  }
+
   const connection = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
   const inboundWorker = new Worker<InboundJob>(
@@ -180,6 +191,7 @@ async function main() {
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
   const stopCatalogSync = startCatalogSync(); // sync incremental del catálogo cada 6 h
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
+  const stopReliability = startReliabilityMonitor(connection); // canario TuBot + scan sin-responder
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
   // La API lo lee en /health/status; si envejece, el worker está caído/atascado.
@@ -204,6 +216,7 @@ async function main() {
     stopRetentionPurge();
     stopCatalogSync();
     stopOrphanWaba();
+    stopReliability();
     stopScheduler();
     stopTemplateSync();
     stopDailyDigests();

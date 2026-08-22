@@ -468,16 +468,32 @@ export async function runAgentTurn(opts: {
   // (token por-WABA del tenant; fallback al global)
   if (persisted && conversation.contact.phone) {
     const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
-    try {
-      const sent = await getChannelProvider().send(auth.phoneNumberId, {
-        to: conversation.contact.phone,
-        type: "text",
-        text: persisted.body ?? "",
-      }, { accessToken: auth.accessToken });
+    // Envío con REINTENTO ante fallos transitorios de Meta (red/5xx/429): un blip no
+    // puede perder la respuesta ya generada. Los errores de config (auth) NO se
+    // reintentan (no se arreglan solos). Antes: 1 intento → mensaje perdido.
+    const MAX_SEND_ATTEMPTS = 3;
+    let sent: Awaited<ReturnType<ReturnType<typeof getChannelProvider>["send"]>> | undefined;
+    let sendErr: unknown;
+    for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
+      try {
+        sent = await getChannelProvider().send(
+          auth.phoneNumberId,
+          { to: conversation.contact.phone, type: "text", text: persisted.body ?? "" },
+          { accessToken: auth.accessToken },
+        );
+        sendErr = undefined;
+        break;
+      } catch (err) {
+        sendErr = err;
+        if (err instanceof ChannelAuthError) break; // config: no reintentar
+        if (attempt < MAX_SEND_ATTEMPTS) await new Promise((r) => setTimeout(r, 600 * attempt));
+      }
+    }
+    if (sent) {
       await withTenant(organizationId, (tx) =>
         tx.message.update({
           where: { id: persisted.id },
-          data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
+          data: { status: "SENT", externalId: sent!.externalId, sentAt: new Date() },
         }),
       );
       await emitPlatformEvent(organizationId, "message.sent", {
@@ -485,16 +501,17 @@ export async function runAgentTurn(opts: {
         agentSlug: agent.slug,
         text: (persisted.body ?? "").slice(0, 200),
       });
-    } catch (err) {
-      if (err instanceof ChannelAuthError) {
-        await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+    } else {
+      if (sendErr instanceof ChannelAuthError) {
+        await markChannelAuthError(organizationId, auth.channelConnectionId, sendErr.message);
       }
       await withTenant(organizationId, (tx) =>
         tx.message.update({
           where: { id: persisted.id },
-          data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
+          data: { status: "FAILED", error: (sendErr as Error).message.slice(0, 500) },
         }),
       );
+      console.error(`✖ Envío WhatsApp falló tras ${MAX_SEND_ATTEMPTS} intentos (${conversationId}):`, (sendErr as Error).message);
     }
   }
 
