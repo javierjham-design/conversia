@@ -58,10 +58,18 @@ export class WhatsappController {
       }
     }
 
+    // Reintentos en la RUTA CRÍTICA de ingreso: un fallo transitorio (DB/Redis/latencia)
+    // no puede perder el mensaje entrante. El worker deduplica por wamid (external_id),
+    // así que reprocesar es idempotente. Antes: attempts=1 (un fallo = mensaje perdido).
     await this.queues.inbound.add(
       "inbound",
       { raw: req.body, receivedAt: new Date().toISOString() },
-      { removeOnComplete: 1000, removeOnFail: 5000 },
+      {
+        attempts: 5,
+        backoff: { type: "exponential", delay: 2000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      },
     );
     return { received: true };
   }

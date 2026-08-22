@@ -1,5 +1,6 @@
 export * from "./pricing.js";
 export * from "./providers.js";
+export * from "./resilient.js";
 export * from "./transcription.js";
 export * from "./actions.js";
 export * from "./tools.js";
