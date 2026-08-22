@@ -146,7 +146,7 @@ export interface ToolOptions {
 async function resolveAssistedClientOrg(
   agentOrgId: string,
   contactId: string | null | undefined,
-): Promise<{ orgId: string; scopeChannelId: string | null } | null> {
+): Promise<{ id: string; orgId: string; scopeChannelId: string | null; journeyStep: number | null; journeyLabel: string | null } | null> {
   const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
   if (!contactId || agentOrgId !== providerOrgId) return null;
   const admin = getAdminPrisma();
@@ -158,9 +158,11 @@ async function resolveAssistedClientOrg(
       expiresAt: { gt: new Date() },
     },
     orderBy: { createdAt: "desc" },
-    select: { organizationId: true, scopeChannelId: true },
+    select: { id: true, organizationId: true, scopeChannelId: true, journeyStep: true, journeyLabel: true },
   });
-  return grant ? { orgId: grant.organizationId, scopeChannelId: grant.scopeChannelId } : null;
+  return grant
+    ? { id: grant.id, orgId: grant.organizationId, scopeChannelId: grant.scopeChannelId, journeyStep: grant.journeyStep, journeyLabel: grant.journeyLabel }
+    : null;
 }
 
 /** Mapea una fila de catalog_items a lo que el bot necesita (usa botDescription si existe). */
@@ -738,10 +740,22 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       if (!client) return { authorized: false };
       try {
         const svc = await openAssistedSetup(client.orgId, getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID);
-        return { authorized: true, state: await svc.getSetupState() };
+        const state = await svc.getSetupState();
+        // Paso del viaje PERSISTIDO (no inferido): el agente sabe siempre dónde va.
+        return { authorized: true, state: { ...state, journeyStep: client.journeyStep, journeyLabel: client.journeyLabel } };
       } catch {
         return { authorized: false };
       }
+    },
+    async setSetupStep(step: number, label: string) {
+      const client = await resolveAssistedClientOrg(orgId, t.contactId);
+      if (!client) return { ok: false, error: "El cliente no ha vinculado su cuenta (montaje no autorizado)" };
+      const s = Math.max(1, Math.min(10, Math.round(step)));
+      await getAdminPrisma().assistedSetupGrant.update({
+        where: { id: client.id },
+        data: { journeyStep: s, journeyLabel: label.slice(0, 120), journeyUpdatedAt: new Date() },
+      });
+      return { ok: true, step: s };
     },
     async assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }) {
       const client = await resolveAssistedClientOrg(orgId, t.contactId);

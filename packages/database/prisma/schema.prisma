@@ -404,6 +404,11 @@ model AssistedSetupGrant {
   redeemCodeExpiresAt     DateTime? @map("redeem_code_expires_at")
   redeemedAt              DateTime? @map("redeemed_at")
   scopeChannelId          String?   @map("scope_channel_id")
+  // Paso del VIAJE de implementación (1-10) PERSISTIDO, para que el agente sepa
+  // siempre en qué va cada cliente en vez de inferirlo de la conversación.
+  journeyStep             Int?      @map("journey_step")
+  journeyLabel            String?   @map("journey_label")
+  journeyUpdatedAt        DateTime? @map("journey_updated_at")
   expiresAt               DateTime  @map("expires_at")
   revokedAt               DateTime? @map("revoked_at")
   createdAt               DateTime  @default(now()) @map("created_at")

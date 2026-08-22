@@ -281,7 +281,11 @@ export async function buildSandboxServices(
     },
     async assistedSetupState() {
       track("Estado del montaje del cliente", "(simulado)");
-      return { authorized: true, state: { agents: 0, flows: 0, services: 0, knowledge: 0 } };
+      return { authorized: true, state: { agents: 0, flows: 0, services: 0, knowledge: 0, journeyStep: null, journeyLabel: null } };
+    },
+    async setSetupStep(step: number, label: string) {
+      track("Paso del montaje", `${step} — ${label} (simulado)`);
+      return { ok: true, step };
     },
     async assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string }) {
       track("Agente del cliente configurado", `${input.name} (${input.systemPrompt.length} chars) — simulado`);

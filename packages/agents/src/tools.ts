@@ -68,7 +68,9 @@ export interface ToolServices {
   // el tenant del CLIENTE (previa autorización), acotado a su configuración.
   generateAssistedLink(): Promise<{ url: string }>;
   redeemAssistedCode(code: string): Promise<{ ok: boolean; orgName?: string | null; channelName?: string | null; error?: string }>;
-  assistedSetupState(): Promise<{ authorized: boolean; state?: { agents: number; flows: number; services: number; knowledge: number } }>;
+  assistedSetupState(): Promise<{ authorized: boolean; state?: { agents: number; flows: number; services: number; knowledge: number; journeyStep?: number | null; journeyLabel?: string | null } }>;
+  // Marca el PASO del viaje de implementación (1-10) — persistido, para no perder dónde va el cliente.
+  setSetupStep(step: number, label: string): Promise<{ ok: boolean; step?: number; error?: string }>;
   assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }): Promise<{ ok: boolean; agentId?: string; error?: string }>;
 }
 
@@ -399,10 +401,22 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getClientSetupState",
       description:
-        "Consulta en qué paso va el montaje del cliente (cuántos agentes, flujos, servicios y documentos tiene) para saber qué falta. Requiere que el cliente haya autorizado el montaje asistido.",
+        "Consulta en qué paso va el montaje del cliente: el PASO guardado del viaje (journeyStep/journeyLabel) y cuántos agentes, flujos, servicios y documentos tiene. Úsalo al retomar para saber exactamente dónde quedaron y no repetir pasos. Requiere que el cliente haya autorizado el montaje asistido.",
       inputSchema: z.object({}),
       async execute(ctx) {
         return services(ctx).assistedSetupState();
+      },
+    },
+    {
+      name: "marcarPasoMontaje",
+      description:
+        "Guarda el PASO del viaje de implementación en el que va el cliente (1=activó prueba, 2=WhatsApp escritorio, 3=autorización, 4=plantillas, 5=entrevista, 6=agente creado, 7=conocimiento, 8=prueba en simulador, 9=conectar WhatsApp, 10=activar y cobrar). Márcalo CADA vez que completen un paso, para que al retomar sepas dónde quedaron sin re-preguntar.",
+      inputSchema: z.object({
+        step: z.number().int().min(1).max(10).describe("número de paso 1-10"),
+        label: z.string().describe("breve descripción del paso, p. ej. 'entrevista completa'"),
+      }),
+      async execute(ctx, input: { step: number; label: string }) {
+        return services(ctx).setSetupStep(input.step, input.label);
       },
     },
     {
