@@ -1,21 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { assembleSystemPrompt, ToolRegistry, buildCoreTools, renderTemplate } from "./index.js";
+import { assembleSystemPrompt, CORE_SCOPE_PREAMBLE, ToolRegistry, buildCoreTools, renderTemplate } from "./index.js";
 
 // Instrucciones en lenguaje natural de las acciones → inyectadas en el prompt.
+// Nota: assembleSystemPrompt SIEMPRE antepone el núcleo de límites de alcance
+// (CORE_SCOPE_PREAMBLE), inmutable; los tests verifican el prompt del negocio DENTRO.
 describe("assembleSystemPrompt", () => {
   const base = "Eres un asistente.";
 
-  it("devuelve el prompt base cuando no hay acciones", () => {
-    expect(assembleSystemPrompt(base)).toBe(base);
-    expect(assembleSystemPrompt(base, {})).toBe(base);
-    expect(assembleSystemPrompt(base, null)).toBe(base);
+  it("incluye el prompt base (bajo el núcleo) cuando no hay acciones", () => {
+    for (const out of [assembleSystemPrompt(base), assembleSystemPrompt(base, {}), assembleSystemPrompt(base, null)]) {
+      expect(out.startsWith(CORE_SCOPE_PREAMBLE)).toBe(true);
+      expect(out).toContain(base);
+      expect(out).not.toContain("## Cuándo y cómo usar tus acciones");
+    }
   });
 
   it("inyecta la instrucción de una acción habilitada con su etiqueta", () => {
     const out = assembleSystemPrompt(base, {
       scheduling: { enabled: true, instructions: "Ofrece horas reales." },
     });
-    expect(out.startsWith(base)).toBe(true);
+    expect(out.startsWith(CORE_SCOPE_PREAMBLE)).toBe(true);
+    expect(out).toContain(base);
     expect(out).toContain("## Cuándo y cómo usar tus acciones");
     expect(out).toContain("- Agendar citas: Ofrece horas reales.");
   });
@@ -25,7 +30,8 @@ describe("assembleSystemPrompt", () => {
       close: { enabled: false, instructions: "No debería aparecer." },
       tags: { enabled: true, instructions: "   " },
     });
-    expect(out).toBe(base);
+    expect(out).toContain(base);
+    expect(out).not.toContain("## Cuándo y cómo usar tus acciones");
     expect(out).not.toContain("No debería aparecer");
   });
 

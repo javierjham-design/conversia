@@ -4,6 +4,7 @@
  * worker (runtime real) y el probador (misma verdad), para que el agente reciba
  * exactamente la misma guía que configuró el usuario.
  */
+import { CORE_SCOPE_PREAMBLE } from "./core-guardrails.js";
 export const ACTION_LABELS: Record<string, string> = {
   scheduling: "Agendar citas",
   lifecycle: "Actualizar la etapa del lead",
@@ -29,10 +30,13 @@ export function assembleSystemPrompt(basePrompt: string, actions?: Record<string
       lines.push(`- ${ACTION_LABELS[key] ?? key}: ${cfg.instructions.trim()}`);
     }
   }
-  if (lines.length === 0) return basePrompt;
-  return (
-    `${basePrompt}\n\n## Cuándo y cómo usar tus acciones\n` +
-    `Tienes herramientas para ejecutar acciones. Sigue estas indicaciones del negocio para decidir cuándo usarlas:\n` +
-    lines.join("\n")
-  );
+  const body =
+    lines.length === 0
+      ? basePrompt
+      : `${basePrompt}\n\n## Cuándo y cómo usar tus acciones\n` +
+        `Tienes herramientas para ejecutar acciones. Sigue estas indicaciones del negocio para decidir cuándo usarlas:\n` +
+        lines.join("\n");
+  // Núcleo de límites de alcance SIEMPRE al frente e inmutable: aplica a todos los
+  // agentes y plantillas, y el tenant no puede desactivarlo editando su prompt.
+  return `${CORE_SCOPE_PREAMBLE}\n\n${body}`;
 }

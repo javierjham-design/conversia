@@ -59,6 +59,12 @@ const envSchema = z.object({
   ASSISTED_SETUP_PROVIDER_ORG_ID: z.string().default("cms5zmgtz0001od01t30lw4t6"),
   AI_CLASSIFIER_MODEL: z.string().default("gpt-4o-mini"),
   AI_TRANSCRIBE_MODEL: z.string().default("whisper-1"), // notas de voz de WhatsApp (OpenAI)
+  // Resiliencia de las llamadas al proveedor de IA (nunca dejar al cliente en silencio).
+  AI_MAX_ATTEMPTS: z.coerce.number().default(3), // intentos por modelo antes de pasar al fallback
+  AI_CALL_TIMEOUT_MS: z.coerce.number().default(45_000), // timeout por llamada al proveedor
+  // Modelo de respaldo si el principal falla todos los intentos. claude-haiku-4-5 cubre
+  // sobrecarga/429 del principal; poner un gpt-* da resiliencia ante caída total de Anthropic.
+  AI_FALLBACK_MODEL: z.string().default("claude-haiku-4-5"),
   // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
   RESEND_API_KEY: z.string().optional().default(""),
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),

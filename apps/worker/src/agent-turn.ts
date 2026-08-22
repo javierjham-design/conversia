@@ -1,10 +1,12 @@
 import {
+  ResilientAIProvider,
   ToolRegistry,
   assembleSystemPrompt,
   buildCoreTools,
   createAIRouter,
   orchestrate,
   type AgentRuntime,
+  type OrchestrateResult,
 } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
@@ -32,17 +34,66 @@ function extractHandoffSlug(
   }
 }
 
-// Router por modelo: gpt-* → OpenAI, claude-* → Anthropic (según las llaves).
-const ai = createAIRouter({
-  anthropicApiKey: getEnv().ANTHROPIC_API_KEY,
-  openaiApiKey: getEnv().OPENAI_API_KEY,
-});
+// Router por modelo: gpt-* → OpenAI, claude-* → Anthropic (según las llaves),
+// envuelto en resiliencia: timeout + reintentos con backoff + fallback de modelo.
+// Un fallo transitorio del proveedor NO puede dejar al cliente en silencio.
+const ai = new ResilientAIProvider(
+  createAIRouter({
+    anthropicApiKey: getEnv().ANTHROPIC_API_KEY,
+    openaiApiKey: getEnv().OPENAI_API_KEY,
+  }),
+  {
+    maxAttempts: getEnv().AI_MAX_ATTEMPTS,
+    timeoutMs: getEnv().AI_CALL_TIMEOUT_MS,
+    fallbackModel: getEnv().AI_FALLBACK_MODEL,
+    onRetry: ({ model, attempt, error }) =>
+      console.warn(`↻ IA reintento (${model}, intento ${attempt}): ${error}`),
+  },
+);
 
 /**
  * Ejecuta un turno del agente activo de una conversación y envía la
  * respuesta por el canal. Registra trazabilidad completa (agente, versión,
  * tools, tokens, costo) en messages + ai_requests + usage_events.
  */
+/** Limpia un valor para inyectarlo en el prompt: sin saltos ni llaves de plantilla, acotado. */
+function sanitizeField(v: unknown): string {
+  return String(v ?? "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[{}]/g, "")
+    .trim()
+    .slice(0, 200);
+}
+
+/**
+ * Bloque "datos que YA conoces del contacto" a partir de lo guardado (nombre,
+ * email y el perfil de negocio en contact.attributes.profile). Se reinyecta
+ * SIEMPRE para que el bot no vuelva a preguntar lo ya respondido. "" si no hay nada.
+ */
+function buildKnownContactBlock(contact: {
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  attributes?: unknown;
+}): string {
+  const known: string[] = [];
+  const name = [contact.firstName, contact.lastName].filter(Boolean).map(sanitizeField).join(" ");
+  if (name) known.push(`Nombre: ${name}`);
+  if (contact.email) known.push(`Email: ${sanitizeField(contact.email)}`);
+  const profile = (contact.attributes as Record<string, unknown> | null | undefined)?.profile;
+  if (profile && typeof profile === "object") {
+    for (const [k, v] of Object.entries(profile as Record<string, unknown>)) {
+      const val = sanitizeField(v);
+      if (val) known.push(`${sanitizeField(k)}: ${val}`);
+    }
+  }
+  if (!known.length) return "";
+  return (
+    "\n\n## Datos que YA conoces de este contacto (NO los vuelvas a preguntar)\n" +
+    known.map((k) => `- ${k}`).join("\n")
+  );
+}
+
 export async function runAgentTurn(opts: {
   organizationId: string;
   conversationId: string;
@@ -251,6 +302,11 @@ export async function runAgentTurn(opts: {
     await recallContactMemory(organizationId, conversation.contactId, lastUserText),
   );
 
+  // Datos YA guardados del contacto: se reinyectan SIEMPRE para que el bot no
+  // vuelva a preguntar lo que ya sabe (email, apellido, y el perfil de negocio
+  // que se guarda en contact.attributes.profile). Saneado (sin saltos/llaves).
+  const knownContactBlock = buildKnownContactBlock(conversation.contact);
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -265,6 +321,7 @@ export async function runAgentTurn(opts: {
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
       buildConversationInstructions(aiNotes) +
       contactMemoryBlock +
+      knownContactBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma
@@ -305,8 +362,39 @@ export async function runAgentTurn(opts: {
     "agent.name": agent.name,
   };
 
-  // 3. Orquestar (modelo + loop de tools)
-  const result = await orchestrate(ai, registry, { ctx: toolCtx, agent: runtime, history, vars });
+  // 3. Orquestar (modelo + loop de tools). MODO DEGRADADO: si el proveedor de IA
+  // falla incluso tras los reintentos+fallback de la capa resiliente, el cliente
+  // NO queda en silencio — recibe un mensaje humano honesto y se avisa al equipo.
+  let result: OrchestrateResult;
+  try {
+    result = await orchestrate(ai, registry, { ctx: toolCtx, agent: runtime, history, vars });
+  } catch (err) {
+    console.error(`✖ IA no disponible tras reintentos (${conversationId}):`, (err as Error).message);
+    result = {
+      reply:
+        "Perdona, estoy teniendo un problema técnico para procesarte bien en este momento 🙏. Ya avisé al equipo para que te ayude enseguida. Si es urgente, cuéntame y lo derivo de inmediato.",
+      toolEvents: [],
+      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      latencyMs: 0,
+      stopReason: "error",
+    };
+    // Alerta al equipo (best-effort). La IA sigue habilitada: si el fallo era
+    // transitorio, el próximo turno se recupera solo; el aviso permite intervenir.
+    try {
+      const contactName =
+        [conversation.contact.firstName].filter(Boolean).join(" ") || conversation.contact.phone || "Un contacto";
+      const { enqueueNotification } = await import("./notifications/queue.js");
+      await enqueueNotification({
+        eventKey: "ai.escalation",
+        organizationId,
+        conversationId,
+        context: { conversationId },
+        data: { contactName, reason: "IA no disponible (fallo del proveedor)", conversationId },
+      });
+    } catch (e) {
+      console.error(`✖ Aviso de degradación (${conversationId}):`, (e as Error).message);
+    }
+  }
 
   // 4. Persistir trazabilidad + respuesta
   const persisted = await withTenant(organizationId, async (tx) => {
