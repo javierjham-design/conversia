@@ -1,5 +1,25 @@
 # Registro de progreso
 
+## 2026-08-21 — Confiabilidad del bot (endurecimiento pre-campañas)
+
+Programa de robustez del bot de TuBot antes de lanzar campañas. Causa raíz, no
+parches. Ver [`docs/RELIABILITY.md`](./RELIABILITY.md).
+
+- **Autopsia (Bloque 1)**: causas raíz de silencio/a-medias/pérdida-de-contexto con
+  `file:line`.
+- **Nunca silencio (Bloque 2, PR #215)**: `ResilientAIProvider` (timeout+retry+backoff+
+  fallback), modo degradado (cliente siempre recibe respuesta + `ai.escalation`), cola
+  de entrada con reintentos. Fix Opus prefill (#213/#214).
+- **Límites de alcance (Bloque 4, PR #215)**: `CORE_SCOPE_PREAMBLE` inmutable en todos
+  los agentes/plantillas (anti-McDonald's/jailbreak), no desactivable por el tenant.
+- **Memoria/estado (Bloque 3, PR #215/#217)**: reinyección de datos guardados; paso del
+  montaje persistido (`journeyStep`, migración). Pendiente: resumen automático.
+- **Detección (Bloque 5, PR #216)**: canario sintético 15 min + alerta
+  `conversation.unanswered` 3 min + check de canario en `/health/status`.
+- **Carga (Bloque 6, PR #216)**: envío con reintento, mock ruidoso; pool `DB_CONNECTION_LIMIT=15`.
+- Pendiente: resumen automático, métricas de calidad Super Admin, prueba de carga,
+  recorridos E2E (Bloque 7), canario 24 h. Veredicto: **aún no listo para lanzar**.
+
 ## 2026-08-12 — Flujos: Bloque 4 (observabilidad de ejecuciones)
 
 Responder "¿por qué no se ejecutó mi flujo?" con datos. **Sin migración** (usa
