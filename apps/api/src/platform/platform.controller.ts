@@ -151,6 +151,48 @@ export class PlatformController {
     };
   }
 
+  /** Métricas de CALIDAD del bot (últimas 24 h): responde / a tiempo / sin fallar. */
+  @Get("quality")
+  async quality() {
+    const db = this.prisma.admin;
+    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    const [reqAgg, errCount, refusalCount, inbound, botReplies, failedOut, failedByOrg] = await Promise.all([
+      db.aiRequest.aggregate({ where: { createdAt: { gte: since } }, _avg: { latencyMs: true }, _count: { _all: true } }),
+      db.aiRequest.count({ where: { createdAt: { gte: since }, status: "error" } }),
+      db.aiRequest.count({ where: { createdAt: { gte: since }, status: "refusal" } }),
+      db.message.count({ where: { createdAt: { gte: since }, direction: "INBOUND" } }),
+      db.message.count({ where: { createdAt: { gte: since }, direction: "OUTBOUND", authorType: "AGENT" } }),
+      db.message.count({ where: { createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" } }),
+      db.message.groupBy({
+        by: ["organizationId"],
+        where: { createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" },
+        _count: { _all: true },
+        orderBy: { _count: { organizationId: "desc" } },
+        take: 5,
+      }),
+    ]);
+    // Tasa de respuesta aproximada: respuestas del bot / mensajes entrantes.
+    const responseRate = inbound > 0 ? Math.min(1, botReplies / inbound) : 1;
+    const offenders = await Promise.all(
+      failedByOrg.map(async (o) => {
+        const org = await db.organization.findUnique({ where: { id: o.organizationId }, select: { name: true } });
+        return { organizationId: o.organizationId, name: org?.name ?? o.organizationId, failed: o._count._all };
+      }),
+    );
+    return {
+      windowHours: 24,
+      aiRequests: reqAgg._count._all,
+      avgResponseMs: Math.round(reqAgg._avg.latencyMs ?? 0),
+      aiErrors: errCount,
+      aiRefusals: refusalCount,
+      failedOutbound: failedOut,
+      inbound,
+      botReplies,
+      responseRatePct: Math.round(responseRate * 100),
+      topFailingTenants: offenders,
+    };
+  }
+
   // ---------------------------- Organizaciones ----------------------------
 
   @Get("organizations")
