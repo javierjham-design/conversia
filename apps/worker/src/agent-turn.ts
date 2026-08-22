@@ -411,7 +411,7 @@ export async function runAgentTurn(opts: {
         outputTokens: result.usage.outputTokens,
         costUsd: result.usage.costUsd,
         latencyMs: result.latencyMs,
-        status: result.stopReason === "refusal" ? "refusal" : "ok",
+        status: result.stopReason === "refusal" ? "refusal" : result.stopReason === "error" ? "error" : "ok",
       },
     });
     await tx.usageEvent.create({

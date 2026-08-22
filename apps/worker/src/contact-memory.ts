@@ -200,3 +200,75 @@ export function formatMemoryForPrompt(rows: MemoryRow[]): string {
   }
   return "\n\n" + lines.join("\n");
 }
+
+/** Extrae un array JSON de hechos de la salida del modelo (tolera cercos ```). */
+function parseFacts(text: string): Array<{ category: string; content: string }> {
+  const m = text.match(/\[[\s\S]*\]/);
+  if (!m) return [];
+  try {
+    const arr = JSON.parse(m[0]);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((f) => f && typeof f.content === "string" && f.content.trim())
+      .map((f) => ({ category: String(f.category ?? "other"), content: String(f.content).trim() }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * RESUMEN AUTOMÁTICO: al cerrar (o al superar muchos mensajes) una conversación,
+ * extrae los hechos DURADEROS del cliente y los guarda en su ficha (contact_memories),
+ * para que al volver —incluso días después— el bot no pierda lo entregado. Best-effort:
+ * no lanza, no bloquea el cierre. Se ejecuta aunque el modelo no haya llamado a
+ * `recordarMemoria` durante la conversación.
+ */
+export async function summarizeConversationToMemory(
+  orgId: string,
+  conversationId: string,
+  contactId: string,
+  agentId?: string | null,
+): Promise<number> {
+  if (!contactId) return 0;
+  try {
+    const msgs = await withTenant(orgId, (tx) =>
+      tx.message.findMany({
+        where: { conversationId, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
+        orderBy: { createdAt: "desc" },
+        take: 40,
+        select: { direction: true, body: true },
+      }),
+    );
+    const userMsgs = msgs.filter((m) => m.direction === "INBOUND").length;
+    if (msgs.length < 3 || userMsgs < 2) return 0; // nada útil que resumir
+
+    const transcript = msgs
+      .reverse()
+      .map((m) => `${m.direction === "INBOUND" ? "Cliente" : "Agente"}: ${(m.body ?? "").slice(0, 400)}`)
+      .join("\n")
+      .slice(0, 6000);
+
+    const system =
+      "Eres un extractor de memoria de CRM. A partir de la conversación, devuelve SOLO hechos DURADEROS y útiles sobre el CLIENTE para futuras conversaciones (no sobre el agente, no datos efímeros ni saludos). Responde EXCLUSIVAMENTE un array JSON de objetos {category, content}. category ∈ intent|need|preference|objection|constraint|timeline|business|summary. content: frase breve en tercera persona. Máximo 6. Si no hay nada útil, responde []. No inventes.";
+    const model = getEnv().AI_CLASSIFIER_MODEL || getEnv().AI_DEFAULT_MODEL;
+    const resp = await ai().chat({ model, system, messages: [{ role: "user", content: transcript }], maxTokens: 500 });
+    const facts = parseFacts(resp.text ?? "").slice(0, 6);
+
+    let saved = 0;
+    for (const f of facts) {
+      const r = await saveContactMemory({
+        orgId,
+        contactId,
+        category: f.category,
+        content: f.content,
+        agentId: agentId ?? null,
+        sourceConversationId: conversationId,
+      });
+      if (r.saved) saved++;
+    }
+    return saved;
+  } catch (err) {
+    console.error(`✖ summarizeConversationToMemory (${conversationId}):`, (err as Error).message);
+    return 0;
+  }
+}

@@ -499,6 +499,12 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         });
       });
       await emitPlatformEvent(orgId, "conversation.closed", { conversationId: t.conversationId });
+      // Resumen automático a la ficha del contacto (best-effort, en segundo plano):
+      // al cerrar, guardamos los hechos duraderos para no perder contexto si vuelve.
+      void (async () => {
+        const { summarizeConversationToMemory } = await import("./contact-memory.js");
+        await summarizeConversationToMemory(orgId, t.conversationId, t.contactId, t.agentId ?? null);
+      })().catch((err) => console.error(`✖ Resumen al cerrar (${t.conversationId}):`, (err as Error).message));
     },
 
     async assignConversation(target: string, reason?: string) {

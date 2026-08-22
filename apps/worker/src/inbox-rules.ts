@@ -37,7 +37,7 @@ async function autoClose(organizationId: string, days: number, note: string): Pr
   const stale = await withTenant(organizationId, (tx) =>
     tx.conversation.findMany({
       where: { status: { in: ["OPEN", "PENDING"] }, lastMessageAt: { lt: cutoff } },
-      select: { id: true },
+      select: { id: true, contactId: true },
       take: 100, // por tick, para no bloquear
     }),
   );
@@ -62,6 +62,15 @@ async function autoClose(organizationId: string, days: number, note: string): Pr
       data: { organizationId, actorType: "system", action: "conversation.auto_close", entityType: "conversation", after: { count: stale.length, days } },
     });
   });
+  // Resumen automático de las cerradas (best-effort, en segundo plano). La función
+  // gatea por contenido (salta las triviales), así que el costo de IA solo cae en
+  // conversaciones con engagement real.
+  void (async () => {
+    const { summarizeConversationToMemory } = await import("./contact-memory.js");
+    for (const c of stale) {
+      if (c.contactId) await summarizeConversationToMemory(organizationId, c.id, c.contactId).catch(() => undefined);
+    }
+  })().catch(() => undefined);
   await publishRealtime(organizationId, { type: "counters.dirty" });
 }
 

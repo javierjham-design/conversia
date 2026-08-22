@@ -14,12 +14,37 @@ interface Alert {
   createdAt: string;
 }
 
+interface Quality {
+  windowHours: number;
+  aiRequests: number;
+  avgResponseMs: number;
+  aiErrors: number;
+  aiRefusals: number;
+  failedOutbound: number;
+  inbound: number;
+  botReplies: number;
+  responseRatePct: number;
+  topFailingTenants: { organizationId: string; name: string; failed: number }[];
+}
+
+function Metric({ label, value, warn }: { label: string; value: string | number; warn?: boolean }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className={`mt-0.5 text-lg font-semibold ${warn ? "text-red-600" : "text-navy-900"}`}>{value}</div>
+    </div>
+  );
+}
+
 export default function AlertsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<Alert[] | null>(null);
+  const [q, setQ] = useState<Quality | null>(null);
 
   const load = useCallback(async () => {
-    setRows(await padmin<Alert[]>("/platform/alerts"));
+    const [a, quality] = await Promise.all([padmin<Alert[]>("/platform/alerts"), padmin<Quality>("/platform/quality")]);
+    setRows(a);
+    setQ(quality);
   }, []);
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
@@ -29,6 +54,30 @@ export default function AlertsPage() {
   return (
     <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8">
       <PageHeader title="Alertas" description="Avisos y errores de integración de todos los tenants (salud de Meta, IA en pausa, suspensiones…)." />
+
+      <section className="mb-6">
+        <h2 className="mb-2 text-sm font-semibold text-navy-900">Calidad del bot (últimas 24 h)</h2>
+        {!q ? (
+          <Skeleton className="h-24" />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+              <Metric label="Tasa de respuesta" value={`${q.responseRatePct}%`} warn={q.responseRatePct < 90} />
+              <Metric label="Tiempo medio" value={`${(q.avgResponseMs / 1000).toFixed(1)}s`} warn={q.avgResponseMs > 15000} />
+              <Metric label="Respuestas IA" value={q.aiRequests} />
+              <Metric label="Errores IA" value={q.aiErrors} warn={q.aiErrors > 0} />
+              <Metric label="Rechazos IA" value={q.aiRefusals} />
+              <Metric label="Envíos fallidos" value={q.failedOutbound} warn={q.failedOutbound > 0} />
+            </div>
+            {q.topFailingTenants.length > 0 && (
+              <p className="mt-2 text-xs text-slate-500">
+                Con más envíos fallidos:{" "}
+                {q.topFailingTenants.map((t) => `${t.name} (${t.failed})`).join(" · ")}
+              </p>
+            )}
+          </>
+        )}
+      </section>
       {!rows ? (
         <Skeleton className="h-64" />
       ) : (
