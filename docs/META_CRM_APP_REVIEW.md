@@ -34,16 +34,30 @@ USE por permiso:
 - pages_show_list / pages_manage_metadata / pages_read_engagement: list Pages
   during connection and subscribe the app to the Page's webhooks.
 
-## Screencast (uno puede cubrir varios permisos)
+## Screencast — UN solo video, mismo archivo en las 7 tarjetas con cajón de video
+(leads_retrieval NO pide video). Guión definitivo 2026-08-22:
 
-1. Login en tubot.cl → Integraciones → Meta CRM.
-2. "Conectar con Meta" → diálogo OAuth → elegir portafolio/página/IG → aceptar.
-3. "Conectar" la página → se ven formularios registrados (leads_retrieval,
-   pages_manage_ads, pages_show_list, pages_manage_metadata).
-4. Herramienta de prueba de Lead Ads → lead aparece en /crm (leads_retrieval).
-5. Enviar DM a la IG conectada y mensaje a la página → aparecen en la Bandeja
-   y el agente responde (instagram_manage_messages, pages_messaging).
-6. Mostrar desconexión (Integraciones → Meta CRM → Desconectar).
+Preparación: grabar el PC (Win+G u OBS), URL visible, 3-4 min, sin audio.
+Pestañas: (1) tubot.cl deslogueado; (2) messenger.com con FB personal;
+(3) instagram.com como @jvr.aedo (vinculado al FB admin en Centro de cuentas —
+requisito para que el DM llegue en modo desarrollo; verificado E2E 2026-08-22).
+Antes: revisor.meta@tubot.cl invitado al tenant TuBot y login probado.
+
+1. Login `revisor.meta@tubot.cl` → selector org → TuBot. [contexto]
+2. Integraciones → Meta CRM → "Conectar con Meta" → OAuth muestra lista de
+   páginas → elegir página TuBot + IG → aceptar. [pages_show_list, instagram_basic]
+3. "Conectar" la página → conectada + formularios de leads listados +
+   diagnóstico verde. [pages_manage_ads, pages_manage_metadata, pages_read_engagement]
+4. Lead Ads Testing Tool → lead de prueba → aparece en /crm con campos.
+   [leads_retrieval]
+5. messenger.com (FB personal) → mensaje a la página TuBot → Bandeja en tiempo
+   real → IA responde → respuesta manual → mostrar llegada en messenger.com.
+   [pages_messaging]
+6. instagram.com (@jvr.aedo) → DM a @tubot.io → Bandeja → responder desde la
+   Bandeja → mostrar la respuesta llegando al chat de Instagram. ⚠️ La tarjeta
+   de instagram_manage_messages EXIGE mostrar el envío desde la app Y el
+   cliente de IG recibiéndolo. [instagram_manage_messages, instagram_basic]
+7. Integraciones → Meta CRM → mostrar botón Desconectar (sin ejecutar). [datos]
 
 Usuario de prueba para el revisor: mismo patrón que la review de WhatsApp
 (usuario dedicado con acceso al tenant demo; NO desactivarlo durante la review).

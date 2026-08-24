@@ -34,7 +34,6 @@ export class ReportsController {
         appointments,
         leadStatuses,
         leadsByStatus,
-        ai,
         convSeries,
         msgSeries,
       ] = await Promise.all([
@@ -48,11 +47,7 @@ export class ReportsController {
         tx.appointment.groupBy({ by: ["status"], _count: { _all: true }, where: { createdAt: { gte: since } } }),
         tx.leadStatus.findMany({ orderBy: { order: "asc" } }),
         tx.lead.groupBy({ by: ["statusId"], _count: { _all: true } }),
-        tx.aiRequest.aggregate({
-          where: { createdAt: { gte: since } },
-          _count: { _all: true },
-          _sum: { inputTokens: true, outputTokens: true, costUsd: true },
-        }),
+        // Costos/uso de IA: SOLO en el Super Admin — nunca exponerlos al tenant.
         // Series diarias — organization_id explícito: el SQL crudo no pasa por
         // los filtros de Prisma y la conexión admin bypasea RLS.
         tx.$queryRaw<Array<{ day: Date; count: bigint }>>`
@@ -84,12 +79,6 @@ export class ReportsController {
           category: s.category,
           count: leadsByStatus.find((l) => l.statusId === s.id)?._count._all ?? 0,
         })),
-        ai: {
-          requests: ai._count._all,
-          inputTokens: ai._sum.inputTokens ?? 0,
-          outputTokens: ai._sum.outputTokens ?? 0,
-          costUsd: Number(ai._sum.costUsd ?? 0),
-        },
         series: {
           conversationsPerDay: convSeries.map((r) => ({ day: r.day.toISOString().slice(0, 10), count: Number(r.count) })),
           inboundPerDay: msgSeries.map((r) => ({ day: r.day.toISOString().slice(0, 10), count: Number(r.count) })),
