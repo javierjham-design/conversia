@@ -683,6 +683,74 @@ export class ConversationsController {
   }
 
   /** Envía una plantilla HSM aprobada (única vía fuera de la ventana de 24 h). */
+  /**
+   * Inicia (o reutiliza) una conversación de WhatsApp con un contacto y le
+   * envía una plantilla aprobada. Es la vía para contactar leads que nunca
+   * escribieron (p. ej. formulario de Lead Ads sin clic al botón de WhatsApp):
+   * fuera de la ventana de 24 h solo se puede abrir con plantilla.
+   */
+  @Post("start")
+  async start(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z
+      .object({
+        contactId: z.string().min(1),
+        channelId: z.string().min(1).optional(),
+        templateId: z.string().min(1),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("contactId y templateId requeridos");
+    const { contactId, channelId, templateId } = parsed.data;
+
+    const conversationId = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const contact = await tx.contact.findFirst({ where: { id: contactId, deletedAt: null } });
+      if (!contact) throw new NotFoundException("Contacto no encontrado");
+      if (!contact.phone) {
+        throw new BadRequestException("El contacto no tiene teléfono — las plantillas de WhatsApp necesitan un número");
+      }
+
+      const channel = channelId
+        ? await tx.channelConnection.findFirst({ where: { id: channelId, type: "WHATSAPP_CLOUD" } })
+        : await tx.channelConnection.findFirst({ where: { type: "WHATSAPP_CLOUD", status: "active" }, orderBy: { createdAt: "asc" } });
+      if (!channel) throw new BadRequestException("No hay un canal de WhatsApp activo para enviar la plantilla");
+
+      // Reutiliza la conversación abierta del contacto EN ESTE canal (si la
+      // hay); si su conversación abierta vive en otro canal (p. ej. Instagram)
+      // se crea una aparte para no desviar ese hilo.
+      let conversation = await tx.conversation.findFirst({
+        where: { contactId: contact.id, channelConnectionId: channel.id, status: { in: ["OPEN", "PENDING"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!conversation) {
+        conversation = await tx.conversation.create({
+          data: {
+            organizationId: ctx.organizationId,
+            clinicId: contact.clinicId ?? null,
+            contactId: contact.id,
+            channelConnectionId: channel.id,
+            activeAgentId: channel.defaultAgentId ?? null,
+            status: "OPEN",
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "conversation.start_outbound",
+            entityType: "conversation",
+            entityId: conversation.id,
+            after: { contactId: contact.id, channelId: channel.id },
+          },
+        });
+      }
+      return conversation.id;
+    });
+
+    const message = await this.sendTemplate(conversationId, { templateId });
+    return { conversationId, message };
+  }
+
   @Post(":id/send-template")
   async sendTemplate(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requireContext();

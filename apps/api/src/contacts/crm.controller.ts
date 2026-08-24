@@ -17,6 +17,15 @@ const boardQuery = z.object({
 
 const PER_COLUMN = 50;
 
+const listQuery = boardQuery.extend({
+  /** code de la etapa del ciclo de vida (columna) */
+  stage: z.string().max(60).optional(),
+  page: z.coerce.number().int().positive().max(10_000).default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(25),
+  sort: z.enum(["updatedAt", "createdAt"]).default("updatedAt"),
+  order: z.enum(["asc", "desc"]).default("desc"),
+});
+
 /**
  * Tablero CRM de leads: pipeline por etapa del ciclo de vida. Es una VISTA
  * sobre leads+contactos (no un modelo nuevo); mover una tarjeta usa el mismo
@@ -120,18 +129,103 @@ export class CrmController {
     });
   }
 
+  /** Listado plano de leads (vista tabla del CRM): mismos filtros del tablero
+   *  + etapa, con paginación y orden. */
+  @Get("list")
+  list(@Query() query: Record<string, string>) {
+    const ctx = requireContext();
+    const q = listQuery.parse(query ?? {});
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const contactWhere: Record<string, unknown> = { deletedAt: null };
+      if (q.source) contactWhere.source = q.source;
+      if (q.q) {
+        contactWhere.OR = [
+          { firstName: { contains: q.q, mode: "insensitive" } },
+          { lastName: { contains: q.q, mode: "insensitive" } },
+          { phone: { contains: q.q.replace(/[^\d+]/g, "") || q.q } },
+          { email: { contains: q.q, mode: "insensitive" } },
+        ];
+      }
+      const leadWhere: Record<string, unknown> = { contact: contactWhere };
+      if (q.formId) leadWhere.meta = { path: ["formId"], equals: q.formId };
+      if (q.days) leadWhere.createdAt = { gte: new Date(Date.now() - q.days * 86_400_000) };
+      if (q.stage) {
+        const status = await tx.leadStatus.findUnique({
+          where: { organizationId_code: { organizationId: ctx.organizationId, code: q.stage } },
+        });
+        leadWhere.statusId = status?.id ?? "__none__";
+      }
+
+      const [total, leads] = await Promise.all([
+        tx.lead.count({ where: leadWhere as any }),
+        tx.lead.findMany({
+          where: leadWhere as any,
+          orderBy: { [q.sort]: q.order },
+          skip: (q.page - 1) * q.pageSize,
+          take: q.pageSize,
+          include: {
+            status: { select: { code: true, name: true, emoji: true, color: true, category: true } },
+            contact: { select: { id: true, firstName: true, lastName: true, profileName: true, phone: true, email: true, source: true, attributes: true, country: true } },
+          },
+        }),
+      ]);
+
+      const contactIds = [...new Set(leads.map((l) => l.contactId))];
+      const conversations = contactIds.length
+        ? await tx.conversation.findMany({
+            where: { contactId: { in: contactIds }, status: { not: "CLOSED" } },
+            orderBy: { lastMessageAt: "desc" },
+            select: { id: true, contactId: true },
+          })
+        : [];
+      const convByContact = new Map<string, string>();
+      for (const c of conversations) if (!convByContact.has(c.contactId)) convByContact.set(c.contactId, c.id);
+
+      return {
+        total,
+        page: q.page,
+        pageSize: q.pageSize,
+        rows: leads.map((lead) => {
+          const meta = (lead.meta as Record<string, any> | null) ?? {};
+          const attrs = (lead.contact.attributes as Record<string, any> | null) ?? {};
+          return {
+            id: lead.id,
+            contactId: lead.contact.id,
+            name:
+              [lead.contact.firstName, lead.contact.lastName].filter(Boolean).join(" ") ||
+              lead.contact.profileName ||
+              lead.contact.phone ||
+              "Sin nombre",
+            phone: lead.contact.phone,
+            email: lead.contact.email,
+            country: lead.contact.country,
+            source: lead.contact.source,
+            formId: meta.formId ?? attrs.metaLead?.formId ?? null,
+            campaignId: meta.campaignId ?? attrs.metaLead?.campaignId ?? null,
+            stage: { code: lead.status.code, name: lead.status.name, emoji: lead.status.emoji, color: lead.status.color, category: lead.status.category },
+            conversationId: convByContact.get(lead.contact.id) ?? null,
+            createdAt: lead.createdAt.toISOString(),
+            updatedAt: lead.updatedAt.toISOString(),
+          };
+        }),
+      };
+    });
+  }
+
   /** Orígenes y formularios presentes (para poblar los filtros del tablero). */
   @Get("filters")
   filters() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [sources, forms] = await Promise.all([
+      const [sources, forms, stages] = await Promise.all([
         tx.contact.groupBy({ by: ["source"], where: { deletedAt: null, source: { not: null } }, _count: { _all: true } }),
         tx.metaAsset.findMany({ where: { kind: "lead_form" }, select: { externalId: true, name: true } }),
+        tx.leadStatus.findMany({ where: { active: true }, orderBy: { order: "asc" }, select: { code: true, name: true, emoji: true, color: true } }),
       ]);
       return {
         sources: sources.map((s) => ({ value: s.source, count: s._count._all })),
         forms: forms.map((f) => ({ id: f.externalId, name: f.name ?? f.externalId })),
+        stages,
       };
     });
   }
