@@ -10,7 +10,6 @@ interface Overview {
   humanHandoffs: number;
   appointments: { status: string; count: number }[];
   leadFunnel: { code: string; name: string; category: string; count: number }[];
-  ai: { requests: number; inputTokens: number; outputTokens: number; costUsd: number };
   series: {
     conversationsPerDay: { day: string; count: number }[];
     inboundPerDay: { day: string; count: number }[];
@@ -91,7 +90,7 @@ export default function ReportsPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Reportes</h1>
-          <p className="text-sm text-ink-muted">Actividad, conversión de leads y costos de IA del tenant.</p>
+          <p className="text-sm text-ink-muted">Actividad y conversión de leads del tenant.</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
@@ -112,7 +111,7 @@ export default function ReportsPage() {
         <Kpi label={`Conversaciones nuevas (${data.days}d)`} value={data.conversations.newInPeriod} hint={`${data.conversations.total} históricas`} />
         <Kpi label="Abiertas ahora" value={data.conversations.openNow} hint={`${data.conversations.humanControlNow} en control humano`} />
         <Kpi label={`Mensajes (${data.days}d)`} value={data.messages.inbound + data.messages.outbound} hint={`${data.messages.inbound} recibidos · ${data.messages.outbound} enviados`} />
-        <Kpi label={`Costo IA (${data.days}d)`} value={`$${data.ai.costUsd.toFixed(3)} USD`} hint={`${data.ai.requests} requests · ${(data.ai.inputTokens + data.ai.outputTokens).toLocaleString()} tokens`} />
+        <Kpi label="Leads en el funnel" value={leadFunnel.reduce((acc, f) => acc + f.count, 0)} hint={`${data.humanHandoffs} escalados a humano (${data.days}d)`} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
