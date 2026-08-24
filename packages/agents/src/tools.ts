@@ -56,7 +56,7 @@ export interface ToolServices {
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
-  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null }>>;
+  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null; contactsMonthly: number | null; aiTokensDaily: number | null }>>;
   // Catálogo comercial real del negocio (tienda o menú). Vender con datos vivos.
   searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }): Promise<Array<CatalogHit>>;
   getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
@@ -367,7 +367,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getPlanes",
       description:
-        "Devuelve los planes y PRECIOS VIGENTES de TuBot desde el sistema (nombre, precio en CLP y USD, si es mensual o anual, y mensajes de plantilla incluidos). Úsalo SIEMPRE antes de cotizar un precio: nunca inventes ni memorices valores, pueden cambiar en cualquier momento.",
+        "Devuelve los planes y PRECIOS VIGENTES de TuBot desde el sistema: nombre, precio CLP/USD (mensual y anual), mensajes de plantilla incluidos (templateMessages), y los LÍMITES reales de cada plan: contactos por mes (contactsMonthly) y tope de tokens de IA por día (aiTokensDaily). 0 = ilimitado. Úsalo SIEMPRE antes de cotizar. Vende con la VERDAD: cada plan incluye un CUPO de contactos/mes y una cuota diaria de IA — NUNCA digas que es 'ilimitado' ni 'no lo vas a tocar' si el plan tiene un tope. Si el cliente estima un volumen que supera el cupo del plan, recomiéndale el plan que sí lo cubre (o Enterprise/cuota a medida); nunca inventes ni prometas capacidad que el plan no da.",
       inputSchema: z.object({}),
       async execute(ctx) {
         return { plans: await services(ctx).listPlans() };

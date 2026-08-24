@@ -230,7 +230,9 @@ export async function buildSandboxServices(
       const plans = await withTenant(orgId, (tx) => tx.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } }));
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
-        return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null, priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null, templateMessages: typeof tm === "number" ? tm : null };
+        const lim = (p.limits as Record<string, unknown> | null) ?? {};
+        const num = (v: unknown) => (typeof v === "number" ? v : null);
+        return { code: p.code, name: p.name, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null, priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null, templateMessages: typeof tm === "number" ? tm : null, contactsMonthly: num(lim.contactsMonthly), aiTokensDaily: num(lim.aiTokensDaily) };
       });
     },
     async searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }) {
