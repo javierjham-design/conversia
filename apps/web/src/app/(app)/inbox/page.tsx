@@ -5,11 +5,12 @@
  * Tiempo real vía SSE (pub/sub Redis por tenant) con fallback automático a sondeo.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Search, User } from "lucide-react";
+import { Bot, Search, SquarePen, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { reportViewing } from "@/lib/push";
 import { EmptyState, Modal, cn } from "@/components/ui";
 import { ContactPanel } from "./contact-panel";
+import { NewMessageModal } from "./new-message";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
 import { avatarColor, displayName, formatListTime, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
@@ -52,6 +53,7 @@ export default function InboxPage() {
   const [context, setContext] = useState<ConvContext | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
+  const [showNewMessage, setShowNewMessage] = useState(false);
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [users, setUsers] = useState<{ userId: string; name: string }[]>([]);
@@ -315,10 +317,19 @@ export default function InboxPage() {
               <h1 className="text-sm font-semibold text-ink">
                 {filter.kind === "all" ? "Todas" : filter.kind === "mine" ? "Mías" : filter.kind === "unassigned" ? "Sin asignar" : filter.kind === "unanswered" ? "No respondidas" : filter.kind === "blocked" ? "Bloqueados" : (filter as { label: string }).label}
               </h1>
-              <span className={cn("flex items-center gap-1 text-2xs", live ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle")} title={live ? "Actualización en tiempo real" : "Actualizando por sondeo"}>
-                <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500 live-dot" : "bg-ink-subtle")} />
-                {live ? "en vivo" : "sondeo"}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={cn("flex items-center gap-1 text-2xs", live ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle")} title={live ? "Actualización en tiempo real" : "Actualizando por sondeo"}>
+                  <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500 live-dot" : "bg-ink-subtle")} />
+                  {live ? "en vivo" : "sondeo"}
+                </span>
+                <button
+                  onClick={() => setShowNewMessage(true)}
+                  className="rounded-control border border-line-strong p-1.5 text-ink-muted transition-colors hover:bg-app hover:text-brand-600"
+                  title="Nuevo mensaje (enviar plantilla a un contacto)"
+                >
+                  <SquarePen size={14} />
+                </button>
+              </div>
             </div>
             <div className="relative">
               <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
@@ -465,6 +476,19 @@ export default function InboxPage() {
           </>
         )}
       </div>
+
+      {/* Nuevo mensaje: plantilla a un contacto sin conversación (p. ej. lead de formulario) */}
+      <NewMessageModal
+        open={showNewMessage}
+        onClose={() => setShowNewMessage(false)}
+        channels={channels}
+        onStarted={(conversationId) => {
+          setShowNewMessage(false);
+          openConversation(conversationId);
+          void loadList();
+          void loadCounters();
+        }}
+      />
 
       {/* Hoja de ayuda de atajos (tecla ?) */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Atajos de teclado">
