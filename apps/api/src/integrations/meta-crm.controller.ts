@@ -66,7 +66,7 @@ export class MetaCrmController {
           ? { status: conn.status, mode: conn.mode, businessName: conn.businessName, scopes: (conn.appScopes as string[]) ?? [], lastError: conn.lastError }
           : null,
         pages: pages.map((p) => ({ externalId: p.externalId, name: p.name, enabled: p.enabled })),
-        forms: forms.map((f) => ({ externalId: f.externalId, name: f.name })),
+        forms: forms.map((f) => ({ externalId: f.externalId, name: f.name, pageId: ((f.meta as Record<string, unknown>) ?? {}).pageId ?? null })),
         mappingActive: Boolean(mapping?.active),
         datasetReady: Boolean(eventMapping?.datasetId && eventMapping?.active !== false),
       };
@@ -237,8 +237,8 @@ export class MetaCrmController {
       for (const f of forms) {
         await tx.metaAsset.upsert({
           where: { organizationId_kind_externalId: { organizationId: ctx.organizationId, kind: "lead_form", externalId: f.id } },
-          update: { name: f.name },
-          create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "lead_form", externalId: f.id, name: f.name },
+          update: { name: f.name, meta: { pageId: String(page.id) } },
+          create: { organizationId: ctx.organizationId, connectionId: general.id, kind: "lead_form", externalId: f.id, name: f.name, meta: { pageId: String(page.id) } },
         });
       }
       // Cuenta de Instagram vinculada a la página → rutea los DMs de IG al tenant
