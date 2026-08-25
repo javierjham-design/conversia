@@ -33,7 +33,7 @@ async function resolveMessagingTenant(e: MessagingEvent): Promise<string | null>
  */
 /** Súbelo cuando mejore la captura de foto: fuerza UN reintento inmediato en
  *  contactos que ya habían agotado su intento con la versión anterior. */
-const AVATAR_TRY_VERSION = 2;
+const AVATAR_TRY_VERSION = 3;
 
 async function enrichContactName(
   organizationId: string,
@@ -84,12 +84,13 @@ async function enrichContactName(
       // la página (mismo endpoint que el diagnóstico valida en verde).
       const platformParam = e.platform === "instagram" ? "&platform=instagram" : "";
       const conv = await fetchGraphWithProof(
-        `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=participants${platformParam}&access_token=${encodeURIComponent(token)}`,
+        `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=${encodeURIComponent("participants{name,username,picture}")}${platformParam}&access_token=${encodeURIComponent(token)}`,
         token,
       );
       const cjson: any = await conv.json().catch(() => ({}));
       const parts: any[] = cjson?.data?.[0]?.participants?.data ?? [];
       const p = parts.find((x) => String(x?.id ?? "") === e.senderId);
+      if (!avatarUrl && p?.picture?.data?.url && !p?.picture?.data?.is_silhouette) avatarUrl = String(p.picture.data.url);
       if (conv.ok && p && (p.name || p.username)) {
         json = { name: p.name ?? p.username ?? null, username: p.username ?? null };
       } else {
@@ -97,12 +98,13 @@ async function enrichContactName(
         // remitentes reales de Messenger). El "from" de los mensajes de la
         // misma conversación sí lo trae.
         const msgs = await fetchGraphWithProof(
-          `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=messages.limit(5){from}${platformParam}&access_token=${encodeURIComponent(token)}`,
+          `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=${encodeURIComponent("messages.limit(5){from{name,username,picture}}")}${platformParam}&access_token=${encodeURIComponent(token)}`,
           token,
         );
         const mjson: any = await msgs.json().catch(() => ({}));
         const arr: any[] = mjson?.data?.[0]?.messages?.data ?? [];
         const from = arr.map((m) => m?.from).find((f) => String(f?.id ?? "") === e.senderId);
+        if (!avatarUrl && from?.picture?.data?.url && !from?.picture?.data?.is_silhouette) avatarUrl = String(from.picture.data.url);
         if (!msgs.ok || !from || !(from.name || from.username)) {
           console.warn(
             `⚠ Perfil de ${e.platform} ${e.senderId} no disponible · directo: ${json?.error?.message ?? res.status} · participants: ${cjson?.error?.message ?? (p ? "sin nombre" : "sin match")} · messages.from: ${mjson?.error?.message ?? "sin nombre"}`,
