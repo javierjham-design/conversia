@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckCircle2, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Settings2, Unplug } from "lucide-react";
+import { CheckCircle2, Database, Inbox, KanbanSquare, KeyRound, Link2, Megaphone, MessageCircle, RefreshCw, Send, Settings2, Unplug, UploadCloud } from "lucide-react";
 import { api } from "@/lib/api";
 import { InstagramIcon, MessengerIcon } from "@/components/brand-icons";
-import { Button, ConfirmDialog, PageHeader, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, PageHeader, Select, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
 import { EventMappingEditor, FieldMappingEditor } from "../meta/panels";
 
 // Integración «Meta CRM (Lead Ads)»: conexión SEPARADA de Meta Business Suite.
@@ -618,17 +618,41 @@ function PagesPanel({
  */
 function ConversionsTab() {
   const toast = useToast();
-  const [mapping, setMapping] = useState<{ datasetId: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null>(null);
+  const [mapping, setMapping] = useState<{ datasetId: string | null; crmDatasetId?: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null>(null);
   const [activity, setActivity] = useState<any[] | null>(null);
+  const [stages, setStages] = useState<{ code: string; name: string; category: string }[]>([]);
+  const [backfillStage, setBackfillStage] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
 
   const loadAll = useCallback(() => {
     void api<any>("/integrations/meta/event-mapping").then(setMapping).catch(() => setMapping(null));
     void api<any[]>("/integrations/activity?provider=capi&take=12").then(setActivity).catch(() => setActivity([]));
+    void api<{ code: string; name: string; category: string }[]>("/lifecycle-stages")
+      .then((rows) => setStages(rows.map((s) => ({ code: s.code, name: s.name, category: s.category }))))
+      .catch(() => setStages([]));
   }, []);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Sólo se pueden reenviar etapas con una regla activa (etapa → evento de Meta).
+  const mappedStages = stages.filter((s) =>
+    ((mapping?.rules as any[]) ?? []).some((r) => r?.active && r?.source === `lead.status_changed:${s.code}`),
+  );
+
+  async function act(key: string, fn: () => Promise<{ detail: string }>) {
+    setBusy(key);
+    try {
+      const r = await fn();
+      toast.push(r.detail, "ok");
+    } catch (e: any) {
+      toast.push(e.message ?? "Error", "error");
+    } finally {
+      setBusy(null);
+      setTimeout(loadAll, 1500);
+    }
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -643,27 +667,101 @@ function ConversionsTab() {
         {mapping === null ? <Skeleton className="h-48" /> : <EventMappingEditor initial={mapping} onSaved={loadAll} />}
       </div>
       <div className="space-y-4">
+        {/* Tres funciones separadas, como el flujo de referencia de Cláriva */}
         <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-          <h2 className="mb-2 font-semibold">Evento de prueba</h2>
-          <p className="mb-3 text-[13px] text-ink-muted">
-            Verifica la conexión con el dataset. Ojo: la pestaña «Probar eventos» del Events Manager no muestra eventos de
-            CRM — el resultado fiable es el «aceptados: 1» del registro de abajo (y el Resumen del dataset, con ≤30 min de retardo).
-          </p>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              try {
-                const r = await api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({ target: "crm" }) });
-                toast.push(r.detail, "ok");
-              } catch (e: any) {
-                toast.push(e.message ?? "Error al enviar el evento", "error");
-              }
-              setTimeout(loadAll, 1500);
-            }}
-          >
-            <Send size={14} /> Enviar evento de prueba
-          </Button>
+          <h2 className="mb-3 font-semibold">Pruebas y envíos</h2>
+
+          {/* 1 · Píxel del WABA (dataset general) */}
+          <div className="rounded-lg border border-line p-3">
+            <div className="flex items-center gap-2">
+              <MessageCircle size={15} className="text-ink-muted" />
+              <p className="text-sm font-medium">1 · Píxel de WhatsApp (WABA)</p>
+            </div>
+            <p className="mt-1 text-[12px] text-ink-muted">
+              Prueba el dataset <b>general/WABA</b> (eventos nativos de WhatsApp). No es el embudo del CRM.
+            </p>
+            <Button
+              variant="secondary"
+              className="mt-2"
+              disabled={busy !== null}
+              onClick={() => void act("waba", () => api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({ target: "general" }) }))}
+            >
+              <Send size={14} /> Probar píxel WABA
+            </Button>
+          </div>
+
+          {/* 2 · Envío de datos al CRM (dataset de conversiones) */}
+          <div className="mt-3 rounded-lg border border-line p-3">
+            <div className="flex items-center gap-2">
+              <Database size={15} className="text-ink-muted" />
+              <p className="text-sm font-medium">2 · Envío de datos al CRM (conversiones)</p>
+            </div>
+            <p className="mt-1 text-[12px] text-ink-muted">
+              Prueba el dataset <b>exclusivo del CRM</b> (<code className="text-xs">action_source: system_generated</code>).
+              La pestaña «Probar eventos» del Events Manager no muestra eventos de CRM: el resultado fiable es el
+              <b> «aceptados: 1»</b> del registro de abajo (y el Resumen del dataset, ≤30 min).
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={() => void act("crm", () => api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({ target: "crm" }) }))}
+              >
+                <Send size={14} /> Enviar evento de prueba (CRM)
+              </Button>
+            </div>
+            {/* Reenvío de producción: conversiones pendientes de una etapa */}
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="text-[12px] font-medium">Reenviar conversiones de una etapa</p>
+              <p className="mt-0.5 text-[11px] text-ink-subtle">
+                Envía la conversión de todos los leads que hoy están en esa etapa (arranca la señal sin esperar nuevos cambios).
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <Select value={backfillStage} onChange={(e) => setBackfillStage(e.target.value)} className="text-sm">
+                  <option value="">— elegir etapa —</option>
+                  {mappedStages.map((s) => (
+                    <option key={s.code} value={s.code}>{s.name}{s.category === "WON" ? " (Ganada)" : ""}</option>
+                  ))}
+                </Select>
+                <Button
+                  disabled={busy !== null || !backfillStage}
+                  onClick={() => void act("backfill", () => api<{ detail: string }>("/integrations/meta/capi-backfill", { method: "POST", body: JSON.stringify({ stageCode: backfillStage }) }))}
+                >
+                  <UploadCloud size={14} /> Enviar pendientes
+                </Button>
+              </div>
+              {mappedStages.length === 0 && (
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                  Primero genera el embudo y guarda las reglas (a la izquierda) para habilitar el reenvío por etapa.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* 3 · Recepción de leads (Formulario Instantáneo) */}
+          <div className="mt-3 rounded-lg border border-line p-3">
+            <div className="flex items-center gap-2">
+              <Inbox size={15} className="text-ink-muted" />
+              <p className="text-sm font-medium">3 · Recepción de leads</p>
+            </div>
+            <p className="mt-1 text-[12px] text-ink-muted">
+              Simula la llegada de un lead del Formulario Instantáneo para verificar el ingreso al CRM, workflows y mapeo.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={() => void act("lead", () => api<{ detail: string }>("/integrations/meta/lead-test", { method: "POST" }))}
+              >
+                <Send size={14} /> Simular lead entrante
+              </Button>
+              <Link href="/integrations/meta-crm">
+                <Button variant="ghost"><Settings2 size={14} /> Configurar recepción</Button>
+              </Link>
+            </div>
+          </div>
         </div>
+
         <div className="rounded-card border border-line bg-panel p-5 shadow-card">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="font-semibold">Registro de envíos</h2>

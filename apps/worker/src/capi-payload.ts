@@ -26,12 +26,21 @@ export interface CapiIdentity {
   ctwaClid?: string | null;
 }
 
+/**
+ * lead_id como lo espera la guía CRM de Meta: NÚMERO cuando cabe sin perder
+ * precisión (los ids son de 15–17 dígitos), string si excede el entero seguro.
+ */
+function leadIdValue(leadgenId: string): number | string {
+  const n = Number(leadgenId);
+  return /^\d+$/.test(leadgenId) && Number.isSafeInteger(n) ? n : leadgenId;
+}
+
 /** user_data con el máximo de identificadores disponibles (mejor match). */
 export function buildUserData(id: CapiIdentity): Record<string, unknown> {
   return {
     ...(id.phone ? { ph: [hashPhone(id.phone)] } : {}),
     ...(id.email ? { em: [hashEmail(id.email)] } : {}),
-    ...(id.leadgenId ? { lead_id: id.leadgenId } : {}),
+    ...(id.leadgenId ? { lead_id: leadIdValue(id.leadgenId) } : {}),
     ...(id.ctwaClid ? { ctwa_clid: id.ctwaClid } : {}),
   };
 }
