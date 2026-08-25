@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Copy, ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Checkbox, ConfirmDialog, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, IconButton, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
 
 interface IaSettings {
   managed: { model: string; maxTokens: number; maxToolRounds: number; dailyTokenBudget: number };
@@ -164,9 +164,9 @@ export default function IaSettingsPage() {
                 <span className="shrink-0 text-[10px] text-ink-subtle">
                   {t.agentIds.length === 0 ? "Todos los agentes" : `${t.agentIds.length} agente(s)`}
                 </span>
-                <button onClick={() => setEditing(t)} className="text-ink-subtle hover:text-brand-700" title="Editar"><Pencil size={13} /></button>
-                <button onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })} className="text-ink-subtle hover:text-brand-700" title="Duplicar"><Copy size={13} /></button>
-                <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={13} /></button>
+                <IconButton label="Editar" onClick={() => setEditing(t)}><Pencil size={13} /></IconButton>
+                <IconButton label="Duplicar" onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })}><Copy size={13} /></IconButton>
+                <IconButton label="Eliminar" destructive onClick={() => setDeleting(t)}><Trash2 size={13} /></IconButton>
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{t.body}</p>
             </li>

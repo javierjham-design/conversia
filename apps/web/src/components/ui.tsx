@@ -47,6 +47,35 @@ export function Button({
   return <button className={cn(base, variants[variant], className)} {...props} />;
 }
 
+/**
+ * Acción de fila unificada (B5.6): icono + tooltip. `destructive` la pinta en
+ * rojo al pasar el cursor. Reemplaza los «✕»/«Editar» sueltos por un patrón
+ * único en todas las listas (Editar/Duplicar/Eliminar).
+ */
+export function IconButton({
+  label,
+  destructive,
+  className,
+  children,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; destructive?: boolean }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className={cn(
+        "rounded-control p-1.5 text-ink-subtle transition-colors disabled:cursor-not-allowed disabled:opacity-30",
+        destructive ? "hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400" : "hover:bg-app hover:text-ink",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
 // -------------------- Controles de formulario propios --------------------
 // (B4: reemplazan a los controles nativos sin estilo — mismo alto, radio,
 // tipografía, foco y modo oscuro en toda la app.)
