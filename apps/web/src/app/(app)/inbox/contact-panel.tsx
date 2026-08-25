@@ -16,11 +16,14 @@ export function ContactPanel({
   context,
   onClose,
   onChanged,
+  onOpenFull,
 }: {
   conversationId: string;
   context: ConvContext | null;
   onClose: () => void;
   onChanged: () => void;
+  /** abre la ficha COMPLETA (el mismo ContactDrawer de Clientes/Tablero) */
+  onOpenFull?: (contactId: string) => void;
 }) {
   const toast = useToast();
   const [newNote, setNewNote] = useState("");
@@ -108,9 +111,14 @@ export function ContactPanel({
             )}
           </dl>
           {c.blocked && <div className="mt-1.5"><StatusBadge kind="error" label="Bloqueado" /></div>}
-          <a href={`/contacts?open=${c.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 dark:text-brand-400 dark:text-brand-300">
+          {/* Ficha ÚNICA (B1.7): abre el mismo ContactDrawer de Clientes/Tablero
+              sin salir de la conversación; sin prop cae al enlace clásico. */}
+          <button
+            onClick={() => (onOpenFull ? onOpenFull(c.id) : (window.location.href = `/contacts?open=${c.id}`))}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 transition-colors hover:text-brand-800 dark:text-brand-400"
+          >
             Ver ficha completa <ExternalLink size={11} />
-          </a>
+          </button>
         </div>
 
         {/* Etapa + tags */}
