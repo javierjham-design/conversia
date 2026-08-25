@@ -121,6 +121,9 @@ export class ChannelsController {
           type: c.type,
           name: c.name,
           status: c.status,
+          // Foto de perfil de la página/cuenta IG (pages_read_engagement) —
+          // guardada en config al conectar la página en Meta CRM.
+          pictureUrl: (((c.config as Record<string, unknown>) ?? {}).pictureUrl as string | undefined) ?? null,
           defaultAgentId: c.defaultAgentId,
           defaultAgentName: c.defaultAgentId ? (agentName.get(c.defaultAgentId) ?? null) : null,
           // Número por defecto para envíos proactivos (recordatorios/plantillas a

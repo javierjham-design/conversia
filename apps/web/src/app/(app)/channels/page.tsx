@@ -10,6 +10,7 @@ interface Channel {
   type: "WHATSAPP_CLOUD" | "MOCK" | "MESSENGER" | "INSTAGRAM";
   name: string;
   status: string;
+  pictureUrl?: string | null;
   defaultAgentId: string | null;
   defaultAgentName: string | null;
   defaultProactive?: boolean;
@@ -495,6 +496,23 @@ export default function ChannelsPage() {
           <div key={c.id} className="rounded-xl border border-line bg-panel p-4 shadow-card">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-3">
+                {c.pictureUrl ? (
+                  // Foto de perfil real de la página/cuenta (pages_read_engagement)
+                  // con el badge de la red en la esquina.
+                  <div className="relative shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={c.pictureUrl} alt={c.name} className="h-10 w-10 rounded-xl border border-line object-cover" />
+                    <span
+                      className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-panel ${
+                        c.type === "MESSENGER"
+                          ? "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white"
+                          : "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                      }`}
+                    >
+                      {c.type === "MESSENGER" ? <MessengerIcon size={11} /> : <InstagramIcon size={11} />}
+                    </span>
+                  </div>
+                ) : (
                 <div
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
                     c.type === "WHATSAPP_CLOUD"
@@ -516,6 +534,7 @@ export default function ChannelsPage() {
                     "🧪"
                   )}
                 </div>
+                )}
                 <div>
                   <h3 className="flex items-center gap-2 font-medium">
                     {c.name}

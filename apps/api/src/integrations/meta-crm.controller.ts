@@ -173,8 +173,12 @@ export class MetaCrmController {
   async pages() {
     const ctx = requirePermission("integrations:read");
     const token = await this.crmToken(ctx.organizationId);
-    const json = await this.graph("me/accounts?fields=id,name&limit=100", token);
-    const pages: Array<{ id: string; name: string }> = (json.data ?? []).map((p: any) => ({ id: String(p.id), name: String(p.name ?? p.id) }));
+    const json = await this.graph("me/accounts?fields=id,name,picture{url}&limit=100", token);
+    const pages: Array<{ id: string; name: string; pictureUrl: string | null }> = (json.data ?? []).map((p: any) => ({
+      id: String(p.id),
+      name: String(p.name ?? p.id),
+      pictureUrl: p.picture?.data?.url ? String(p.picture.data.url) : null,
+    }));
     const registered = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.metaAsset.findMany({ where: { kind: "page" }, select: { externalId: true } }),
     );
@@ -191,7 +195,8 @@ export class MetaCrmController {
   async connectPage(@Param("pageId") pageId: string) {
     const ctx = requirePermission("integrations:write");
     const token = await this.crmToken(ctx.organizationId);
-    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account`, token);
+    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account,picture{url}`, token);
+    const pagePictureUrl: string | null = page.picture?.data?.url ? String(page.picture.data.url) : null;
     const pageToken: string | undefined = page.access_token;
     if (!pageToken) {
       throw new BadRequestException(
@@ -207,9 +212,11 @@ export class MetaCrmController {
     // El canal IG se nombra por su @usuario real (no por la página): la cuenta
     // que ve el cliente es @usuario, y así aparece en Canales y en la bandeja.
     let igUsername: string | null = null;
+    let igPictureUrl: string | null = null;
     if (igId) {
-      const ig = await this.graph(`${encodeURIComponent(igId)}?fields=username`, pageToken).catch(() => null);
+      const ig = await this.graph(`${encodeURIComponent(igId)}?fields=username,profile_picture_url`, pageToken).catch(() => null);
       igUsername = ig?.username ? String(ig.username) : null;
+      igPictureUrl = ig?.profile_picture_url ? String(ig.profile_picture_url) : null;
     }
     const formsJson = await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
     const forms: Array<{ id: string; name: string; status: string }> = (formsJson.data ?? []).map((f: any) => ({
@@ -253,9 +260,22 @@ export class MetaCrmController {
       // Canales visibles en Canales desde ya (no esperar el primer DM)
       const chans = await tx.channelConnection.findMany({ where: { type: { in: ["MESSENGER", "INSTAGRAM"] as any } } });
       const findChan = (t: string) => chans.find((c) => c.type === (t as any) && String((c.config as any)?.pageId ?? "") === String(page.id));
-      if (!findChan("MESSENGER")) {
+      const existingMsgr = findChan("MESSENGER");
+      if (!existingMsgr) {
         await tx.channelConnection.create({
-          data: { organizationId: ctx.organizationId, type: "MESSENGER" as any, name: `Messenger · ${page.name ?? pageId}`, status: "active", config: { pageId: String(page.id) } as object },
+          data: {
+            organizationId: ctx.organizationId,
+            type: "MESSENGER" as any,
+            name: `Messenger · ${page.name ?? pageId}`,
+            status: "active",
+            config: { pageId: String(page.id), ...(pagePictureUrl ? { pictureUrl: pagePictureUrl } : {}) } as object,
+          },
+        });
+      } else if (pagePictureUrl && (existingMsgr.config as any)?.pictureUrl !== pagePictureUrl) {
+        // Re-conectar refresca la foto de perfil de la página (pages_read_engagement)
+        await tx.channelConnection.update({
+          where: { id: existingMsgr.id },
+          data: { config: { ...((existingMsgr.config as any) ?? {}), pictureUrl: pagePictureUrl } as object },
         });
       }
       if (igId) {
@@ -263,13 +283,23 @@ export class MetaCrmController {
         const existingIg = findChan("INSTAGRAM");
         if (!existingIg) {
           await tx.channelConnection.create({
-            data: { organizationId: ctx.organizationId, type: "INSTAGRAM" as any, name: igChanName, status: "active", config: { pageId: String(page.id), igId } as object },
+            data: {
+              organizationId: ctx.organizationId,
+              type: "INSTAGRAM" as any,
+              name: igChanName,
+              status: "active",
+              config: { pageId: String(page.id), igId, ...(igPictureUrl ? { pictureUrl: igPictureUrl } : {}) } as object,
+            },
           });
-        } else if (existingIg.name !== igChanName || String((existingIg.config as any)?.igId ?? "") !== igId) {
-          // Re-conectar corrige el nombre (p. ej. quedó con el de la página) y el igId
+        } else if (
+          existingIg.name !== igChanName ||
+          String((existingIg.config as any)?.igId ?? "") !== igId ||
+          (igPictureUrl && (existingIg.config as any)?.pictureUrl !== igPictureUrl)
+        ) {
+          // Re-conectar corrige nombre, igId y foto de perfil de la cuenta
           await tx.channelConnection.update({
             where: { id: existingIg.id },
-            data: { name: igChanName, config: { ...((existingIg.config as any) ?? {}), pageId: String(page.id), igId } as object },
+            data: { name: igChanName, config: { ...((existingIg.config as any) ?? {}), pageId: String(page.id), igId, ...(igPictureUrl ? { pictureUrl: igPictureUrl } : {}) } as object },
           });
         }
       }
