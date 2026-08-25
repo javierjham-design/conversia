@@ -442,8 +442,8 @@ export default function ContactsPage() {
           <Button variant="secondary" onClick={() => setDupOpen(true)} title="Buscar y fusionar duplicados">
             <GitMerge size={15} /> Duplicados
           </Button>
-          <Button variant="secondary" onClick={downloadExport} disabled={exporting}>
-            <Download size={15} /> {exporting ? "Exportando…" : "Exportar"}
+          <Button variant="secondary" onClick={downloadExport} disabled={exporting} title="Descarga en CSV los contactos de la vista actual (con los filtros aplicados). Para exportaciones completas con historial: Configuración → Exportar datos.">
+            <Download size={15} /> {exporting ? "Exportando…" : "Exportar vista"}
           </Button>
           <Button variant="secondary" onClick={() => setImportOpen(true)}>
             <Upload size={15} /> Importar

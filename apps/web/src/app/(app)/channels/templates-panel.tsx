@@ -290,7 +290,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
             ) : null}
           </p>
           <a
-            href="/settings/plan"
+            href="/billing"
             className="mt-3 inline-flex rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
           >
             {ent.planAllows ? "Contratar activación" : "Ver planes"}

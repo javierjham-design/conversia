@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState } from "@/components/ui";
+import { EmptyState, cn } from "@/components/ui";
 
 interface AgentRow {
   id: string;
@@ -129,30 +129,52 @@ export default function AgentsPage() {
       )}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {agents.map((a) => (
+        {agents.map((a) => {
+          // Posible duplicado: mismo tipo + mismo modelo y AMBOS activos —
+          // dato del tenant (no se borra nada), pero la lista lo advierte.
+          const twin = a.active && agents.find((b) => b.id !== a.id && b.active && b.kind === a.kind && b.model === a.model);
+          return (
           <button
             key={a.id}
             onClick={() => router.push(`/agents/${a.id}`)}
-            className="rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-cyan-300"
+            className={cn(
+              "rounded-xl border bg-panel p-4 text-left shadow-sm transition-colors hover:border-brand-300",
+              a.active ? "border-line" : "border-dashed border-line opacity-70",
+            )}
           >
             <div className="flex items-center justify-between">
               <h2 className="font-medium">{a.name}</h2>
-              <span className={`text-[10px] ${a.active ? "text-emerald-600" : "text-ink-subtle"} dark:text-emerald-400`}>
+              <span className={`text-[10px] ${a.active ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle"}`}>
                 {a.active ? "● activo" : "○ inactivo"}
               </span>
             </div>
             <p className="text-xs text-ink-subtle">{KIND_LABELS[a.kind] ?? a.kind} · {a.model ?? "—"}</p>
-            <p className="mt-2 line-clamp-2 text-sm text-ink-muted">{a.description ?? "Sin descripción"}</p>
-            <div className="mt-3 flex gap-2 text-[11px]">
+            {a.description ? (
+              <p className="mt-2 line-clamp-2 text-sm text-ink-muted">{a.description}</p>
+            ) : (
+              <p className="mt-2 text-sm text-brand-700 underline decoration-dotted underline-offset-2 dark:text-brand-400">
+                Agregar una descripción…
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
               {a.publishedVersion ? (
                 <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">v{a.publishedVersion} publicada</span>
               ) : (
                 <span className="rounded bg-app px-2 py-0.5 text-ink-muted">sin publicar</span>
               )}
               {a.hasDraft && <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">borrador pendiente</span>}
+              {twin && (
+                <span
+                  className="rounded bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                  title={`«${a.name}» y «${twin.name}» son del mismo tipo y modelo y están ambos activos — revisa si uno sobra.`}
+                >
+                  ⚠ posible duplicado de «{twin.name}»
+                </span>
+              )}
             </div>
           </button>
-        ))}
+          );
+        })}
         {agents.length === 0 && (
           <EmptyState
             icon={<Bot size={28} />}

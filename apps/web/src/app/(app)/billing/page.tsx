@@ -9,8 +9,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
 import { SubscriptionSelfService } from "./subscription-self-service";
+import { WalletCard } from "./wallet-card";
 import { money } from "@/lib/safe";
 import { Button, ConfirmDialog, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
+import { UsageBars } from "@/components/usage-bars";
 
 interface Plan {
   code: string;
@@ -35,13 +37,6 @@ interface Overview {
   paymentProvider: string;
 }
 
-const USAGE_LABELS: Record<string, string> = {
-  users: "Usuarios",
-  agents: "Agentes IA",
-  channels: "Canales",
-  workflows: "Flujos",
-  aiTokensToday: "Tokens IA (hoy)",
-};
 const LIMIT_LABELS: Record<string, string> = {
   users: "usuarios",
   agents: "agentes IA",
@@ -252,34 +247,15 @@ export default function BillingPage() {
           </div>
         </div>
 
-        {/* -------- Uso del período -------- */}
+        {/* -------- Uso del período (componente único de barras) -------- */}
         <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-          <p className="text-sm font-medium text-ink-muted">Uso del período</p>
-          <ul className="mt-3 space-y-2.5">
-            {Object.entries(data.usage).map(([key, u]) => {
-              const used = u.used ?? 0;
-              const unlimited = u.limit == null || u.limit === 0;
-              const pct = unlimited ? null : Math.min(100, Math.round((used / u.limit!) * 100));
-              return (
-                <li key={key} className="text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-ink-muted">{USAGE_LABELS[key] ?? key}</span>
-                    <span className="font-medium text-ink-muted">
-                      {used.toLocaleString("es-CL")} / {unlimited ? "∞" : u.limit!.toLocaleString("es-CL")}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-app">
-                    <div
-                      className={cn("h-full transition-all", pct === null ? "bg-slate-300" : pct < 70 ? "bg-emerald-400" : pct < 90 ? "bg-amber-400" : "bg-red-500")}
-                      style={{ width: `${pct ?? (u.used > 0 ? 8 : 0)}%` }}
-                    />
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <p className="mb-3 text-sm font-medium text-ink-muted">Uso del período</p>
+          <UsageBars usage={data.usage} />
         </div>
       </div>
+
+      {/* -------- Bolsa de mensajes de plantilla (única tarjeta del tema) -------- */}
+      <WalletCard />
 
       {/* -------- Suscripción automática (autogestión) -------- */}
       <SubscriptionSelfService planCode={data.plan?.code ?? null} interval={billingInterval} />
