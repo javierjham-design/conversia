@@ -440,7 +440,7 @@ export default function ChannelsPage() {
       </div>
 
       <p className="mb-4 rounded-lg border border-line bg-panel px-3 py-2 text-xs text-ink-muted">
-        Al pulsar <b>Conectar con Meta</b> podrás <b>elegir el negocio</b> (si administras varios) y <b>crear una cuenta de WhatsApp nueva</b> o usar una existente, con su número. Si no ves esas opciones, revisa que tu <span className="font-mono">META_CONFIG_ID</span> sea una configuración de <b>Embedded Signup de WhatsApp</b> (no un login genérico) y que la app tenga acceso avanzado a <span className="font-mono">whatsapp_business_management</span>.
+        Al pulsar <b>Conectar con Meta</b> podrás <b>elegir el negocio</b> (si administras varios) y <b>crear una cuenta de WhatsApp nueva</b> o usar una existente, con su número. Si no ves esas opciones, cierra el diálogo e inténtalo de nuevo — y si persiste, escríbenos por Soporte y lo revisamos contigo.
       </p>
 
       {showNew && (
@@ -553,11 +553,12 @@ export default function ChannelsPage() {
                       {c.status === "active" ? "● Conectado" : c.status === "error" ? "⚠ Requiere reautorización" : "○ Desconectado"}
                     </span>
                   </h3>
-                  <p className="text-xs text-ink-subtle">
+                  {/* El dato principal es el NÚMERO; el id técnico va al tooltip (B3) */}
+                  <p className="text-xs tnum text-ink-subtle" title={c.type === "WHATSAPP_CLOUD" && c.phoneNumberId ? `Identificador técnico del número (phone_number_id): ${c.phoneNumberId}` : undefined}>
                     {c.type === "WHATSAPP_CLOUD"
-                      ? `phone_number_id: ${c.phoneNumberId ?? "—"} · ${c.displayPhone ?? ""}`
+                      ? (c.displayPhone ?? "Número sin registrar")
                       : c.type === "MESSENGER" || c.type === "INSTAGRAM"
-                        ? "Mensajería de la página · configuración y diagnóstico en su menú propio"
+                        ? "Mensajería de la página · configuración y diagnóstico en Configurar"
                         : "Canal de prueba: usa el simulador para enviar mensajes"}
                   </p>
                 </div>

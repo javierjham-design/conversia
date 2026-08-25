@@ -79,6 +79,23 @@ function PushActivation() {
   );
 }
 
+/** Sustituye las variables de plantilla del catálogo por texto legible. */
+function humanizeTemplate(s: string): string {
+  const WORDS: Record<string, string> = {
+    contactName: "un contacto",
+    minutes: "N",
+    reason: "el motivo",
+    source: "el origen",
+    excerpt: "el mensaje",
+    stageName: "la etapa",
+    workflowName: "el flujo",
+    channelName: "el canal",
+    agentName: "el agente",
+    userName: "el usuario",
+  };
+  return s.replace(/\{(\w+)\}/g, (_, k: string) => WORDS[k] ?? "…");
+}
+
 type Channel = "in_app" | "web_push" | "email";
 interface EventDef {
   key: string;
@@ -194,7 +211,9 @@ export default function NotificationsSettingsPage() {
         {events.map((ev) => (
           <div key={ev.key} className="flex items-center border-b border-line px-3 py-2.5 last:border-0">
             <span className="flex-1 pr-2">
-              <span className="block text-sm text-ink">{ev.title}</span>
+              {/* Los títulos del catálogo traen variables ({contactName}) — se
+                  humanizan para mostrar, jamás se pinta la llave cruda (B3). */}
+              <span className="block text-sm text-ink">{humanizeTemplate(ev.title)}</span>
               {ev.urgency === "critical" && <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">crítico</span>}
             </span>
             {CHANNELS.map((c) => {
