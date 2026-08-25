@@ -205,14 +205,20 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       });
     }
 
-    // Lead con estado inicial configurado; si el código no existe (etapas
-    // renombradas por el tenant), cae a la primera etapa OPEN del ciclo.
+    // Lead con estado inicial configurado. La etapa DEBE ser visible en el
+    // tablero (activa); si la configurada no existe o está inactiva (código
+    // renombrado/desactivado), cae a la primera etapa OPEN activa y, si no hay
+    // ninguna OPEN, a CUALQUIER etapa activa — así el lead SIEMPRE aparece en el
+    // CRM (antes: sin etapa activa no se creaba el Lead y el lead solo llegaba a
+    // los workflows/Sheets pero no al listado del CRM).
     const statusCode = config.leadStatusCode as string | undefined;
     let status = statusCode
       ? await tx.leadStatus.findUnique({ where: { organizationId_code: { organizationId, code: statusCode } } })
       : null;
-    if (!status) {
-      status = await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" } });
+    if (!status || !status.active) {
+      status =
+        (await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" } })) ??
+        (await tx.leadStatus.findFirst({ where: { active: true }, orderBy: { order: "asc" } }));
     }
     let leadId: string | null = null;
     if (status) {
@@ -225,6 +231,19 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
         },
       });
       leadId = lead.id;
+    } else {
+      // Sin ninguna etapa activa en el ciclo de vida: no se puede ubicar el lead
+      // en el tablero. Se deja rastro claro para que el tenant active una etapa.
+      await tx.integrationEvent.create({
+        data: {
+          organizationId,
+          provider: "lead_ads",
+          type: "lead.no_stage",
+          status: "warning",
+          message: `Lead recibido pero SIN etapa activa en el ciclo de vida: el contacto se creó pero no aparece en el tablero del CRM. Activa al menos una etapa en Configuración → Etapas.`,
+          payload: { leadgenId: change.leadgen_id, contactId: contact.id } as object,
+        },
+      });
     }
 
     const newTags: string[] = [];
