@@ -95,11 +95,11 @@ export default function ImportSettingsPage() {
         </p>
       </div>
 
-      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Historial de imports</h3>
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">Historial de importaciones</h3>
       {!history ? (
         <Skeleton className="mt-2 h-32" />
       ) : history.length === 0 ? (
-        <p className="mt-2 rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin imports registrados.</p>
+        <p className="mt-2 rounded-lg border border-dashed border-line p-4 text-center text-sm text-ink-subtle">Sin importaciones registradas.</p>
       ) : (
         <ul className="mt-2 space-y-1">
           {history.map((h) => (

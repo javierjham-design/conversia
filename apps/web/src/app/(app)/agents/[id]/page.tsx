@@ -930,9 +930,9 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
           <div className="absolute left-0 z-20 mt-1 max-h-80 w-64 overflow-y-auto rounded-lg border border-line bg-panel p-1 shadow-pop">
             {Object.entries(byType).map(([type, tpls]) => (
               <div key={type}>
-                <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-cyan-600 dark:text-cyan-400">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
+                <p className="px-2 pt-1.5 text-[9px] font-semibold uppercase text-brand-600 dark:text-brand-400">{TENANT_TPL_TYPES[type] ?? type} · tu biblioteca</p>
                 {tpls.map((t) => (
-                  <button key={t.id} onClick={() => { onPick(t.body); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-cyan-50" title={t.body.slice(0, 200)}>
+                  <button key={t.id} onClick={() => { onPick(t.body); setOpen(false); }} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-brand-50" title={t.body.slice(0, 200)}>
                     {t.name}
                   </button>
                 ))}
@@ -945,7 +945,7 @@ function PromptTemplateMenu({ onPick, agentId }: { onPick: (text: string) => voi
                 {sn.label}
               </button>
             ))}
-            <a href="/settings/ia" className="mt-1 block border-t border-line px-2 py-1.5 text-[11px] text-cyan-700 underline dark:text-cyan-300">
+            <a href="/settings/ia" className="mt-1 block border-t border-line px-2 py-1.5 text-[11px] text-brand-700 underline dark:text-brand-300">
               Administrar mi biblioteca ↗
             </a>
           </div>
