@@ -22,7 +22,6 @@ import {
   Settings,
   ShoppingBag,
   Smartphone,
-  Users,
   Workflow,
 } from "lucide-react";
 import { api, clearToken, getToken } from "@/lib/api";
@@ -247,7 +246,8 @@ const NAV_GROUPS: Array<{
       { href: "/settings", label: "Configuración", icon: Settings, perm: undefined },
       { href: "/channels", label: "Canales", icon: Smartphone, perm: "channels:read" },
       { href: "/integrations", label: "Integraciones", icon: Plug, perm: "integrations:read" },
-      { href: "/users", label: "Usuarios", icon: Users, perm: "users:read" },
+      // "Usuarios" vive en Configuración → Usuarios y equipos (la ruta /users
+      // redirige allá); se quitó del menú principal por duplicado (B1.2).
       { href: "/billing", label: "Plan y facturación", icon: CreditCard, perm: "billing:read" },
     ],
   },

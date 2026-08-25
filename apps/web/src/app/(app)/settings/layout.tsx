@@ -37,7 +37,8 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
       { href: "/settings/general", label: "Información general", keywords: "nombre negocio logo rubro zona horaria moneda idioma empresa", perm: "settings:write", ready: true },
       { href: "/settings/personalization", label: "Rubro y personalización", keywords: "rubro industria vocabulario terminos etiquetas modulos plantillas paciente cliente alumno agenda", perm: "settings:write", ready: true },
       { href: "/settings/hours", label: "Horario de atención", keywords: "horario dias feriados atencion apertura", perm: "settings:write", ready: true },
-      { href: "/settings/plan", label: "Plan y uso", keywords: "plan consumo tokens mensajes facturacion límites uso", perm: "settings:write", ready: true },
+      // Plan/consumo/bolsa/facturas viven en UNA sola página (acceso directo evidente)
+      { href: "/billing", label: "Plan y facturación", keywords: "plan consumo tokens mensajes facturacion límites uso bolsa facturas pagos", external: true, ready: true },
     ],
   },
   {
@@ -77,7 +78,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
   {
     title: "Canales e integraciones",
     pages: [
-      { href: "/channels", label: "Canales (WhatsApp)", keywords: "canales whatsapp numeros", external: true, ready: true },
+      { href: "/channels", label: "Canales", keywords: "canales whatsapp instagram messenger numeros", external: true, ready: true },
       { href: "/integrations", label: "Integraciones", keywords: "integraciones google hubspot dentalink capi", external: true, ready: true },
     ],
   },
