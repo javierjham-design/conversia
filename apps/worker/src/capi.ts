@@ -81,13 +81,21 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   // Identidad con el máximo de señales: ph+em hasheados y, si el contacto vino
   // de un formulario de Lead Ads, lead_id (integración CRM → system_generated).
   const identity = await resolveIdentity(job);
+  const actionSource = actionSourceFor(identity);
+  // Integración de CRM (Conversion Leads): Meta exige event_source="crm" +
+  // lead_event_source en custom_data para los eventos de etapas del funnel
+  // (los que llevan lead_id de Lead Ads y van como system_generated).
+  const customData: Record<string, unknown> = {
+    ...(value ? { value, currency } : {}),
+    ...(actionSource === "system_generated" ? { event_source: "crm", lead_event_source: "TuBot CRM" } : {}),
+  };
   const eventPayload: Record<string, unknown> = {
     event_name: eventName,
     event_time: Math.floor(new Date(job.occurredAt).getTime() / 1000),
-    action_source: actionSourceFor(identity),
+    action_source: actionSource,
     event_id: `${organizationId}:${source}:${job.leadId ?? job.contactId ?? job.contactPhone ?? "anon"}:${job.occurredAt}`,
     user_data: buildUserData(identity),
-    ...(value ? { custom_data: { value, currency } } : {}),
+    ...(Object.keys(customData).length ? { custom_data: customData } : {}),
   };
   const body: Record<string, unknown> = { data: [eventPayload] };
   if (job.test && config.mapping.testEventCode) body.test_event_code = config.mapping.testEventCode;
@@ -101,11 +109,11 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     );
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
-      await log("error", `Meta rechazó el evento: ${json?.error?.message ?? res.status}`, { dest: config.rule.dest });
+      await log("error", `Meta rechazó el evento: ${json?.error?.message ?? res.status}`, { dest: eventName });
       return;
     }
-    await log("ok", `${source} → ${config.rule.dest}${job.test ? " (test)" : ""} · aceptados: ${json?.events_received ?? 1}`, {
-      dest: config.rule.dest,
+    await log("ok", `${source} → ${eventName}${job.test ? " (test)" : ""} · aceptados: ${json?.events_received ?? 1}`, {
+      dest: eventName,
       test: Boolean(job.test),
     });
     // Espejo opcional a Google Analytics (switch "enviar también a Analytics").
