@@ -18,7 +18,7 @@ interface Plan {
   limits: Record<string, number>;
   features: Record<string, unknown>;
 }
-type Draft = { priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number };
+type Draft = { priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; isPublic: boolean; limits: Record<string, number>; features: Record<string, boolean>; lsVariantId: string; templateMessages: number; contactPackSize: number; contactPackPriceClp: number; contactPackPriceUsd: number };
 type NewPlan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number; priceUsdYearly: number; templateMessages: number; whatsappTemplates: boolean; custom: boolean; isPublic: boolean; order: number };
 const EMPTY_NEW: NewPlan = { code: "", name: "", priceClp: 0, priceUsd: 0, priceClpYearly: 0, priceUsdYearly: 0, templateMessages: 1000, whatsappTemplates: true, custom: false, isPublic: true, order: 10 };
 interface CostModel {
@@ -84,6 +84,9 @@ export default function PlansPage() {
         features: Object.fromEntries(FEATURE_FIELDS.map((f) => [f.key, Boolean((plan.features as any)?.[f.key])])),
         lsVariantId: String((plan.features as any)?.lsVariantId ?? ""),
         templateMessages: Number((plan.features as any)?.templateMessages ?? 0),
+        contactPackSize: Number((plan.features as any)?.contactPackSize ?? 100),
+        contactPackPriceClp: Number((plan.features as any)?.contactPackPriceClp ?? 0),
+        contactPackPriceUsd: Number((plan.features as any)?.contactPackPriceUsd ?? 0),
       };
     }
     setDrafts(d);
@@ -103,7 +106,7 @@ export default function PlansPage() {
     try {
       await padmin(`/platform/plans/${plan.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, priceClpYearly: d.priceClpYearly || null, priceUsdYearly: d.priceUsdYearly || null, isPublic: d.isPublic, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages } }),
+        body: JSON.stringify({ priceClp: d.priceClp, priceUsd: d.priceUsd, priceClpYearly: d.priceClpYearly || null, priceUsdYearly: d.priceUsdYearly || null, isPublic: d.isPublic, limits: { ...plan.limits, ...d.limits }, features: { ...plan.features, ...d.features, lsVariantId: d.lsVariantId || undefined, templateMessages: d.templateMessages, contactPackSize: d.contactPackSize, contactPackPriceClp: d.contactPackPriceClp, contactPackPriceUsd: d.contactPackPriceUsd } }),
       });
       toast.push(`Plan ${plan.name} guardado`, "ok");
       await load();
@@ -338,6 +341,22 @@ export default function PlansPage() {
                     <input type="number" value={d.templateMessages} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, templateMessages: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
                   </label>
                   <p className="text-[10px] text-slate-400">Recarga la bolsa del tenant al renovar. El excedente se compra por paquetes prepago (no hay cobro post-pago).</p>
+                </div>
+                <div className="mt-3 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50/60 p-2">
+                  <p className="text-[11px] font-medium text-slate-600">Excedente de contactos (post-pago)</p>
+                  <label className="flex items-center justify-between text-xs text-slate-600">
+                    <span>Tamaño del pack (contactos)</span>
+                    <input type="number" value={d.contactPackSize} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, contactPackSize: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                  </label>
+                  <label className="flex items-center justify-between text-xs text-slate-600">
+                    <span>Precio del pack (CLP)</span>
+                    <input type="number" value={d.contactPackPriceClp} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, contactPackPriceClp: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                  </label>
+                  <label className="flex items-center justify-between text-xs text-slate-600">
+                    <span>Precio del pack (USD)</span>
+                    <input type="number" step="0.01" value={d.contactPackPriceUsd} onChange={(e) => patchDraft(p.id, (x) => ({ ...x, contactPackPriceUsd: Number(e.target.value) }))} className="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm" />
+                  </label>
+                  <p className="text-[10px] text-slate-400">Al pasar el cupo de "Contactos / mes", se acumula 1 pack por cada N contactos extra y se cobra en la próxima factura (dunning si no paga).</p>
                 </div>
 
                 <div className="mt-2 flex gap-3">
