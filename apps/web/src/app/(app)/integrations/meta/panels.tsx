@@ -439,11 +439,12 @@ export function EventMappingEditor({
   initial,
   onSaved,
 }: {
-  initial: { datasetId: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null;
+  initial: { datasetId: string | null; crmDatasetId?: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null;
   onSaved: () => void;
 }) {
   const toast = useToast();
   const [datasetId, setDatasetId] = useState(initial?.datasetId ?? "");
+  const [crmDatasetId, setCrmDatasetId] = useState(initial?.crmDatasetId ?? "");
   const [testEventCode, setTestEventCode] = useState(initial?.testEventCode ?? "");
   const [active, setActive] = useState(initial?.active ?? false);
   const [rules, setRules] = useState<Array<{ source: string; dest: string; value?: number | null; currency?: string | null; active: boolean }>>(
@@ -469,7 +470,7 @@ export function EventMappingEditor({
     try {
       await api("/integrations/meta/event-mapping", {
         method: "PUT",
-        body: JSON.stringify({ datasetId: datasetId || null, testEventCode: testEventCode || null, rules, active }),
+        body: JSON.stringify({ datasetId: datasetId || null, crmDatasetId: crmDatasetId || null, testEventCode: testEventCode || null, rules, active }),
       });
       toast.push("Reglas de conversiones guardadas", "ok");
       onSaved();
@@ -484,8 +485,18 @@ export function EventMappingEditor({
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block text-sm font-medium">
-          Dataset ID (Events Manager)
+          Dataset del CRM (embudo de leads)
+          <input value={crmDatasetId} onChange={(e) => setCrmDatasetId(e.target.value)} placeholder="dataset exclusivo del CRM" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
+          <span className="mt-0.5 block text-[11px] font-normal text-ink-subtle">
+            Recibe los eventos <code>lead.*</code> (etapas del embudo). Vacío = usa el dataset general.
+          </span>
+        </label>
+        <label className="block text-sm font-medium">
+          Dataset general / WhatsApp (WABA)
           <input value={datasetId} onChange={(e) => setDatasetId(e.target.value)} placeholder="123456789012345" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
+          <span className="mt-0.5 block text-[11px] font-normal text-ink-subtle">
+            Citas, envíos manuales y workflows. Puede ser el mismo del CRM si el cliente lo prefiere.
+          </span>
         </label>
         <label className="block text-sm font-medium">
           Test event code (opcional)

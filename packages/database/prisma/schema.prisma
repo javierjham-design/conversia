@@ -1674,7 +1674,10 @@ model MetaFieldMapping {
 model MetaEventMapping {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
+  /** dataset general/WABA: eventos conversacionales (citas, envíos manuales, workflows) */
   datasetId      String?  @map("dataset_id")
+  /** dataset EXCLUSIVO del CRM (embudo lead.*); null = usa datasetId (mismo dataset) */
+  crmDatasetId   String?  @map("crm_dataset_id")
   testEventCode  String?  @map("test_event_code")
   rules          Json     @default("[]") // [{source, dest, value, currency, active, dedup}]
   active         Boolean  @default(false)

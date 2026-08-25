@@ -60,7 +60,12 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     await log("error", `Sin regla activa para "${source}"`);
     return;
   }
-  if (!config.mapping.datasetId) {
+  // Enrutamiento por destino: el embudo del CRM (lead.*) va a su dataset
+  // EXCLUSIVO si está configurado; el resto (citas, envíos manuales, workflows)
+  // al dataset general/WABA. Con crmDatasetId vacío ambos usan el mismo.
+  const isCrmEvent = source === "lead.created" || source.startsWith("lead.status_changed");
+  const datasetId = (isCrmEvent ? config.mapping.crmDatasetId || config.mapping.datasetId : config.mapping.datasetId) ?? null;
+  if (!datasetId) {
     await log("error", "Falta configurar el dataset de conversiones");
     return;
   }
@@ -103,7 +108,7 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   try {
     // fallback de appsecret_proof: el token puede ser de la app TuBot CRM
     const res = await fetchGraphWithProof(
-      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${config.mapping.datasetId}/events?access_token=${encodeURIComponent(token)}`,
+      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${datasetId}/events?access_token=${encodeURIComponent(token)}`,
       token,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     );
