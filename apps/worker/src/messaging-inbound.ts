@@ -31,6 +31,10 @@ async function resolveMessagingTenant(e: MessagingEvent): Promise<string | null>
  * pendiente de App Review, IG sin página vinculada) el contacto queda sin
  * nombre y se reintenta en su próximo mensaje.
  */
+/** Súbelo cuando mejore la captura de foto: fuerza UN reintento inmediato en
+ *  contactos que ya habían agotado su intento con la versión anterior. */
+const AVATAR_TRY_VERSION = 2;
+
 async function enrichContactName(
   organizationId: string,
   contactId: string,
@@ -41,21 +45,11 @@ async function enrichContactName(
     const token = await pageToken(organizationId, pageId);
     const v = getEnv().META_GRAPH_VERSION;
 
-    // Foto de perfil (best-effort): el edge /picture del PSID/IGSID es distinto
-    // al perfil directo y suele responder incluso en acceso estándar. Si el
-    // cliente oculta su foto por privacidad, Meta devuelve una silueta y no
-    // guardamos nada (quedan las iniciales).
+    // La foto del remitente viene como campo profile_pic del PERFIL de
+    // mensajería (PSID/IGSID) — el edge /picture no aplica a esos IDs. Si el
+    // perfil directo está negado (acceso estándar, remitente público), no hay
+    // foto disponible y quedan las iniciales.
     let avatarUrl: string | null = null;
-    try {
-      const pic = await fetchGraphWithProof(
-        `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}/picture?redirect=false&width=240&height=240&access_token=${encodeURIComponent(token)}`,
-        token,
-      );
-      const pjson: any = await pic.json().catch(() => ({}));
-      if (pic.ok && pjson?.data?.url && !pjson?.data?.is_silhouette) avatarUrl = String(pjson.data.url);
-    } catch {
-      /* sin foto */
-    }
 
     // Guarda nombre y/o foto en una sola pasada (avatarTriedAt evita reintentar
     // la foto en cada mensaje cuando Meta la niega).
@@ -71,17 +65,19 @@ async function enrichContactName(
               ...attrs,
               ...(avatarUrl ? { avatarUrl, avatarFetchedAt: new Date().toISOString() } : {}),
               avatarTriedAt: new Date().toISOString(),
+              avatarTryVersion: AVATAR_TRY_VERSION,
             } as object,
           },
         });
       });
 
-    const fields = e.platform === "messenger" ? "first_name,last_name" : "name,username";
+    const fields = e.platform === "messenger" ? "first_name,last_name,profile_pic" : "name,username,profile_pic";
     const res = await fetchGraphWithProof(
       `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}?fields=${fields}&access_token=${encodeURIComponent(token)}`,
       token,
     );
     let json: any = await res.json().catch(() => ({}));
+    if (res.ok && json?.profile_pic) avatarUrl = String(json.profile_pic);
     if (!res.ok) {
       // Acceso estándar: Meta niega el perfil directo del PSID/IGSID. Plan B
       // permitido: el nombre viene en los PARTICIPANTES de la conversación de
@@ -219,14 +215,16 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       started,
       text: e.text ?? "",
       needsName: !contact.firstName && !contact.profileName,
-      // Foto de perfil: si no hay, reintenta a lo más 1 vez cada 24 h; si hay,
-      // se refresca semanalmente (las URLs firmadas del CDN de Meta caducan).
+      // Foto de perfil: si no hay, reintenta a lo más 1 vez cada 24 h (o de
+      // inmediato si la versión de captura mejoró); si hay, se refresca
+      // semanalmente (las URLs firmadas del CDN de Meta caducan).
       needsAvatar: (() => {
         const attrs = (contact.attributes as Record<string, any>) ?? {};
         if (attrs.avatarUrl) {
           const fetched = attrs.avatarFetchedAt ? new Date(String(attrs.avatarFetchedAt)).getTime() : 0;
           return Date.now() - fetched > 7 * 24 * 3_600_000;
         }
+        if (Number(attrs.avatarTryVersion ?? 0) < AVATAR_TRY_VERSION) return true;
         const tried = attrs.avatarTriedAt ? new Date(String(attrs.avatarTriedAt)).getTime() : 0;
         return Date.now() - tried > 24 * 3_600_000;
       })(),
