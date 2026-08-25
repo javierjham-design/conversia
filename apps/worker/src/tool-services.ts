@@ -588,6 +588,8 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       const plans = await admin.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } });
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
+        const lim = (p.limits as Record<string, unknown> | null) ?? {};
+        const num = (v: unknown) => (typeof v === "number" ? v : null);
         return {
           code: p.code,
           name: p.name,
@@ -596,6 +598,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           priceClpYearly: p.priceClpYearly != null ? Number(p.priceClpYearly) : null,
           priceUsdYearly: p.priceUsdYearly != null ? Number(p.priceUsdYearly) : null,
           templateMessages: typeof tm === "number" ? tm : null,
+          // Límites que el bot DEBE conocer para vender con la verdad (0 = ilimitado).
+          contactsMonthly: num(lim.contactsMonthly),
+          aiTokensDaily: num(lim.aiTokensDaily),
         };
       });
     },

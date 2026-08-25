@@ -26,6 +26,7 @@ interface CostModel {
 }
 
 const LIMIT_FIELDS: { key: string; label: string }[] = [
+  { key: "contactsMonthly", label: "Contactos / mes" },
   { key: "aiTokensDaily", label: "Tokens IA / día" },
   { key: "agents", label: "Agentes" },
   { key: "channels", label: "Canales" },
