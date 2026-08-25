@@ -72,7 +72,7 @@ export function ContactPanel({
           <div className="flex items-center gap-2.5">
             {c.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={c.avatarUrl} alt="" className="h-11 w-11 rounded-full border border-line object-cover" />
+              <img referrerPolicy="no-referrer" src={c.avatarUrl} alt="" className="h-11 w-11 rounded-full border border-line object-cover" />
             ) : (
               <div className={cn("flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold", avatarColor(c))}>
                 {initials(c).toUpperCase()}
@@ -145,7 +145,7 @@ export function ContactPanel({
             {context.ad.headline && <p className="mt-1 text-ink-muted">«{context.ad.headline}»</p>}
             {context.ad.imageUrl && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={context.ad.imageUrl} alt="Anuncio" className="mt-1.5 max-h-24 rounded-control object-cover" />
+              <img referrerPolicy="no-referrer" src={context.ad.imageUrl} alt="Anuncio" className="mt-1.5 max-h-24 rounded-control object-cover" />
             )}
             <p className="mt-1 break-all text-[10px] text-ink-subtle">
               {context.ad.adId ? `ad ${context.ad.adId}` : ""}

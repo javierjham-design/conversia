@@ -247,7 +247,7 @@ export function Thread({
           <div className="flex min-w-0 items-center gap-2.5">
             {conversation.contact.avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={conversation.contact.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full border border-line object-cover" />
+              <img referrerPolicy="no-referrer" src={conversation.contact.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full border border-line object-cover" />
             ) : (
               <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold", avatarColor(conversation.contact))}>
                 {initials(conversation.contact).toUpperCase()}
@@ -290,7 +290,7 @@ export function Thread({
                   <span className="inline-flex items-center gap-1" title="Canal por el que se conversa">
                     {channel.pictureUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={channel.pictureUrl} alt="" className="h-3.5 w-3.5 rounded-full border border-line object-cover" />
+                      <img referrerPolicy="no-referrer" src={channel.pictureUrl} alt="" className="h-3.5 w-3.5 rounded-full border border-line object-cover" />
                     ) : (
                       <Smartphone size={11} />
                     )}{" "}
@@ -419,7 +419,7 @@ export function Thread({
             <div className="mt-1.5 flex items-center gap-3">
               {context.ad.imageUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={context.ad.imageUrl} alt="Anuncio" className="max-h-16 rounded-control object-cover" />
+                <img referrerPolicy="no-referrer" src={context.ad.imageUrl} alt="Anuncio" className="max-h-16 rounded-control object-cover" />
               )}
               <div className="min-w-0 text-2xs text-ink-subtle">
                 {context.ad.ctwaClid && <p className="truncate">ctwa_clid: {context.ad.ctwaClid}</p>}
