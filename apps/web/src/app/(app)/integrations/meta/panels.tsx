@@ -242,7 +242,7 @@ export function MetaWizard({
             ["WhatsApp Cloud API", "Mensajería con agentes IA en tu número oficial", true, "Se gestiona en Canales"],
             ["Recepción de leads (Lead Ads)", "Formularios instantáneos → contactos y workflows", data.checklist.leadMappingReady, "Configura el mapeo en la pestaña Lead Ads"],
             ["Envío de conversiones (CAPI)", "Citas y ventas de vuelta a tus campañas", data.checklist.capiReady, "Configura reglas en la pestaña Conversions API"],
-            ["Instagram Direct", "DM de Instagram en la bandeja", false, "Próximamente"],
+            ["Instagram", "DM de Instagram en la bandeja", false, "Próximamente"],
             ["Messenger", "Chat de tu página de Facebook", false, "Próximamente"],
           ].map(([name, desc, on, hint]) => (
             <div key={name as string} className="flex items-center justify-between rounded-xl border border-line p-3">

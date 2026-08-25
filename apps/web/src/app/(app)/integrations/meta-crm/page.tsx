@@ -351,13 +351,13 @@ function MessagingTab({ data, onConnect, onChanged }: { data: CrmStatus; onConne
   const nets: Array<{ type: "INSTAGRAM" | "MESSENGER"; label: string; icon: ReactNode; chipClass: string }> = [
     {
       type: "INSTAGRAM",
-      label: "Instagram Direct",
+      label: "Instagram",
       icon: <InstagramIcon size={20} />,
       chipClass: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white",
     },
     {
       type: "MESSENGER",
-      label: "Facebook Messenger",
+      label: "Messenger",
       icon: <MessengerIcon size={20} />,
       chipClass: "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white",
     },
