@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, CalendarCheck, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { plural } from "@/lib/plural";
 import {
   Button,
   Checkbox,
@@ -1878,7 +1879,7 @@ export function HubspotDrawer({
     setBusy(true);
     try {
       const r = await api<{ queued: number }>("/integrations/hubspot/sync-all", { method: "POST" });
-      toast.push(`Backfill iniciado: ${r.queued} contacto(s) en cola (escalonados)`, "ok");
+      toast.push(`Sincronización iniciada: ${plural(r.queued, "contacto")} en cola (escalonados)`, "ok");
       onChanged();
     } catch (err) {
       toast.push((err as Error).message, "error");

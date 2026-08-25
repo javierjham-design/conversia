@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
+import { plural } from "@/lib/plural";
 import { Button, Checkbox, ConfirmDialog, DateInput, EmptyState, Modal, Pagination, Select, Skeleton, cn, useToast } from "@/components/ui";
 import { BoardView } from "./board-view";
 import { ContactDrawer } from "./contact-drawer";
@@ -311,7 +312,7 @@ export default function ContactsPage() {
   async function runBulk(action: string, params: Record<string, unknown> = {}) {
     try {
       const r = await api<{ affected: number }>("/contacts/bulk", { method: "POST", body: JSON.stringify({ ids: [...selected], action, ...params }) });
-      toast.push(`${r.affected} contacto(s) actualizados`, "ok");
+      toast.push(`${plural(r.affected, "contacto actualizado", "contactos actualizados")}`, "ok");
       setSelected(new Set());
       refresh();
     } catch (e: any) {
@@ -324,7 +325,7 @@ export default function ContactsPage() {
     const ids = [...selected];
     try {
       await api(`/workflows/${workflowId}/run-bulk`, { method: "POST", body: JSON.stringify({ contactIds: ids }) });
-      toast.push(`Flujo ejecutado sobre ${ids.length} contacto(s)`, "ok");
+      toast.push(`Flujo ejecutado sobre ${plural(ids.length, "contacto")}`, "ok");
       setSelected(new Set());
     } catch (e: any) {
       toast.push(e.message ?? "No se pudo ejecutar el flujo", "error");
@@ -508,7 +509,7 @@ export default function ContactsPage() {
               onChange={(v) => setSecReset({ channel: v })}
               options={Object.entries(CHANNEL_LABEL).filter(([k]) => ["WHATSAPP_CLOUD", "MOCK", "INSTAGRAM"].includes(k)).map(([value, label]) => ({ value, label }))}
             />
-            <FilterSelect label="País" value={sec.country} onChange={(v) => setSecReset({ country: v })} options={meta.countries.map((c) => ({ value: c, label: `${flag(c)} ${c}` }))} />
+            <FilterSelect label="País" value={sec.country} onChange={(v) => setSecReset({ country: v })} options={meta.countries.map((c) => ({ value: c, label: c }))} />
             {meta.campaigns.length > 0 && (
               <FilterSelect label="Campaña" value={sec.campaign} onChange={(v) => setSecReset({ campaign: v })} options={meta.campaigns.map((c) => ({ value: c.id, label: c.name }))} />
             )}
@@ -679,7 +680,7 @@ export default function ContactsPage() {
                             </div>
                           </td>
                         )}
-                        {visibleCols.has("country") && <td className="px-3 py-2.5 text-ink-muted">{c.country ? `${flag(c.country)} ${c.country}` : "—"}</td>}
+                        {visibleCols.has("country") && <td className="px-3 py-2.5 text-ink-muted"><span title={c.country ?? undefined}>{c.country ? (flag(c.country) || c.country) : "—"}</span></td>}
                         {visibleCols.has("locale") && <td className="px-3 py-2.5 uppercase text-ink-muted">{c.locale ?? "—"}</td>}
                         {visibleCols.has("conv") && (
                           <td className="px-3 py-2.5">
@@ -740,7 +741,7 @@ export default function ContactsPage() {
         open={confirmBulkDel}
         onClose={() => setConfirmBulkDel(false)}
         onConfirm={() => runBulk("delete")}
-        title={`Eliminar ${selected.size} contacto(s)`}
+        title={`Eliminar ${plural(selected.size, "contacto")}`}
         description="Se dan de baja (borrado lógico). Sus conversaciones se conservan."
         confirmLabel="Eliminar"
         danger
@@ -751,7 +752,7 @@ export default function ContactsPage() {
         onClose={() => setRunWfTarget(null)}
         onConfirm={() => runWfTarget && runWorkflowBulk(runWfTarget.id)}
         title={`Ejecutar «${runWfTarget?.name ?? ""}»`}
-        description={`Se ejecutará el flujo sobre los ${selected.size} contacto(s) seleccionados. Cada uno inicia una ejecución independiente (según sus condiciones).`}
+        description={`Se ejecutará el flujo sobre ${plural(selected.size, "contacto seleccionado", "contactos seleccionados")}. Cada uno inicia una ejecución independiente (según sus condiciones).`}
         confirmLabel="Ejecutar flujo"
       />
 

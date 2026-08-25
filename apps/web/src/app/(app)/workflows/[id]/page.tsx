@@ -32,6 +32,7 @@ import {
   Pause, Pencil, Play, PlayCircle, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { plural } from "@/lib/plural";
 import { Button, Checkbox, Modal, Select, cn, useToast } from "@/components/ui";
 import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
 import { triggerPreview, messageWouldTrigger } from "@/lib/workflow-trigger-preview";
@@ -262,13 +263,13 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "run_agent": return config.agentSlug ? `Agente: ${config.agentSlug}` : "Agente activo";
     case "wait": {
       const v = config.days ?? config.hours ?? config.minutes ?? 0;
-      const u = config.days ? "día(s)" : config.hours ? "hora(s)" : "minuto(s)";
-      return `Esperar ${v} ${u}${config.cancelOn === "contact_reply" ? " · cancela si responde" : ""}`;
+      const u = config.days ? plural(v, "día") : config.hours ? plural(v, "hora") : plural(v, "minuto");
+      return `Esperar ${u}${config.cancelOn === "contact_reply" ? " · cancela si responde" : ""}`;
     }
     case "wait_reply": {
       const v = config.days ?? config.hours ?? config.minutes ?? 0;
-      const u = config.days ? "día(s)" : config.hours ? "hora(s)" : "minuto(s)";
-      return `Espera respuesta hasta ${v} ${u} · Sí / No`;
+      const u = config.days ? plural(v, "día") : config.hours ? plural(v, "hora") : plural(v, "minuto");
+      return `Espera respuesta hasta ${u} · Sí / No`;
     }
     case "condition": return "Continúa si el contacto no ha respondido";
     case "update_lead_status": return config.statusCode ? `→ ${config.statusCode}` : "(elige un estado)";
@@ -750,7 +751,7 @@ function Editor() {
       });
       if (!v.ok) {
         applyIssues(v.issues);
-        toast.push(`El flujo tiene ${v.issues.length} problema(s): revisa lo marcado en rojo`, "error");
+        toast.push(`El flujo tiene ${plural(v.issues.length, "problema")}: revisa lo marcado en rojo`, "error");
         return;
       }
       const r = await api<{ publishedVersion: number; conflicts?: { id: string; name: string }[] }>(`/workflows/${id}/publish`, { method: "POST" });
@@ -1205,7 +1206,7 @@ function VarField({
               // onMouseDown + preventDefault: conserva el cursor del campo al hacer clic.
               onMouseDown={(e) => { e.preventDefault(); insertAtCaret(v.key); }}
               title={`{{${v.key}}}`}
-              className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-800 transition-colors hover:bg-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300"
+              className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-800 transition-colors hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
             >
               + {v.label}
             </button>
@@ -1227,7 +1228,7 @@ function VarField({
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); insertAtCaret(v.key); }}
                   title={`{{${v.key}}}`}
-                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] text-cyan-800 transition-colors hover:bg-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-300"
+                  className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] text-brand-800 transition-colors hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300"
                 >
                   + {v.label}
                 </button>
