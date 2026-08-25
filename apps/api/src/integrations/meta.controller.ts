@@ -416,40 +416,90 @@ export class MetaController {
   @Post("lead-test")
   async leadTest() {
     const ctx = requirePermission("integrations:write");
-    const payload = {
-      object: "page",
-      entry: [
-        {
-          id: "demo-page-1",
-          time: Math.floor(Date.now() / 1000),
-          changes: [
-            {
-              field: "leadgen",
-              value: {
-                page_id: "demo-page-1",
-                form_id: "demo-form-implantes",
-                leadgen_id: `test-lead-${Date.now()}`,
-                created_time: Math.floor(Date.now() / 1000),
-                // field_data embebido = modo prueba (el real se obtiene de Graph)
-                field_data: [
-                  { name: "full_name", values: ["Lead Prueba Meta"] },
-                  { name: "phone_number", values: ["+56955556666"] },
-                  { name: "email", values: ["lead.prueba@example.com"] },
-                ],
-                organization_hint: ctx.organizationId,
-              },
+    // Creación SÍNCRONA y DIRECTA bajo la organización autenticada: el lead de
+    // prueba se crea aquí, en el tenant que lo pide, y JAMÁS puede enrutarse a
+    // otra organización (antes iba por la cola de webhooks, cuyo enrutador podía
+    // elegir otro tenant por los ids DEMO compartidos). Devuelve el lead creado
+    // para confirmación inmediata; el ciclo (flujos + CAPI) se dispara igual con
+    // el evento lead.created de abajo, así se valida la conexión de punta a punta.
+    const leadgenId = `test-lead-${Date.now()}`;
+    const phone = "56955556666";
+    const created = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const metaLead = { leadgenId, formId: "demo-form-implantes", source: "test" };
+      // Contacto: reutiliza el existente (aunque estuviera dado de baja) o crea.
+      const existing = await tx.contact.findFirst({ where: { phone } });
+      const contact = existing
+        ? await tx.contact.update({
+            where: { id: existing.id },
+            data: {
+              deletedAt: null,
+              firstName: existing.firstName ?? "Lead Prueba",
+              lastName: existing.lastName ?? "Meta",
+              email: existing.email ?? "lead.prueba@example.com",
+              attributes: { ...((existing.attributes as object) ?? {}), metaLead },
             },
-          ],
+          })
+        : await tx.contact.create({
+            data: {
+              organizationId: ctx.organizationId,
+              firstName: "Lead Prueba",
+              lastName: "Meta",
+              phone,
+              email: "lead.prueba@example.com",
+              source: "meta_lead_ads",
+              acquisitionSource: "ad",
+              firstContactAt: new Date(),
+              attributes: { metaLead },
+            },
+          });
+      // Etapa inicial: primera OPEN activa, o cualquier activa (visible en el tablero).
+      const status =
+        (await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" } })) ??
+        (await tx.leadStatus.findFirst({ where: { active: true }, orderBy: { order: "asc" } }));
+      if (!status) return { contactId: contact.id, leadId: null, stage: null as string | null };
+      const lead = await tx.lead.create({
+        data: {
+          organizationId: ctx.organizationId,
+          contactId: contact.id,
+          statusId: status.id,
+          meta: { source: "meta_lead_ads", formId: "demo-form-implantes", leadgenId },
         },
-      ],
-    };
-    // internal:true — único camino autorizado para organization_hint
-    await this.queues.inbound.add("meta-lead-test", {
-      raw: payload,
-      receivedAt: new Date().toISOString(),
-      internal: true,
+      });
+      await tx.integrationEvent.create({
+        data: {
+          organizationId: ctx.organizationId,
+          provider: "lead_ads",
+          type: "lead.received",
+          message: `Lead de prueba: Lead Prueba Meta (${phone}) → etapa «${status.name}»`,
+          payload: { leadgenId, formId: "demo-form-implantes", contactId: contact.id } as object,
+        },
+      });
+      return { contactId: contact.id, leadId: lead.id, stage: status.name };
     });
-    return { ok: true, detail: "Lead de prueba encolado — revisa Contactos, la actividad y los workflows con trigger lead_created" };
+
+    if (!created.leadId) {
+      throw new BadRequestException(
+        "El contacto de prueba se creó pero NO hay ninguna etapa ACTIVA en el ciclo de vida: actívala en Configuración → Etapas para que el lead aparezca en el tablero.",
+      );
+    }
+
+    // Cierra el ciclo como un lead real: dispara flujos (trigger lead_created) y
+    // el envío CAPI al dataset (regla source "lead.created"), vía la cola events.
+    await this.queues.events.add("emit", {
+      organizationId: ctx.organizationId,
+      type: "lead.created",
+      contactId: created.contactId,
+      data: { source: "meta_lead_ads", formId: "demo-form-implantes", contactId: created.contactId },
+      occurredAt: new Date().toISOString(),
+    });
+
+    return {
+      ok: true,
+      contactId: created.contactId,
+      leadId: created.leadId,
+      stage: created.stage,
+      detail: `Lead de prueba creado en tu organización, etapa «${created.stage}». Ábrelo en el CRM y cámbialo de estado para validar el envío al dataset (Conversiones).`,
+    };
   }
 
   // Lead Ads (páginas/formularios) vive en la integración SEPARADA
