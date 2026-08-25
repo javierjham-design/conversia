@@ -67,7 +67,11 @@ async function enrichContactName(
           where: { id: contactId },
           data: {
             ...(name ? { profileName: name, ...(c?.firstName ? {} : { firstName: first ?? null, lastName: last ?? null }) } : {}),
-            attributes: { ...attrs, ...(avatarUrl ? { avatarUrl } : {}), avatarTriedAt: new Date().toISOString() } as object,
+            attributes: {
+              ...attrs,
+              ...(avatarUrl ? { avatarUrl, avatarFetchedAt: new Date().toISOString() } : {}),
+              avatarTriedAt: new Date().toISOString(),
+            } as object,
           },
         });
       });
@@ -215,10 +219,14 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       started,
       text: e.text ?? "",
       needsName: !contact.firstName && !contact.profileName,
-      // Foto de perfil: reintenta como máximo una vez cada 24 h por contacto
+      // Foto de perfil: si no hay, reintenta a lo más 1 vez cada 24 h; si hay,
+      // se refresca semanalmente (las URLs firmadas del CDN de Meta caducan).
       needsAvatar: (() => {
         const attrs = (contact.attributes as Record<string, any>) ?? {};
-        if (attrs.avatarUrl) return false;
+        if (attrs.avatarUrl) {
+          const fetched = attrs.avatarFetchedAt ? new Date(String(attrs.avatarFetchedAt)).getTime() : 0;
+          return Date.now() - fetched > 7 * 24 * 3_600_000;
+        }
         const tried = attrs.avatarTriedAt ? new Date(String(attrs.avatarTriedAt)).getTime() : 0;
         return Date.now() - tried > 24 * 3_600_000;
       })(),

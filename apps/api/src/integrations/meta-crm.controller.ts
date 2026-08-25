@@ -173,11 +173,14 @@ export class MetaCrmController {
   async pages() {
     const ctx = requirePermission("integrations:read");
     const token = await this.crmToken(ctx.organizationId);
-    const json = await this.graph("me/accounts?fields=id,name,picture.width(240).height(240){url}&limit=100", token);
+    const json = await this.graph("me/accounts?fields=id,name&limit=100", token);
+    // Foto vía la URL PÚBLICA estable de Graph (no caduca, a diferencia de las
+    // URLs firmadas de scontent que expiran en semanas).
+    const v = getEnv().META_GRAPH_VERSION;
     const pages: Array<{ id: string; name: string; pictureUrl: string | null }> = (json.data ?? []).map((p: any) => ({
       id: String(p.id),
       name: String(p.name ?? p.id),
-      pictureUrl: p.picture?.data?.url ? String(p.picture.data.url) : null,
+      pictureUrl: `https://graph.facebook.com/${v}/${encodeURIComponent(String(p.id))}/picture?width=240&height=240`,
     }));
     const registered = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.metaAsset.findMany({ where: { kind: "page" }, select: { externalId: true } }),
@@ -195,8 +198,9 @@ export class MetaCrmController {
   async connectPage(@Param("pageId") pageId: string) {
     const ctx = requirePermission("integrations:write");
     const token = await this.crmToken(ctx.organizationId);
-    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account,picture.width(240).height(240){url}`, token);
-    const pagePictureUrl: string | null = page.picture?.data?.url ? String(page.picture.data.url) : null;
+    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account`, token);
+    // URL pública ESTABLE de la foto de página (no caduca como las firmadas de scontent)
+    const pagePictureUrl = `https://graph.facebook.com/${getEnv().META_GRAPH_VERSION}/${encodeURIComponent(String(page.id))}/picture?width=240&height=240`;
     const pageToken: string | undefined = page.access_token;
     if (!pageToken) {
       throw new BadRequestException(

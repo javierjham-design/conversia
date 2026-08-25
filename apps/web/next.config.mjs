@@ -13,7 +13,10 @@ const csp = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  "img-src 'self' data: blob: https://*.gstatic.com https://*.googleusercontent.com",
+  // Meta CDN: fotos de perfil de páginas/cuentas IG/remitentes e imágenes de
+  // anuncios CTWA (scontent-*.fbcdn.net, *.cdninstagram.com, lookaside.fbsbx.com;
+  // graph.facebook.com/{id}/picture redirige a esos CDN).
+  "img-src 'self' data: blob: https://*.gstatic.com https://*.googleusercontent.com https://*.fbcdn.net https://*.cdninstagram.com https://*.fbsbx.com https://graph.facebook.com",
   "font-src 'self' data:",
   // Next inyecta estilos/inline bootstrap; se permite inline sólo aquí
   "style-src 'self' 'unsafe-inline'",
