@@ -9,6 +9,7 @@ import { Bot, Search, SquarePen, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { reportViewing } from "@/lib/push";
 import { EmptyState, Modal, cn } from "@/components/ui";
+import { ContactDrawer } from "../contacts/contact-drawer";
 import { ContactPanel } from "./contact-panel";
 import { NewMessageModal } from "./new-message";
 import { InboxSidebar } from "./sidebar";
@@ -54,6 +55,8 @@ export default function InboxPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
   const [showNewMessage, setShowNewMessage] = useState(false);
+  // Ficha COMPLETA del contacto (el mismo drawer de Clientes/Tablero) sin salir de la bandeja
+  const [fullContactId, setFullContactId] = useState<string | null>(null);
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [users, setUsers] = useState<{ userId: string; name: string }[]>([]);
@@ -470,17 +473,20 @@ export default function InboxPage() {
         {selectedId && conversation && panelOpen && (
           <>
             <div className="hidden xl:block">
-              <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} />
+              <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} onOpenFull={setFullContactId} />
             </div>
             <div className="fixed inset-0 z-40 flex justify-end xl:hidden">
               <div className="absolute inset-0 bg-navy-950/50" onClick={() => setPanelOpen(false)} />
               <div className="relative h-full">
-                <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} />
+                <ContactPanel conversationId={selectedId} context={context} onClose={() => setPanelOpen(false)} onChanged={refreshCurrent} onOpenFull={setFullContactId} />
               </div>
             </div>
           </>
         )}
       </div>
+
+      {/* Ficha ÚNICA del contacto (mismo componente que Clientes y Tablero) */}
+      <ContactDrawer id={fullContactId} onClose={() => setFullContactId(null)} onChanged={refreshCurrent} />
 
       {/* Nuevo mensaje: plantilla a un contacto sin conversación (p. ej. lead de formulario) */}
       <NewMessageModal
