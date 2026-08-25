@@ -16,6 +16,8 @@ export interface ContactLite {
   phone: string | null;
   country?: string | null;
   blocked?: boolean;
+  /** foto de perfil (Messenger/IG; WhatsApp no la expone por API) */
+  avatarUrl?: string | null;
 }
 
 export interface ConvItem {
@@ -105,6 +107,7 @@ export interface ConvContext {
     blocked: boolean;
     createdAt: string;
     isReturning: boolean;
+    avatarUrl?: string | null;
   };
   stage: Stage | null;
   tags: string[];
@@ -129,6 +132,8 @@ export interface ChannelInfo {
   name: string;
   status: string;
   displayPhone: string | null;
+  /** foto de la página/cuenta IG del canal */
+  pictureUrl?: string | null;
 }
 
 export interface Snippet {

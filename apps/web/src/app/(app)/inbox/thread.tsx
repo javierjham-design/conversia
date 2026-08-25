@@ -245,9 +245,14 @@ export function Thread({
           <button onClick={onBack} className="text-lg text-ink-muted hover:text-ink lg:hidden" aria-label="Volver">←</button>
           {/* Zona izquierda: identidad */}
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold", avatarColor(conversation.contact))}>
-              {initials(conversation.contact).toUpperCase()}
-            </div>
+            {conversation.contact.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={conversation.contact.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full border border-line object-cover" />
+            ) : (
+              <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold", avatarColor(conversation.contact))}>
+                {initials(conversation.contact).toUpperCase()}
+              </div>
+            )}
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-base font-semibold text-ink">{displayName(conversation.contact)}</h2>
@@ -282,8 +287,14 @@ export function Thread({
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-ink-subtle">
                 <span className="tnum">{conversation.contact.phone}</span>
                 {channel && (
-                  <span className="inline-flex items-center gap-1" title="Número por el que se conversa">
-                    <Smartphone size={11} /> {channel.name}
+                  <span className="inline-flex items-center gap-1" title="Canal por el que se conversa">
+                    {channel.pictureUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={channel.pictureUrl} alt="" className="h-3.5 w-3.5 rounded-full border border-line object-cover" />
+                    ) : (
+                      <Smartphone size={11} />
+                    )}{" "}
+                    {channel.name}
                     {channel.displayPhone ? ` · ${channel.displayPhone}` : ""}
                     {channel.status === "error" && <span className="text-red-500">⚠ reautorizar</span>}
                   </span>

@@ -373,9 +373,14 @@ export default function InboxPage() {
                 {selectedId === c.id && <span className="absolute inset-y-0 left-0 w-0.5 bg-brand-500" />}
                 <div className="flex items-center gap-2.5">
                   <div className="relative shrink-0">
-                    <div className={cn("flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold", avatarColor(c.contact))}>
-                      {initials(c.contact).toUpperCase()}
-                    </div>
+                    {c.contact.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={c.contact.avatarUrl} alt="" className="h-9 w-9 rounded-full border border-line object-cover" />
+                    ) : (
+                      <div className={cn("flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold", avatarColor(c.contact))}>
+                        {initials(c.contact).toUpperCase()}
+                      </div>
+                    )}
                     <span
                       className={cn(
                         "absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-panel text-[8px] text-white",
