@@ -1,5 +1,6 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
+import { pageToken } from "./messaging-send";
 import { resolveMetaLeadToken } from "./meta-token";
 import { dispatchEvent } from "./workflow-runtime";
 import { emitPlatformEvent } from "./platform-events";
@@ -34,19 +35,48 @@ interface GraphLead {
   adId: string | null;
 }
 
-/** Obtiene el lead completo desde Graph (campos + atribución de campaña). */
-async function fetchLeadFromGraph(organizationId: string, leadgenId: string): Promise<GraphLead | null> {
+/** GET del lead con un token dado; en fallo devuelve el error REAL de Meta
+ *  (message/code), no solo el status HTTP — sin eso el diagnóstico es a ciegas. */
+async function graphGetLead(
+  leadgenId: string,
+  token: string,
+): Promise<{ ok: true; json: any } | { ok: false; detail: string }> {
   const env = getEnv();
-  // Prefiere el token de la conexión Meta CRM del tenant (app separada).
-  const token = await resolveMetaLeadToken(organizationId);
-  if (!token) return null;
   // Con dos apps (principal + TuBot CRM) el proof se resuelve con fallback.
   const res = await fetchGraphWithProof(
     `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${leadgenId}?fields=field_data,campaign_id,ad_id,form_id,created_time&access_token=${encodeURIComponent(token)}`,
     token,
   );
-  if (!res.ok) throw new Error(`Graph ${res.status}`);
-  const json: any = await res.json();
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = json?.error;
+    const detail = e?.message
+      ? `${e.message} [code ${e.code}${e.error_subcode ? `/${e.error_subcode}` : ""}]`
+      : `HTTP ${res.status}`;
+    return { ok: false, detail };
+  }
+  return { ok: true, json };
+}
+
+/** Obtiene el lead completo desde Graph (campos + atribución de campaña). */
+async function fetchLeadFromGraph(organizationId: string, pageId: string, leadgenId: string): Promise<GraphLead | null> {
+  // Prefiere el token de la conexión Meta CRM del tenant (app separada).
+  const token = await resolveMetaLeadToken(organizationId);
+  if (!token) return null;
+  let r = await graphGetLead(leadgenId, token);
+  if (!r.ok) {
+    // Fallback con token de PÁGINA: es la vía canónica para leer leads y el
+    // Administrador de acceso a clientes potenciales lo evalúa distinto.
+    try {
+      const pt = await pageToken(organizationId, pageId);
+      const r2 = await graphGetLead(leadgenId, pt);
+      r = r2.ok ? r2 : { ok: false, detail: `${r.detail} · con token de página: ${r2.detail}` };
+    } catch {
+      /* mantiene el error original del token de usuario */
+    }
+  }
+  if (!r.ok) throw new Error(r.detail);
+  const json = r.json;
   return {
     fieldData: json.field_data ?? [],
     campaignId: json.campaign_id ? String(json.campaign_id) : null,
@@ -72,7 +102,7 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
   let adId: string | null = null;
   if (!fieldData) {
     try {
-      const graphLead = await fetchLeadFromGraph(organizationId, change.leadgen_id);
+      const graphLead = await fetchLeadFromGraph(organizationId, change.page_id, change.leadgen_id);
       fieldData = graphLead?.fieldData ?? null;
       campaignId = graphLead?.campaignId ?? null;
       adId = graphLead?.adId ?? null;
