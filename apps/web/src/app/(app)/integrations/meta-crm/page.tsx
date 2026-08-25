@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckCircle2, ExternalLink, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Settings2, Unplug } from "lucide-react";
+import { CheckCircle2, KanbanSquare, KeyRound, Link2, Megaphone, RefreshCw, Send, Settings2, Unplug } from "lucide-react";
 import { api } from "@/lib/api";
 import { InstagramIcon, MessengerIcon } from "@/components/brand-icons";
 import { Button, ConfirmDialog, PageHeader, Skeleton, StatusBadge, cn, useToast } from "@/components/ui";
-import { FieldMappingEditor } from "../meta/panels";
+import { EventMappingEditor, FieldMappingEditor } from "../meta/panels";
 
 // Integración «Meta CRM (Lead Ads)»: conexión SEPARADA de Meta Business Suite.
 // Conectar/desconectar acá jamás toca WhatsApp, anuncios ni la conexión Meta general.
@@ -25,7 +25,7 @@ interface GraphPage {
   connected: boolean;
 }
 
-type MetaCrmTab = "crm" | "mensajeria";
+type MetaCrmTab = "crm" | "mensajeria" | "conversiones";
 
 export default function MetaCrmPage() {
   const toast = useToast();
@@ -38,12 +38,13 @@ export default function MetaCrmPage() {
   // Pestaña por URL (?tab=mensajeria) — así Canales puede enlazar directo a la
   // configuración de mensajería sin pasar por el bloque de CRM.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("tab") === "mensajeria") setTab("mensajeria");
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "mensajeria" || t === "conversiones") setTab(t);
   }, []);
 
   function switchTab(t: MetaCrmTab) {
     setTab(t);
-    window.history.replaceState(null, "", t === "mensajeria" ? "/integrations/meta-crm?tab=mensajeria" : "/integrations/meta-crm");
+    window.history.replaceState(null, "", t === "crm" ? "/integrations/meta-crm" : `/integrations/meta-crm?tab=${t}`);
   }
 
   const load = useCallback(async () => {
@@ -108,6 +109,7 @@ export default function MetaCrmPage() {
         {(
           [
             ["crm", "📊 Lead Ads (CRM)"],
+            ["conversiones", "📈 Conversiones (dataset)"],
             ["mensajeria", "💬 Mensajería · Instagram y Messenger"],
           ] as Array<[MetaCrmTab, string]>
         ).map(([key, label]) => (
@@ -128,6 +130,8 @@ export default function MetaCrmPage() {
         <Skeleton className="h-64" />
       ) : tab === "mensajeria" ? (
         <MessagingTab data={data} onConnect={() => void connectWithMeta()} onChanged={() => void load()} />
+      ) : tab === "conversiones" ? (
+        <ConversionsTab />
       ) : (
         <>
           {/* Pasos del circuito */}
@@ -215,15 +219,13 @@ export default function MetaCrmPage() {
                       <KanbanSquare size={14} /> Abrir el CRM
                     </Button>
                   </Link>
-                  <Link href="/integrations/meta">
-                    <Button variant="ghost">
-                      <Megaphone size={14} /> Reglas del dataset (Conversions API) <ExternalLink size={12} />
-                    </Button>
-                  </Link>
+                  <Button variant="ghost" onClick={() => switchTab("conversiones")}>
+                    <Megaphone size={14} /> Reglas del dataset (Conversiones)
+                  </Button>
                 </div>
                 <p className="mt-3 text-[11px] text-ink-subtle">
-                  Las reglas por etapa (p. ej. «cliente» → Purchase) viven en la pestaña Conversions API del Centro Meta;
-                  los envíos usan automáticamente esta conexión CRM cuando existe.
+                  Las reglas por etapa (p. ej. «Cliente» → Purchase) están en la pestaña <b>Conversiones (dataset)</b> de
+                  este mismo centro; los envíos usan automáticamente esta conexión CRM cuando existe.
                 </p>
               </div>
             </div>
@@ -561,6 +563,85 @@ function PagesPanel({ enabled, onConnected, messaging }: { enabled: boolean; onC
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Pestaña «Conversiones (dataset)»: TODA la operación del dataset de Meta en el
+ * mismo centro — reglas por etapa del funnel, evento de prueba y registro de
+ * envíos. Reusa el editor y los endpoints del Centro Meta general (misma
+ * configuración, un solo lugar visible para el usuario).
+ */
+function ConversionsTab() {
+  const toast = useToast();
+  const [mapping, setMapping] = useState<{ datasetId: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null>(null);
+  const [activity, setActivity] = useState<any[] | null>(null);
+
+  const loadAll = useCallback(() => {
+    void api<any>("/integrations/meta/event-mapping").then(setMapping).catch(() => setMapping(null));
+    void api<any[]>("/integrations/activity?provider=capi&take=12").then(setActivity).catch(() => setActivity([]));
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+        <h2 className="mb-1 font-semibold">Reglas del embudo (etapa → evento de Meta)</h2>
+        <p className="mb-4 text-[13px] text-ink-muted">
+          Cada cambio de etapa del CRM envía un evento al conjunto de datos con el <code className="text-xs">lead_id</code>{" "}
+          del formulario — es lo que alimenta la optimización de «clientes potenciales de conversión» en tus campañas.
+        </p>
+        {mapping === null ? <Skeleton className="h-48" /> : <EventMappingEditor initial={mapping} onSaved={loadAll} />}
+      </div>
+      <div className="space-y-4">
+        <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+          <h2 className="mb-2 font-semibold">Evento de prueba</h2>
+          <p className="mb-3 text-[13px] text-ink-muted">
+            Verifica la conexión con el dataset. Ojo: la pestaña «Probar eventos» del Events Manager no muestra eventos de
+            CRM — el resultado fiable es el «aceptados: 1» del registro de abajo (y el Resumen del dataset, con ≤30 min de retardo).
+          </p>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              try {
+                const r = await api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({}) });
+                toast.push(r.detail, "ok");
+              } catch (e: any) {
+                toast.push(e.message ?? "Error al enviar el evento", "error");
+              }
+              setTimeout(loadAll, 1500);
+            }}
+          >
+            <Send size={14} /> Enviar evento de prueba
+          </Button>
+        </div>
+        <div className="rounded-card border border-line bg-panel p-5 shadow-card">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="font-semibold">Registro de envíos</h2>
+            <button onClick={loadAll} className="rounded p-1 text-ink-subtle hover:bg-app" title="Actualizar">
+              <RefreshCw size={14} />
+            </button>
+          </div>
+          {activity === null ? (
+            <Skeleton className="h-24" />
+          ) : activity.length === 0 ? (
+            <p className="text-sm text-ink-subtle">Sin envíos todavía.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {activity.map((a) => (
+                <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-3 py-2 text-xs">
+                  <span className={a.status === "error" ? "text-red-600 dark:text-red-400" : "text-ink-muted"}>{a.message ?? a.type}</span>
+                  <span className="shrink-0 text-ink-subtle">{new Date(a.createdAt).toLocaleString("es-CL")}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
