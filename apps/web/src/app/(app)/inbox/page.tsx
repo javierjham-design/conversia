@@ -375,7 +375,7 @@ export default function InboxPage() {
                   <div className="relative shrink-0">
                     {c.contact.avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.contact.avatarUrl} alt="" className="h-9 w-9 rounded-full border border-line object-cover" />
+                      <img referrerPolicy="no-referrer" src={c.contact.avatarUrl} alt="" className="h-9 w-9 rounded-full border border-line object-cover" />
                     ) : (
                       <div className={cn("flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold", avatarColor(c.contact))}>
                         {initials(c.contact).toUpperCase()}

@@ -501,7 +501,7 @@ export default function ChannelsPage() {
                   // con el badge de la red en la esquina.
                   <div className="relative shrink-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={c.pictureUrl} alt={c.name} className="h-10 w-10 rounded-xl border border-line object-cover" />
+                    <img referrerPolicy="no-referrer" src={c.pictureUrl} alt={c.name} className="h-10 w-10 rounded-xl border border-line object-cover" />
                     <span
                       className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-panel ${
                         c.type === "MESSENGER"
