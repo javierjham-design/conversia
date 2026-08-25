@@ -154,7 +154,7 @@ export class ConversationsController {
         where,
         include: {
           contact: {
-            select: { id: true, firstName: true, lastName: true, profileName: true, phone: true, country: true, blocked: true, ctwaClid: true, adId: true },
+            select: { id: true, firstName: true, lastName: true, profileName: true, phone: true, country: true, blocked: true, ctwaClid: true, adId: true, attributes: true },
           },
         },
         orderBy,
@@ -198,7 +198,8 @@ export class ConversationsController {
           lastMessagePreview: c.lastMessagePreview,
           lastMessageAt: c.lastMessageAt,
           stage: stageByContact.get(c.contactId) ?? null,
-          contact: c.contact,
+          // avatarUrl vive en attributes (lo puebla el enriquecimiento de perfil)
+          contact: (({ attributes, ...rest }) => ({ ...rest, avatarUrl: (attributes as Record<string, unknown> | null)?.avatarUrl ?? null }))(c.contact),
         })),
         nextCursor: hasMore ? page[page.length - 1]!.id : null,
       };
@@ -247,6 +248,7 @@ export class ConversationsController {
           blocked: contact.blocked,
           createdAt: contact.createdAt,
           isReturning: contact.isReturning,
+          avatarUrl: attributes.avatarUrl ?? null,
         },
         stage: lead ? { code: lead.status.code, name: lead.status.name, color: lead.status.color, emoji: lead.status.emoji, category: lead.status.category } : null,
         tags: tagRows.map((t) => t.name),
@@ -604,8 +606,9 @@ export class ConversationsController {
       if (conversation.unreadCount > 0) {
         await tx.conversation.update({ where: { id }, data: { unreadCount: 0 } });
       }
+      const contactAttrs = (conversation.contact.attributes as Record<string, unknown> | null) ?? {};
       return {
-        conversation,
+        conversation: { ...conversation, contact: { ...conversation.contact, avatarUrl: contactAttrs.avatarUrl ?? null } },
         messages: messages.map((m) => ({ ...m, authorName: m.authorUserId ? (authors.get(m.authorUserId) ?? null) : null })),
       };
     });

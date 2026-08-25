@@ -70,9 +70,14 @@ export function ContactPanel({
         {/* Datos básicos */}
         <div>
           <div className="flex items-center gap-2.5">
-            <div className={cn("flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold", avatarColor(c))}>
-              {initials(c).toUpperCase()}
-            </div>
+            {c.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={c.avatarUrl} alt="" className="h-11 w-11 rounded-full border border-line object-cover" />
+            ) : (
+              <div className={cn("flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold", avatarColor(c))}>
+                {initials(c).toUpperCase()}
+              </div>
+            )}
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-ink">{displayName(c)}</p>
               <p className="truncate text-xs text-ink-subtle tnum">

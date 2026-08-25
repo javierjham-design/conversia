@@ -40,6 +40,38 @@ async function enrichContactName(
   try {
     const token = await pageToken(organizationId, pageId);
     const v = getEnv().META_GRAPH_VERSION;
+
+    // Foto de perfil (best-effort): el edge /picture del PSID/IGSID es distinto
+    // al perfil directo y suele responder incluso en acceso estándar. Si el
+    // cliente oculta su foto por privacidad, Meta devuelve una silueta y no
+    // guardamos nada (quedan las iniciales).
+    let avatarUrl: string | null = null;
+    try {
+      const pic = await fetchGraphWithProof(
+        `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}/picture?redirect=false&width=240&height=240&access_token=${encodeURIComponent(token)}`,
+        token,
+      );
+      const pjson: any = await pic.json().catch(() => ({}));
+      if (pic.ok && pjson?.data?.url && !pjson?.data?.is_silhouette) avatarUrl = String(pjson.data.url);
+    } catch {
+      /* sin foto */
+    }
+
+    // Guarda nombre y/o foto en una sola pasada (avatarTriedAt evita reintentar
+    // la foto en cada mensaje cuando Meta la niega).
+    const saveProfile = (name: string | null, first?: string | null, last?: string | null) =>
+      withTenant(organizationId, async (tx) => {
+        const c = await tx.contact.findUnique({ where: { id: contactId }, select: { firstName: true, attributes: true } });
+        const attrs = (c?.attributes as Record<string, unknown>) ?? {};
+        await tx.contact.update({
+          where: { id: contactId },
+          data: {
+            ...(name ? { profileName: name, ...(c?.firstName ? {} : { firstName: first ?? null, lastName: last ?? null }) } : {}),
+            attributes: { ...attrs, ...(avatarUrl ? { avatarUrl } : {}), avatarTriedAt: new Date().toISOString() } as object,
+          },
+        });
+      });
+
     const fields = e.platform === "messenger" ? "first_name,last_name" : "name,username";
     const res = await fetchGraphWithProof(
       `https://graph.facebook.com/${v}/${encodeURIComponent(e.senderId)}?fields=${fields}&access_token=${encodeURIComponent(token)}`,
@@ -75,6 +107,7 @@ async function enrichContactName(
           console.warn(
             `⚠ Perfil de ${e.platform} ${e.senderId} no disponible · directo: ${json?.error?.message ?? res.status} · participants: ${cjson?.error?.message ?? (p ? "sin nombre" : "sin match")} · messages.from: ${mjson?.error?.message ?? "sin nombre"}`,
           );
+          await saveProfile(null); // conserva la foto si al menos eso se obtuvo
           return;
         }
         json = { name: from.name ?? null, username: from.username ?? null };
@@ -82,16 +115,13 @@ async function enrichContactName(
     }
     const name: string | null =
       [json.first_name, json.last_name].filter(Boolean).join(" ") || json.name || json.username || null;
-    if (!name) return;
+    if (!name) {
+      await saveProfile(null);
+      return;
+    }
     const first = json.first_name ?? String(name).split(" ")[0];
     const last = json.last_name ?? (String(name).split(" ").slice(1).join(" ") || null);
-    await withTenant(organizationId, async (tx) => {
-      const c = await tx.contact.findUnique({ where: { id: contactId }, select: { firstName: true } });
-      await tx.contact.update({
-        where: { id: contactId },
-        data: { profileName: name, ...(c?.firstName ? {} : { firstName: first, lastName: last }) },
-      });
-    });
+    await saveProfile(name, first, last);
   } catch (err) {
     console.warn(`⚠ Enriquecimiento de perfil ${e.platform} falló: ${(err as Error).message}`);
   }
@@ -185,13 +215,20 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       started,
       text: e.text ?? "",
       needsName: !contact.firstName && !contact.profileName,
+      // Foto de perfil: reintenta como máximo una vez cada 24 h por contacto
+      needsAvatar: (() => {
+        const attrs = (contact.attributes as Record<string, any>) ?? {};
+        if (attrs.avatarUrl) return false;
+        const tried = attrs.avatarTriedAt ? new Date(String(attrs.avatarTriedAt)).getTime() : 0;
+        return Date.now() - tried > 24 * 3_600_000;
+      })(),
       pageId: String((channel.config as any)?.pageId ?? e.channelExternalId),
     };
   });
 
   if (!result) return; // duplicado
 
-  if (result.needsName) await enrichContactName(organizationId, result.contactId, e, result.pageId);
+  if (result.needsName || result.needsAvatar) await enrichContactName(organizationId, result.contactId, e, result.pageId);
 
   await cancelTimersOnReply(organizationId, result.conversationId);
 
