@@ -14,7 +14,7 @@ import { EventMappingEditor, FieldMappingEditor } from "../meta/panels";
 interface CrmStatus {
   connection: { status: string; mode: string; businessName: string | null; scopes: string[]; lastError: string | null } | null;
   pages: Array<{ externalId: string; name: string; enabled: boolean }>;
-  forms: Array<{ externalId: string; name: string }>;
+  forms: Array<{ externalId: string; name: string; pageId?: string | null }>;
   mappingActive: boolean;
   datasetReady: boolean;
 }
@@ -186,7 +186,7 @@ export default function MetaCrmPage() {
 
               {/* Páginas */}
               <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-                <PagesPanel enabled={connected} onConnected={() => void load()} />
+                <PagesPanel enabled={connected} onConnected={() => void load()} forms={data.forms} />
               </div>
             </div>
 
@@ -435,7 +435,18 @@ function MessagingTab({ data, onConnect, onChanged }: { data: CrmStatus; onConne
 
 // ------------------------- Páginas conectadas -------------------------
 
-function PagesPanel({ enabled, onConnected, messaging }: { enabled: boolean; onConnected: () => void; messaging?: boolean }) {
+function PagesPanel({
+  enabled,
+  onConnected,
+  messaging,
+  forms = [],
+}: {
+  enabled: boolean;
+  onConnected: () => void;
+  messaging?: boolean;
+  /** formularios registrados (con la página a la que pertenecen) para listarlos bajo cada página */
+  forms?: Array<{ externalId: string; name: string; pageId?: string | null }>;
+}) {
   const toast = useToast();
   const [pages, setPages] = useState<GraphPage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -523,8 +534,12 @@ function PagesPanel({ enabled, onConnected, messaging }: { enabled: boolean; onC
         </p>
       ) : (
         <div className="space-y-2">
-          {pages.map((p) => (
-            <div key={p.id} className="flex items-center justify-between rounded-xl border border-line p-3">
+          {pages.map((p) => {
+            // Formularios de ESTA página (los antiguos sin pageId se muestran si hay una sola página)
+            const pageForms = forms.filter((f) => f.pageId === p.id || (!f.pageId && pages.length === 1));
+            return (
+            <div key={p.id} className="rounded-xl border border-line p-3">
+            <div className="flex items-center justify-between">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{p.name}</p>
                 <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
@@ -546,7 +561,24 @@ function PagesPanel({ enabled, onConnected, messaging }: { enabled: boolean; onC
                 )}
               </div>
             </div>
-          ))}
+            {/* Formularios de la página — visibles para operar (y para el screencast de App Review) */}
+            {!messaging && p.connected && pageForms.length > 0 && (
+              <details className="mt-2 rounded-lg bg-app px-3 py-2">
+                <summary className="cursor-pointer select-none text-xs font-medium text-ink-muted">
+                  📋 {pageForms.length} formulario(s) de clientes potenciales de esta página
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {pageForms.map((f) => (
+                    <li key={f.externalId} className="flex items-center justify-between gap-2 rounded border border-line bg-panel px-2.5 py-1.5 text-xs">
+                      <span className="truncate font-medium text-ink">{f.name}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-ink-subtle">{f.externalId}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            </div>
+          );})}
           {diag && (
             <div className="rounded-xl border border-line bg-app p-3">
               <p className="mb-2 text-xs font-medium text-ink-muted">Diagnóstico de mensajería (página {diag.pageId})</p>
