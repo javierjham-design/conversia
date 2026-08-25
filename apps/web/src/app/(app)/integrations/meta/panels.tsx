@@ -1,7 +1,7 @@
 "use client";
 
 /** Wizard de conexión Meta + editores de mapeo (Lead Ads y Conversions API). */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, FlaskConical, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
@@ -429,19 +429,11 @@ export function FieldMappingEditor({
 
 // ---------------------- Editor de eventos CAPI ----------------------
 
-const CAPI_SOURCES = [
-  "lead.created",
-  "lead.status_changed:contactado",
-  "lead.status_changed:calificando",
-  "lead.status_changed:hot_lead",
-  "lead.status_changed:agenda",
-  "lead.status_changed:confirmado",
-  "lead.status_changed:en_tratamiento",
-  "lead.status_changed:ganado",
-  "lead.status_changed:perdido",
-  "appointment.created",
-];
-const CAPI_DESTS = ["Lead", "Contact", "Schedule", "SubmitApplication", "CompleteRegistration", "Purchase"];
+// Los eventos de etapa se arman con las etapas REALES del ciclo de vida del
+// tenant (antes era una lista fija de la plantilla dental y las reglas jamás
+// coincidían con los eventos emitidos).
+const CAPI_BASE_SOURCES = ["lead.created", "appointment.created"];
+const CAPI_DESTS = ["Lead", "QualifiedLead", "Contact", "Schedule", "StartTrial", "SubmitApplication", "CompleteRegistration", "Purchase"];
 
 export function EventMappingEditor({
   initial,
@@ -458,6 +450,19 @@ export function EventMappingEditor({
     (initial?.rules as any[]) ?? [{ source: "lead.created", dest: "Lead", active: true }],
   );
   const [busy, setBusy] = useState(false);
+  const [stages, setStages] = useState<{ code: string; name: string }[]>([]);
+
+  useEffect(() => {
+    api<{ code: string; name: string }[]>("/lifecycle-stages")
+      .then((rows) => setStages(rows.map((s) => ({ code: s.code, name: s.name }))))
+      .catch(() => setStages([]));
+  }, []);
+
+  const sourceOptions: { value: string; label: string }[] = [
+    { value: "lead.created", label: "lead.created — lead nuevo" },
+    ...stages.map((s) => ({ value: `lead.status_changed:${s.code}`, label: `etapa → ${s.name}` })),
+    { value: "appointment.created", label: "appointment.created — cita creada" },
+  ];
 
   async function save() {
     setBusy(true);
@@ -498,8 +503,11 @@ export function EventMappingEditor({
                 onChange={(e) => setRules((r) => r.map((x, idx) => (idx === i ? { ...x, source: e.target.value } : x)))}
                 className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 font-mono text-xs"
               >
-                {[...new Set([rule.source, ...CAPI_SOURCES])].map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                {(sourceOptions.some((o) => o.value === rule.source)
+                  ? sourceOptions
+                  : [{ value: rule.source, label: rule.source }, ...sourceOptions]
+                ).map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
               <ChevronRight size={14} className="text-ink-subtle" aria-hidden />
@@ -537,7 +545,7 @@ export function EventMappingEditor({
             </div>
           ))}
         </div>
-        <Button variant="ghost" className="mt-2" onClick={() => setRules((r) => [...r, { source: "lead.status_changed:agenda", dest: "Schedule", active: true }])}>
+        <Button variant="ghost" className="mt-2" onClick={() => setRules((r) => [...r, { source: stages[0] ? `lead.status_changed:${stages[0].code}` : "lead.created", dest: "Lead", active: true }])}>
           <Plus size={14} /> Agregar regla
         </Button>
         <p className="mt-1 text-xs text-ink-subtle">
