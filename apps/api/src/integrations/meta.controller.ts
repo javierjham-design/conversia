@@ -35,6 +35,9 @@ const eventMappingSchema = z.object({
   datasetId: z.string().nullable().optional(),
   /** dataset EXCLUSIVO del CRM (embudo lead.*); null = usa datasetId */
   crmDatasetId: z.string().nullable().optional(),
+  /** token del dataset del CRM (write-only: se cifra y JAMÁS se devuelve);
+   *  string = rotar, null = quitar, undefined = mantener */
+  crmDatasetToken: z.string().nullable().optional(),
   testEventCode: z.string().nullable().optional(),
   active: z.boolean().default(false),
   rules: z
@@ -459,10 +462,11 @@ export class MetaController {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const row = await tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } });
-      return (
-        row ?? {
+      if (!row) {
+        return {
           datasetId: null,
           crmDatasetId: null,
+          hasCrmDatasetToken: false,
           testEventCode: null,
           active: false,
           rules: [
@@ -470,8 +474,11 @@ export class MetaController {
             { source: "lead.status_changed:schedule", dest: "Schedule", active: true },
             { source: "appointment.created", dest: "Schedule", active: false },
           ],
-        }
-      );
+        };
+      }
+      // El token JAMÁS vuelve al navegador — solo el hecho de que existe.
+      const { crmDatasetCredentialId, ...rest } = row;
+      return { ...rest, hasCrmDatasetToken: Boolean(crmDatasetCredentialId) };
     });
   }
 
@@ -479,8 +486,24 @@ export class MetaController {
   putEventMapping(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
     const input = parse(eventMappingSchema, body);
-    return this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.metaEventMapping.upsert({
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // Token del dataset del CRM: cifrado en integration_credentials.
+      // undefined = mantener el actual; string = rotar; null = quitar.
+      const credPatch: { crmDatasetCredentialId?: string | null } = {};
+      if (typeof input.crmDatasetToken === "string" && input.crmDatasetToken.trim()) {
+        const credential = await tx.integrationCredential.create({
+          data: {
+            organizationId: ctx.organizationId,
+            provider: "meta",
+            label: "Token del dataset del CRM (Conversions API)",
+            ciphertext: encryptSecret(input.crmDatasetToken.trim()),
+          },
+        });
+        credPatch.crmDatasetCredentialId = credential.id;
+      } else if (input.crmDatasetToken === null) {
+        credPatch.crmDatasetCredentialId = null;
+      }
+      const row = await tx.metaEventMapping.upsert({
         where: { organizationId: ctx.organizationId },
         update: {
           datasetId: input.datasetId ?? null,
@@ -488,6 +511,7 @@ export class MetaController {
           testEventCode: input.testEventCode ?? null,
           rules: input.rules,
           active: input.active,
+          ...credPatch,
         },
         create: {
           organizationId: ctx.organizationId,
@@ -496,9 +520,12 @@ export class MetaController {
           testEventCode: input.testEventCode ?? null,
           rules: input.rules,
           active: input.active,
+          crmDatasetCredentialId: credPatch.crmDatasetCredentialId ?? null,
         },
-      }),
-    );
+      });
+      const { crmDatasetCredentialId, ...rest } = row;
+      return { ...rest, hasCrmDatasetToken: Boolean(crmDatasetCredentialId) };
+    });
   }
 
   /**

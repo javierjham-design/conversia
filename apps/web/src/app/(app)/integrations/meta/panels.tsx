@@ -439,12 +439,13 @@ export function EventMappingEditor({
   initial,
   onSaved,
 }: {
-  initial: { datasetId: string | null; crmDatasetId?: string | null; testEventCode: string | null; rules: any[]; active: boolean } | null;
+  initial: { datasetId: string | null; crmDatasetId?: string | null; hasCrmDatasetToken?: boolean; testEventCode: string | null; rules: any[]; active: boolean } | null;
   onSaved: () => void;
 }) {
   const toast = useToast();
   const [datasetId, setDatasetId] = useState(initial?.datasetId ?? "");
   const [crmDatasetId, setCrmDatasetId] = useState(initial?.crmDatasetId ?? "");
+  const [crmDatasetToken, setCrmDatasetToken] = useState("");
   const [testEventCode, setTestEventCode] = useState(initial?.testEventCode ?? "");
   const [active, setActive] = useState(initial?.active ?? false);
   const [rules, setRules] = useState<Array<{ source: string; dest: string; value?: number | null; currency?: string | null; active: boolean }>>(
@@ -470,8 +471,17 @@ export function EventMappingEditor({
     try {
       await api("/integrations/meta/event-mapping", {
         method: "PUT",
-        body: JSON.stringify({ datasetId: datasetId || null, crmDatasetId: crmDatasetId || null, testEventCode: testEventCode || null, rules, active }),
+        body: JSON.stringify({
+          datasetId: datasetId || null,
+          crmDatasetId: crmDatasetId || null,
+          // solo se envía si el usuario pegó uno nuevo (rota el anterior)
+          ...(crmDatasetToken.trim() ? { crmDatasetToken: crmDatasetToken.trim() } : {}),
+          testEventCode: testEventCode || null,
+          rules,
+          active,
+        }),
       });
+      setCrmDatasetToken("");
       toast.push("Reglas de conversiones guardadas", "ok");
       onSaved();
     } catch (err) {
@@ -496,6 +506,20 @@ export function EventMappingEditor({
           <input value={datasetId} onChange={(e) => setDatasetId(e.target.value)} placeholder="123456789012345" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
           <span className="mt-0.5 block text-[11px] font-normal text-ink-subtle">
             Citas, envíos manuales y workflows. Puede ser el mismo del CRM si el cliente lo prefiere.
+          </span>
+        </label>
+        <label className="block text-sm font-medium">
+          Token del dataset del CRM {initial?.hasCrmDatasetToken ? <span className="ml-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">guardado ●●●●</span> : <span className="ml-1 text-[10px] font-normal text-ink-subtle">(recomendado)</span>}
+          <input
+            type="password"
+            value={crmDatasetToken}
+            onChange={(e) => setCrmDatasetToken(e.target.value)}
+            placeholder={initial?.hasCrmDatasetToken ? "pegar uno nuevo lo rota" : "EAAB… (se guarda cifrado)"}
+            className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-xs"
+          />
+          <span className="mt-0.5 block text-[11px] font-normal text-ink-subtle">
+            Lo genera el asistente del dataset en Events Manager («Crear punto de conexión» → Copiar token de acceso).
+            Es el token que Meta espera para los eventos del embudo del CRM. Jamás vuelve al navegador.
           </span>
         </label>
         <label className="block text-sm font-medium">

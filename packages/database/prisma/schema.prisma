@@ -1678,6 +1678,9 @@ model MetaEventMapping {
   datasetId      String?  @map("dataset_id")
   /** dataset EXCLUSIVO del CRM (embudo lead.*); null = usa datasetId (mismo dataset) */
   crmDatasetId   String?  @map("crm_dataset_id")
+  /** token de acceso PROPIO del dataset del CRM (el que genera el asistente de
+   *  Events Manager en «Crear punto de conexión»), cifrado en integration_credentials */
+  crmDatasetCredentialId String? @map("crm_dataset_credential_id")
   testEventCode  String?  @map("test_event_code")
   rules          Json     @default("[]") // [{source, dest, value, currency, active, dedup}]
   active         Boolean  @default(false)
