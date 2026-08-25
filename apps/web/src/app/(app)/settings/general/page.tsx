@@ -49,7 +49,6 @@ const CURRENCIES = [
   ["EUR", "EUR — Euro"],
 ] as const;
 
-const INDUSTRIES = ["Clínica dental", "Clínica médica", "Estética y belleza", "Educación", "Inmobiliaria", "Retail / e-commerce", "Servicios profesionales", "Otro"];
 
 export default function GeneralSettingsPage() {
   const toast = useToast();
@@ -117,15 +116,14 @@ export default function GeneralSettingsPage() {
             <span className="text-xs text-ink-muted">Nombre del negocio</span>
             <input value={data.name} onChange={(e) => set({ name: e.target.value })} className={input} />
           </label>
-          <label className="block text-sm">
+          <div className="block text-sm">
             <span className="text-xs text-ink-muted">Rubro</span>
-            <Select value={data.industry} onChange={(e) => set({ industry: e.target.value })} className="mt-1 w-full">
-              <option value="">— elegir —</option>
-              {INDUSTRIES.map((i) => (
-                <option key={i} value={i}>{i}</option>
-              ))}
-            </Select>
-          </label>
+            <div className="mt-1 flex h-[38px] items-center gap-2 rounded-control border border-line bg-app px-3">
+              <span className="flex-1 truncate text-ink">{data.industry || "Sin definir"}</span>
+              <a href="/settings/personalization" className="shrink-0 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">Cambiar</a>
+            </div>
+            <p className="mt-1 text-[11px] text-ink-subtle">Se define en «Rubro y personalización».</p>
+          </div>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Zona horaria</span>
             <Select value={data.timezone} onChange={(e) => set({ timezone: e.target.value })} className="mt-1 w-full">
