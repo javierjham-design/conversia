@@ -96,13 +96,14 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   // Identidad con el máximo de señales: ph+em hasheados y, si el contacto vino
   // de un formulario de Lead Ads, lead_id (integración CRM → system_generated).
   const identity = await resolveIdentity(job);
-  const actionSource = actionSourceFor(identity);
-  // Integración de CRM (Conversion Leads): Meta exige event_source="crm" +
-  // lead_event_source en custom_data para los eventos de etapas del funnel
-  // (los que llevan lead_id de Lead Ads y van como system_generated).
+  // Integración de CRM (Conversion Leads): la guía del punto de conexión exige
+  // action_source SIEMPRE "system_generated" + custom_data.event_source="crm" +
+  // lead_event_source para TODOS los eventos del embudo (con o sin lead_id).
+  // Los eventos no-CRM (citas, envíos manuales) mantienen su action_source real.
+  const actionSource = isCrmEvent ? "system_generated" : actionSourceFor(identity);
   const customData: Record<string, unknown> = {
     ...(value ? { value, currency } : {}),
-    ...(actionSource === "system_generated" ? { event_source: "crm", lead_event_source: "TuBot CRM" } : {}),
+    ...(isCrmEvent || actionSource === "system_generated" ? { event_source: "crm", lead_event_source: "TuBot CRM" } : {}),
   };
   const eventPayload: Record<string, unknown> = {
     event_name: eventName,
