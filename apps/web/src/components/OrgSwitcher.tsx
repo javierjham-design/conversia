@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Building2, Check, ChevronsUpDown } from "lucide-react";
 import { api, setToken } from "@/lib/api";
+import { roleLabel } from "@/lib/labels";
 
 interface Org {
   id: string;
@@ -92,7 +93,7 @@ export function OrgSwitcher({ currentName }: { currentName?: string | null }) {
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-white">{o.name}</span>
-                  <span className="block text-[10px] uppercase tracking-wide text-navy-400">{o.roleCode}</span>
+                  <span className="block text-[10px] uppercase tracking-wide text-navy-400">{roleLabel(o.roleCode)}</span>
                 </span>
                 {o.id === current ? (
                   <Check size={14} className="shrink-0 text-accent-400" />
