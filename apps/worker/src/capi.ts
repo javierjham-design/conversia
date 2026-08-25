@@ -1,5 +1,6 @@
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
+import { decryptCredential } from "./credentials";
 import { resolveMetaCapiToken } from "./meta-token";
 import { actionSourceFor, buildUserData, type CapiIdentity } from "./capi-payload";
 import type { CapiJob } from "@conversia/types";
@@ -38,7 +39,12 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     const rules = (mapping.rules as any[]) ?? [];
     const rule = rules.find((r) => r?.active && r?.source === source);
     const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId } });
-    return { mapping, rule, mode: connection?.mode ?? null };
+    // Token PROPIO del dataset del CRM (asistente de Events Manager) — si
+    // existe, es el que Meta espera para el punto de conexión del CRM.
+    const datasetCred = mapping.crmDatasetCredentialId
+      ? await tx.integrationCredential.findUnique({ where: { id: mapping.crmDatasetCredentialId } })
+      : null;
+    return { mapping, rule, mode: connection?.mode ?? null, datasetCredCiphertext: datasetCred?.ciphertext ?? null };
   });
   // Token: prefiere la conexión Meta GENERAL (permisos del dataset); cae a CRM/env.
   const token = (await resolveMetaCapiToken(organizationId)) ?? "";
@@ -69,6 +75,10 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     await log("error", "Falta configurar el dataset de conversiones");
     return;
   }
+  // Eventos del CRM con token PROPIO del dataset (si el tenant lo cargó): es el
+  // que Meta genera para el punto de conexión, y NO lleva appsecret_proof
+  // (no pertenece a nuestras apps).
+  const datasetToken = isCrmEvent && config.datasetCredCiphertext ? decryptCredential(config.datasetCredCiphertext) : null;
   if (config.mode === "MOCK") {
     await log("ok", `[SIMULADO] ${source} → ${eventName} (conexión de desarrollo, no se envió a Meta)`, {
       simulated: true,
@@ -76,8 +86,8 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     });
     return;
   }
-  if (!token) {
-    await log("error", "Sin access token de Meta: conecta Meta CRM (o Meta) o define META_ACCESS_TOKEN");
+  if (!token && !datasetToken) {
+    await log("error", "Sin access token de Meta: carga el token del dataset del CRM o conecta Meta");
     return;
   }
 
@@ -86,13 +96,14 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   // Identidad con el máximo de señales: ph+em hasheados y, si el contacto vino
   // de un formulario de Lead Ads, lead_id (integración CRM → system_generated).
   const identity = await resolveIdentity(job);
-  const actionSource = actionSourceFor(identity);
-  // Integración de CRM (Conversion Leads): Meta exige event_source="crm" +
-  // lead_event_source en custom_data para los eventos de etapas del funnel
-  // (los que llevan lead_id de Lead Ads y van como system_generated).
+  // Integración de CRM (Conversion Leads): la guía del punto de conexión exige
+  // action_source SIEMPRE "system_generated" + custom_data.event_source="crm" +
+  // lead_event_source para TODOS los eventos del embudo (con o sin lead_id).
+  // Los eventos no-CRM (citas, envíos manuales) mantienen su action_source real.
+  const actionSource = isCrmEvent ? "system_generated" : actionSourceFor(identity);
   const customData: Record<string, unknown> = {
     ...(value ? { value, currency } : {}),
-    ...(actionSource === "system_generated" ? { event_source: "crm", lead_event_source: "TuBot CRM" } : {}),
+    ...(isCrmEvent || actionSource === "system_generated" ? { event_source: "crm", lead_event_source: "TuBot CRM" } : {}),
   };
   const eventPayload: Record<string, unknown> = {
     event_name: eventName,
@@ -106,12 +117,12 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
   if (job.test && config.mapping.testEventCode) body.test_event_code = config.mapping.testEventCode;
 
   try {
-    // fallback de appsecret_proof: el token puede ser de la app TuBot CRM
-    const res = await fetchGraphWithProof(
-      `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${datasetId}/events?access_token=${encodeURIComponent(token)}`,
-      token,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
-    );
+    const url = (t: string) => `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${datasetId}/events?access_token=${encodeURIComponent(t)}`;
+    // Con token de dataset: fetch plano (sin appsecret_proof). Sin él: token
+    // general con fallback de proof entre nuestras apps.
+    const res = datasetToken
+      ? await fetch(url(datasetToken), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      : await fetchGraphWithProof(url(token), token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const json: any = await res.json().catch(() => ({}));
     if (!res.ok) {
       await log("error", `Meta rechazó el evento: ${json?.error?.message ?? res.status}`, { dest: eventName });
