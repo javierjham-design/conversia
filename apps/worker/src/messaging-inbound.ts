@@ -58,11 +58,27 @@ async function enrichContactName(
       const cjson: any = await conv.json().catch(() => ({}));
       const parts: any[] = cjson?.data?.[0]?.participants?.data ?? [];
       const p = parts.find((x) => String(x?.id ?? "") === e.senderId);
-      if (!conv.ok || !p) {
-        console.warn(`⚠ Perfil de ${e.platform} ${e.senderId} no disponible: ${json?.error?.message ?? res.status}`);
-        return;
+      if (conv.ok && p && (p.name || p.username)) {
+        json = { name: p.name ?? p.username ?? null, username: p.username ?? null };
+      } else {
+        // 3er intento: los participants a veces vienen SIN nombre (visto con
+        // remitentes reales de Messenger). El "from" de los mensajes de la
+        // misma conversación sí lo trae.
+        const msgs = await fetchGraphWithProof(
+          `https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/conversations?user_id=${encodeURIComponent(e.senderId)}&fields=messages.limit(5){from}${platformParam}&access_token=${encodeURIComponent(token)}`,
+          token,
+        );
+        const mjson: any = await msgs.json().catch(() => ({}));
+        const arr: any[] = mjson?.data?.[0]?.messages?.data ?? [];
+        const from = arr.map((m) => m?.from).find((f) => String(f?.id ?? "") === e.senderId);
+        if (!msgs.ok || !from || !(from.name || from.username)) {
+          console.warn(
+            `⚠ Perfil de ${e.platform} ${e.senderId} no disponible · directo: ${json?.error?.message ?? res.status} · participants: ${cjson?.error?.message ?? (p ? "sin nombre" : "sin match")} · messages.from: ${mjson?.error?.message ?? "sin nombre"}`,
+          );
+          return;
+        }
+        json = { name: from.name ?? null, username: from.username ?? null };
       }
-      json = { name: p.name ?? p.username ?? null, username: p.username ?? null };
     }
     const name: string | null =
       [json.first_name, json.last_name].filter(Boolean).join(" ") || json.name || json.username || null;
