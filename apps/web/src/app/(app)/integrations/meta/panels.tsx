@@ -2,7 +2,7 @@
 
 /** Wizard de conexión Meta + editores de mapeo (Lead Ads y Conversions API). */
 import { useEffect, useState } from "react";
-import { CheckCircle2, ChevronRight, Circle, FlaskConical, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, FlaskConical, Plus, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Checkbox, Modal, Select, StatusBadge, cn, useToast } from "@/components/ui";
 import type { MetaOverview } from "./page";
@@ -450,13 +450,31 @@ export function EventMappingEditor({
     (initial?.rules as any[]) ?? [{ source: "lead.created", dest: "Lead", active: true }],
   );
   const [busy, setBusy] = useState(false);
-  const [stages, setStages] = useState<{ code: string; name: string }[]>([]);
+  const [stages, setStages] = useState<{ code: string; name: string; category: string; active: boolean }[]>([]);
 
   useEffect(() => {
-    api<{ code: string; name: string }[]>("/lifecycle-stages")
-      .then((rows) => setStages(rows.map((s) => ({ code: s.code, name: s.name }))))
+    api<{ code: string; name: string; category: string; active: boolean; order: number }[]>("/lifecycle-stages")
+      .then((rows) => setStages(rows.map((s) => ({ code: s.code, name: s.name, category: s.category, active: s.active }))))
       .catch(() => setStages([]));
   }, []);
+
+  /**
+   * Genera el embudo automáticamente desde las etapas reales del CRM
+   * (Configuración → Etapas): lead nuevo → Lead, cada etapa abierta →
+   * QualifiedLead, etapa Ganada → Purchase. Las etapas Perdida/Congelada no
+   * generan evento de conversión. El usuario puede afinar cada destino después.
+   */
+  function generarEmbudo() {
+    const nuevas: Array<{ source: string; dest: string; value?: number | null; currency?: string | null; active: boolean }> = [
+      { source: "lead.created", dest: "Lead", active: true },
+    ];
+    for (const s of stages) {
+      if (!s.active || s.category === "LOST" || s.category === "FROZEN") continue;
+      nuevas.push({ source: `lead.status_changed:${s.code}`, dest: s.category === "WON" ? "Purchase" : "QualifiedLead", active: true });
+    }
+    setRules(nuevas);
+    toast.push("Embudo generado desde tus etapas — revisa y guarda", "ok");
+  }
 
   const sourceOptions: { value: string; label: string }[] = [
     { value: "lead.created", label: "lead.created — lead nuevo" },
@@ -527,7 +545,12 @@ export function EventMappingEditor({
       </div>
 
       <div>
-        <p className="mb-2 text-sm font-medium">Evento de TuBot → Evento de Meta</p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm font-medium">Evento de TuBot → Evento de Meta</p>
+          <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={generarEmbudo} disabled={stages.length === 0} title="Crea una regla por cada etapa de tu CRM (Ganada → Purchase)">
+            <Sparkles size={13} /> Generar embudo desde mis etapas
+          </Button>
+        </div>
         <div className="space-y-2">
           {rules.map((rule, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-2">
