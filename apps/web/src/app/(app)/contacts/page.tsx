@@ -8,6 +8,7 @@ import {
   Columns3,
   Contact2,
   Filter,
+  KanbanSquare,
   Plus,
   Search,
   Download,
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { Button, ConfirmDialog, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { BoardView } from "./board-view";
 import { ContactDrawer } from "./contact-drawer";
 import { DuplicatesModal, ImportMessagesModal, ImportModal } from "./contact-import-merge";
 
@@ -116,7 +118,9 @@ function fmtDate(s: string | null): string {
 type ColKey =
   | "channel" | "stage" | "email" | "phone" | "tags" | "country" | "locale" | "conv" | "assigned" | "lastContactAt" | "createdAt";
 const COLUMNS: { key: ColKey; label: string; def: boolean }[] = [
-  { key: "channel", label: "Canal", def: true },
+  // "Origen" = de dónde llega la persona (WhatsApp, Instagram, Messenger,
+  // formulario…) — mismo nombre de columna que la vista Tablero (B1.1).
+  { key: "channel", label: "Origen", def: true },
   { key: "stage", label: "Etapa", def: true },
   { key: "phone", label: "Teléfono", def: true },
   { key: "email", label: "Email", def: true },
@@ -153,6 +157,10 @@ export default function ContactsPage() {
   const [data, setData] = useState<ListResp | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Vista del módulo: Tabla (contactos) o Tablero (kanban por etapa — ex /crm).
+  const [view, setView] = useState<"tabla" | "tablero">("tabla");
+  const [boardTotal, setBoardTotal] = useState<number | null>(null);
+
   // Filtro primario (sidebar) + secundarios (barra de filtros) + búsqueda.
   const [primary, setPrimary] = useState<Primary>({ kind: "all" });
   const [sec, setSec] = useState<{ tag?: string; channel?: string; country?: string; source?: string; campaign?: string; dateFrom?: string; dateTo?: string }>({});
@@ -182,6 +190,22 @@ export default function ContactsPage() {
   const userName = useMemo(() => new Map(meta?.users.map((u) => [u.id, u.name]) ?? []), [meta]);
 
   const secCount = Object.values(sec).filter(Boolean).length;
+
+  // Deep-links: ?vista=tablero abre el Tablero (así llega el menú CRM);
+  // ?open=<id> abre la ficha del contacto (antes este parámetro se ignoraba
+  // y los enlaces "ver ficha" de otras pantallas no abrían nada).
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("vista") === "tablero") setView("tablero");
+    else if (window.localStorage.getItem("personas.view") === "tablero") setView("tablero");
+    const open = p.get("open");
+    if (open) setOpenId(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  function switchView(v: "tabla" | "tablero") {
+    setView(v);
+    window.localStorage.setItem("personas.view", v);
+  }
 
   // Debounce de la búsqueda (300 ms) → resetea a la página 1.
   useEffect(() => {
@@ -396,6 +420,26 @@ export default function ContactsPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Barra de herramientas */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
+          {/* Vista única del módulo de personas: Tabla (contactos) | Tablero (etapas) */}
+          <div className="flex shrink-0 overflow-hidden rounded-lg border border-line-strong">
+            <button
+              onClick={() => switchView("tabla")}
+              className={cn("flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium", view === "tabla" ? "bg-brand-600 text-white" : "bg-panel text-ink-muted hover:bg-app")}
+              title="Vista tabla"
+            >
+              <Columns3 size={13} /> Tabla
+            </button>
+            <button
+              onClick={() => switchView("tablero")}
+              className={cn("flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium", view === "tablero" ? "bg-brand-600 text-white" : "bg-panel text-ink-muted hover:bg-app")}
+              title="Vista tablero por etapa"
+            >
+              <KanbanSquare size={13} /> Tablero
+            </button>
+          </div>
+          {view === "tablero" && boardTotal !== null && (
+            <span className="rounded-full bg-app px-2 py-0.5 text-xs tnum text-ink-subtle">{boardTotal.toLocaleString("es-CL")} en el embudo</span>
+          )}
           <div className="relative flex-1 min-w-[220px]">
             <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-subtle" />
             <input
@@ -519,7 +563,21 @@ export default function ContactsPage() {
           </div>
         )}
 
+        {/* Vista Tablero (kanban por etapa — ex /crm; misma búsqueda y sidebar) */}
+        {view === "tablero" && (
+          <div className="min-h-0 flex-1 overflow-auto px-3 pt-3">
+            <BoardView
+              q={q}
+              stage={primary.kind === "stage" ? (primary.value ?? "") : ""}
+              refreshKey={refreshKey}
+              onOpenContact={setOpenId}
+              onTotal={setBoardTotal}
+            />
+          </div>
+        )}
+
         {/* Tabla */}
+        {view === "tabla" && (
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-[1] bg-app text-left text-[12px] uppercase tracking-wide text-ink-muted">
@@ -536,7 +594,7 @@ export default function ContactsPage() {
                   />
                 </th>
                 <Th sortable active={sortBy === "firstName"} dir={sortDir} onSort={() => toggleSort("firstName")}>Contacto</Th>
-                {visibleCols.has("channel") && <Th>Canal</Th>}
+                {visibleCols.has("channel") && <Th>Origen</Th>}
                 {visibleCols.has("stage") && <Th>Etapa</Th>}
                 {visibleCols.has("phone") && <Th>Teléfono</Th>}
                 {visibleCols.has("email") && <Th>Email</Th>}
@@ -658,8 +716,10 @@ export default function ContactsPage() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Paginación */}
+        {/* Paginación (solo vista Tabla; el Tablero muestra su total en las columnas) */}
+        {view === "tabla" && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-panel px-4 py-2.5 text-sm text-ink-muted">
           <div className="flex items-center gap-2">
             <span>{total.toLocaleString("es-CL")} contactos</span>
@@ -682,6 +742,7 @@ export default function ContactsPage() {
             <Button variant="secondary" className="px-2.5 py-1" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Siguiente</Button>
           </div>
         </div>
+        )}
       </div>
 
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={() => { setAddOpen(false); loadMeta(); setPrimaryReset({ kind: "all" }); }} />
