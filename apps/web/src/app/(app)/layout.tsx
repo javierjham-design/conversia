@@ -257,8 +257,8 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/onboarding": ["Inicio", "Primeros pasos"],
   "/onboarding/plantillas": ["Inicio", "Primeros pasos", "Plantillas"],
   "/inbox": ["Operación", "Bandeja"],
-  "/contacts": ["Operación", "Contactos"],
-  "/crm": ["Operación", "CRM"],
+  "/contacts": ["Operación", "Clientes"],
+  "/crm": ["Operación", "Clientes"],
   "/agents": ["Automatización", "Agentes IA"],
   "/workflows": ["Automatización", "Flujos"],
   "/reports": ["Análisis", "Reportes"],
@@ -317,10 +317,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!ready) return null;
 
-  const crumbs =
+  const rawCrumbs =
     BREADCRUMBS[pathname] ??
     BREADCRUMBS[Object.keys(BREADCRUMBS).filter((k) => pathname.startsWith(k)).sort((a, b) => b.length - a.length)[0] ?? ""] ??
     [];
+  // El vocabulario del tenant es la fuente única: el breadcrumb usa el mismo
+  // término que el menú (B2 — «Clientes»/«Pacientes»/… según el rubro).
+  const crumbVocab = me?.personalization?.vocabulary as Record<string, string> | undefined;
+  const crumbs = rawCrumbs.map((c) => (c === "Clientes" && crumbVocab?.contacts ? crumbVocab.contacts : c));
 
   // Permisos del usuario para segmentar la navegación. null = aún cargando (muestra todo).
   const perms = me?.permissions ?? null;

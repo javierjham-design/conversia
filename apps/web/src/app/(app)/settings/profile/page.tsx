@@ -83,7 +83,7 @@ export default function ProfilePage() {
           <input value={name} onChange={(e) => setName(e.target.value)} className={input} />
         </label>
         <div className="mt-2 flex justify-end">
-          <Button onClick={() => void saveName()} disabled={busy || name.trim().length < 2 || name.trim() === me.user?.name}>Guardar nombre</Button>
+          <Button onClick={() => void saveName()} disabled={busy || name.trim().length < 2 || name.trim() === me.user?.name}>Guardar cambios</Button>
         </div>
       </div>
 

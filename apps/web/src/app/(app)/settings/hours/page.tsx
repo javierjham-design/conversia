@@ -139,7 +139,7 @@ export default function HoursSettingsPage() {
       </div>
 
       <div className="mt-4 flex justify-end">
-        <Button onClick={() => void save()} disabled={busy}>Guardar horario</Button>
+        <Button onClick={() => void save()} disabled={busy}>Guardar cambios</Button>
       </div>
     </div>
   );

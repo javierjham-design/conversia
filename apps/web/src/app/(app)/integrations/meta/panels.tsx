@@ -594,7 +594,7 @@ export function EventMappingEditor({
         Envío de conversiones activo
       </label>
 
-      <Button onClick={() => void save()} disabled={busy}>Guardar reglas</Button>
+      <Button onClick={() => void save()} disabled={busy}>Guardar cambios</Button>
     </div>
   );
 }

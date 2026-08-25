@@ -79,7 +79,7 @@ export default function AgentsPage() {
       )}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Agentes de IA</h1>
+          <h1 className="text-xl font-semibold">Agentes IA</h1>
           <p className="text-sm text-ink-muted">
             Cada agente tiene su propio prompt, modelo, herramientas y versiones — independientes entre sí.
           </p>
