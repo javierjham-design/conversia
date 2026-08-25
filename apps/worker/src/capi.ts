@@ -1,6 +1,6 @@
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
-import { resolveMetaLeadToken } from "./meta-token";
+import { resolveMetaCapiToken } from "./meta-token";
 import { actionSourceFor, buildUserData, type CapiIdentity } from "./capi-payload";
 import type { CapiJob } from "@conversia/types";
 
@@ -40,8 +40,8 @@ export async function processCapiJob(job: CapiJob): Promise<void> {
     const connection = await tx.metaBusinessConnection.findUnique({ where: { organizationId } });
     return { mapping, rule, mode: connection?.mode ?? null };
   });
-  // Token: prefiere la conexión Meta CRM (app separada); cae a la general/env.
-  const token = (await resolveMetaLeadToken(organizationId)) ?? "";
+  // Token: prefiere la conexión Meta GENERAL (permisos del dataset); cae a CRM/env.
+  const token = (await resolveMetaCapiToken(organizationId)) ?? "";
 
   const log = (status: string, message: string, payload: Record<string, unknown> = {}) =>
     withTenant(organizationId, (tx) =>
