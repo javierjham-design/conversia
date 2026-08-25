@@ -98,12 +98,12 @@ export default function LifecycleSettingsPage() {
       <GripVertical size={14} className="shrink-0 cursor-grab text-ink-subtle" />
       <span className="w-7 text-center text-base">{s.emoji ?? "•"}</span>
       <span className="min-w-0 flex-1">
-        <span className={cn("text-sm font-medium", !s.active && "line-through")} style={s.color ? { color: s.color } : {}}>{s.name}</span>
-        <span className="ml-2 font-mono text-[10px] text-ink-subtle">{s.code}</span>
+        {/* El slug es dato de desarrollador → tooltip, no fila (B3) */}
+        <span className={cn("text-sm font-medium", !s.active && "line-through")} style={s.color ? { color: s.color } : {}} title={`Clave interna: ${s.code}`}>{s.name}</span>
         {s.category === "WON" && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Conversión → CAPI</span>}
       </span>
       <span className="shrink-0 rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{CATEGORY_LABELS[s.category]}</span>
-      <span className="w-16 shrink-0 text-right text-[10px] text-ink-subtle">{s.leadsCount} lead(s)</span>
+      <span className="w-16 shrink-0 text-right text-[10px] text-ink-subtle">{s.leadsCount === 1 ? '1 lead' : `${s.leadsCount} leads`}</span>
       <button onClick={() => void toggleActive(s)} className="text-[11px] text-ink-subtle underline hover:text-ink-muted">
         {s.active ? "Desactivar" : "Activar"}
       </button>
@@ -271,7 +271,7 @@ function DeleteStageModal({
       {stage.leadsCount > 0 ? (
         <>
           <p className="text-sm text-ink-muted">
-            Esta etapa tiene <b>{stage.leadsCount} lead(s)</b>. Elige a qué etapa migrarlos antes de eliminarla:
+            Esta etapa tiene <b>{stage.leadsCount === 1 ? "1 lead" : `${stage.leadsCount} leads`}</b>. Elige a qué etapa migrarlos antes de eliminarla:
           </p>
           <select value={migrateTo} onChange={(e) => setMigrateTo(e.target.value)} className="mt-2 w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
             <option value="">— elegir etapa destino —</option>
