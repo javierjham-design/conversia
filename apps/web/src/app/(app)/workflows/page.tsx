@@ -25,16 +25,20 @@ interface WorkflowRow {
   publishedBy: string | null;
 }
 
+// Etiquetas de RESPALDO: la fuente real es el catálogo del editor
+// (/workflows/meta/catalog) que se carga al montar — así la lista y el editor
+// muestran SIEMPRE el mismo nombre para cada disparador (B3).
 const TRIGGER_LABELS: Record<string, string> = {
   conversation_started: "Conversación nueva",
-  message_received: "Cada mensaje",
+  message_received: "Mensaje recibido",
   keyword: "Palabra clave",
   lead_created: "Lead creado",
-  tag_added: "Etiqueta agregada",
-  manual: "Atajo manual",
+  tag_added: "Etiqueta añadida",
+  manual: "Disparo manual",
   webhook_received: "Webhook entrante",
   conversation_closed: "Conversación cerrada",
-  appointment_upcoming: "Cita próxima",
+  appointment_upcoming: "Recordatorio de cita",
+  missed_call: "Llamada perdida",
 };
 
 const ONBOARDING_KEY = "conversia.workflows.onboarded";
@@ -78,6 +82,7 @@ export default function WorkflowsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<WorkflowRow[] | null>(null);
   const [hasAgents, setHasAgents] = useState<boolean | null>(null);
+  const [triggerLabels, setTriggerLabels] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -103,6 +108,10 @@ export default function WorkflowsPage() {
     api<{ id: string; name: string }[]>("/agents/assignable")
       .then((a) => setHasAgents(a.length > 0))
       .catch(() => setHasAgents(null));
+    // Etiquetas de disparadores desde el MISMO catálogo del editor (fuente única)
+    api<{ triggers: { type: string; label: string }[] }>("/workflows/meta/catalog")
+      .then((c) => setTriggerLabels(Object.fromEntries(c.triggers.map((t) => [t.type, t.label]))))
+      .catch(() => setTriggerLabels({}));
   }, []);
 
   useEffect(() => {
@@ -208,6 +217,7 @@ export default function WorkflowsPage() {
             <WorkflowCard
               key={w.id}
               w={w}
+              triggerLabels={triggerLabels}
               onOpen={() => router.push(`/workflows/${w.id}`)}
               onRename={() => setRenameTarget(w)}
               onDuplicate={() => duplicate(w)}
@@ -342,8 +352,10 @@ function OnboardingModal({ open, onClose, onCreate }: { open: boolean; onClose: 
 }
 
 function WorkflowCard({
+  triggerLabels,
   w, onOpen, onRename, onDuplicate, onToggle, onDelete,
 }: {
+  triggerLabels: Record<string, string>;
   w: WorkflowRow;
   onOpen: () => void;
   onRename: () => void;
@@ -379,7 +391,7 @@ function WorkflowCard({
           </p>
         )}
         <p className="mt-1.5 text-xs text-ink-subtle">
-          Disparador: {w.trigger ? TRIGGER_LABELS[w.trigger] ?? w.trigger : "—"} · {w.runsTotal} ejecuciones
+          Disparador: {w.trigger ? triggerLabels[w.trigger] ?? TRIGGER_LABELS[w.trigger] ?? w.trigger : "—"} · {w.runsTotal} ejecuciones
           {w.runsWaiting > 0 ? ` (${w.runsWaiting} en espera)` : ""}
         </p>
         <p className="mt-0.5 text-[11px] text-ink-subtle">

@@ -719,16 +719,67 @@ export default function ChannelsPage() {
         <div className="mt-6 rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-2 text-sm font-medium">Salud de WhatsApp — últimos eventos</h2>
           <ul className="space-y-1">
-            {health.map((e) => (
-              <li key={e.id} className="flex items-start gap-2 text-xs">
-                <span className={e.status === "error" ? "text-red-500" : e.status === "warning" ? "text-amber-500" : "text-emerald-500"}>●</span>
-                <span className="text-ink-muted">{e.message ?? e.type}</span>
-                <span className="ml-auto shrink-0 text-ink-subtle">{new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
-              </li>
-            ))}
+            {health.map((e) => {
+              const h = humanizeHealthEvent(e.type, e.message);
+              return (
+                <li key={e.id} className="text-xs">
+                  <div className="flex items-start gap-2">
+                    <span className={e.status === "error" ? "text-red-500" : e.status === "warning" ? "text-amber-500" : "text-emerald-500"}>●</span>
+                    <span className="text-ink-muted">
+                      {h.summary}
+                      {h.action && <span className="ml-1 text-amber-700 dark:text-amber-300">→ {h.action}</span>}
+                    </span>
+                    <span className="ml-auto shrink-0 tnum text-ink-subtle">{new Date(e.createdAt).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" })}</span>
+                  </div>
+                  {h.technical && (
+                    <details className="ml-4">
+                      <summary className="cursor-pointer select-none text-[10px] text-ink-subtle hover:text-ink-muted">detalle técnico</summary>
+                      <p className="mt-0.5 break-all rounded bg-app p-1.5 font-mono text-[10px] text-ink-subtle">{h.technical}</p>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Traduce los eventos de salud de Meta a lenguaje humano con acción sugerida.
+ * El texto crudo (inglés, con IDs) queda colapsado como detalle técnico — no se
+ * muestran URLs con business_id/asset_id en la fila (pantallas compartibles).
+ */
+function humanizeHealthEvent(type: string, message: string | null): { summary: string; action?: string; technical?: string } {
+  const raw = message ?? type;
+  // Los eventos frecuentes, resumidos:
+  if (type === "message_template_status_update") {
+    const approved = /APPROVED/i.test(raw);
+    const rejected = /REJECTED/i.test(raw);
+    return {
+      summary: approved ? "Una plantilla fue aprobada por Meta" : rejected ? "Meta rechazó una plantilla" : "Cambió el estado de una plantilla",
+      action: rejected ? "revísala en Plantillas y ajústala" : undefined,
+      technical: raw,
+    };
+  }
+  if (/#131042|currency is not configured/i.test(raw)) {
+    return {
+      summary: "Meta no pudo cobrar un envío: falta configurar el método de pago de tu cuenta de WhatsApp Business",
+      action: "configura moneda y pago en el Administrador comercial de Meta (Facturación)",
+      technical: raw,
+    };
+  }
+  if (type === "phone_number_quality_update") {
+    return { summary: "Cambió la calificación de calidad de tu número de WhatsApp", action: "si bajó, modera el volumen de plantillas por unos días", technical: raw };
+  }
+  if (type === "account_update") {
+    return { summary: "Meta actualizó el estado de tu cuenta de WhatsApp Business", technical: raw };
+  }
+  // Genérico: si el mensaje viene en inglés crudo o trae URLs con IDs, resumir
+  if (/https?:\/\//.test(raw) || /[a-z]_[a-z]/.test(type)) {
+    return { summary: `Aviso de Meta (${type.replace(/_/g, " ")})`, technical: raw };
+  }
+  return { summary: raw };
 }
