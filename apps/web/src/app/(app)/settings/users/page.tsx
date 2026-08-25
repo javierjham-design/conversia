@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { expandPerms } from "@/lib/safe";
+import { roleLabel } from "@/lib/labels";
 
 interface Member {
   membershipId: string;
@@ -337,10 +338,13 @@ ${inviteUrl}
               <div key={r.code} className="rounded-xl border border-line bg-panel p-3">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="font-medium">{r.name}</p>
-                    <p className="text-xs text-ink-subtle">{r.code}{r.system ? " · sistema" : ""}</p>
+                    {/* El slug del rol es dato de desarrollador → tooltip, no fila */}
+                    <p className="font-medium" title={`Clave interna: ${r.code}`}>{roleLabel(r.code) === r.code ? r.name : roleLabel(r.code)}</p>
+                    <p className="text-xs text-ink-subtle">{r.system ? "Rol del sistema" : "Rol personalizado"}</p>
                   </div>
-                  {!locked && (
+                  {locked ? (
+                    <span className="text-xs text-ink-subtle" title="Los roles predefinidos del sistema no se editan ni eliminan">🔒 predefinido</span>
+                  ) : (
                     <div className="flex gap-2 text-xs">
                       <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
                       {!r.system && <button onClick={() => void deleteRole(r.code)} className="text-ink-subtle hover:text-red-500">✕</button>}

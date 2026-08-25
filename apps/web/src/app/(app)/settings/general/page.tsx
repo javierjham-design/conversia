@@ -183,7 +183,7 @@ export default function GeneralSettingsPage() {
         </div>
 
         <div className="flex items-center justify-between border-t border-line pt-3">
-          <p className="text-[11px] text-ink-subtle">Espacio: <code>{data.slug}</code></p>
+          
           <Button onClick={() => void save()} disabled={busy || data.name.trim().length < 2}>Guardar cambios</Button>
         </div>
       </div>

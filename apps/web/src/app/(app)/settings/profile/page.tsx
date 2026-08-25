@@ -3,6 +3,7 @@
 /** Mi perfil (configuración PERSONAL — cualquier rol): nombre, contraseña. */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { roleLabel } from "@/lib/labels";
 import { Button, Skeleton, cn, useToast } from "@/components/ui";
 import { useMe } from "../../layout";
 import { ImageUpload } from "../image-upload";
@@ -75,7 +76,7 @@ export default function ProfilePage() {
           />
           <div className="min-w-0">
             <p className="text-sm font-medium">{me.user?.name}</p>
-            <p className="text-xs text-ink-subtle">{me.user?.email} · rol: {me.role}</p>
+            <p className="text-xs text-ink-subtle">{me.user?.email} · {roleLabel(me.role)}</p>
           </div>
         </div>
         <label className="mt-3 block text-sm">

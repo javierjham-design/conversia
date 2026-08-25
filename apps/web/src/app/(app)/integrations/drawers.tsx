@@ -1226,7 +1226,7 @@ export function CustomSchedulingDrawer({ open, onClose, state, onChanged }: { op
         onClose={() => setConfirmDisconnect(false)}
         onConfirm={() => void disconnect()}
         title="¿Desconectar la agenda personalizada?"
-        description="Los agentes IA dejarán de consultar tu sistema y volverán a la agenda interna de Conversia."
+        description="Los agentes IA dejarán de consultar tu sistema y volverán a la agenda interna de TuBot."
         confirmLabel="Desconectar"
         danger
       />

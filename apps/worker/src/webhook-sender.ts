@@ -64,7 +64,7 @@ export async function processWebhookDelivery(job: WebhookDeliveryJob): Promise<v
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "user-agent": "Conversia-Webhooks/1.0",
+        "user-agent": "TuBot-Webhooks/1.0",
         "x-conversia-signature": `sha256=${signature}`,
         "x-conversia-event": delivery.event,
         "x-conversia-delivery": delivery.id,
