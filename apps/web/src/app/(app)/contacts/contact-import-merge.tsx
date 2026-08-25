@@ -276,15 +276,15 @@ export function ImportMessagesModal({ open, onClose }: { open: boolean; onClose:
         </div>
       ) : !rows ? (
         <div>
-          <p className="mb-3 text-sm text-slate-500">Sube el CSV de <b>Data export → Messages</b> de Respond.io. Es seguro correrlo más de una vez (los duplicados se omiten) y NO dispara agentes, flujos ni webhooks.</p>
-          <button onClick={() => fileRef.current?.click()} className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 py-10 text-slate-500 hover:border-brand-400">
+          <p className="mb-3 text-sm text-ink-muted">Sube el CSV de <b>Data export → Messages</b> de Respond.io. Es seguro correrlo más de una vez (los duplicados se omiten) y NO dispara agentes, flujos ni webhooks.</p>
+          <button onClick={() => fileRef.current?.click()} className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-line-strong bg-app py-10 text-ink-subtle hover:border-brand-400 hover:text-brand-600">
             <FileUp size={28} /><span className="font-medium">Selecciona el CSV de mensajes</span>
           </button>
           <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">{rows.length.toLocaleString("es-CL")} mensajes detectados. Se envían en tandas de 5.000.</p>
+          <p className="text-sm text-ink-muted">{rows.length.toLocaleString("es-CL")} mensajes detectados. Se envían en tandas de 5.000.</p>
           {progress && <p className="text-xs text-brand-600">{progress}</p>}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setRows(null)} disabled={busy}>Volver</Button>

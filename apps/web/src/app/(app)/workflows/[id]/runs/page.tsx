@@ -41,7 +41,7 @@ const RUN_STATUS: Record<string, { label: string; cls: string; icon: React.React
   RUNNING: { label: "En curso", cls: "bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300", icon: <Clock size={13} /> },
   CANCELLED: { label: "Cancelada", cls: "bg-app text-ink-subtle", icon: <XCircle size={13} /> },
 };
-const STEP_STATUS: Record<string, string> = { COMPLETED: "bg-emerald-500", FAILED: "bg-red-500", RUNNING: "bg-brand-500", SKIPPED: "bg-slate-300", PENDING: "bg-slate-300" };
+const STEP_STATUS: Record<string, string> = { COMPLETED: "bg-emerald-500", FAILED: "bg-red-500", RUNNING: "bg-brand-500", SKIPPED: "bg-slate-300 dark:bg-slate-600", PENDING: "bg-slate-300 dark:bg-slate-600" };
 
 function fmtDate(s: string) { return new Date(s).toLocaleString("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); }
 function fmtDur(ms: number | null) {
@@ -286,7 +286,7 @@ export default function WorkflowRunsPage() {
               <ol className="space-y-1.5">
                 {detail.steps.map((s, i) => (
                   <li key={i} className="flex items-start gap-2 rounded-lg border border-line p-2 text-xs">
-                    <span className={cn("mt-1 inline-block h-2 w-2 shrink-0 rounded-full", STEP_STATUS[s.status] ?? "bg-slate-300")} />
+                    <span className={cn("mt-1 inline-block h-2 w-2 shrink-0 rounded-full", STEP_STATUS[s.status] ?? "bg-slate-300 dark:bg-slate-600")} />
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-ink">{nodeLabel(s.nodeType)} <span className="font-normal text-ink-subtle">· {fmtDur(s.durationMs)}{s.attempt > 1 ? ` · intento ${s.attempt}` : ""}</span></p>
                       {s.error && <p className="text-red-600 dark:text-red-400">{s.error}</p>}
