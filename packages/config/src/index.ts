@@ -131,6 +131,12 @@ const envSchema = z.object({
   // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
   // compartir una WABA existente), "whatsapp_business_app_onboarding".
   META_ES_FEATURE_TYPE: z.string().optional().default(""),
+  // Línea de crédito compartida OBO (On Behalf Of): id de la línea de crédito
+  // extendida de TuBot (Business Settings → Pagos, o GET /{business_id}/extendedcredits).
+  // Si está seteada, al onboardear la WABA del cliente le adjuntamos NUESTRA línea de
+  // crédito → el cliente NO configura su propio pago en Meta. "" = OBO desactivado.
+  META_EXTENDED_CREDIT_ID: z.string().optional().default(""),
+  META_CREDIT_CURRENCY: z.string().default("USD"), // moneda de la línea de crédito (debe coincidir con la WABA)
   // App de Meta SEPARADA "TuBot CRM" (Lead Ads + dataset): webhook page/leadgen
   // propio con su secret y verify token. Vacíos = se usa la app principal.
   META_CRM_APP_SECRET: z.string().optional().default(""),

@@ -1,7 +1,7 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
 
 export interface OnboardStep {
-  step: "subscribe" | "register";
+  step: "subscribe" | "register" | "credit_share";
   ok: boolean;
   detail: string;
 }
@@ -96,6 +96,46 @@ export async function subscribeAndRegisterWhatsapp(
     const detail = (e as Error).message;
     warnings.push(`No se pudo registrar el número para Cloud API: ${detail}`);
     steps.push({ step: "register", ok: false, detail });
+  }
+
+  // 3) OBO (On Behalf Of): adjuntar NUESTRA línea de crédito a la WABA del cliente,
+  //    para que NO tenga que configurar su propio método de pago en Meta (evita el
+  //    #131042). Solo si META_EXTENDED_CREDIT_ID está seteada. La llamada va sobre
+  //    NUESTRA línea de crédito → se autentica con el token de sistema de TuBot
+  //    (META_ACCESS_TOKEN), no con el del cliente. Best-effort + idempotente.
+  const creditId = getEnv().META_EXTENDED_CREDIT_ID;
+  if (creditId) {
+    const creditToken = getEnv().META_ACCESS_TOKEN || accessToken;
+    try {
+      const currency = getEnv().META_CREDIT_CURRENCY;
+      const url = `https://graph.facebook.com/${v}/${encodeURIComponent(creditId)}/whatsapp_credit_sharing_and_attach?waba_id=${encodeURIComponent(wabaId)}&waba_currency=${encodeURIComponent(currency)}`;
+      const res = await fetchImpl(withAppSecretProof(url, creditToken), {
+        method: "POST",
+        headers: { authorization: `Bearer ${creditToken}` },
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: { message?: string; code?: number } };
+      const msg = String(json?.error?.message ?? "");
+      const alreadyShared = /already|attached|exists/i.test(msg);
+      if ((!res.ok || json?.error) && !alreadyShared) {
+        const detail = json?.error?.message ?? `HTTP ${res.status}`;
+        warnings.push(
+          `No se pudo compartir la línea de crédito (OBO) con la WABA del cliente: ${detail}. Sin esto, el cliente debe configurar su propio pago en Meta para enviar plantillas.`,
+        );
+        steps.push({ step: "credit_share", ok: false, detail });
+      } else {
+        steps.push({
+          step: "credit_share",
+          ok: true,
+          detail: alreadyShared
+            ? "La línea de crédito ya estaba compartida con esta WABA."
+            : "Línea de crédito compartida (OBO) — el cliente puede enviar sin configurar su propio pago.",
+        });
+      }
+    } catch (e) {
+      const detail = (e as Error).message;
+      warnings.push(`No se pudo compartir la línea de crédito (OBO): ${detail}`);
+      steps.push({ step: "credit_share", ok: false, detail });
+    }
   }
 
   return { warnings, steps };
