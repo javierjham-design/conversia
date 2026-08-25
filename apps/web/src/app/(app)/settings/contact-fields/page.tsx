@@ -2,9 +2,9 @@
 
 /** Campos personalizados del contacto (consumidos por la ficha y las columnas de Contactos). */
 import { useCallback, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Plus } from "lucide-react";
+import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Checkbox, Modal, Select, Skeleton, useToast } from "@/components/ui";
+import { Button, Checkbox, IconButton, Modal, Select, Skeleton, useToast } from "@/components/ui";
 
 interface FieldRow {
   id: string;
@@ -98,13 +98,13 @@ export default function ContactFieldsPage() {
             <label className="flex items-center gap-1 text-[11px] text-ink-muted">
               <Checkbox checked={f.showInList} onChange={() => void toggleColumn(f)} /> Columna
             </label>
-            <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setEditing(f)}>Editar</Button>
-            <button
+            <IconButton label="Editar" onClick={() => setEditing(f)}><Pencil size={14} /></IconButton>
+            <IconButton
+              label={f.valuesCount > 0 ? "Tiene valores: vacíalos primero" : "Eliminar"}
+              destructive
               onClick={() => void remove(f)}
               disabled={f.valuesCount > 0}
-              title={f.valuesCount > 0 ? "Tiene valores: vacíalos primero" : "Eliminar"}
-              className="text-ink-subtle hover:text-red-500 disabled:opacity-30"
-            >✕</button>
+            ><Trash2 size={14} /></IconButton>
           </li>
         ))}
       </ul>

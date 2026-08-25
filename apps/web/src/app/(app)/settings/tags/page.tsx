@@ -2,9 +2,9 @@
 
 /** Etiquetas del tenant: CRUD, conteo de uso, fusión de duplicadas y borrado. */
 import { useCallback, useEffect, useState } from "react";
-import { Plus } from "lucide-react";
+import { Merge, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, ConfirmDialog, Modal, Select, Skeleton, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, IconButton, Modal, Select, Skeleton, useToast } from "@/components/ui";
 
 interface TagRow {
   id: string;
@@ -93,8 +93,8 @@ export default function TagsSettingsPage() {
               className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-line focus:border-brand-400"
             />
             <span className="w-24 shrink-0 text-right text-[11px] text-ink-subtle">{t.usage} uso(s)</span>
-            <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => { setMerging(t); setMergeTarget(""); }}>Fusionar</Button>
-            <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar">✕</button>
+            <IconButton label="Fusionar" onClick={() => { setMerging(t); setMergeTarget(""); }}><Merge size={14} /></IconButton>
+            <IconButton label="Eliminar" destructive onClick={() => setDeleting(t)}><Trash2 size={14} /></IconButton>
           </li>
         ))}
       </ul>

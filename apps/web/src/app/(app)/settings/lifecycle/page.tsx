@@ -7,9 +7,9 @@
  * y la oferta de evento CAPI (etapas de categoría «Ganada» = conversión).
  */
 import { useCallback, useEffect, useState } from "react";
-import { GripVertical, Plus } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, IconButton, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
 
 interface StageRow {
   id: string;
@@ -107,8 +107,8 @@ export default function LifecycleSettingsPage() {
       <button onClick={() => void toggleActive(s)} className="text-[11px] text-ink-subtle underline hover:text-ink-muted">
         {s.active ? "Desactivar" : "Activar"}
       </button>
-      <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setEditing(s)}>Editar</Button>
-      <button onClick={() => setDeleting(s)} className="text-ink-subtle hover:text-red-500" title="Eliminar">✕</button>
+      <IconButton label="Editar" onClick={() => setEditing(s)}><Pencil size={14} /></IconButton>
+      <IconButton label="Eliminar" destructive onClick={() => setDeleting(s)}><Trash2 size={14} /></IconButton>
     </li>
   );
 

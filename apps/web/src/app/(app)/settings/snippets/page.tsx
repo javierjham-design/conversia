@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, ConfirmDialog, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, IconButton, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
 import { renderSnippet } from "../../inbox/types";
 
 interface SnippetRow {
@@ -101,9 +101,9 @@ export default function SnippetsSettingsPage() {
             <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", s.scope === "mine" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" : "bg-app text-ink-muted")}>
               {s.scope === "mine" ? "Solo yo" : "Equipo"}
             </span>
-            <button onClick={() => setEditing(s)} className="text-ink-subtle hover:text-brand-700" title="Editar"><Pencil size={14} /></button>
-            <button onClick={() => setCreating({ shortcut: `${s.shortcut}-copia`, body: s.body, scope: s.scope })} className="text-ink-subtle hover:text-brand-700" title="Duplicar"><Copy size={14} /></button>
-            <button onClick={() => setDeleting(s)} className="text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={14} /></button>
+            <IconButton label="Editar" onClick={() => setEditing(s)}><Pencil size={14} /></IconButton>
+            <IconButton label="Duplicar" onClick={() => setCreating({ shortcut: `${s.shortcut}-copia`, body: s.body, scope: s.scope })}><Copy size={14} /></IconButton>
+            <IconButton label="Eliminar" destructive onClick={() => setDeleting(s)}><Trash2 size={14} /></IconButton>
           </li>
         ))}
       </ul>
