@@ -1,5 +1,41 @@
 # Registro de progreso
 
+## 2026-08-25 — Armonización de la UI (B0–B10, completa)
+
+Programa de orden visual de toda la plataforma. Regla innegociable: **no se rompe
+nada de lo que hoy funciona** — solo presentación, cero lógica de negocio, un PR
+por bloque con CI verde. Zonas prohibidas respetadas (`apps/api/src/platform`,
+`apps/web/src/app/admin`). Ver `docs/DESIGN.md` (sección «Programa de armonización»)
+y `docs/GLOSARIO.md`.
+
+- **B0 (#246)**: red de seguridad — baseline de capturas claro/oscuro
+  (`docs/ui-baseline/`) + registro verde de referencia.
+- **B1 (#247–#249)**: duplicación estructural — Contactos/CRM unificados (tabla +
+  tablero), plan/facturación, canales/integraciones, ficha única.
+- **B2 (#250…)**: nombres únicos — `docs/GLOSARIO.md` como fuente de verdad,
+  vocabulario por rubro consistente en menú y breadcrumbs.
+- **B3 (#254)**: sin tripas en pantalla — auditoría humanizada, salud de WhatsApp
+  traducida, slugs a tooltip, roles/`{contactName}` humanizados.
+- **B4 (#255)**: sistema único de componentes (Select/Checkbox/Switch/DateInput/
+  Pagination), color primario único (cyan→brand), logos reales.
+- **B5 (#256)**: acciones-en-fila unificadas (`IconButton`: Editar/Duplicar/Eliminar);
+  overlays/Escape ya centralizados.
+- **B6 (#257)**: pasada de modo oscuro (la app ya era token-based; ajustes puntuales).
+- **B7 (#258)**: reportes reconstruidos (ejes/tooltip/14 días con ceros, embudo
+  completo, escalamientos como KPI).
+- **B8 (#259)**: textos (inglés fuera, plurales reales con `plural()`, país «CL CL»,
+  404 propia en español).
+- **B9 (#260)**: incoherencias de datos (Rubro único) + inventario
+  `docs/COPY_PENDIENTE_OCT2026.md`.
+- **B10 (#261)**: marca (rol del selector de organización humanizado; coherencia
+  landing/panel verificada).
+
+Cierre verificado sobre main integrado: typecheck de todos los paquetes OK, suite
+completa **491 tests verdes** (web 82 · worker 218 · api 64 · workflows 69 · agents
+36 · scheduling 12 · notifications 10), build de producción OK, probe de robustez
+verde. Intactos confirmados: seis compuertas de envío, billetera prepago, fusible
+global de alcance, aislamiento por organización (RLS), montaje asistido.
+
 ## 2026-08-21 — Confiabilidad del bot (endurecimiento pre-campañas)
 
 Programa de robustez del bot de TuBot antes de lanzar campañas. Causa raíz, no

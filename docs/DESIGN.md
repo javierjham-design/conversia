@@ -150,3 +150,54 @@ vez de la pantalla de error de Next. El smoke que reproduce estos casos vive en
 `/integrations/developers` se dejan como terminal oscuro intencional; el sidebar
 aún no colapsa a solo-íconos; el envío se omitió como optimista a propósito (el
 SSE ya se siente instantáneo).
+
+
+## Programa de armonización de la UI (B0–B10)
+
+Programa de orden visual «no se rompe nada de lo que hoy funciona»: solo
+presentación, cero lógica de negocio, un PR por bloque con CI verde. Zonas
+prohibidas respetadas (`apps/api/src/platform`, `apps/web/src/app/admin`).
+PRs #246–#261.
+
+### Sistema único de componentes (B4)
+En `apps/web/src/components/ui.tsx`:
+
+- `Select` — envuelve el `<select>` nativo con chevron propio, borde/foco/disabled
+  unificados; acepta todos los `SelectHTMLAttributes`.
+- `Checkbox` — casilla propia con check de marca (no depende del render del SO).
+- `Switch` — interruptor pill `role="switch"` para on/off (`onChange(next: boolean)`).
+- `DateInput` — fecha con `color-scheme` que voltea en oscuro.
+- `Pagination` — paginación única «N / página» + Anterior/Página X de Y/Siguiente.
+- `IconButton` (B5) — acción de fila: icono + tooltip, con variante `destructive`
+  (rojo). Patrón único Editar (lápiz) · Duplicar (copia) · Eliminar (papelera).
+
+Regla: los controles nativos sin estilo se reemplazan por estos. Se dejan
+nativos, a propósito, los patrones ocultos (`sr-only`/`hidden`/overlay `opacity-0`)
+y el radio (no hay `Radio` en el DS).
+
+### Color primario único (B4)
+Un solo azul de marca `brand-*` en toda la zona del tenant. El `cyan-*` se
+eliminó (era un segundo primario). `teal`/`accent` quedan solo como acento. En
+oscuro todo se apoya en tokens (`bg-app/panel/raised`, `text-ink/-muted/-subtle`,
+`border-line`) que voltean solos.
+
+### Logos reales (B4)
+`apps/web/src/components/brand-icons.tsx` incluye logos oficiales (Simple Icons,
+CC0): Shopify, WooCommerce, Zapier, Make, HubSpot, Google Analytics. El Centro de
+Integraciones los mapea por `key` en `CATALOG_ICONS`.
+
+### Textos (B8)
+Español de Chile. Helper `plural(n, singular, plural?)` en `src/lib/plural.ts`
+(«1 contacto» / «3 contactos») — nada de «(s)». Página 404 propia
+(`src/app/not-found.tsx`). Etiquetas de rol humanizadas vía `src/lib/labels.ts`
+(`roleLabel`). Ver el glosario en `docs/GLOSARIO.md` (fuente única de nombres).
+
+### Overlays (B5)
+`Modal`, `Drawer` y `ConfirmDialog` cierran con Escape y con clic en el fondo de
+forma central; no hay overlays ad-hoc que se salten ese comportamiento.
+
+### Diferido (reportado, no forzado)
+Reestructurar todas las cabeceras a `PageHeader`, unificar anchos máximos y
+sidebars secundarias son de alto churn con riesgo de recortar contenido → pasada
+dedicada con capturas antes/después. Incoherencias que tocan backend/datos de
+producción están inventariadas en `docs/COPY_PENDIENTE_OCT2026.md`.
