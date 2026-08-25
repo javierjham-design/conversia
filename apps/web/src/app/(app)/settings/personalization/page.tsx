@@ -25,7 +25,8 @@ const TERMS: { key: string; label: string }[] = [
   { key: "professionals", label: "Equipo (plural)" },
   { key: "appointment", label: "Cita" },
   { key: "appointments", label: "Citas" },
-  { key: "branch", label: "Sucursal" },
+  { key: "branch", label: "Sucursal (singular)" },
+  { key: "branches", label: "Sucursales (plural)" },
 ];
 
 export default function PersonalizationPage() {
@@ -145,7 +146,7 @@ export default function PersonalizationPage() {
           ))}
         </div>
         <div className="mt-3 flex justify-end">
-          <Button onClick={() => void saveVocab()} disabled={busy}>Guardar vocabulario</Button>
+          <Button onClick={() => void saveVocab()} disabled={busy}>Guardar cambios</Button>
         </div>
       </div>
 

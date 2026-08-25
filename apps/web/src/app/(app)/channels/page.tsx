@@ -550,7 +550,7 @@ export default function ChannelsPage() {
                             : "border-line bg-app text-ink-subtle"
                       }`}
                     >
-                      {c.status === "active" ? "● activo" : c.status === "error" ? "⚠ requiere reautorización" : "○ inactivo"}
+                      {c.status === "active" ? "● Conectado" : c.status === "error" ? "⚠ Requiere reautorización" : "○ Desconectado"}
                     </span>
                   </h3>
                   <p className="text-xs text-ink-subtle">

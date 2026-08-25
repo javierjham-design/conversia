@@ -173,12 +173,12 @@ export default function WorkflowsPage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       <PageHeader
-        title="Flujos de trabajo"
+        title="Flujos"
         description="Automatizaciones sin código: seguimientos, respuestas, esperas y acciones sobre leads y conversaciones."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="secondary" onClick={() => setShowHelp(true)}>¿Cómo funciona?</Button>
-            <Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear workflow</Button>
+            <Button onClick={() => { setNewName(""); setCreateOpen(true); }}>+ Crear flujo</Button>
           </div>
         }
       />
@@ -219,7 +219,7 @@ export default function WorkflowsPage() {
       )}
 
       {/* Crear */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear workflow" wide>
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Crear flujo" wide>
         {hasAgents === false && (
           <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
             <p className="font-medium">Aún no tienes agentes de IA.</p>

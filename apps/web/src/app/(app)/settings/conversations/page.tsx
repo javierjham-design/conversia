@@ -83,7 +83,7 @@ export default function ConversationRulesPage() {
         </div>
 
         <div className="flex justify-end border-t border-line pt-3">
-          <Button onClick={() => void save()} disabled={busy}>Guardar reglas</Button>
+          <Button onClick={() => void save()} disabled={busy}>Guardar cambios</Button>
         </div>
       </div>
     </div>
