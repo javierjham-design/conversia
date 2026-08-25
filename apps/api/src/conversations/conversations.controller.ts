@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -18,6 +19,7 @@ import { QueueService } from "../queues";
 import { RealtimeService } from "../common/realtime.service";
 import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 
 const sendMessageSchema = z.object({
   text: z.string().min(1).max(4096),
@@ -321,6 +323,80 @@ export class ConversationsController {
       await this.publish(ctx.organizationId, id);
       return r;
     });
+  }
+
+  /**
+   * Elimina UN mensaje del historial de TuBot. No lo borra del teléfono ni del
+   * chat del cliente (la API de Meta no lo permite) — solo de la plataforma.
+   */
+  @Delete(":id/messages/:messageId")
+  async deleteMessage(@Param("id") id: string, @Param("messageId") messageId: string) {
+    const ctx = requirePermission("inbox:write");
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const msg = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
+      if (!msg) throw new NotFoundException("Mensaje no encontrado");
+      await tx.message.delete({ where: { id: messageId } }); // adjuntos caen en cascada
+      // Recalcula el preview de la lista con el último mensaje visible restante
+      const last = await tx.message.findFirst({
+        where: { conversationId: id, visibility: { not: "INTERNAL" } },
+        orderBy: { createdAt: "desc" },
+        select: { body: true, createdAt: true },
+      });
+      await tx.conversation.update({
+        where: { id },
+        data: { lastMessagePreview: last?.body?.slice(0, 120) ?? null, ...(last ? { lastMessageAt: last.createdAt } : {}) },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "conversation.message_deleted",
+          entityType: "message",
+          entityId: messageId,
+          before: { conversationId: id, direction: msg.direction, body: (msg.body ?? "").slice(0, 200) },
+        },
+      });
+    });
+    await this.realtime.publish(ctx.organizationId, { type: "message.updated", conversationId: id });
+    return { ok: true };
+  }
+
+  /**
+   * Elimina la conversación completa con su historial de mensajes. El contacto,
+   * sus leads, citas y costos quedan intactos (solo se desvincula la referencia).
+   */
+  @Delete(":id")
+  async deleteConversation(@Param("id") id: string) {
+    const ctx = requirePermission("inbox:write");
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      // Referencias que deben sobrevivir al borrado (histórico de negocio)
+      await tx.appointment.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
+      await tx.workflowRun.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
+      await tx.aiRequest.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
+      await tx.approvalRequest.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
+      // Dependientes de la conversación
+      await tx.conversationAiNote.deleteMany({ where: { conversationId: id } });
+      await tx.agentHandoff.deleteMany({ where: { conversationId: id } });
+      await tx.humanHandoff.deleteMany({ where: { conversationId: id } });
+      await tx.message.deleteMany({ where: { conversationId: id } }); // adjuntos en cascada
+      await tx.conversation.delete({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "conversation.deleted",
+          entityType: "conversation",
+          entityId: id,
+          before: { contactId: conversation.contactId, channelConnectionId: conversation.channelConnectionId, preview: conversation.lastMessagePreview },
+        },
+      });
+    });
+    await this.realtime.publish(ctx.organizationId, { type: "conversation.updated", conversationId: id });
+    return { ok: true };
   }
 
   @Post(":id/reopen")
