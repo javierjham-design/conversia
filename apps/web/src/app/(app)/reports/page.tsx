@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { API_URL, api, getToken } from "@/lib/api";
+import { Select } from "@/components/ui";
 
 interface Overview {
   days: number;
@@ -36,7 +37,7 @@ function Bars({ data }: { data: { day: string; count: number }[] | null | undefi
     <div className="flex h-24 items-end gap-1">
       {rows.map((d) => (
         <div key={d.day} className="group relative flex-1">
-          <div className="rounded-t bg-cyan-600/80 transition group-hover:bg-cyan-700" style={{ height: `${(d.count / max) * 88 + 4}px` }} />
+          <div className="rounded-t bg-brand-600/80 transition group-hover:bg-brand-700" style={{ height: `${(d.count / max) * 88 + 4}px` }} />
           <span className="pointer-events-none absolute -top-5 left-1/2 hidden -translate-x-1/2 rounded bg-slate-800 px-1 text-[9px] text-white group-hover:block">
             {d.day.slice(5)}: {d.count}
           </span>
@@ -93,11 +94,11 @@ export default function ReportsPage() {
           <p className="text-sm text-ink-muted">Actividad y conversión de leads de tu cuenta.</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={days} onChange={(e) => setDays(Number(e.target.value))}>
             <option value={7}>Últimos 7 días</option>
             <option value={30}>Últimos 30 días</option>
             <option value={90}>Últimos 90 días</option>
-          </select>
+          </Select>
           <button onClick={() => void download(`/reports/export/conversations?days=${days}`, `conversaciones_${days}d.csv`)} className="rounded-lg border border-line-strong px-3 py-2 text-sm hover:bg-app">
             ⬇ Conversaciones CSV
           </button>
@@ -124,7 +125,7 @@ export default function ReportsPage() {
             {leadFunnel.filter((f) => f.count > 0).map((f) => (
               <div key={f.code} className="flex items-center gap-2 text-sm">
                 <span className="w-40 truncate text-xs text-ink-muted">{f.name}</span>
-                <div className="h-5 rounded bg-cyan-600/80" style={{ width: `${(f.count / funnelMax) * 60 + 4}%` }} />
+                <div className="h-5 rounded bg-brand-600/80" style={{ width: `${(f.count / funnelMax) * 60 + 4}%` }} />
                 <span className="text-xs font-medium">{f.count}</span>
               </div>
             ))}

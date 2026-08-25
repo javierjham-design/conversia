@@ -12,9 +12,20 @@ import {
   MessageCircle,
   Plug,
   Search,
+  ShoppingBag,
+  Store,
+  Utensils,
   Webhook,
   Zap,
 } from "lucide-react";
+import {
+  GoogleAnalyticsIcon,
+  HubSpotIcon,
+  MakeIcon,
+  ShopifyIcon,
+  WooCommerceIcon,
+  ZapierIcon,
+} from "@/components/brand-icons";
 import { api } from "@/lib/api";
 import {
   Button,
@@ -81,9 +92,27 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATALOG_ICONS: Record<string, React.ReactNode> = {
   meta: <MetaLogo size={20} />,
+  meta_crm: <MetaLogo size={20} />,
+  meta_leads: <MetaLogo size={20} />,
+  meta_capi: <MetaLogo size={20} />,
+  events_manager: <MetaLogo size={20} />,
   whatsapp: <MessageCircle size={20} />,
   clariva: <CalendarCheck size={20} />,
+  google_calendar: <CalendarCheck size={20} />,
+  custom_scheduling: <CalendarCheck size={20} />,
+  dentalink: <CalendarCheck size={20} />,
   webhooks: <Webhook size={20} />,
+  custom_api: <Webhook size={20} />,
+  sheets: <Webhook size={20} />,
+  zapier: <ZapierIcon size={20} />,
+  make: <MakeIcon size={20} />,
+  hubspot: <HubSpotIcon size={20} />,
+  ga4: <GoogleAnalyticsIcon size={20} />,
+  woocommerce: <WooCommerceIcon size={20} />,
+  shopify: <ShopifyIcon size={20} />,
+  jumpseller: <ShoppingBag size={20} />,
+  bsale: <Store size={20} />,
+  fudo: <Utensils size={20} />,
 };
 
 export default function IntegrationsPage() {

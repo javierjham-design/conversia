@@ -3,7 +3,7 @@
 /** Registro de auditoría del tenant (solo Owner/Admin). */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Skeleton } from "@/components/ui";
+import { DateInput, Select, Skeleton } from "@/components/ui";
 
 interface AuditRow {
   id: string;
@@ -60,11 +60,11 @@ export default function AuditSettingsPage() {
       </p>
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
-        <select value={module} onChange={(e) => setModule(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
+        <Select value={module} onChange={(e) => setModule(e.target.value)} className="text-xs">
           {MODULES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-        </select>
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" />
+        </Select>
+        <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className="text-xs" />
+        <DateInput value={to} onChange={(e) => setTo(e.target.value)} className="text-xs" />
       </div>
 
       {!items ? (
@@ -75,7 +75,7 @@ export default function AuditSettingsPage() {
           {items.map((r) => (
             <li key={r.id} className="rounded-lg border border-line bg-panel px-3 py-1.5 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[11px] text-cyan-800 dark:text-cyan-300">{r.action}</span>
+                <span className="font-mono text-[11px] text-brand-800 dark:text-brand-300">{r.action}</span>
                 <span className="shrink-0 text-ink-subtle">{new Date(r.createdAt).toLocaleString("es-CL")}</span>
               </div>
               <p className="text-ink-muted">
@@ -86,7 +86,7 @@ export default function AuditSettingsPage() {
             </li>
           ))}
           {nextCursor && (
-            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-cyan-700 hover:underline dark:text-cyan-300">
+            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-brand-700 hover:underline dark:text-brand-300">
               Cargar más
             </button>
           )}

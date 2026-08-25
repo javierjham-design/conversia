@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { KanbanSquare, Megaphone, MessageSquare, User2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState, Skeleton, cn, useToast } from "@/components/ui";
+import { EmptyState, Select, Skeleton, cn, useToast } from "@/components/ui";
 
 interface BoardLead {
   id: string;
@@ -204,16 +204,16 @@ export function BoardView({
                     </span>
                   </div>
                   {/* Mover sin arrastrar (móvil / accesibilidad) */}
-                  <select
+                  <Select
                     value={col.code}
                     onChange={(e) => void moveLead(lead.id, col.code, e.target.value)}
-                    className="mt-1.5 w-full rounded border border-line bg-app px-1 py-0.5 text-[11px] text-ink-subtle"
+                    className="mt-1.5 w-full text-[11px]"
                     aria-label="Mover a etapa"
                   >
                     {stages.map((s) => (
                       <option key={s.code} value={s.code}>{s.name}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               ))
             )}

@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { GripVertical, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
 
 interface StageRow {
   id: string;
@@ -91,7 +91,7 @@ export default function LifecycleSettingsPage() {
       onDrop={() => onDrop(s.id)}
       className={cn(
         "flex items-center gap-2 rounded-lg border bg-panel px-2 py-2",
-        dragId === s.id ? "border-cyan-400 opacity-60" : "border-line",
+        dragId === s.id ? "border-brand-400 opacity-60" : "border-line",
         !s.active && "opacity-50",
       )}
     >
@@ -201,11 +201,11 @@ function StageFormModal({
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Categoría</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value as StageRow["category"])} className={`${input} bg-panel`}>
+          <Select value={category} onChange={(e) => setCategory(e.target.value as StageRow["category"])} className="mt-1 w-full">
             {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
               <option key={k} value={k}>{v}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Emoji</span>
@@ -273,12 +273,12 @@ function DeleteStageModal({
           <p className="text-sm text-ink-muted">
             Esta etapa tiene <b>{stage.leadsCount} lead(s)</b>. Elige a qué etapa migrarlos antes de eliminarla:
           </p>
-          <select value={migrateTo} onChange={(e) => setMigrateTo(e.target.value)} className="mt-2 w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
+          <Select value={migrateTo} onChange={(e) => setMigrateTo(e.target.value)} className="mt-2 w-full">
             <option value="">— elegir etapa destino —</option>
             {others.map((s) => (
               <option key={s.id} value={s.id}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>
             ))}
-          </select>
+          </Select>
         </>
       ) : (
         <p className="text-sm text-ink-muted">No tiene leads asociados. Esta acción no se puede deshacer.</p>

@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { withStringDefaults } from "@/lib/safe";
-import { Button, Skeleton, useToast } from "@/components/ui";
+import { Button, Select, Skeleton, useToast } from "@/components/ui";
 import { ImageUpload } from "../image-upload";
 
 interface GeneralSettings {
@@ -119,36 +119,36 @@ export default function GeneralSettingsPage() {
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Rubro</span>
-            <select value={data.industry} onChange={(e) => set({ industry: e.target.value })} className={`${input} bg-panel`}>
+            <Select value={data.industry} onChange={(e) => set({ industry: e.target.value })} className="mt-1 w-full">
               <option value="">— elegir —</option>
               {INDUSTRIES.map((i) => (
                 <option key={i} value={i}>{i}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Zona horaria</span>
-            <select value={data.timezone} onChange={(e) => set({ timezone: e.target.value })} className={`${input} bg-panel`}>
+            <Select value={data.timezone} onChange={(e) => set({ timezone: e.target.value })} className="mt-1 w-full">
               {TIMEZONES.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Moneda por defecto</span>
-            <select value={data.currency} onChange={(e) => set({ currency: e.target.value })} className={`${input} bg-panel`}>
+            <Select value={data.currency} onChange={(e) => set({ currency: e.target.value })} className="mt-1 w-full">
               {CURRENCIES.map(([code, label]) => (
                 <option key={code} value={code}>{label}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Idioma por defecto</span>
-            <select value={data.language} onChange={(e) => set({ language: e.target.value })} className={`${input} bg-panel`}>
+            <Select value={data.language} onChange={(e) => set({ language: e.target.value })} className="mt-1 w-full">
               <option value="es">Español</option>
               <option value="en">Inglés</option>
               <option value="pt">Portugués</option>
-            </select>
+            </Select>
           </label>
           <div className="block text-sm">
             <span className="text-xs text-ink-muted">Logo del negocio</span>

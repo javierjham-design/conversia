@@ -4,7 +4,7 @@
  * que el bot no debe ofrecer y editar la descripción-para-el-bot (sin tocar la tienda). */
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Button, PageHeader, Skeleton, useToast } from "@/components/ui";
+import { Button, Checkbox, PageHeader, Select, Skeleton, useToast } from "@/components/ui";
 import { CsvImport } from "./csv-import";
 
 interface Item {
@@ -50,10 +50,10 @@ export default function CatalogPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }} placeholder="Buscar producto o SKU…" className="w-64 rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm" />
-        <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} className="rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+        <Select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }}>
           <option value="">Todas las categorías</option>
           {data?.categories.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        </Select>
         {data && <span className="text-xs text-ink-subtle">{data.total} productos</span>}
       </div>
 
@@ -92,7 +92,7 @@ export default function CatalogPage() {
                   )}
                 </div>
                 <label className="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
-                  <input type="checkbox" checked={it.active} onChange={(e) => void patch(it.id, { active: e.target.checked })} />
+                  <Checkbox checked={it.active} onChange={(e) => void patch(it.id, { active: e.target.checked })} />
                   El bot lo ofrece
                 </label>
               </div>

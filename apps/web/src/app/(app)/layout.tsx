@@ -185,7 +185,7 @@ function NotificationsBell() {
                 ))}
               </ul>
             )}
-            <a href="/integrations" className="block px-2 py-1.5 text-[11px] text-cyan-700 hover:underline dark:text-cyan-300">
+            <a href="/integrations" className="block px-2 py-1.5 text-[11px] text-brand-700 hover:underline dark:text-brand-300">
               Ver integraciones →
             </a>
           </div>

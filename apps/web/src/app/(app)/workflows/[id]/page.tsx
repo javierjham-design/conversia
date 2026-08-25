@@ -32,7 +32,7 @@ import {
   Pause, Pencil, Play, PlayCircle, Plus, Redo2, Search, Send, Share2, Sheet, Square, StickyNote, Tag, Tags, Target, Trash2, Undo2, Users, UserRound, Webhook, Workflow, XCircle, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, Modal, Select, cn, useToast } from "@/components/ui";
 import { TRIGGER_NODE_ID, defToFlow, edgeStyle, flowToDef, type DefTrigger } from "@/lib/workflow-serialize";
 import { triggerPreview, messageWouldTrigger } from "@/lib/workflow-trigger-preview";
 import { QRCodeCanvas } from "qrcode.react";
@@ -1348,9 +1348,9 @@ function ClickToChatConfig({ trigger, onChange }: { trigger: DefTrigger; onChang
       {accts && accts.accounts.length > 1 && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Cuenta publicitaria</span>
-          <select value={adAccountId ?? ""} onChange={(e) => setCfg({ adAccountId: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={adAccountId ?? ""} onChange={(e) => setCfg({ adAccountId: e.target.value })} className="mt-1 block w-full">
             {accts.accounts.map((a) => <option key={a.externalId} value={a.externalId}>{a.name}</option>)}
-          </select>
+          </Select>
         </label>
       )}
       <div className="flex items-center justify-between text-[11px] text-ink-subtle">
@@ -1386,7 +1386,7 @@ function ClickToChatConfig({ trigger, onChange }: { trigger: DefTrigger; onChang
               {campaigns.map((c) => (
                 <div key={c.id}>
                   <label className="flex items-center gap-2 rounded px-1.5 py-1 text-xs font-medium hover:bg-app">
-                    <input type="checkbox" checked={isCampaignSel(c.id)} onChange={() => toggleCampaign(c.id)} className="h-3.5 w-3.5" />
+                    <Checkbox checked={isCampaignSel(c.id)} onChange={() => toggleCampaign(c.id)} />
                     <span className="truncate text-ink">{c.name}</span>
                   </label>
                   {c.adsets.map((s) => (
@@ -1394,7 +1394,7 @@ function ClickToChatConfig({ trigger, onChange }: { trigger: DefTrigger; onChang
                       <p className="px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-subtle">{s.name}</p>
                       {s.ads.map((a) => (
                         <label key={a.id} className={cn("ml-2 flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-app", !a.available && "opacity-50")} title={!a.available ? "Ya no está en Meta" : undefined}>
-                          <input type="checkbox" checked={isAdSel(a, c.id)} disabled={isCampaignSel(c.id)} onChange={() => toggleAd(a)} className="h-3.5 w-3.5" />
+                          <Checkbox checked={isAdSel(a, c.id)} disabled={isCampaignSel(c.id)} onChange={() => toggleAd(a)} />
                           <span className="truncate text-ink-muted">{a.name}</span>
                           <span className={cn("ml-auto shrink-0 rounded px-1 text-[9px]", a.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "bg-app text-ink-subtle")}>{a.status === "ACTIVE" ? "activo" : "pausado"}</span>
                           {!a.available && <span className="shrink-0 text-[9px] text-amber-600 dark:text-amber-400">no disponible</span>}
@@ -1550,14 +1550,14 @@ function MessageReceivedConditions({ trigger, onChange }: { trigger: DefTrigger;
 
       <label className="block text-sm">
         <span className="text-xs text-ink-muted">Canal</span>
-        <select
+        <Select
           value={String(cfg.channel ?? "")}
           onChange={(e) => set({ channel: e.target.value || undefined })}
-          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+          className="mt-1 block w-full"
         >
           <option value="">— cualquier canal —</option>
           {MSG_CHANNELS.map((c) => (<option key={c.value} value={c.value}>{c.label}</option>))}
-        </select>
+        </Select>
       </label>
 
       <label className="block text-sm">
@@ -1595,8 +1595,7 @@ function MessageReceivedConditions({ trigger, onChange }: { trigger: DefTrigger;
       )}
 
       <label className="flex items-center gap-1.5 text-xs text-ink-muted">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={cfg.firstMessage === true}
           onChange={(e) => set({ firstMessage: e.target.checked })}
         />
@@ -1642,7 +1641,7 @@ function ApptFilters({ catalog, trigger, onChange }: { catalog: Catalog; trigger
               <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-md border border-line-strong bg-panel p-1.5">
                 {d.items.map((it) => (
                   <label key={it.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-[13px] hover:bg-app">
-                    <input type="checkbox" className="h-3.5 w-3.5" checked={sel.includes(it.id)} onChange={() => toggle(d.key, it.id)} />
+                    <Checkbox checked={sel.includes(it.id)} onChange={() => toggle(d.key, it.id)} />
                     <span className="truncate">{it.name}</span>
                   </label>
                 ))}
@@ -1695,15 +1694,15 @@ function TriggerPanel({ wfId, catalog, trigger, onChange, issues = [] }: { wfId:
       )}
       <label className="block text-sm">
         <span className="text-xs text-ink-muted">¿Cuándo se ejecuta el flujo?</span>
-        <select
+        <Select
           value={trigger.type}
           onChange={(e) => onChange({ type: e.target.value, config: {} })}
-          className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+          className="mt-1 block w-full"
         >
           {catalog.triggers
             .filter((t) => !t.hidden || t.type === trigger.type)
             .map((t) => (<option key={t.type} value={t.type}>{t.label}</option>))}
-        </select>
+        </Select>
       </label>
       {desc && <p className="text-xs text-ink-subtle">{desc}</p>}
 
@@ -1757,14 +1756,14 @@ function TriggerPanel({ wfId, catalog, trigger, onChange, issues = [] }: { wfId:
           {(["fromStatus", "toStatus"] as const).map((key) => (
             <label key={key} className="block text-sm">
               <span className="text-xs text-ink-muted">{key === "fromStatus" ? "Desde la etapa" : "Hacia la etapa"}</span>
-              <select
+              <Select
                 value={String(trigger.config[key] ?? "")}
                 onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, [key]: e.target.value } })}
-                className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+                className="mt-1 block w-full"
               >
                 <option value="">— cualquiera —</option>
                 {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>))}
-              </select>
+              </Select>
             </label>
           ))}
         </div>
@@ -1798,8 +1797,7 @@ function TriggerPanel({ wfId, catalog, trigger, onChange, issues = [] }: { wfId:
             <span className="mt-1 block text-[10px] text-ink-subtle">Se programa el recordatorio al crear la cita.</span>
           </label>
           <label className="flex items-start gap-1.5 text-xs text-ink-muted">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-0.5"
               checked={trigger.config.avoidOffHours !== false}
               onChange={(e) => onChange({ ...trigger, config: { ...trigger.config, avoidOffHours: e.target.checked } })}
@@ -1937,10 +1935,10 @@ function NodePanel({
       {type === "run_agent" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Agente</span>
-          <select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full">
             <option value="">Agente activo de la conversación</option>
             {catalog.agents.map((a) => (<option key={a.slug} value={a.slug}>🤖 {a.name}</option>))}
-          </select>
+          </Select>
         </label>
       )}
 
@@ -1970,10 +1968,10 @@ function NodePanel({
       {type === "goto" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Continuar en el paso…</span>
-          <select value={config.targetNodeId ?? ""} onChange={(e) => onChange({ targetNodeId: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.targetNodeId ?? ""} onChange={(e) => onChange({ targetNodeId: e.target.value })} className="mt-1 block w-full">
             <option value="">— elige un paso —</option>
             {steps.map((s) => (<option key={s.id} value={s.id}>{s.label}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[10px] text-ink-subtle">Salta a otro paso (se dibuja punteado). Máximo 25 saltos por ejecución para evitar bucles.</span>
         </label>
       )}
@@ -1990,10 +1988,10 @@ function NodePanel({
         <div className="space-y-2">
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Agente</span>
-            <select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+            <Select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full">
               <option value="">Agente activo de la conversación</option>
               {catalog.agents.map((a) => (<option key={a.slug} value={a.slug}>🤖 {a.name}</option>))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Objetivo</span>
@@ -2032,19 +2030,19 @@ function NodePanel({
             <>
               <label className="block text-sm">
                 <span className="text-xs text-ink-muted">Plantilla aprobada</span>
-                <select
+                <Select
                   value={config.templateId ?? ""}
                   onChange={(e) => {
                     const t = catalog.templates.find((x) => x.id === e.target.value);
                     onChange({ templateId: e.target.value, templateName: t?.name ?? "" });
                   }}
-                  className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+                  className="mt-1 block w-full"
                 >
                   <option value="">— elegir —</option>
                   {catalog.templates.map((t) => (
                     <option key={t.id} value={t.id}>{t.name} · {t.language}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <p className="text-[10px] text-ink-subtle">
                 Las variables de la plantilla se completan solas con los datos reales del contacto (nombre, cita, etc.)
@@ -2180,10 +2178,10 @@ function NodePanel({
       {type === "update_lead_status" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Nuevo estado del lead</span>
-          <select value={config.statusCode ?? ""} onChange={(e) => onChange({ statusCode: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.statusCode ?? ""} onChange={(e) => onChange({ statusCode: e.target.value })} className="mt-1 block w-full">
             <option value="">— elegir —</option>
             {catalog.leadStatuses.map((s) => (<option key={s.code} value={s.code}>{s.emoji ? `${s.emoji} ` : ""}{s.name}</option>))}
-          </select>
+          </Select>
         </label>
       )}
 
@@ -2214,10 +2212,10 @@ function NodePanel({
       {type === "assign_user" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Usuario</span>
-          <select value={config.userId ?? ""} onChange={(e) => onChange({ userId: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.userId ?? ""} onChange={(e) => onChange({ userId: e.target.value })} className="mt-1 block w-full">
             <option value="">— elegir persona —</option>
             {catalog.users.map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[10px] text-ink-subtle">Al asignar, la IA se pausa en esa conversación.</span>
         </label>
       )}
@@ -2225,10 +2223,10 @@ function NodePanel({
       {type === "assign_team" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Equipo</span>
-          <select value={config.teamId ?? ""} onChange={(e) => onChange({ teamId: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.teamId ?? ""} onChange={(e) => onChange({ teamId: e.target.value })} className="mt-1 block w-full">
             <option value="">— elegir equipo —</option>
             {catalog.teams.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[10px] text-ink-subtle">Al asignar, la IA se pausa en esa conversación.</span>
         </label>
       )}
@@ -2236,20 +2234,20 @@ function NodePanel({
       {type === "switch_agent" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Agente IA que toma el control</span>
-          <select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.agentSlug ?? ""} onChange={(e) => onChange({ agentSlug: e.target.value })} className="mt-1 block w-full">
             <option value="">— elegir agente —</option>
             {catalog.agents.map((a) => (<option key={a.slug} value={a.slug}>🤖 {a.name}</option>))}
-          </select>
+          </Select>
         </label>
       )}
 
       {type === "start_workflow" && (
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Flujo a disparar</span>
-          <select value={config.workflowName ?? ""} onChange={(e) => onChange({ workflowName: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={config.workflowName ?? ""} onChange={(e) => onChange({ workflowName: e.target.value })} className="mt-1 block w-full">
             <option value="">— elegir flujo —</option>
             {catalog.workflows.map((w) => (<option key={w.name} value={w.name}>{w.name}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[10px] text-ink-subtle">Debe estar publicado y activo. Un flujo no puede dispararse a sí mismo.</span>
         </label>
       )}
@@ -2270,15 +2268,15 @@ function NodePanel({
         <div className="mt-2 space-y-2 rounded-lg border border-line bg-app p-3">
           <p className="text-xs font-medium text-ink">En caso de error</p>
           <div className="flex items-center gap-2">
-            <select
+            <Select
               value={String(config.onError ?? "stop")}
               onChange={(e) => onChange({ onError: e.target.value })}
-              className="flex-1 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
+              className="w-full flex-1 text-xs"
             >
               <option value="stop">Detener el flujo (por defecto)</option>
               <option value="continue">Continuar al siguiente paso</option>
               <option value="branch">Ramificar por «si falla»</option>
-            </select>
+            </Select>
             <label className="flex items-center gap-1 text-xs text-ink-muted">
               Reintentos
               <input type="number" min={0} max={5} value={Number(config.retries ?? 0)} onChange={(e) => onChange({ retries: Math.max(0, Math.min(5, Number(e.target.value))) })} className="w-14 rounded-lg border border-line-strong px-2 py-1 text-xs" />
@@ -2298,9 +2296,9 @@ function CapiForm({ config, onChange }: { config: Record<string, any>; onChange:
     <div className="space-y-2 text-sm">
       <label className="block">
         <span className="text-xs text-ink-muted">Evento estándar de Meta</span>
-        <select value={config.eventName ?? "Lead"} onChange={(e) => onChange({ eventName: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+        <Select value={config.eventName ?? "Lead"} onChange={(e) => onChange({ eventName: e.target.value })} className="mt-1 block w-full">
           {CAPI_EVENTS.map((ev) => (<option key={ev} value={ev}>{ev}</option>))}
-        </select>
+        </Select>
       </label>
       <div className="flex gap-2">
         <label className="flex-1">
@@ -2337,22 +2335,22 @@ function HttpForm({ config, onChange, presets = [] }: { config: Record<string, a
       {presets.length > 0 && (
         <label className="block">
           <span className="text-xs text-ink-muted">Preset de API (Integraciones → API personalizada)</span>
-          <select
+          <Select
             value={config.presetId ?? ""}
             onChange={(e) => onChange({ presetId: e.target.value || undefined })}
-            className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm"
+            className="mt-1 block w-full"
           >
             <option value="">— sin preset (URL completa manual) —</option>
             {presets.map((p) => (<option key={p.id} value={p.id}>{p.name} · {p.baseUrl}</option>))}
-          </select>
+          </Select>
         </label>
       )}
       <div className="flex gap-2">
         <label className="w-28">
           <span className="text-xs text-ink-muted">Método</span>
-          <select value={method} onChange={(e) => onChange({ method: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
+          <Select value={method} onChange={(e) => onChange({ method: e.target.value })} className="mt-1 block w-full">
             {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (<option key={m} value={m}>{m}</option>))}
-          </select>
+          </Select>
         </label>
         <label className="flex-1">
           <span className="text-xs text-ink-muted">{config.presetId ? "Ruta (relativa al preset)" : "URL"}</span>
@@ -2411,7 +2409,7 @@ function BusinessHoursForm({ config, onChange }: { config: Record<string, any>; 
           return (
             <div key={key} className="flex items-center gap-2">
               <label className="flex w-16 items-center gap-1 text-xs">
-                <input type="checkbox" checked={open} onChange={(e) => setDay(key, { open: e.target.checked })} />
+                <Checkbox checked={open} onChange={(e) => setDay(key, { open: e.target.checked })} />
                 {label}
               </label>
               {open ? (
@@ -2453,14 +2451,14 @@ function WaitForm({ config, onChange }: { config: Record<string, any>; onChange:
       <span className="text-xs text-ink-muted">Esperar</span>
       <div className="flex items-center gap-2">
         <input type="number" min={1} value={value} onChange={(e) => setWait(Number(e.target.value), unit)} className="w-20 rounded-lg border border-line-strong px-2 py-1.5" />
-        <select value={unit} onChange={(e) => setWait(Number(value), e.target.value as any)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
+        <Select value={unit} onChange={(e) => setWait(Number(value), e.target.value as any)}>
           <option value="minutes">minutos</option>
           <option value="hours">horas</option>
           <option value="days">días</option>
-        </select>
+        </Select>
       </div>
       <label className="flex items-center gap-1.5 text-xs text-ink-muted">
-        <input type="checkbox" checked={config.cancelOn === "contact_reply"} onChange={(e) => onChange({ cancelOn: e.target.checked ? "contact_reply" : undefined })} />
+        <Checkbox checked={config.cancelOn === "contact_reply"} onChange={(e) => onChange({ cancelOn: e.target.checked ? "contact_reply" : undefined })} />
         Cancelar la espera si el contacto responde
       </label>
     </div>
@@ -2477,11 +2475,11 @@ function WaitReplyForm({ config, onChange }: { config: Record<string, any>; onCh
       <span className="text-xs text-ink-muted">Esperar la respuesta hasta</span>
       <div className="flex items-center gap-2">
         <input type="number" min={1} value={value} onChange={(e) => setWait(Number(e.target.value), unit)} className="w-20 rounded-lg border border-line-strong px-2 py-1.5" />
-        <select value={unit} onChange={(e) => setWait(Number(value), e.target.value as any)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
+        <Select value={unit} onChange={(e) => setWait(Number(value), e.target.value as any)}>
           <option value="minutes">minutos</option>
           <option value="hours">horas</option>
           <option value="days">días</option>
-        </select>
+        </Select>
       </div>
       <p className="rounded-lg bg-app p-3 text-xs text-ink-muted">
         Si el contacto responde dentro de ese tiempo, sigue por <b>Sí, respondió</b>. Si vence sin respuesta, sigue por <b>No respondió</b>.

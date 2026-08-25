@@ -4,7 +4,7 @@
  * (El Montaje asistido de TuBot tiene su página propia: /settings/assisted-setup.) */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Skeleton, useToast } from "@/components/ui";
+import { Select, Skeleton, useToast } from "@/components/ui";
 
 interface DataPolicy {
   conversationsMonths: number;
@@ -53,7 +53,6 @@ export default function DataSettingsPage() {
   }
 
   if (!policy) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
-  const sel = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -66,17 +65,17 @@ export default function DataSettingsPage() {
       <div className="mt-4 space-y-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <label className="block text-sm">
           <span className="font-medium">Conservar conversaciones y mensajes</span>
-          <select className={sel} value={policy.conversationsMonths} disabled={busy} onChange={(e) => void save({ conversationsMonths: Number(e.target.value) })}>
+          <Select className="mt-1 w-full" value={policy.conversationsMonths} disabled={busy} onChange={(e) => void save({ conversationsMonths: Number(e.target.value) })}>
             {OPTIONS.map((o) => (<option key={o.v} value={o.v}>{o.label}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[11px] text-ink-subtle">Las conversaciones más antiguas se eliminan por completo (con sus mensajes y adjuntos). El contacto se conserva.</span>
         </label>
 
         <label className="block text-sm">
           <span className="font-medium">Conservar transcripciones de audio</span>
-          <select className={sel} value={policy.transcriptionsMonths} disabled={busy} onChange={(e) => void save({ transcriptionsMonths: Number(e.target.value) })}>
+          <Select className="mt-1 w-full" value={policy.transcriptionsMonths} disabled={busy} onChange={(e) => void save({ transcriptionsMonths: Number(e.target.value) })}>
             {OPTIONS.map((o) => (<option key={o.v} value={o.v}>{o.label}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[11px] text-ink-subtle">Se borra solo el texto transcrito de los audios antiguos; el mensaje se conserva.</span>
         </label>
 

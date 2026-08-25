@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { expandPerms } from "@/lib/safe";
 import { roleLabel } from "@/lib/labels";
+import { Checkbox, Select } from "@/components/ui";
 
 interface Member {
   membershipId: string;
@@ -197,7 +198,7 @@ export default function UsersPage() {
       <h1 className="text-xl font-semibold">Usuarios y roles</h1>
       <p className="mb-6 text-sm text-ink-muted">
         Quién entra al panel y con qué permisos. Los equipos de atención viven en{" "}
-        <a href="/settings/teams" className="text-cyan-700 underline dark:text-cyan-300">Equipos</a>.
+        <a href="/settings/teams" className="text-brand-700 underline dark:text-brand-300">Equipos</a>.
       </p>
 
       {msg && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{msg}</p>}
@@ -256,13 +257,15 @@ ${inviteUrl}
             </label>
             <label className="text-sm">
               Rol
-              <select value={invite.roleCode} onChange={(e) => setInvite({ ...invite, roleCode: e.target.value })} className="mt-1 block rounded-lg border border-line-strong bg-panel px-3 py-2">
-                {roles.map((r) => (
-                  <option key={r.code} value={r.code}>{r.name}</option>
-                ))}
-              </select>
+              <span className="mt-1 block">
+                <Select value={invite.roleCode} onChange={(e) => setInvite({ ...invite, roleCode: e.target.value })}>
+                  {roles.map((r) => (
+                    <option key={r.code} value={r.code}>{r.name}</option>
+                  ))}
+                </Select>
+              </span>
             </label>
-            <button type="submit" className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800">Invitar</button>
+            <button type="submit" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">Invitar</button>
           </form>
 
           <div className="overflow-x-auto rounded-xl border border-line bg-panel">
@@ -289,11 +292,11 @@ ${inviteUrl}
                       <div className="text-xs text-ink-subtle">{m.email}</div>
                     </td>
                     <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                      <select value={m.roleCode} onChange={(e) => void changeRole(m.membershipId, e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1 text-xs">
+                      <Select value={m.roleCode} onChange={(e) => void changeRole(m.membershipId, e.target.value)} className="text-xs">
                         {roles.map((r) => (
                           <option key={r.code} value={r.code}>{r.name}</option>
                         ))}
-                      </select>
+                      </Select>
                     </td>
                     <td className="p-3 text-xs text-ink-muted">{(m.teams ?? []).join(", ") || "—"}</td>
                     <td className="p-3 text-xs text-ink-muted" title={m.lastLoginAt ? new Date(m.lastLoginAt).toLocaleString("es-CL") : "Nunca ha iniciado sesión"}>
@@ -315,7 +318,7 @@ ${inviteUrl}
           <div className="rounded-xl border border-line bg-panel p-4">
             <h2 className="mb-1 font-medium">Equipos</h2>
             <p className="text-xs text-ink-muted">Crea equipos (Ventas, Recepción, Sede…) y asigna miembros para las asignaciones de la Bandeja, agentes y flujos.</p>
-            <a href="/settings/teams" className="mt-2 inline-block rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Gestionar equipos ↗</a>
+            <a href="/settings/teams" className="mt-2 inline-block rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-800">Gestionar equipos ↗</a>
           </div>
         </aside>
       </div>
@@ -327,7 +330,7 @@ ${inviteUrl}
             <h2 className="font-medium">Roles y permisos</h2>
             <p className="text-sm text-ink-muted">Define qué puede hacer cada tipo de usuario, desde solo responder mensajes hasta configurar todo.</p>
           </div>
-          <button onClick={newRole} className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">+ Nuevo rol</button>
+          <button onClick={newRole} className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-800">+ Nuevo rol</button>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {roles.map((r) => {
@@ -346,7 +349,7 @@ ${inviteUrl}
                     <span className="text-xs text-ink-subtle" title="Los roles predefinidos del sistema no se editan ni eliminan">🔒 predefinido</span>
                   ) : (
                     <div className="flex gap-2 text-xs">
-                      <button onClick={() => editRole(r)} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
+                      <button onClick={() => editRole(r)} className="text-brand-700 hover:underline dark:text-brand-300">Editar</button>
                       {!r.system && <button onClick={() => void deleteRole(r.code)} className="text-ink-subtle hover:text-red-500">✕</button>}
                     </div>
                   )}
@@ -434,7 +437,7 @@ ${inviteUrl}
               <button
                 onClick={() => void saveProfile()}
                 disabled={savingProfile || !profile.name.trim() || !profile.email.trim()}
-                className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
+                className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-50"
               >
                 {savingProfile ? "Guardando…" : "Guardar cambios"}
               </button>
@@ -469,7 +472,7 @@ ${inviteUrl}
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
                     {mod.actions.map((a) => (
                       <label key={a.key} className="flex items-center gap-2 text-sm text-ink">
-                        <input type="checkbox" checked={draft.permissions.includes(a.key)} onChange={() => togglePerm(a.key)} className="h-4 w-4" />
+                        <Checkbox checked={draft.permissions.includes(a.key)} onChange={() => togglePerm(a.key)} />
                         {a.label}
                       </label>
                     ))}
@@ -479,7 +482,7 @@ ${inviteUrl}
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setDraft(null)} className="rounded-lg border border-line-strong px-4 py-2 text-sm">Cancelar</button>
-              <button onClick={() => void saveRole()} disabled={!draft.name || (draft.isNew && !draft.code)} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-50">
+              <button onClick={() => void saveRole()} disabled={!draft.name || (draft.isNew && !draft.code)} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-50">
                 Guardar
               </button>
             </div>

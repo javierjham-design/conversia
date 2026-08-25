@@ -6,10 +6,12 @@ import { Activity, CalendarCheck, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   Button,
+  Checkbox,
   ConfirmDialog,
   Drawer,
   EmptyState,
   SecretField,
+  Select,
   Skeleton,
   StatusBadge,
   useToast,
@@ -636,7 +638,7 @@ export function EmailDrawer({
           <button
             key={m}
             onClick={() => setForm({ ...form, mode: m })}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-cyan-700 text-white" : "border border-line-strong text-ink-muted"}`}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${form.mode === m ? "bg-brand-700 text-white" : "border border-line-strong text-ink-muted"}`}
           >
             {m === "platform" ? "Remitente de plataforma" : "SMTP propio"}
           </button>
@@ -670,7 +672,7 @@ export function EmailDrawer({
             <input type="password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
           </label>
           <label className="flex items-center gap-2 text-xs text-ink-muted">
-            <input type="checkbox" checked={form.smtpSecure} onChange={(e) => setForm({ ...form, smtpSecure: e.target.checked })} />
+            <Checkbox checked={form.smtpSecure} onChange={(e) => setForm({ ...form, smtpSecure: e.target.checked })} />
             Conexión segura (TLS/465)
           </label>
         </div>
@@ -680,7 +682,7 @@ export function EmailDrawer({
       <div className="mb-3 space-y-3 rounded-xl border border-line p-3">
         <div>
           <label className="flex items-center gap-2 text-sm font-medium">
-            <input type="checkbox" checked={form.escalationEnabled} onChange={(e) => setForm({ ...form, escalationEnabled: e.target.checked })} />
+            <Checkbox checked={form.escalationEnabled} onChange={(e) => setForm({ ...form, escalationEnabled: e.target.checked })} />
             Escalamiento sin atender
           </label>
           <p className="text-[11px] text-ink-subtle">Si un agente deriva a humano y nadie toma la conversación en X minutos.</p>
@@ -699,7 +701,7 @@ export function EmailDrawer({
         </div>
         <div>
           <label className="flex items-center gap-2 text-sm font-medium">
-            <input type="checkbox" checked={form.dailyEnabled} onChange={(e) => setForm({ ...form, dailyEnabled: e.target.checked })} />
+            <Checkbox checked={form.dailyEnabled} onChange={(e) => setForm({ ...form, dailyEnabled: e.target.checked })} />
             Resumen diario
           </label>
           <p className="text-[11px] text-ink-subtle">Conversaciones, contactos, leads y citas de las últimas 24 h.</p>
@@ -718,7 +720,7 @@ export function EmailDrawer({
         </div>
         <div>
           <label className="flex items-center gap-2 text-sm font-medium">
-            <input type="checkbox" checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} />
+            <Checkbox checked={form.alertsEnabled} onChange={(e) => setForm({ ...form, alertsEnabled: e.target.checked })} />
             Alertas de integraciones
           </label>
           <p className="text-[11px] text-ink-subtle">P. ej. el token de WhatsApp venció y hay que reautorizar.</p>
@@ -862,11 +864,11 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
           <div className="flex flex-wrap gap-2">
             <label className="text-sm">
               <span className="text-xs text-ink-muted">Autenticación</span>
-              <select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-2 text-sm">
+              <Select value={editing.authType ?? "none"} onChange={(e) => setEditing({ ...editing, authType: e.target.value as ApiPreset["authType"] })} className="mt-1 block">
                 <option value="none">Sin auth</option>
                 <option value="bearer">Bearer token</option>
                 <option value="header">Header personalizado</option>
-              </select>
+              </Select>
             </label>
             {editing.authType === "header" && (
               <label className="flex-1 text-sm">
@@ -908,11 +910,11 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
                   <p className="text-[11px] text-ink-subtle">
                     <code>{p.baseUrl}</code> · {p.authType === "none" ? "sin auth" : p.authType === "bearer" ? "Bearer" : `header ${p.headerName}`}
                   </p>
-                  {p.usedBy.length > 0 && <p className="text-[10px] text-cyan-700 dark:text-cyan-300">Usado por: {p.usedBy.join(", ")}</p>}
+                  {p.usedBy.length > 0 && <p className="text-[10px] text-brand-700 dark:text-brand-300">Usado por: {p.usedBy.join(", ")}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2 text-xs">
                   <button onClick={() => void test(p.id)} className="text-ink-muted hover:underline">Probar</button>
-                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-cyan-700 hover:underline dark:text-cyan-300">Editar</button>
+                  <button onClick={() => setEditing({ ...p, secret: "" })} className="text-brand-700 hover:underline dark:text-brand-300">Editar</button>
                   <button onClick={() => void remove(p)} className="text-red-400 hover:underline">Eliminar</button>
                 </div>
               </div>
@@ -1007,7 +1009,7 @@ export function Ga4Drawer({ open, onClose, state, onChanged }: { open: boolean; 
           <input type="password" value={form.apiSecret} onChange={(e) => setForm({ ...form, apiSecret: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.mirrorCapi} onChange={(e) => setForm({ ...form, mirrorCapi: e.target.checked })} />
+          <Checkbox checked={form.mirrorCapi} onChange={(e) => setForm({ ...form, mirrorCapi: e.target.checked })} />
           Enviar también a Analytics los eventos CAPI (lead, agenda, compra)
         </label>
       </div>
@@ -1126,7 +1128,7 @@ export function EventsManagerDrawer({ open, onClose }: { open: boolean; onClose:
             </div>
           )}
 
-          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-cyan-700 underline dark:text-cyan-300">
+          <a href={stats.eventsManagerUrl} target="_blank" rel="noreferrer" className="block text-xs text-brand-700 underline dark:text-brand-300">
             Abrir el Events Manager de Meta (dataset {stats.datasetId}) →
           </a>
         </div>
@@ -1551,7 +1553,7 @@ export function GoogleDrawer({
                   <StatusBadge kind={state?.lastError ? "attention" : "connected"} label={state?.lastError ? "Atención" : "Activa"} />
                 </div>
                 <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={calendarSync} onChange={(e) => setCalendarSync(e.target.checked)} />
+                  <Checkbox checked={calendarSync} onChange={(e) => setCalendarSync(e.target.checked)} />
                   Reflejar cada cita creada, actualizada o cancelada
                 </label>
                 <label className="mt-2 block text-sm">
@@ -1559,10 +1561,10 @@ export function GoogleDrawer({
                   {calendars === null ? (
                     <Skeleton className="mt-1 h-9" />
                   ) : (
-                    <select
+                    <Select
                       value={calendarId}
                       onChange={(e) => setCalendarId(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
+                      className="mt-1 block w-full"
                     >
                       <option value="">— elegir calendario —</option>
                       {calendars.map((c) => (
@@ -1571,7 +1573,7 @@ export function GoogleDrawer({
                           {c.primary ? " (principal)" : ""}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   )}
                 </label>
                 {state?.lastSyncAt && (
@@ -1933,7 +1935,7 @@ export function HubspotDrawer({
                 </div>
               </div>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={syncAuto} onChange={(e) => setSyncAuto(e.target.checked)} />
+                <Checkbox checked={syncAuto} onChange={(e) => setSyncAuto(e.target.checked)} />
                 Sincronizar automáticamente contactos nuevos y editados
               </label>
 
@@ -1944,15 +1946,15 @@ export function HubspotDrawer({
                     <div key={prop} className="flex items-center gap-2 text-xs">
                       <code className="w-28 shrink-0 rounded bg-app px-1.5 py-1">{prop}</code>
                       <span className="text-ink-subtle">←</span>
-                      <select
+                      <Select
                         value={field}
                         onChange={(e) => setMapping({ ...mapping, [prop]: e.target.value })}
-                        className="flex-1 rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
+                        className="w-full flex-1 text-xs"
                       >
                         {HUBSPOT_FIELD_OPTIONS.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
                         ))}
-                      </select>
+                      </Select>
                       <button
                         type="button"
                         onClick={() => {

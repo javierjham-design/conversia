@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileUp, GitMerge, Upload } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, Modal, Select, cn, useToast } from "@/components/ui";
 import { guessField, parseCSV } from "./contact-csv";
 
 const inputCls = "w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm outline-none focus:border-brand-500";
@@ -150,19 +150,19 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
                   <p className="truncate text-sm font-medium text-ink">{h || `Columna ${i + 1}`}</p>
                   <p className="truncate text-xs text-ink-subtle">{parsed.rows[0]?.[i] ?? ""}</p>
                 </div>
-                <select value={mapping[i] ?? ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })} className={cn(inputCls, "w-48")}>
+                <Select value={mapping[i] ?? ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })} className="w-48">
                   {TARGET_FIELDS.map((f) => (
                     <option key={f.key} value={f.key}>{f.label}</option>
                   ))}
                   {customFields.map((f) => (
                     <option key={`custom:${f.key}`} value={`custom:${f.key}`}>Campo: {f.label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
             ))}
           </div>
           <label className="flex items-center gap-2 text-sm text-ink-muted">
-            <input type="checkbox" checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} />
+            <Checkbox checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} />
             Actualizar contactos existentes (mismo teléfono) rellenando campos vacíos
           </label>
           {!canImport && <p className="text-xs text-amber-600 dark:text-amber-400">Mapea al menos Teléfono, Email o Nombre para poder importar.</p>}

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, ConfirmDialog, Modal, Skeleton, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, Modal, Select, Skeleton, useToast } from "@/components/ui";
 
 interface TagRow {
   id: string;
@@ -90,7 +90,7 @@ export default function TagsSettingsPage() {
             <input
               defaultValue={t.name}
               onBlur={(e) => void rename(t, e.target.value)}
-              className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-line focus:border-cyan-400"
+              className="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 text-sm hover:border-line focus:border-brand-400"
             />
             <span className="w-24 shrink-0 text-right text-[11px] text-ink-subtle">{t.usage} uso(s)</span>
             <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => { setMerging(t); setMergeTarget(""); }}>Fusionar</Button>
@@ -104,12 +104,12 @@ export default function TagsSettingsPage() {
           <p className="text-sm text-ink-muted">
             Todos los usos de <b>{merging.name}</b> ({merging.usage}) pasarán a la etiqueta que elijas, y «{merging.name}» se eliminará.
           </p>
-          <select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="mt-2 w-full rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
+          <Select value={mergeTarget} onChange={(e) => setMergeTarget(e.target.value)} className="mt-2 w-full">
             <option value="">— etiqueta destino —</option>
             {tags.filter((t) => t.id !== merging.id).map((t) => (
               <option key={t.id} value={t.id}>{t.name} ({t.usage})</option>
             ))}
-          </select>
+          </Select>
           <div className="mt-3 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setMerging(null)}>Cancelar</Button>
             <Button

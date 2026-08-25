@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowDown, ArrowUp, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, Skeleton, useToast } from "@/components/ui";
+import { Button, Checkbox, Modal, Select, Skeleton, useToast } from "@/components/ui";
 
 interface FieldRow {
   id: string;
@@ -96,7 +96,7 @@ export default function ContactFieldsPage() {
             <span className="shrink-0 rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{TYPES.find(([t]) => t === f.type)?.[1] ?? f.type}</span>
             <span className="w-20 shrink-0 text-right text-[10px] text-ink-subtle">{f.valuesCount} con valor</span>
             <label className="flex items-center gap-1 text-[11px] text-ink-muted">
-              <input type="checkbox" checked={f.showInList} onChange={() => void toggleColumn(f)} /> Columna
+              <Checkbox checked={f.showInList} onChange={() => void toggleColumn(f)} /> Columna
             </label>
             <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => setEditing(f)}>Editar</Button>
             <button
@@ -158,9 +158,9 @@ function FieldModal({ field, onCancel, onSaved }: { field: FieldRow | null; onCa
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Tipo</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className={`${input} bg-panel`} disabled={!!field}>
+          <Select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full" disabled={!!field}>
             {TYPES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-          </select>
+          </Select>
         </label>
         {type === "select" && (
           <label className="block text-sm">
@@ -169,7 +169,7 @@ function FieldModal({ field, onCancel, onSaved }: { field: FieldRow | null; onCa
           </label>
         )}
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} /> Obligatorio en la ficha
+          <Checkbox checked={required} onChange={(e) => setRequired(e.target.checked)} /> Obligatorio en la ficha
         </label>
       </div>
       <div className="mt-3 flex justify-end gap-2">

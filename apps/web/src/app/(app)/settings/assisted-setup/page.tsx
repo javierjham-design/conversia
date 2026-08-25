@@ -7,7 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Button, Skeleton, useToast } from "@/components/ui";
+import { Button, Select, Skeleton, useToast } from "@/components/ui";
 
 interface AssistedStatus {
   authorized: boolean;
@@ -78,7 +78,6 @@ export default function AssistedSetupPage() {
   }
 
   if (!loaded) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
-  const sel = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -93,10 +92,10 @@ export default function AssistedSetupPage() {
         {channels.length > 0 && (
           <label className="block text-sm">
             <span className="font-medium">Canal a configurar</span>
-            <select className={sel} value={channelId} disabled={busy} onChange={(e) => setChannelId(e.target.value)}>
+            <Select className="mt-1 w-full" value={channelId} disabled={busy} onChange={(e) => setChannelId(e.target.value)}>
               <option value="">Todos mis canales</option>
               {channels.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-            </select>
+            </Select>
             <span className="mt-1 block text-[11px] text-ink-subtle">Elige el canal que quieres que TuBot configure. El asistente solo podrá tocar ese canal.</span>
           </label>
         )}

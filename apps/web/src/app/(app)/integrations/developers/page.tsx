@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Checkbox } from "@/components/ui";
 
 // Herramientas de desarrollador del tenant: webhooks ENTRANTES (Make/Zapier/
 // landings → Conversia, disparan el trigger "Webhook entrante" de workflows) y
@@ -154,7 +155,7 @@ export default function DevelopersPage() {
           </p>
           <form onSubmit={createHook} className="mb-3 flex gap-2">
             <input value={newHookName} onChange={(e) => setNewHookName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. Landing implantes)" className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm" />
-            <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Crear</button>
+            <button type="submit" className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-800">Crear</button>
           </form>
           <ul className="space-y-2">
             {hooks.map((h) => (
@@ -190,13 +191,12 @@ export default function DevelopersPage() {
           <form onSubmit={createKey} className="mb-3 space-y-2">
             <div className="flex gap-2">
               <input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} required minLength={2} placeholder="Nombre (p. ej. CRM interno)" className="flex-1 rounded-lg border border-line-strong px-3 py-1.5 text-sm" />
-              <button type="submit" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">Crear</button>
+              <button type="submit" className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-800">Crear</button>
             </div>
             <div className="flex gap-4 text-xs text-ink-muted">
               {["contacts:read", "contacts:write"].map((s) => (
                 <label key={s} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={newKeyScopes.includes(s)}
                     onChange={() => setNewKeyScopes((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]))}
                   />

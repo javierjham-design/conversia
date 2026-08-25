@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { Select } from "@/components/ui";
 
 // Gestión de plantillas de mensaje de WhatsApp (HSM) de la WABA del canal.
 // El cuerpo se escribe con CAMPOS REALES de la plataforma ({{Nombre del contacto}});
@@ -318,27 +319,27 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
             </label>
             <label className="text-xs text-ink-muted">
               Categoría
-              <select
+              <Select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full text-xs"
               >
                 {Object.entries(CATEGORY_LABEL).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="text-xs text-ink-muted">
               Idioma
-              <select
+              <Select
                 value={form.language}
                 onChange={(e) => setForm({ ...form, language: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2.5 py-1.5 text-xs"
+                className="mt-1 w-full text-xs"
               >
                 {LANGUAGES.map((l) => (
                   <option key={l.value} value={l.value}>{l.label}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           </div>
 
@@ -361,7 +362,7 @@ export function TemplatesPanel({ channelId }: { channelId: string }) {
                   type="button"
                   onClick={() => insertField(f.label)}
                   title={`Ejemplo: ${f.sample}`}
-                  className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] text-cyan-800 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:text-cyan-300 dark:border-cyan-500/30"
+                  className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] text-brand-800 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:border-brand-500/30"
                 >
                   + {f.label}
                 </button>

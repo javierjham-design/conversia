@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clock, ExternalLink, Megaphone, PanelRight, Smartphone, Trash2 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { Button, ConfirmDialog, Modal, cn, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, Modal, Select, cn, useToast } from "@/components/ui";
 import { Composer } from "./composer";
 import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
 
@@ -226,8 +226,8 @@ export function Thread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id, conversation.channelConnectionId, channels]);
 
-  // Selects terciarios: compactos, borde sutil, sin competir con la acción primaria.
-  const sel = "rounded-control border border-line bg-app px-2 py-1.5 text-xs text-ink transition-colors hover:border-line-strong max-w-[8.5rem] truncate";
+  // Selects terciarios: compactos, sin competir con la acción primaria.
+  const sel = "max-w-[8.5rem] truncate text-xs";
   const closed = conversation.status === "CLOSED";
   const windowTone =
     windowLevel === "ok"
@@ -309,26 +309,26 @@ export function Thread({
           {/* Zona derecha: 1 primaria + secundaria + terciarios */}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <div className="flex items-center gap-1 rounded-control bg-app p-0.5">
-              <select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
+              <Select value={conversation.assignedUserId ?? ""} onChange={(e) => void act("assign", { userId: e.target.value || null })} className={sel} title="Responsable">
                 <option value="">👤 Sin asignar</option>
                 {users.map((u) => (
                   <option key={u.userId} value={u.userId}>👤 {u.name}</option>
                 ))}
-              </select>
+              </Select>
               {teams.length > 0 && (
-                <select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
+                <Select value={conversation.assignedTeamId ?? ""} onChange={(e) => void act("assign", { teamId: e.target.value || null })} className={sel} title="Equipo">
                   <option value="">👥 Sin equipo</option>
                   {teams.map((t) => (
                     <option key={t.id} value={t.id}>👥 {t.name}</option>
                   ))}
-                </select>
+                </Select>
               )}
-              <select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
+              <Select value={conversation.activeAgentId ?? ""} onChange={(e) => void act("agent", { agentId: e.target.value || null })} className={sel} title="Agente IA a cargo">
                 <option value="">🤖 Sin agente</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>🤖 {a.name}</option>
                 ))}
-              </select>
+              </Select>
               {/* Canal de envío: por cuál número sale esta conversación. Se muestra
                   cuando hay 2+ canales de WhatsApp o si el actual no resuelve (quedó
                   atada a un canal viejo). Cambiarlo re-envía por el número elegido. */}
@@ -337,7 +337,7 @@ export function Thread({
                 const currentUnresolved = !channels.some((ch) => ch.id === conversation.channelConnectionId);
                 if (waChannels.length < 2 && !(currentUnresolved && waChannels.length >= 1)) return null;
                 return (
-                  <select
+                  <Select
                     value={channels.some((ch) => ch.id === conversation.channelConnectionId) ? conversation.channelConnectionId ?? "" : ""}
                     onChange={(e) => {
                       if (e.target.value) void act("channel", { channelConnectionId: e.target.value }).then(() => toast.push("Canal de envío cambiado", "ok"));
@@ -349,11 +349,11 @@ export function Thread({
                     {waChannels.map((ch) => (
                       <option key={ch.id} value={ch.id}>📱 {ch.name}{ch.displayPhone ? ` · ${ch.displayPhone}` : ""}{ch.status === "error" ? " ⚠" : ""}</option>
                     ))}
-                  </select>
+                  </Select>
                 );
               })()}
               {workflows.length > 0 && (
-                <select
+                <Select
                   value=""
                   onChange={(e) => {
                     if (e.target.value) {
@@ -367,7 +367,7 @@ export function Thread({
                   {workflows.map((w) => (
                     <option key={w.id} value={w.id}>{w.name}</option>
                   ))}
-                </select>
+                </Select>
               )}
             </div>
             {/* Acción primaria única */}

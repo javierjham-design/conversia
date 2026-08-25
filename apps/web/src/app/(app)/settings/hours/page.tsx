@@ -3,7 +3,7 @@
 /** Horario de atención del negocio: default del nodo «Fecha y hora» de workflows. */
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Button, Skeleton, useToast } from "@/components/ui";
+import { Button, Checkbox, DateInput, Skeleton, useToast } from "@/components/ui";
 
 type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 interface Interval { from: string; to: string }
@@ -73,8 +73,7 @@ export default function HoursSettingsPage() {
           return (
             <div key={key} className="flex flex-wrap items-center gap-2 border-b border-line py-1.5 last:border-0">
               <label className="flex w-28 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={open}
                   onChange={(e) => setDay(key, e.target.checked ? [{ from: "09:00", to: "19:00" }] : [])}
                 />
@@ -95,7 +94,7 @@ export default function HoursSettingsPage() {
                 <span className="text-xs text-ink-subtle">Cerrado</span>
               )}
               {open && intervals.length < 3 && (
-                <button onClick={() => setDay(key, [...intervals, { from: "15:00", to: "19:00" }])} className="text-[11px] text-cyan-700 underline dark:text-cyan-300">
+                <button onClick={() => setDay(key, [...intervals, { from: "15:00", to: "19:00" }])} className="text-[11px] text-brand-700 underline dark:text-brand-300">
                   + tramo
                 </button>
               )}
@@ -125,7 +124,7 @@ export default function HoursSettingsPage() {
           {data.holidays.length === 0 && <span className="text-xs text-ink-subtle">Sin feriados cargados.</span>}
         </div>
         <div className="mt-2 flex gap-2">
-          <input type="date" value={newHoliday} onChange={(e) => setNewHoliday(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5 text-xs" />
+          <DateInput value={newHoliday} onChange={(e) => setNewHoliday(e.target.value)} className="text-xs" />
           <Button
             variant="ghost"
             onClick={() => {
