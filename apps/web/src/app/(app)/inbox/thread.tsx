@@ -514,8 +514,12 @@ export function Thread({
                       {outbound ? (m.authorType === "AGENT" ? "🤖 IA" : m.authorName ?? "equipo") : displayName(conversation.contact)} ·{" "}
                       {new Date(m.createdAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
                       {outbound && <span title={m.status.toLowerCase()}>{STATUS_TICK[m.status] ?? ""}</span>}
-                      {failed && m.error ? <span className="text-red-100" title={String(m.error)}>· {String(m.error).slice(0, 50)}</span> : null}
                     </p>
+                    {failed && (
+                      <p className="mt-1 rounded bg-white/20 px-1.5 py-1 text-2xs font-medium leading-snug text-white">
+                        ⚠ No entregado{m.error ? `: ${String(m.error)}` : " — motivo no disponible (reenvía para ver el detalle de Meta)"}
+                      </p>
+                    )}
                   </div>
                   {!outbound && (
                     <button
