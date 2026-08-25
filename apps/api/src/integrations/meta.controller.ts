@@ -33,6 +33,8 @@ const leadMappingSchema = z.object({
 
 const eventMappingSchema = z.object({
   datasetId: z.string().nullable().optional(),
+  /** dataset EXCLUSIVO del CRM (embudo lead.*); null = usa datasetId */
+  crmDatasetId: z.string().nullable().optional(),
   testEventCode: z.string().nullable().optional(),
   active: z.boolean().default(false),
   rules: z
@@ -460,6 +462,7 @@ export class MetaController {
       return (
         row ?? {
           datasetId: null,
+          crmDatasetId: null,
           testEventCode: null,
           active: false,
           rules: [
@@ -481,6 +484,7 @@ export class MetaController {
         where: { organizationId: ctx.organizationId },
         update: {
           datasetId: input.datasetId ?? null,
+          crmDatasetId: input.crmDatasetId ?? null,
           testEventCode: input.testEventCode ?? null,
           rules: input.rules,
           active: input.active,
@@ -488,6 +492,7 @@ export class MetaController {
         create: {
           organizationId: ctx.organizationId,
           datasetId: input.datasetId ?? null,
+          crmDatasetId: input.crmDatasetId ?? null,
           testEventCode: input.testEventCode ?? null,
           rules: input.rules,
           active: input.active,
@@ -505,16 +510,25 @@ export class MetaController {
   @Post("capi-test")
   async capiTest(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = parse(z.object({ eventName: z.string().min(1).max(60).optional() }), body ?? {});
+    const input = parse(
+      z.object({
+        eventName: z.string().min(1).max(60).optional(),
+        /** "crm" prueba el dataset EXCLUSIVO del CRM; por defecto el general/WABA */
+        target: z.enum(["crm", "general"]).optional(),
+      }),
+      body ?? {},
+    );
     const mapping = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }),
     );
-    if (!mapping?.datasetId) {
-      throw new BadRequestException("Configura primero el dataset de conversiones en la pestaña Conversions API");
+    const targetDataset = input.target === "crm" ? (mapping?.crmDatasetId ?? mapping?.datasetId) : mapping?.datasetId;
+    if (!targetDataset) {
+      throw new BadRequestException("Configura primero el dataset de conversiones en la pestaña Conversiones");
     }
     await this.queues.capi.add("test", {
       organizationId: ctx.organizationId,
-      source: "test",
+      // source lead.created → el worker lo enruta al dataset del CRM
+      source: input.target === "crm" ? "lead.created" : "test",
       eventName: input.eventName ?? "Lead",
       contactPhone: "+56955556666",
       test: true,
@@ -522,7 +536,7 @@ export class MetaController {
     });
     return {
       ok: true,
-      detail: mapping.testEventCode
+      detail: mapping?.testEventCode
         ? "Evento de prueba enviado — míralo en la pestaña «Eventos de prueba» del Events Manager (y en Actividad)."
         : "Evento de prueba enviado. Sugerencia: define un test_event_code para verlo en tiempo real en «Eventos de prueba» del Events Manager.",
     };

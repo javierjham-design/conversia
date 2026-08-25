@@ -653,7 +653,7 @@ function ConversionsTab() {
             variant="secondary"
             onClick={async () => {
               try {
-                const r = await api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({}) });
+                const r = await api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({ target: "crm" }) });
                 toast.push(r.detail, "ok");
               } catch (e: any) {
                 toast.push(e.message ?? "Error al enviar el evento", "error");
