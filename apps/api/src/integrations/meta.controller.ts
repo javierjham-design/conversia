@@ -569,6 +569,58 @@ export class MetaController {
     };
   }
 
+  /**
+   * Envío de datos de PRODUCCIÓN al dataset del CRM: reenvía la conversión de
+   * TODOS los leads que hoy están en una etapa (equivalente a «Enviar Schedule
+   * CRM a AGENDADO pendientes»). Cada lead viaja con su lead_id/teléfono/email
+   * reales por el mismo pipeline (action_source system_generated). Sirve para
+   * arrancar la señal del embudo sin esperar nuevos cambios de etapa.
+   */
+  @Post("capi-backfill")
+  async capiBackfill(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(z.object({ stageCode: z.string().min(1) }), body ?? {});
+    const mapping = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaEventMapping.findUnique({ where: { organizationId: ctx.organizationId } }),
+    );
+    const rules = ((mapping?.rules as any[]) ?? []).filter((r) => r?.active);
+    const rule = rules.find((r) => r?.source === `lead.status_changed:${input.stageCode}`);
+    if (!rule) {
+      throw new BadRequestException(
+        `No hay una regla activa para la etapa «${input.stageCode}». Genera el embudo o agrega la regla en Conversiones.`,
+      );
+    }
+    // Leads que hoy están en esa etapa (con su contacto para resolver identidad).
+    const leads = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.lead.findMany({
+        where: { status: { code: input.stageCode } },
+        select: { id: true, contactId: true, contact: { select: { attributes: true } } },
+        take: 500,
+      }),
+    );
+    if (leads.length === 0) {
+      return { ok: true, queued: 0, detail: "No hay leads en esa etapa para reenviar." };
+    }
+    const now = new Date().toISOString();
+    for (const lead of leads) {
+      const metaLead = (lead.contact?.attributes as Record<string, any> | null)?.metaLead;
+      await this.queues.capi.add("backfill", {
+        organizationId: ctx.organizationId,
+        source: `lead.status_changed:${input.stageCode}`,
+        eventName: rule.dest,
+        contactId: lead.contactId,
+        leadId: lead.id,
+        leadgenId: metaLead?.leadgenId ? String(metaLead.leadgenId) : null,
+        occurredAt: now,
+      });
+    }
+    return {
+      ok: true,
+      queued: leads.length,
+      detail: `Encolados ${leads.length} evento(s) «${rule.dest}» al dataset del CRM — revisa el Registro de envíos.`,
+    };
+  }
+
   // ------------------------- Catálogo de anuncios -------------------------
 
   /** Cuentas publicitarias del tenant (para elegir cuáles sincroniza). */

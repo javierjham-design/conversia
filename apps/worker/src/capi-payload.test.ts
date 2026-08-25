@@ -13,9 +13,14 @@ describe("capi-payload", () => {
     expect(hashEmail("  Persona@Mail.COM ")).toBe(sha("persona@mail.com"));
   });
 
-  it("user_data incluye todos los identificadores disponibles", () => {
+  it("user_data incluye todos los identificadores disponibles (lead_id numérico, guía Meta)", () => {
     const ud = buildUserData({ phone: "+56912345678", email: "a@b.cl", leadgenId: "987", ctwaClid: "clid1" });
-    expect(ud).toEqual({ ph: [sha("56912345678")], em: [sha("a@b.cl")], lead_id: "987", ctwa_clid: "clid1" });
+    expect(ud).toEqual({ ph: [sha("56912345678")], em: [sha("a@b.cl")], lead_id: 987, ctwa_clid: "clid1" });
+  });
+
+  it("lead_id de 17+ dígitos que excede el entero seguro queda como string", () => {
+    const big = "123456789012345678"; // > Number.MAX_SAFE_INTEGER
+    expect(buildUserData({ leadgenId: big })).toEqual({ lead_id: big });
   });
 
   it("user_data omite lo que falta (sin claves vacías)", () => {
