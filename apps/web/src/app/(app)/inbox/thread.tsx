@@ -2,9 +2,9 @@
 
 /** Zona 3: cabecera con indicadores + hilo de mensajes + compositor. */
 import { useEffect, useRef, useState } from "react";
-import { Clock, ExternalLink, Megaphone, PanelRight, Smartphone } from "lucide-react";
+import { Clock, ExternalLink, Megaphone, PanelRight, Smartphone, Trash2 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { Button, Modal, cn, useToast } from "@/components/ui";
+import { Button, ConfirmDialog, Modal, cn, useToast } from "@/components/ui";
 import { Composer } from "./composer";
 import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
 
@@ -124,6 +124,30 @@ export function Thread({
   const [sendingTemplate, setSendingTemplate] = useState(false);
   const [closeNote, setCloseNote] = useState<string | null>(null); // null = modal cerrado
   const [capiOffer, setCapiOffer] = useState<{ stageName: string } | null>(null);
+  const [deleteConvOpen, setDeleteConvOpen] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState<Msg | null>(null);
+
+  async function deleteConversation() {
+    try {
+      await api(`/conversations/${conversation.id}`, { method: "DELETE" });
+      toast.push("Conversación eliminada", "ok");
+      setDeleteConvOpen(false);
+      onBack();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    }
+  }
+
+  async function deleteMessage(m: Msg) {
+    try {
+      await api(`/conversations/${conversation.id}/messages/${m.id}`, { method: "DELETE" });
+      toast.push("Mensaje eliminado de TuBot", "ok");
+      setDeleteMsg(null);
+      onRefresh();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    }
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -351,6 +375,14 @@ export function Thread({
             ) : (
               <button onClick={() => setCloseNote("")} className="rounded-control border border-line-strong px-2.5 py-1.5 text-xs text-ink transition-colors hover:bg-app">Cerrar</button>
             )}
+            <button
+              onClick={() => setDeleteConvOpen(true)}
+              className="rounded-control border border-line-strong p-1.5 text-ink-muted transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+              title="Eliminar conversación"
+              aria-label="Eliminar conversación"
+            >
+              <Trash2 size={14} />
+            </button>
             <button onClick={onTogglePanel} className={cn("rounded-control border p-1.5 transition-colors", panelOpen ? "border-brand-300 bg-brand-soft text-brand-700 dark:border-brand-500/40 dark:text-brand-300" : "border-line-strong text-ink-muted hover:bg-app")} title="Panel del contacto">
               <PanelRight size={14} />
             </button>
@@ -445,7 +477,17 @@ export function Thread({
             return (
               <div key={m.id}>
                 {sep}
-                <div className={cn("flex", outbound ? "justify-end" : "justify-start")}>
+                <div className={cn("group flex items-center gap-1.5", outbound ? "justify-end" : "justify-start")}>
+                  {outbound && (
+                    <button
+                      onClick={() => setDeleteMsg(m)}
+                      className="rounded p-1 text-ink-subtle opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                      title="Eliminar mensaje (solo de TuBot)"
+                      aria-label="Eliminar mensaje"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                   <div
                     className={cn(
                       "max-w-[62ch] rounded-bubble px-3.5 py-2 text-sm shadow-e1",
@@ -475,6 +517,16 @@ export function Thread({
                       {failed && m.error ? <span className="text-red-100" title={String(m.error)}>· {String(m.error).slice(0, 50)}</span> : null}
                     </p>
                   </div>
+                  {!outbound && (
+                    <button
+                      onClick={() => setDeleteMsg(m)}
+                      className="rounded p-1 text-ink-subtle opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                      title="Eliminar mensaje (solo de TuBot)"
+                      aria-label="Eliminar mensaje"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -539,6 +591,28 @@ export function Thread({
           </div>
         )}
       </Modal>
+
+      {/* Eliminar conversación */}
+      <ConfirmDialog
+        open={deleteConvOpen}
+        onClose={() => setDeleteConvOpen(false)}
+        onConfirm={() => void deleteConversation()}
+        title="¿Eliminar esta conversación?"
+        description="Se borra TODO el historial de mensajes de TuBot (no se puede deshacer). El contacto, sus leads y citas se conservan. Ojo: esto no borra el chat del teléfono del cliente."
+        confirmLabel="Eliminar conversación"
+        danger
+      />
+
+      {/* Eliminar mensaje */}
+      <ConfirmDialog
+        open={deleteMsg !== null}
+        onClose={() => setDeleteMsg(null)}
+        onConfirm={() => deleteMsg && void deleteMessage(deleteMsg)}
+        title="¿Eliminar este mensaje?"
+        description={`Se elimina solo del historial de TuBot — el cliente lo sigue viendo en su chat. «${(deleteMsg?.body ?? "").slice(0, 80)}»`}
+        confirmLabel="Eliminar mensaje"
+        danger
+      />
 
       {/* Cerrar con nota opcional */}
       <Modal open={closeNote !== null} onClose={() => setCloseNote(null)} title="Cerrar conversación">
