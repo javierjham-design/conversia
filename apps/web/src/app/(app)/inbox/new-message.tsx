@@ -49,6 +49,9 @@ export function NewMessageModal({
   const [hits, setHits] = useState<ContactHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [contact, setContact] = useState<ContactHit | null>(null);
+  /** número nuevo (no existe como contacto): se crea al vuelo al enviar */
+  const [newPhone, setNewPhone] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
   const [channelId, setChannelId] = useState("");
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [templateId, setTemplateId] = useState("");
@@ -85,16 +88,22 @@ export function NewMessageModal({
   function reset() {
     setQ("");
     setContact(null);
+    setNewPhone(null);
+    setNewName("");
     setTemplateId("");
   }
 
   async function send() {
-    if (!contact || !templateId || sending) return;
+    if ((!contact && !newPhone) || !templateId || sending) return;
     setSending(true);
     try {
       const r = await api<{ conversationId: string }>("/conversations/start", {
         method: "POST",
-        body: JSON.stringify({ contactId: contact.id, templateId, ...(channelId ? { channelId } : {}) }),
+        body: JSON.stringify({
+          ...(contact ? { contactId: contact.id } : { phone: newPhone, ...(newName.trim() ? { name: newName.trim() } : {}) }),
+          templateId,
+          ...(channelId ? { channelId } : {}),
+        }),
       });
       toast.push("Plantilla enviada — conversación iniciada", "ok");
       reset();
@@ -108,6 +117,9 @@ export function NewMessageModal({
 
   const selectable = hits.filter((h) => h.phone);
   const noPhone = hits.length > 0 && selectable.length === 0;
+  // La búsqueda parece un teléfono → ofrecer crear el contacto al vuelo
+  const phoneQuery = q.replace(/[^\d+]/g, "").replace(/^\+/, "");
+  const looksLikePhone = phoneQuery.length >= 8 && /^[\d\s()+-]+$/.test(q.trim());
 
   return (
     <Modal
@@ -129,7 +141,7 @@ export function NewMessageModal({
           </p>
 
           {/* Paso 1 — contacto */}
-          {!contact ? (
+          {!contact && !newPhone ? (
             <div>
               <div className="relative">
                 <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
@@ -143,7 +155,19 @@ export function NewMessageModal({
               </div>
               <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">
                 {searching && <p className="px-1 py-2 text-xs text-ink-subtle">Buscando…</p>}
-                {!searching && hits.length === 0 && <p className="px-1 py-2 text-xs text-ink-subtle">Sin resultados.</p>}
+                {!searching && hits.length === 0 && !looksLikePhone && <p className="px-1 py-2 text-xs text-ink-subtle">Sin resultados.</p>}
+                {!searching && looksLikePhone && (
+                  <button
+                    onClick={() => setNewPhone(phoneQuery)}
+                    className="flex w-full items-center gap-2 rounded-control border border-dashed border-brand-400 px-2.5 py-2 text-left text-sm text-brand-700 hover:bg-brand-soft dark:text-brand-400"
+                  >
+                    <span className="text-base leading-none">＋</span>
+                    <span>
+                      Enviar a número nuevo: <b>+{phoneQuery}</b>
+                      <span className="block text-xs text-ink-subtle">Se crea el contacto y se le envía la plantilla</span>
+                    </span>
+                  </button>
+                )}
                 {noPhone && <p className="px-1 py-2 text-xs text-amber-700 dark:text-amber-300">Los contactos encontrados no tienen teléfono (necesario para WhatsApp).</p>}
                 {selectable.map((h) => (
                   <button
@@ -164,7 +188,7 @@ export function NewMessageModal({
                 ))}
               </div>
             </div>
-          ) : (
+          ) : contact ? (
             <div className="flex items-center justify-between rounded-control border border-line bg-app px-2.5 py-2 text-sm">
               <span>
                 <span className="font-medium text-ink">{contactName(contact)}</span>
@@ -174,10 +198,28 @@ export function NewMessageModal({
                 Cambiar
               </button>
             </div>
+          ) : (
+            <div className="space-y-2 rounded-control border border-line bg-app px-2.5 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span>
+                  <span className="font-medium text-ink">Contacto nuevo</span>
+                  <span className="ml-2 text-xs text-ink-subtle">+{newPhone}</span>
+                </span>
+                <button onClick={() => setNewPhone(null)} className="text-xs text-brand-700 hover:underline dark:text-brand-400">
+                  Cambiar
+                </button>
+              </div>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Nombre (opcional)"
+                className="w-full rounded-control border border-line-strong bg-panel px-2.5 py-1.5 text-sm text-ink placeholder:text-ink-subtle"
+              />
+            </div>
           )}
 
           {/* Paso 2 — canal (solo si hay más de uno) */}
-          {contact && waChannels.length > 1 && (
+          {(contact || newPhone) && waChannels.length > 1 && (
             <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className="w-full rounded-control border border-line-strong bg-panel px-2 py-1.5 text-sm text-ink">
               {waChannels.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -186,7 +228,7 @@ export function NewMessageModal({
           )}
 
           {/* Paso 3 — plantilla */}
-          {contact &&
+          {(contact || newPhone) &&
             (templates !== null && templates.length === 0 ? (
               <p className="rounded-control bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                 No hay plantillas aprobadas. Créalas o sincronízalas en <a href="/channels" className="underline">Canales → Plantillas</a>.
@@ -224,7 +266,7 @@ export function NewMessageModal({
             </button>
             <button
               onClick={() => void send()}
-              disabled={!contact || !templateId || sending}
+              disabled={(!contact && !newPhone) || !templateId || sending}
               className="rounded-control bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
             >
               {sending ? "Enviando…" : "Enviar plantilla"}
