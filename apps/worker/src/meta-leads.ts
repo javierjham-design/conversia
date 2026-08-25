@@ -17,6 +17,13 @@ interface LeadgenChange {
 
 /** Resuelve el tenant dueño de la página/formulario (lookup global de ruteo). */
 async function resolveLeadTenant(change: LeadgenChange, internal: boolean): Promise<string | null> {
+  // CRÍTICO (anti cruce de tenant): en un encolado INTERNO autenticado (lead de
+  // prueba del panel), el organization_hint MANDA y se resuelve PRIMERO. Los ids
+  // del lead de prueba son DEMO (demo-page-1 / demo-form-implantes) y existen en
+  // TODAS las orgs que probaron la conexión simulada; si buscáramos por asset
+  // antes, un findFirst global podría enrutar el lead de prueba a OTRO tenant.
+  if (internal && change.organization_hint) return change.organization_hint;
+
   const prisma = getAdminPrisma();
   const byForm = await prisma.metaAsset.findFirst({
     where: { kind: "lead_form", externalId: change.form_id },
