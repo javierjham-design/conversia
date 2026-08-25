@@ -23,6 +23,7 @@ interface GraphPage {
   id: string;
   name: string;
   connected: boolean;
+  pictureUrl?: string | null;
 }
 
 type MetaCrmTab = "crm" | "mensajeria" | "conversiones";
@@ -540,9 +541,19 @@ function PagesPanel({
             return (
             <div key={p.id} className="rounded-xl border border-line p-3">
             <div className="flex items-center justify-between">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{p.name}</p>
-                <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
+              <div className="flex min-w-0 items-center gap-2.5">
+                {p.pictureUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.pictureUrl} alt={p.name} className="h-9 w-9 shrink-0 rounded-full border border-line object-cover" />
+                ) : (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-app text-xs font-semibold text-ink-muted">
+                    {p.name.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{p.name}</p>
+                  <p className="font-mono text-[10px] text-ink-subtle">{p.id}</p>
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {p.connected && (
