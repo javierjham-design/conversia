@@ -93,7 +93,11 @@ export default function OnboardingPage() {
                     </p>
                     <p className="mt-0.5 text-sm text-ink-muted">{step.description}</p>
                   </div>
-                  {!step.done && (
+                  {step.done ? (
+                    <Link href={step.cta.href} className="shrink-0 self-center text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+                      Revisar
+                    </Link>
+                  ) : (
                     <Link href={step.cta.href} className="shrink-0 self-center">
                       <Button variant="secondary" className="whitespace-nowrap">
                         {step.cta.label}
