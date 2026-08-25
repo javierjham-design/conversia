@@ -173,7 +173,7 @@ export class MetaCrmController {
   async pages() {
     const ctx = requirePermission("integrations:read");
     const token = await this.crmToken(ctx.organizationId);
-    const json = await this.graph("me/accounts?fields=id,name,picture{url}&limit=100", token);
+    const json = await this.graph("me/accounts?fields=id,name,picture.width(240).height(240){url}&limit=100", token);
     const pages: Array<{ id: string; name: string; pictureUrl: string | null }> = (json.data ?? []).map((p: any) => ({
       id: String(p.id),
       name: String(p.name ?? p.id),
@@ -195,7 +195,7 @@ export class MetaCrmController {
   async connectPage(@Param("pageId") pageId: string) {
     const ctx = requirePermission("integrations:write");
     const token = await this.crmToken(ctx.organizationId);
-    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account,picture{url}`, token);
+    const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account,picture.width(240).height(240){url}`, token);
     const pagePictureUrl: string | null = page.picture?.data?.url ? String(page.picture.data.url) : null;
     const pageToken: string | undefined = page.access_token;
     if (!pageToken) {
