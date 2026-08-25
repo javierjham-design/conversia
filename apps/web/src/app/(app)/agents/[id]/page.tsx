@@ -76,7 +76,7 @@ function Section({ title, subtitle, helpKey, onHelp, children }: { title: string
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked} className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-brand-600" : "bg-slate-300")}>
+    <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked} className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-brand-600" : "bg-slate-300 dark:bg-slate-600")}>
       <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-panel transition-all", checked ? "left-[18px]" : "left-0.5")} />
     </button>
   );

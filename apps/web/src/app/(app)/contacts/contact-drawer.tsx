@@ -397,7 +397,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <ul className="space-y-2">
                   {d.activity.map((a) => (
                     <li key={a.id} className="flex items-start gap-2 text-sm">
-                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
                       <div>
                         <p className="text-ink">{ACTION_LABEL[a.action] ?? a.action}</p>
                         <p className="text-xs text-ink-subtle">{a.actor ?? a.actorType} · {fmt(a.createdAt)}</p>
