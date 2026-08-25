@@ -203,7 +203,7 @@ export default function IntegrationsPage() {
     if (data.messagingChannels?.instagram) {
       rows.push({
         key: "instagram",
-        name: "Instagram Direct",
+        name: "Instagram",
         category: "Meta y mensajería",
         icon: <MessageCircle size={22} />,
         status: "connected",
@@ -215,7 +215,7 @@ export default function IntegrationsPage() {
     if (data.messagingChannels?.messenger) {
       rows.push({
         key: "messenger",
-        name: "Facebook Messenger",
+        name: "Messenger",
         category: "Meta y mensajería",
         icon: <MessageCircle size={22} />,
         status: "connected",
@@ -375,46 +375,34 @@ export default function IntegrationsPage() {
     return rows;
   }, [data, router]);
 
-  // Claves del catálogo que ya tienen conexión: la tarjeta pasa a «Conectada / Administrar».
-  const connectedKeys = useMemo(() => {
-    const s = new Set<string>();
-    if (!data) return s;
-    if (data.meta && data.meta.status !== "DISCONNECTED") {
-      s.add("meta");
-      s.add("whatsapp");
-    }
-    if (data.metaCrm && data.metaCrm.status === "CONNECTED") s.add("meta_crm");
-    if (data.messagingChannels?.instagram) s.add("instagram");
-    if (data.messagingChannels?.messenger) s.add("messenger");
-    if (data.capiConfigured) s.add("meta_capi");
-    if (data.clariva?.status === "active") s.add("clariva");
-    if (data.webhooks.length > 0) s.add("webhooks");
-    if (data.email) s.add("email");
-    if (data.apiPresets.count > 0) s.add("custom_api");
-    if (data.ga4) s.add("ga4");
-    if (data.customScheduling) s.add("custom_scheduling");
-    if (data.dentalink) s.add("dentalink");
-    if (data.google) {
-      s.add("google_calendar");
-      s.add("sheets");
-    }
-    if (data.hubspot) s.add("hubspot");
-    if (data.automations?.zapier) s.add("zapier");
-    if (data.automations?.make) s.add("make");
-    return s;
-  }, [data]);
+  // Lo conectado se marca DENTRO del catálogo (una sola lista, sin sección
+  // duplicada arriba). Los alias resuelven claves distintas entre la conexión
+  // y el catálogo (meta-crm↔meta_crm; google cubre Calendar y Sheets; la
+  // conexión Meta cubre WhatsApp y CAPI).
+  const connectedByKey = useMemo(() => {
+    const alias: Record<string, string[]> = {
+      "meta-crm": ["meta_crm"],
+      google: ["google_calendar", "sheets"],
+      meta: ["meta", "whatsapp", "meta_capi"],
+    };
+    const m = new Map<string, (typeof connected)[number]>();
+    for (const c of connected) for (const k of alias[c.key] ?? [c.key]) m.set(k, c);
+    return m;
+  }, [connected]);
 
   const filteredCatalog = useMemo(() => {
     if (!data) return [];
     return data.catalog.filter((c) => {
+      const conn = connectedByKey.get(c.key);
       if (categoryFilter !== "todas" && c.category !== categoryFilter) return false;
-      if (statusFilter === "disponibles" && (c.status === "proximamente" || c.status === "config_pendiente")) return false;
+      if (statusFilter === "conectadas" && !conn) return false;
+      if (statusFilter === "atencion" && !(conn && (conn.status === "attention" || conn.status === "error" || conn.status === "incomplete"))) return false;
+      if (statusFilter === "disponibles" && (conn || c.status === "proximamente" || c.status === "config_pendiente")) return false;
       if (statusFilter === "proximamente" && c.status !== "proximamente") return false;
-      if (statusFilter === "conectadas") return false; // conectadas viven en su propia sección
       if (search && !`${c.name} ${c.description}`.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [data, categoryFilter, statusFilter, search]);
+  }, [data, categoryFilter, statusFilter, search, connectedByKey]);
 
   async function notifyInterest(key: string) {
     await api("/integrations/interest", { method: "POST", body: JSON.stringify({ key }) });
@@ -490,7 +478,7 @@ export default function IntegrationsPage() {
       <div className="mx-auto max-w-[1400px] px-6 py-6 lg:px-8">
         <PageHeader
           title="Integraciones"
-          description="Conecta Meta, tu agenda y tus sistemas. Todo con credenciales cifradas por organización."
+          description="Todo lo que se conecta con tu cuenta además de los canales: campañas y leads de Meta, agenda, datos, CRM y comercio. Los canales de conversación (WhatsApp, Instagram, Messenger) se administran en Canales."
           actions={
             <>
               <Button variant="secondary" onClick={() => (window.location.href = "/integrations/developers")}>
@@ -590,13 +578,12 @@ export default function IntegrationsPage() {
           </div>
         )}
 
-        {/* Conectadas */}
-        {(statusFilter === "todas" || statusFilter === "conectadas" || statusFilter === "atencion") && (
-          <section className="mb-10">
-            <h2 className="mb-3 text-lg font-semibold">Conectadas</h2>
-            {!data ? (
-              <Skeleton className="h-36" />
-            ) : connected.length === 0 ? (
+        {/* Catálogo ÚNICO: lo conectado se marca aquí mismo (sin sección aparte) */}
+        <section id="catalogo">
+          {!data ? (
+            <Skeleton className="h-64" />
+          ) : filteredCatalog.length === 0 ? (
+            statusFilter === "conectadas" ? (
               <EmptyState
                 icon={<Plug size={32} />}
                 title="Todavía no hay integraciones conectadas"
@@ -604,44 +591,8 @@ export default function IntegrationsPage() {
                 action={<Button onClick={() => router.push("/integrations/meta")}>Conectar Meta</Button>}
               />
             ) : (
-              <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-                {connected
-                  .filter((c) => statusFilter !== "atencion" || c.status === "attention" || c.status === "error")
-                  .map((c) => (
-                    <div key={c.key} className="rounded-card border border-line bg-panel p-5 shadow-card transition-shadow hover:shadow-pop">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-navy-900 text-accent-400">{c.icon}</div>
-                          <div>
-                            <p className="font-semibold">{c.name}</p>
-                            <p className="text-xs text-ink-subtle">{c.category}</p>
-                          </div>
-                        </div>
-                        <HealthDot level={c.health} />
-                      </div>
-                      <div className="mt-3 flex items-center gap-2">
-                        <StatusBadge kind={c.status} label={c.statusLabel} />
-                      </div>
-                      <p className="mt-2 truncate text-sm text-ink-muted">{c.detail}</p>
-                      <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
-                        <Button variant="secondary" onClick={c.onManage}>
-                          Administrar <ArrowRight size={14} />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Catálogo */}
-        <section id="catalogo">
-          <h2 className="mb-3 text-lg font-semibold">Catálogo</h2>
-          {!data ? (
-            <Skeleton className="h-64" />
-          ) : filteredCatalog.length === 0 ? (
-            <EmptyState title="Sin resultados" description="Prueba con otros filtros o términos de búsqueda." />
+              <EmptyState title="Sin resultados" description="Prueba con otros filtros o términos de búsqueda." />
+            )
           ) : (
             (["meta", "agenda", "datos", "crm", "comercio"] as const).map((cat) => {
               const items = filteredCatalog.filter((c) => c.category === cat);
@@ -652,25 +603,32 @@ export default function IntegrationsPage() {
                     {CATEGORY_LABELS[cat]}
                   </h3>
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                    {items.map((item) => (
+                    {items.map((item) => {
+                      const conn = connectedByKey.get(item.key);
+                      return (
                       <div
                         key={item.key}
                         className={cn(
                           "flex flex-col rounded-card border bg-panel p-4 shadow-card transition-shadow",
-                          item.status === "proximamente" ? "border-line opacity-80" : "border-line hover:shadow-pop",
+                          item.status === "proximamente" ? "border-line opacity-80" : conn ? "border-brand-200 hover:shadow-pop dark:border-brand-500/30" : "border-line hover:shadow-pop",
                         )}
                       >
                         <div className="flex items-start justify-between">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-app text-ink-muted">
-                            {CATALOG_ICONS[item.key] ?? <Plug size={20} />}
+                          {/* El MISMO logo conectada o no (el de la conexión gana) */}
+                          <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", conn ? "bg-navy-900 text-accent-400" : "bg-app text-ink-muted")}>
+                            {conn?.icon ?? CATALOG_ICONS[item.key] ?? <Plug size={20} />}
                           </div>
-                          <StatusBadge
-                            kind={connectedKeys.has(item.key) ? "connected" : item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
-                            label={connectedKeys.has(item.key) ? "✓ Conectada" : item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
-                          />
+                          <div className="flex items-center gap-1.5">
+                            {conn && <HealthDot level={conn.health} />}
+                            <StatusBadge
+                              kind={conn ? conn.status : item.status === "disponible" ? "connected" : item.status === "beta" ? "beta" : item.status === "config_pendiente" ? "incomplete" : "soon"}
+                              label={conn ? (conn.statusLabel ?? "Conectada") : item.status === "disponible" ? "Disponible" : item.status === "config_pendiente" ? "Requiere configuración" : undefined}
+                            />
+                          </div>
                         </div>
                         <p className="mt-2.5 font-semibold">{item.name}</p>
                         <p className="mt-0.5 flex-1 text-[13px] leading-relaxed text-ink-muted">{item.description}</p>
+                        {conn?.detail && <p className="mt-1.5 truncate text-xs text-ink-subtle">{conn.detail}</p>}
                         <div className="mt-2.5 flex flex-wrap gap-1">
                           {(item.capabilities ?? []).map((cap) => (
                             <span key={cap} className="rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{cap}</span>
@@ -682,14 +640,15 @@ export default function IntegrationsPage() {
                               <Bell size={14} /> Avisarme cuando esté disponible
                             </Button>
                           ) : (
-                            <Button variant="secondary" className="w-full" onClick={() => catalogAction(item)}>
-                              {connectedKeys.has(item.key) ? "Administrar" : "Conectar"}
+                            <Button variant="secondary" className="w-full" onClick={() => (conn ? conn.onManage() : catalogAction(item))}>
+                              {conn ? "Administrar" : "Conectar"}
                               <ArrowRight size={14} />
                             </Button>
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );

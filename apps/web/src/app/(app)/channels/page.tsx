@@ -372,7 +372,10 @@ export default function ChannelsPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Canales</h1>
-          <p className="text-sm text-ink-muted">WhatsApp, Instagram, Messenger y canales de prueba — todos a la misma bandeja.</p>
+          <p className="text-sm text-ink-muted">
+            Por dónde entran y salen tus conversaciones: WhatsApp, Instagram y Messenger, todos a la misma bandeja. El
+            resto de conexiones (campañas, agenda, datos) vive en Integraciones.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button
