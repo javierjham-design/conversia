@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { Button, ConfirmDialog, EmptyState, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, DateInput, EmptyState, Modal, Pagination, Select, Skeleton, cn, useToast } from "@/components/ui";
 import { BoardView } from "./board-view";
 import { ContactDrawer } from "./contact-drawer";
 import { DuplicatesModal, ImportMessagesModal, ImportModal } from "./contact-import-merge";
@@ -345,7 +345,6 @@ export default function ContactsPage() {
 
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const allOnPageSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   function toggleSort(col: "createdAt" | "lastContactAt" | "firstName") {
@@ -465,8 +464,7 @@ export default function ContactsPage() {
                 <div className="absolute right-0 z-20 mt-1 w-52 rounded-xl border border-line bg-panel p-1.5 shadow-pop">
                   {COLUMNS.map((c) => (
                     <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-app">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={visibleCols.has(c.key)}
                         onChange={(e) =>
                           setVisibleCols((prev) => {
@@ -517,11 +515,11 @@ export default function ContactsPage() {
             <FilterSelect label="Origen" value={sec.source} onChange={(v) => setSecReset({ source: v })} options={[{ value: "ad", label: "Anuncio (CTWA)" }, { value: "organic", label: "Orgánico" }]} />
             <div>
               <p className="mb-1 text-xs font-medium text-ink-muted">Creado desde</p>
-              <input type="date" value={sec.dateFrom ?? ""} onChange={(e) => setSecReset({ dateFrom: e.target.value || undefined })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
+              <DateInput value={sec.dateFrom ?? ""} onChange={(e) => setSecReset({ dateFrom: e.target.value || undefined })} />
             </div>
             <div>
               <p className="mb-1 text-xs font-medium text-ink-muted">hasta</p>
-              <input type="date" value={sec.dateTo ?? ""} onChange={(e) => setSecReset({ dateTo: e.target.value || undefined })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
+              <DateInput value={sec.dateTo ?? ""} onChange={(e) => setSecReset({ dateTo: e.target.value || undefined })} />
             </div>
             {secCount > 0 && (
               <button onClick={() => setSecReset({ tag: undefined, channel: undefined, country: undefined, source: undefined, dateFrom: undefined, dateTo: undefined })} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-ink-muted hover:text-ink">
@@ -583,8 +581,7 @@ export default function ContactsPage() {
             <thead className="sticky top-0 z-[1] bg-app text-left text-[12px] uppercase tracking-wide text-ink-muted">
               <tr>
                 <th className="w-10 px-3 py-2.5">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={allOnPageSelected}
                     onChange={(e) => {
                       const next = new Set(selected);
@@ -633,8 +630,7 @@ export default function ContactsPage() {
                         className={cn("cursor-pointer border-t border-line hover:bg-app/70", selected.has(c.id) && "bg-brand-50/40")}
                       >
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selected.has(c.id)}
                             onChange={(e) => {
                               const next = new Set(selected);
@@ -720,27 +716,18 @@ export default function ContactsPage() {
 
         {/* Paginación (solo vista Tabla; el Tablero muestra su total en las columnas) */}
         {view === "tabla" && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-panel px-4 py-2.5 text-sm text-ink-muted">
-          <div className="flex items-center gap-2">
-            <span>{total.toLocaleString("es-CL")} contactos</span>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              className="rounded-lg border border-line-strong bg-panel px-2 py-1 text-sm"
-            >
-              {[25, 50, 100].map((n) => (
-                <option key={n} value={n}>{n} / página</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button variant="secondary" className="px-2.5 py-1" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</Button>
-            <span className="px-2">Página {page} de {totalPages}</span>
-            <Button variant="secondary" className="px-2.5 py-1" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Siguiente</Button>
-          </div>
+        <div className="border-t border-line bg-panel px-4 py-2.5">
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            onPage={setPage}
+            onPageSize={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+            itemLabel="clientes"
+          />
         </div>
         )}
       </div>
@@ -868,16 +855,16 @@ function FilterSelect({
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-ink-muted">{label}</p>
-      <select
+      <Select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || undefined)}
-        className="min-w-[130px] rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm"
+        className="min-w-[130px]"
       >
         <option value="">Todos</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

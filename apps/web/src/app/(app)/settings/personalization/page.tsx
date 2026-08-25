@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Button, Skeleton, useToast } from "@/components/ui";
+import { Button, Checkbox, Select, Skeleton, useToast } from "@/components/ui";
 import { recommendedFor } from "@/lib/industry-templates";
 
 interface Personalization {
@@ -121,9 +121,9 @@ export default function PersonalizationPage() {
       <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
         <label className="block text-sm">
           <span className="font-medium">Rubro / industria</span>
-          <select className={sel} value={p.industry} disabled={busy} onChange={(e) => void saveIndustry(e.target.value)}>
+          <Select className="mt-1 w-full" value={p.industry} disabled={busy} onChange={(e) => void saveIndustry(e.target.value)}>
             {p.industries.map((i) => (<option key={i.code} value={i.code}>{i.label}</option>))}
-          </select>
+          </Select>
           <span className="mt-1 block text-[11px] text-ink-subtle">Cambia el vocabulario y los módulos por defecto. Tus ajustes manuales se conservan.</span>
         </label>
       </div>
@@ -155,7 +155,7 @@ export default function PersonalizationPage() {
         <p className="text-sm font-medium">Módulos visibles</p>
         <p className="mt-1 text-xs text-ink-muted">Oculta del menú lo que no usas. No borra datos ni rompe rutas.</p>
         <label className="mt-3 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={p.modules.agenda !== false} disabled={busy} onChange={(e) => void toggleModule("agenda", e.target.checked)} />
+          <Checkbox checked={p.modules.agenda !== false} disabled={busy} onChange={(e) => void toggleModule("agenda", e.target.checked)} />
           Mostrar <b>Agenda</b> (citas / reservas)
         </label>
       </div>

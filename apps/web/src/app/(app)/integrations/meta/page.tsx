@@ -15,6 +15,7 @@ import {
 import { api } from "@/lib/api";
 import {
   Button,
+  Checkbox,
   ConfirmDialog,
   EmptyState,
   PageHeader,
@@ -459,8 +460,7 @@ function SystemUserTokenPanel({ onConnected }: { onConnected: () => void }) {
               <div className="max-h-40 space-y-0.5 overflow-y-auto">
                 {info.adAccounts.map((a) => (
                   <label key={a.id} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-panel">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={picked.has(a.id)}
                       onChange={() => setPicked((prev) => { const n = new Set(prev); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })}
                       className="h-3.5 w-3.5"

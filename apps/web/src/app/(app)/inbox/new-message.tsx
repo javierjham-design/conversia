@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileText, Search } from "lucide-react";
 import { api } from "@/lib/api";
-import { Modal, cn, useToast } from "@/components/ui";
+import { Modal, Select, cn, useToast } from "@/components/ui";
 import type { ChannelInfo } from "./types";
 
 interface ContactHit {
@@ -220,11 +220,11 @@ export function NewMessageModal({
 
           {/* Paso 2 — canal (solo si hay más de uno) */}
           {(contact || newPhone) && waChannels.length > 1 && (
-            <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className="w-full rounded-control border border-line-strong bg-panel px-2 py-1.5 text-sm text-ink">
+            <Select value={channelId} onChange={(e) => setChannelId(e.target.value)} className="w-full">
               {waChannels.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </select>
+            </Select>
           )}
 
           {/* Paso 3 — plantilla */}

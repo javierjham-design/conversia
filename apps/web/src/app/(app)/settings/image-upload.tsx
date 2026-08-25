@@ -114,7 +114,7 @@ export function ImageUpload({
         className={cn(
           "flex h-20 w-20 shrink-0 cursor-pointer items-center justify-center overflow-hidden border-2 border-dashed bg-app text-ink-subtle transition-colors",
           round ? "rounded-full" : "rounded-xl",
-          dragging ? "border-cyan-400 bg-cyan-50 dark:bg-cyan-500/10" : "border-line hover:border-cyan-300",
+          dragging ? "border-brand-400 bg-brand-50 dark:bg-brand-500/10" : "border-line hover:border-brand-300",
         )}
         title={`Arrastra o haz clic para subir ${label.toLowerCase()}`}
       >

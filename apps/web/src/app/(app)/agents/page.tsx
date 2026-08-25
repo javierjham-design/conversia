@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState, cn } from "@/components/ui";
+import { EmptyState, Select, cn } from "@/components/ui";
 
 interface AgentRow {
   id: string;
@@ -68,11 +68,11 @@ export default function AgentsPage() {
   return (
     <div className="h-full overflow-y-auto p-6">
       {hasWhatsapp === false && (
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 dark:bg-cyan-500/10 dark:border-cyan-500/30">
-          <p className="text-sm text-cyan-900 dark:text-cyan-200">
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 dark:bg-brand-500/10 dark:border-brand-500/30">
+          <p className="text-sm text-brand-900 dark:text-brand-200">
             Tus agentes aún no tienen canal: <b>conecta WhatsApp</b> para que respondan conversaciones reales.
           </p>
-          <a href="/channels" className="rounded-lg bg-cyan-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-cyan-800">
+          <a href="/channels" className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-800">
             Conectar WhatsApp
           </a>
         </div>
@@ -86,14 +86,14 @@ export default function AgentsPage() {
         </div>
         <button
           onClick={() => setShowNew(!showNew)}
-          className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800"
+          className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800"
         >
           + Nuevo agente
         </button>
       </div>
 
       {showNew && (
-        <form onSubmit={createAgent} className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 dark:border-cyan-500/30">
+        <form onSubmit={createAgent} className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-4 dark:border-brand-500/30">
           <label className="text-sm">
             Nombre
             <input
@@ -107,20 +107,20 @@ export default function AgentsPage() {
           </label>
           <label className="text-sm">
             Tipo
-            <select
+            <Select
               value={newKind}
               onChange={(e) => setNewKind(e.target.value)}
-              className="mt-1 block rounded-lg border border-line-strong bg-panel px-3 py-2"
+              className="mt-1 block"
             >
               {Object.entries(KIND_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <button
             type="submit"
             disabled={loading}
-            className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800 disabled:opacity-50"
+            className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-50"
           >
             Crear y configurar
           </button>
@@ -183,7 +183,7 @@ export default function AgentsPage() {
             action={
               <button
                 onClick={() => setShowNew(true)}
-                className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800"
+                className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800"
               >
                 + Nuevo agente
               </button>

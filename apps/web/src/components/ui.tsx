@@ -31,15 +31,155 @@ export function Button({
   className,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
+  // Deshabilitado INEQUÍVOCO (B4.5): gris, sin sombra, cursor bloqueado — nunca
+  // un primario "clarito" que se confunda con uno habilitado.
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-control px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+    "inline-flex items-center justify-center gap-1.5 rounded-control px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed";
   const variants = {
-    primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-e1",
-    secondary: "border border-line-strong bg-panel text-ink hover:bg-app",
-    ghost: "text-ink-muted hover:bg-app",
-    danger: "border border-red-300 bg-panel text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10 ",
+    primary:
+      "bg-brand-600 text-white hover:bg-brand-700 shadow-e1 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none dark:disabled:bg-slate-700 dark:disabled:text-slate-500",
+    secondary:
+      "border border-line-strong bg-panel text-ink hover:bg-app disabled:border-line disabled:bg-app disabled:text-ink-subtle",
+    ghost: "text-ink-muted hover:bg-app disabled:text-ink-subtle disabled:hover:bg-transparent",
+    danger:
+      "border border-red-300 bg-panel text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10 disabled:border-line disabled:bg-app disabled:text-ink-subtle",
   };
   return <button className={cn(base, variants[variant], className)} {...props} />;
+}
+
+// -------------------- Controles de formulario propios --------------------
+// (B4: reemplazan a los controles nativos sin estilo — mismo alto, radio,
+// tipografía, foco y modo oscuro en toda la app.)
+
+/** Select del design system: envuelve el <select> nativo (teclado y a11y
+ *  gratis) con estilo unificado y chevron propio. */
+export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className={cn("relative inline-flex", className?.includes("w-full") && "w-full")}>
+      <select
+        className={cn(
+          "appearance-none rounded-control border border-line-strong bg-panel py-1.5 pl-3 pr-8 text-sm text-ink transition-colors",
+          "hover:border-line-strong focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-app disabled:text-ink-subtle",
+          className,
+        )}
+        {...props}
+      />
+      <svg
+        aria-hidden
+        viewBox="0 0 16 16"
+        className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      >
+        <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+/** Checkbox del design system — para SELECCIONAR de una lista. */
+export function Checkbox({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      type="checkbox"
+      className={cn(
+        "h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-line-strong bg-panel transition-colors",
+        "checked:border-brand-600 checked:bg-brand-600 checked:bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22white%22 stroke-width=%222.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M3.5 8.5l3 3 6-7%22/></svg>')] checked:bg-center checked:bg-no-repeat",
+        "disabled:cursor-not-allowed disabled:opacity-40",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Switch del design system — para ACTIVAR una capacidad (on/off). */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+        checked ? "bg-brand-600" : "bg-slate-300 dark:bg-slate-600",
+        disabled && "cursor-not-allowed opacity-40",
+        className,
+      )}
+    >
+      <span className={cn("inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform", checked ? "translate-x-[18px]" : "translate-x-0.5")} />
+    </button>
+  );
+}
+
+/** Input de fecha del design system (nativo estilizado; formato del navegador
+ *  es-CL, con color-scheme correcto en oscuro). */
+export function DateInput({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      type="date"
+      className={cn(
+        "rounded-control border border-line-strong bg-panel px-3 py-1.5 text-sm text-ink transition-colors [color-scheme:light] dark:[color-scheme:dark]",
+        "focus:border-brand-500 disabled:cursor-not-allowed disabled:bg-app disabled:text-ink-subtle",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Paginación única de la plataforma: «N / página» + Anterior/Siguiente. */
+export function Pagination({
+  page,
+  pageSize,
+  total,
+  onPage,
+  onPageSize,
+  itemLabel = "registros",
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPage: (p: number) => void;
+  onPageSize?: (n: number) => void;
+  itemLabel?: string;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-muted">
+      <div className="flex items-center gap-2">
+        <span className="tnum">{total.toLocaleString("es-CL")} {itemLabel}</span>
+        {onPageSize && (
+          <Select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Tamaño de página">
+            {[25, 50, 100].map((n) => (
+              <option key={n} value={n}>{n} / página</option>
+            ))}
+          </Select>
+        )}
+      </div>
+      <div className="flex items-center gap-1">
+        <Button variant="secondary" className="px-2.5 py-1" disabled={page <= 1} onClick={() => onPage(Math.max(1, page - 1))}>Anterior</Button>
+        <span className="px-2 tnum">Página {page} de {totalPages}</span>
+        <Button variant="secondary" className="px-2.5 py-1" disabled={page >= totalPages} onClick={() => onPage(Math.min(totalPages, page + 1))}>Siguiente</Button>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------- Encabezados ----------------------------

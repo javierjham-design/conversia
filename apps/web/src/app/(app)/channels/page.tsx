@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
+import { Checkbox, Select } from "@/components/ui";
 import { InstagramIcon, MessengerIcon, TikTokIcon, WhatsAppIcon } from "@/components/brand-icons";
 import { TemplatesPanel } from "./templates-panel";
 
@@ -444,14 +445,14 @@ export default function ChannelsPage() {
       </p>
 
       {showNew && (
-        <form onSubmit={create} className="mb-6 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4 dark:border-cyan-500/30">
+        <form onSubmit={create} className="mb-6 rounded-xl border border-brand-200 bg-brand-50/40 p-4 dark:border-brand-500/30">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-sm">
               Tipo
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as any })} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2">
+              <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as any })} className="mt-1 w-full">
                 <option value="WHATSAPP_CLOUD">WhatsApp Cloud API (Meta)</option>
                 <option value="MOCK">Canal de prueba (mock)</option>
-              </select>
+              </Select>
             </label>
             <label className="text-sm">
               Nombre
@@ -480,15 +481,15 @@ export default function ChannelsPage() {
             )}
             <label className="text-sm">
               Agente por defecto
-              <select value={form.defaultAgentId} onChange={(e) => setForm({ ...form, defaultAgentId: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2">
+              <Select value={form.defaultAgentId} onChange={(e) => setForm({ ...form, defaultAgentId: e.target.value })} className="mt-1 w-full">
                 <option value="">— sin agente (solo humanos) —</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           </div>
-          <button type="submit" className="mt-3 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-800">
+          <button type="submit" className="mt-3 rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
             Conectar
           </button>
         </form>
@@ -564,19 +565,19 @@ export default function ChannelsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <select
+                <Select
                   value={c.defaultAgentId ?? ""}
                   onChange={(e) => void setDefaultAgent(c.id, e.target.value)}
-                  className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
+                  className="text-xs"
                 >
                   <option value="">sin agente por defecto</option>
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>🤖 {a.name}</option>
                   ))}
-                </select>
+                </Select>
                 {c.type === "WHATSAPP_CLOUD" && c.status === "active" && (
                   <label className="flex items-center gap-1.5 rounded-lg border border-line-strong px-2 py-1.5 text-xs text-ink-muted" title="Número desde el que salen los recordatorios/plantillas a contactos SIN conversación previa (p. ej. citas nacidas en Cláriva). Si el contacto ya escribió, sale por su mismo número.">
-                    <input type="checkbox" checked={c.defaultProactive ?? false} onChange={(e) => void setDefaultProactive(c.id, e.target.checked)} />
+                    <Checkbox checked={c.defaultProactive ?? false} onChange={(e) => void setDefaultProactive(c.id, e.target.checked)} />
                     Por defecto para recordatorios
                   </label>
                 )}

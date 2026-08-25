@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { Bell, BellOff } from "lucide-react";
 import { api } from "@/lib/api";
-import { Skeleton, useToast } from "@/components/ui";
+import { Checkbox, Skeleton, useToast } from "@/components/ui";
 import { disablePush, enablePush, permissionState, pushSupport } from "@/lib/push";
 
 /** Activar/desactivar Web Push EN ESTE DISPOSITIVO (navegador o PWA del celular). */
@@ -222,13 +222,11 @@ export default function NotificationsSettingsPage() {
               return (
                 <span key={c.key} className="w-14 text-center">
                   {allowed ? (
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={isOn(ev, c.key)}
                       disabled={busy || locked}
                       onChange={() => toggle(ev, c.key)}
                       title={locked ? "Obligatorio" : undefined}
-                      className="h-4 w-4"
                     />
                   ) : (
                     <span className="text-ink-subtle">—</span>
@@ -247,12 +245,10 @@ export default function NotificationsSettingsPage() {
             <span className="block text-sm font-medium">Horario silencioso</span>
             <span className="block text-xs text-ink-subtle">Silencia push en la franja indicada. Los avisos <b>críticos</b> igual llegan.</span>
           </span>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={prefs.quietHours.enabled}
             disabled={busy}
             onChange={() => void save({ ...prefs, quietHours: { ...prefs.quietHours, enabled: !prefs.quietHours.enabled } })}
-            className="h-4 w-4"
           />
         </label>
         {prefs.quietHours.enabled && (
@@ -272,12 +268,10 @@ export default function NotificationsSettingsPage() {
             <span className="block text-sm font-medium">Aviso por WhatsApp en eventos críticos</span>
             <span className="block text-xs text-ink-subtle">Si un evento crítico no se atiende en unos minutos, te avisamos por WhatsApp. Se cancela solo si lo abres a tiempo.</span>
           </span>
-          <input
-            type="checkbox"
+          <Checkbox
             checked={prefs.whatsapp.enabled}
             disabled={busy}
             onChange={() => void save({ ...prefs, whatsapp: { ...prefs.whatsapp, enabled: !prefs.whatsapp.enabled } })}
-            className="h-4 w-4"
           />
         </label>
         {estimate && (

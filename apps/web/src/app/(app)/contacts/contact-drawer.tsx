@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Ban, Download, ExternalLink, Megaphone, MessageSquare, Save, ShieldCheck, Trash2, UserX } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, ConfirmDialog, Skeleton, Tabs, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, DateInput, Select, Skeleton, Tabs, cn, useToast } from "@/components/ui";
 
 // --------------------------------- Tipos ---------------------------------
 
@@ -285,7 +285,7 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
               <F label="Email"><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} /></F>
               <div className="grid grid-cols-2 gap-3">
                 <F label="Documento"><input value={form.documentId} onChange={(e) => setForm({ ...form, documentId: e.target.value })} className={inputCls} /></F>
-                <F label="Nacimiento"><input type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} className={inputCls} /></F>
+                <F label="Nacimiento"><DateInput value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} className="w-full" /></F>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <F label="País"><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value.toUpperCase().slice(0, 2) })} className={inputCls} /></F>
@@ -293,8 +293,8 @@ export function ContactDrawer({ id, onClose, onChanged }: { id: string | null; o
                 <F label="Zona horaria"><input value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls} /></F>
               </div>
               <div className="flex gap-5 pt-1">
-                <label className="flex items-center gap-2 text-sm text-ink-muted"><input type="checkbox" checked={form.consent} onChange={(e) => setForm({ ...form, consent: e.target.checked })} /> Consiente contacto</label>
-                <label className="flex items-center gap-2 text-sm text-ink-muted"><input type="checkbox" checked={form.doNotContact} onChange={(e) => setForm({ ...form, doNotContact: e.target.checked })} /> No contactar</label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted"><Checkbox checked={form.consent} onChange={(e) => setForm({ ...form, consent: e.target.checked })} /> Consiente contacto</label>
+                <label className="flex items-center gap-2 text-sm text-ink-muted"><Checkbox checked={form.doNotContact} onChange={(e) => setForm({ ...form, doNotContact: e.target.checked })} /> No contactar</label>
               </div>
 
               {d.customFields.length > 0 && (
@@ -468,15 +468,15 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 
 function CustomInput({ field, value, onChange }: { field: CustomField; value: any; onChange: (v: any) => void }) {
   const opts = (field.options as any[]).map((o) => (typeof o === "string" ? { value: o, label: o } : o));
-  if (field.type === "boolean") return <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />;
+  if (field.type === "boolean") return <Checkbox checked={!!value} onChange={(e) => onChange(e.target.checked)} />;
   if (field.type === "number") return <input type="number" value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={inputCls} />;
-  if (field.type === "date") return <input type="date" value={value ? String(value).slice(0, 10) : ""} onChange={(e) => onChange(e.target.value)} className={inputCls} />;
+  if (field.type === "date") return <DateInput value={value ? String(value).slice(0, 10) : ""} onChange={(e) => onChange(e.target.value)} className="w-full" />;
   if (field.type === "select")
     return (
-      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+      <Select value={value ?? ""} onChange={(e) => onChange(e.target.value)} className="w-full">
         <option value="">—</option>
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
+      </Select>
     );
   return <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={inputCls} />;
 }

@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Ban, Bot, ChevronDown, ChevronRight, Inbox, Plus, Settings2, Tags, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, cn, useToast } from "@/components/ui";
+import { Button, Modal, Select, cn, useToast } from "@/components/ui";
 import type { ChannelInfo, Counters, InboxFilter } from "./types";
 
 function Group({
@@ -236,6 +236,7 @@ function NewViewModal({
   }
 
   const sel = "mt-1 block w-full rounded-control border border-line-strong bg-panel px-2 py-1.5 text-sm text-ink";
+  const selectCls = "mt-1 w-full";
   return (
     <Modal open onClose={onClose} title="Nueva bandeja personalizada">
       <div className="space-y-2.5">
@@ -246,53 +247,53 @@ function NewViewModal({
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Estado</span>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} className={sel}>
+            <Select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
               <option value="open">Abiertas</option>
               <option value="closed">Cerradas</option>
               <option value="all">Todas</option>
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Canal</span>
-            <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className={sel}>
+            <Select value={channelId} onChange={(e) => setChannelId(e.target.value)} className={selectCls}>
               <option value="">Cualquiera</option>
               {channels.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Asignado</span>
-            <select value={assigned} onChange={(e) => setAssigned(e.target.value)} className={sel}>
+            <Select value={assigned} onChange={(e) => setAssigned(e.target.value)} className={selectCls}>
               <option value="">Cualquiera</option>
               <option value="me">Mías</option>
               <option value="unassigned">Sin asignar</option>
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Control</span>
-            <select value={ai} onChange={(e) => setAi(e.target.value)} className={sel}>
+            <Select value={ai} onChange={(e) => setAi(e.target.value)} className={selectCls}>
               <option value="">IA y humano</option>
               <option value="on">Con IA</option>
               <option value="off">Humano</option>
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Etapa</span>
-            <select value={stageCode} onChange={(e) => setStageCode(e.target.value)} className={sel}>
+            <Select value={stageCode} onChange={(e) => setStageCode(e.target.value)} className={selectCls}>
               <option value="">Cualquiera</option>
               {stages.map((s) => (
                 <option key={s.code} value={s.code}>{s.name}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="block text-sm">
             <span className="text-xs text-ink-muted">Origen anuncio</span>
-            <select value={hasAd} onChange={(e) => setHasAd(e.target.value)} className={sel}>
+            <Select value={hasAd} onChange={(e) => setHasAd(e.target.value)} className={selectCls}>
               <option value="">Da igual</option>
               <option value="si">Desde anuncio</option>
               <option value="no">Sin anuncio</option>
-            </select>
+            </Select>
           </label>
         </div>
         <label className="block text-sm">

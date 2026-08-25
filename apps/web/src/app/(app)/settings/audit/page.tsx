@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { api } from "@/lib/api";
-import { Skeleton } from "@/components/ui";
+import { DateInput, Select, Skeleton } from "@/components/ui";
 
 interface AuditRow {
   id: string;
@@ -146,11 +146,11 @@ export default function AuditSettingsPage() {
             className="w-56 rounded-lg border border-line-strong bg-panel py-1.5 pl-8 pr-2 text-xs"
           />
         </div>
-        <select value={module} onChange={(e) => setModule(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5">
+        <Select value={module} onChange={(e) => setModule(e.target.value)} className="text-xs">
           {MODULES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-        </select>
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" aria-label="Desde" />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-lg border border-line-strong px-2 py-1.5" aria-label="Hasta" />
+        </Select>
+        <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className="text-xs" aria-label="Desde" />
+        <DateInput value={to} onChange={(e) => setTo(e.target.value)} className="text-xs" aria-label="Hasta" />
       </div>
 
       {!filtered ? (
@@ -186,7 +186,7 @@ export default function AuditSettingsPage() {
             </section>
           ))}
           {nextCursor && (
-            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-cyan-700 hover:underline dark:text-cyan-300">
+            <button onClick={() => void load(nextCursor)} className="block w-full py-2 text-center text-xs text-brand-700 hover:underline dark:text-brand-300">
               Cargar más
             </button>
           )}

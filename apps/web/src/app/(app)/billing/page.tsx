@@ -196,7 +196,7 @@ export default function BillingPage() {
           </div>
           {data.plan ? (
             <>
-              <p className="mt-1 text-2xl font-semibold text-cyan-800 dark:text-cyan-300">{data.plan.name}</p>
+              <p className="mt-1 text-2xl font-semibold text-brand-800 dark:text-brand-300">{data.plan.name}</p>
               {(() => {
                 const base = priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly");
                 const billTotal = data.billables.reduce((a, b) => a + (Number(b.amount) || 0), 0);
@@ -267,13 +267,13 @@ export default function BillingPage() {
           <div className="inline-flex rounded-lg border border-line-strong p-0.5 text-xs">
             <button
               onClick={() => setBillingInterval("monthly")}
-              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "monthly" ? "bg-cyan-600 text-white" : "text-ink-muted hover:bg-app")}
+              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "monthly" ? "bg-brand-600 text-white" : "text-ink-muted hover:bg-app")}
             >
               Mensual
             </button>
             <button
               onClick={() => setBillingInterval("yearly")}
-              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "yearly" ? "bg-cyan-600 text-white" : "text-ink-muted hover:bg-app")}
+              className={cn("rounded-md px-3 py-1.5 font-medium", billingInterval === "yearly" ? "bg-brand-600 text-white" : "text-ink-muted hover:bg-app")}
             >
               Anual
             </button>
@@ -285,10 +285,10 @@ export default function BillingPage() {
           const isCurrent = p.code === currentCode;
           const enterprise = !p.isPublic;
           return (
-            <div key={p.code} className={cn("flex flex-col rounded-card border bg-panel p-4 shadow-card", isCurrent ? "border-cyan-400 ring-1 ring-cyan-200" : "border-line")}>
+            <div key={p.code} className={cn("flex flex-col rounded-card border bg-panel p-4 shadow-card", isCurrent ? "border-brand-400 ring-1 ring-brand-200" : "border-line")}>
               <div className="flex items-center justify-between">
                 <p className="font-semibold">{p.name}</p>
-                {isCurrent && <span className="rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">Tu plan actual</span>}
+                {isCurrent && <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">Tu plan actual</span>}
               </div>
               {(() => {
                 const showYearly = billingInterval === "yearly" && (yearlyPriceOf(p) ?? 0) > 0;

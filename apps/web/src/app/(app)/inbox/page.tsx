@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Search, SquarePen, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { reportViewing } from "@/lib/push";
-import { EmptyState, Modal, cn } from "@/components/ui";
+import { Checkbox, EmptyState, Modal, Select, cn } from "@/components/ui";
 import { ContactDrawer } from "../contacts/contact-drawer";
 import { ContactPanel } from "./contact-panel";
 import { NewMessageModal } from "./new-message";
@@ -339,13 +339,13 @@ export default function InboxPage() {
               <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…  ( / )" className="w-full rounded-control border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle" />
             </div>
             <div className="flex items-center gap-1.5 text-xs">
-              <select value={order} onChange={(e) => setOrder(e.target.value)} className="flex-1 rounded-control border border-line bg-panel px-2 py-1 text-ink">
+              <Select value={order} onChange={(e) => setOrder(e.target.value)} className="w-full flex-1">
                 <option value="recent">Más nuevas primero</option>
                 <option value="oldest">Más antiguas primero</option>
                 <option value="unanswered_first">Sin responder primero</option>
-              </select>
+              </Select>
               <label className="flex items-center gap-1 whitespace-nowrap text-2xs text-ink-muted">
-                <input type="checkbox" checked={onlyUnanswered} onChange={(e) => setOnlyUnanswered(e.target.checked)} />
+                <Checkbox checked={onlyUnanswered} onChange={(e) => setOnlyUnanswered(e.target.checked)} />
                 Solo no respondidas
               </label>
             </div>

@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "@/lib/api";
-import { Button, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, cn, useToast } from "@/components/ui";
 
 interface Status {
   enabled: boolean;
@@ -147,7 +147,7 @@ export function MfaCard() {
       {/* Política de la organización (solo propietario) */}
       {status.role === "owner" && (
         <label className="mt-4 flex items-start gap-2 border-t border-line pt-3 text-sm">
-          <input type="checkbox" className="mt-0.5" checked={status.requireMfaForAdmins} onChange={(e) => void toggleOrgRequire(e.target.checked)} disabled={busy} />
+          <Checkbox className="mt-0.5" checked={status.requireMfaForAdmins} onChange={(e) => void toggleOrgRequire(e.target.checked)} disabled={busy} />
           <span>
             Exigir 2FA a propietario y administradores
             <span className="block text-[11px] text-ink-subtle">Al iniciar sesión, quien no la tenga activa deberá configurarla antes de entrar.</span>

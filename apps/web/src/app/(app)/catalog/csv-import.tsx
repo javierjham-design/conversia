@@ -3,7 +3,7 @@
 /** Importación de catálogo por CSV: plantilla descargable + mapeo asistido de columnas. */
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { Button, Drawer, useToast } from "@/components/ui";
+import { Button, Drawer, Select, useToast } from "@/components/ui";
 
 interface Field { key: string; label: string; required?: boolean; aliases: string[] }
 const FIELDS: Field[] = [
@@ -84,8 +84,6 @@ export function CsvImport({ open, onClose, onDone }: { open: boolean; onClose: (
     const a = document.createElement("a"); a.href = url; a.download = "plantilla-catalogo.csv"; a.click(); URL.revokeObjectURL(url);
   }
 
-  const sel = "rounded-lg border border-line-strong bg-panel px-2 py-1 text-sm";
-
   return (
     <Drawer open={open} onClose={onClose} title="Importar catálogo por CSV">
       <p className="text-xs text-ink-muted">Sube tu catálogo en una planilla. Descarga la plantilla, complétala y súbela — detectamos las columnas por ti.</p>
@@ -102,10 +100,10 @@ export function CsvImport({ open, onClose, onDone }: { open: boolean; onClose: (
             {FIELDS.map((f) => (
               <div key={f.key} className="flex items-center justify-between text-sm">
                 <span>{f.label}{f.required && " *"}</span>
-                <select value={map[f.key] ?? -1} onChange={(e) => setMap((m) => ({ ...m, [f.key]: Number(e.target.value) }))} className={sel}>
+                <Select value={map[f.key] ?? -1} onChange={(e) => setMap((m) => ({ ...m, [f.key]: Number(e.target.value) }))}>
                   <option value={-1}>— ninguna —</option>
                   {headers.map((h, i) => <option key={i} value={i}>{h}</option>)}
-                </select>
+                </Select>
               </div>
             ))}
           </div>

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { api, getToken } from "@/lib/api";
-import { Button, Skeleton, StatusBadge, useToast } from "@/components/ui";
+import { Button, DateInput, Select, Skeleton, StatusBadge, useToast } from "@/components/ui";
 
 interface ExportRow {
   id: string;
@@ -82,17 +82,19 @@ export default function ExportSettingsPage() {
       <div className="mt-4 flex flex-wrap items-end gap-2 rounded-card border border-line bg-panel p-4 shadow-card">
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Qué exportar</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
-            {Object.entries(TYPE_LABELS).map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-          </select>
+          <span className="mt-1 block">
+            <Select value={type} onChange={(e) => setType(e.target.value)}>
+              {Object.entries(TYPE_LABELS).map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
+            </Select>
+          </span>
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Desde (opcional)</span>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+          <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block" />
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Hasta (opcional)</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+          <DateInput value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block" />
         </label>
         <Button onClick={() => void create()} disabled={busy}>Generar export</Button>
       </div>

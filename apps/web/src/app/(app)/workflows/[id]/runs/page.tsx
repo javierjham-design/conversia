@@ -17,7 +17,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { AlertTriangle, ArrowLeft, CheckCircle2, Clock, RefreshCw, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, cn, useToast } from "@/components/ui";
+import { Button, DateInput, Modal, Select, cn, useToast } from "@/components/ui";
 
 // Etiquetas legibles por tipo de paso (para el historial y el canvas de recorrido).
 // Fuente puente hasta consolidar el catálogo en el Bloque 6.
@@ -214,19 +214,19 @@ export default function WorkflowRunsPage() {
       {/* Filtros */}
       <div className="mb-3 flex flex-wrap items-end gap-3">
         <label className="text-xs text-ink-muted">Estado
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 block">
             <option value="">Todas</option>
             <option value="errors">Solo con error</option>
             <option value="COMPLETED">Completadas</option>
             <option value="WAITING">En espera</option>
             <option value="CANCELLED">Canceladas</option>
-          </select>
+          </Select>
         </label>
         <label className="text-xs text-ink-muted">Desde
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
+          <DateInput value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block" />
         </label>
         <label className="text-xs text-ink-muted">Hasta
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm" />
+          <DateInput value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block" />
         </label>
         {(status || from || to) && <button onClick={() => { setStatus(""); setFrom(""); setTo(""); }} className="pb-2 text-xs text-ink-subtle underline hover:text-ink">Limpiar</button>}
       </div>

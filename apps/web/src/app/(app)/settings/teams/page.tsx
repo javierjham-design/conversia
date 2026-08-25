@@ -54,7 +54,7 @@ export default function TeamsSettingsPage() {
       <p className="mt-1 text-xs text-ink-muted">
         Ventas, Recepción, Sede… Los equipos se usan en las asignaciones de la <b>Bandeja</b>, la acción «Asignar a» de
         los <b>agentes IA</b> y el paso «Asignar» de los <b>flujos</b>. Los usuarios y sus roles viven en{" "}
-        <a href="/settings/users" className="text-cyan-700 underline dark:text-cyan-300">Usuarios</a>.
+        <a href="/settings/users" className="text-brand-700 underline dark:text-brand-300">Usuarios</a>.
       </p>
 
       <div className="mt-4 flex gap-2">
@@ -89,9 +89,9 @@ export default function TeamsSettingsPage() {
                         void api(`/users/teams/${t.id}`, { method: "PATCH", body: JSON.stringify({ name }) }).then(load);
                       }
                     }}
-                    className="w-full rounded border border-transparent px-1 py-0.5 text-sm font-semibold hover:border-line focus:border-cyan-400"
+                    className="w-full rounded border border-transparent px-1 py-0.5 text-sm font-semibold hover:border-line focus:border-brand-400"
                   />
-                  <a href={`/inbox?team=${t.id}`} className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-cyan-700 underline dark:text-cyan-300">
+                  <a href={`/inbox?team=${t.id}`} className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-brand-700 underline dark:text-brand-300">
                     <Inbox size={11} /> {t.openConversations} conversación(es) asignadas hoy
                   </a>
                 </div>
@@ -139,7 +139,7 @@ export default function TeamsSettingsPage() {
                             void load();
                           });
                         }}
-                        className="w-full rounded px-1.5 py-0.5 text-left text-xs text-cyan-700 hover:bg-cyan-50 dark:text-cyan-300"
+                        className="w-full rounded px-1.5 py-0.5 text-left text-xs text-brand-700 hover:bg-brand-50 dark:text-brand-300"
                       >
                         + {u.name}
                       </button>

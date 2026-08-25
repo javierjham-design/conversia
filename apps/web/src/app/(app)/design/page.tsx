@@ -5,8 +5,9 @@
  * sirve para validar tokens, tipografía, superficies, controles y burbujas en
  * modo claro y oscuro (usa el toggle del sidebar). Ruta: /design.
  */
+import { useState } from "react";
 import { Bot, Clock, Paperclip, Send, Smile, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, Checkbox, DateInput, Pagination, Select, Switch } from "@/components/ui";
 
 function Swatch({ name, className }: { name: string; className: string }) {
   return (
@@ -27,6 +28,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function DesignPage() {
+  const [check, setCheck] = useState(true);
+  const [sw, setSw] = useState(false);
+  const [page, setPage] = useState(1);
   return (
     <div className="mx-auto max-w-4xl space-y-5 p-6">
       <div>
@@ -86,11 +90,28 @@ export default function DesignPage() {
           <Button variant="danger">Peligro</Button>
           <Button disabled>Deshabilitado</Button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <input placeholder="Input de texto…" className="rounded-control border border-line-strong bg-panel px-3 py-2 text-sm text-ink placeholder:text-ink-subtle" />
-          <select className="rounded-control border border-line-strong bg-panel px-3 py-2 text-sm text-ink">
-            <option>Selector</option>
-          </select>
+          <Select defaultValue="a">
+            <option value="a">Selector</option>
+            <option value="b">Otra opción</option>
+          </Select>
+          <Select disabled defaultValue="a">
+            <option value="a">Deshabilitado</option>
+          </Select>
+          <DateInput defaultValue="2026-08-25" />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <Checkbox checked={check} onChange={(e) => setCheck(e.target.checked)} /> Casilla
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink opacity-60">
+            <Checkbox disabled /> Deshabilitada
+          </label>
+          <Switch checked={sw} onChange={setSw} label="Interruptor" />
+        </div>
+        <div className="mt-3">
+          <Pagination page={page} pageSize={20} total={137} onPage={setPage} onPageSize={() => setPage(1)} itemLabel="clientes" />
         </div>
       </Section>
 

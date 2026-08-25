@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronRight, Circle, FlaskConical, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, Modal, Select, StatusBadge, cn, useToast } from "@/components/ui";
 import type { MetaOverview } from "./page";
 
 // La conexión de páginas de Lead Ads vive en /integrations/meta-crm
@@ -214,8 +214,7 @@ export function MetaWizard({
                           a.enabled ? "border-brand-300 bg-brand-50 dark:bg-brand-500/10 dark:border-brand-500/40" : "border-line",
                         )}
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={a.enabled}
                           onChange={async (e) => {
                             await api(`/integrations/meta/assets/${a.id}`, { method: "PATCH", body: JSON.stringify({ enabled: e.target.checked }) });
@@ -381,16 +380,15 @@ export function FieldMappingEditor({
                 aria-label="Campo de Meta"
               />
               <ChevronRight size={14} className="shrink-0 text-ink-subtle" aria-hidden />
-              <select
+              <Select
                 value={LEAD_TARGETS.some(([v]) => v === row.target) ? row.target : "custom"}
                 onChange={(e) => setRows((r) => r.map((x, idx) => (idx === i ? { ...x, target: e.target.value === "custom" ? row.source : e.target.value } : x)))}
-                className="rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm"
                 aria-label="Campo de TuBot"
               >
                 {LEAD_TARGETS.map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
-              </select>
+              </Select>
               <button onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))} aria-label="Quitar fila" className="p-1 text-ink-subtle hover:text-red-500">
                 <Trash2 size={15} />
               </button>
@@ -405,11 +403,11 @@ export function FieldMappingEditor({
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block text-sm font-medium">
           Estado inicial del lead
-          <select value={statusCode} onChange={(e) => setStatusCode(e.target.value)} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm">
+          <Select value={statusCode} onChange={(e) => setStatusCode(e.target.value)} className="mt-1 w-full">
             {leadStatuses.map((s) => (
               <option key={s.code} value={s.code}>{s.name}</option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="block text-sm font-medium">
           Etiquetas (separadas por coma)
@@ -418,7 +416,7 @@ export function FieldMappingEditor({
       </div>
 
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+        <Checkbox checked={active} onChange={(e) => setActive(e.target.checked)} />
         Mapeo activo (procesar leads entrantes)
       </label>
 
@@ -533,10 +531,10 @@ export function EventMappingEditor({
         <div className="space-y-2">
           {rules.map((rule, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-2">
-              <select
+              <Select
                 value={rule.source}
                 onChange={(e) => setRules((r) => r.map((x, idx) => (idx === i ? { ...x, source: e.target.value } : x)))}
-                className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 font-mono text-xs"
+                className="font-mono text-xs"
               >
                 {(sourceOptions.some((o) => o.value === rule.source)
                   ? sourceOptions
@@ -544,17 +542,17 @@ export function EventMappingEditor({
                 ).map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
-              </select>
+              </Select>
               <ChevronRight size={14} className="text-ink-subtle" aria-hidden />
-              <select
+              <Select
                 value={rule.dest}
                 onChange={(e) => setRules((r) => r.map((x, idx) => (idx === i ? { ...x, dest: e.target.value } : x)))}
-                className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs"
+                className="text-xs"
               >
                 {[...new Set([rule.dest, ...CAPI_DESTS])].map((d) => (
                   <option key={d} value={d}>{d}</option>
                 ))}
-              </select>
+              </Select>
               <input
                 type="number"
                 value={rule.value ?? ""}
@@ -571,7 +569,7 @@ export function EventMappingEditor({
                 aria-label="Moneda"
               />
               <label className="flex items-center gap-1 text-xs text-ink-muted">
-                <input type="checkbox" checked={rule.active} onChange={(e) => setRules((r) => r.map((x, idx) => (idx === i ? { ...x, active: e.target.checked } : x)))} />
+                <Checkbox checked={rule.active} onChange={(e) => setRules((r) => r.map((x, idx) => (idx === i ? { ...x, active: e.target.checked } : x)))} />
                 activa
               </label>
               <button onClick={() => setRules((r) => r.filter((_, idx) => idx !== i))} aria-label="Quitar regla" className="ml-auto p-1 text-ink-subtle hover:text-red-500">
@@ -590,7 +588,7 @@ export function EventMappingEditor({
       </div>
 
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+        <Checkbox checked={active} onChange={(e) => setActive(e.target.checked)} />
         Envío de conversiones activo
       </label>
 

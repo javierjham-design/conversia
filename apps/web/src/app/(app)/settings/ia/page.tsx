@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Copy, ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { Button, ConfirmDialog, Modal, Skeleton, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, ConfirmDialog, Modal, Select, Skeleton, cn, useToast } from "@/components/ui";
 
 interface IaSettings {
   managed: { model: string; maxTokens: number; maxToolRounds: number; dailyTokenBudget: number };
@@ -84,7 +84,7 @@ export default function IaSettingsPage() {
       <h2 className="text-lg font-semibold">Ajustes de IA</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Los agentes se crean en{" "}
-        <a href="/agents" className="inline-flex items-center gap-0.5 text-cyan-700 underline dark:text-cyan-300">Agentes IA <ExternalLink size={10} /></a>.
+        <a href="/agents" className="inline-flex items-center gap-0.5 text-brand-700 underline dark:text-brand-300">Agentes IA <ExternalLink size={10} /></a>.
       </p>
 
       <div className="mt-4 rounded-card border border-line bg-panel p-5 shadow-card">
@@ -104,25 +104,25 @@ export default function IaSettingsPage() {
             <span className="font-medium">Transcripción de notas de voz</span>
             <span className="block text-xs text-ink-subtle">Convierte los audios entrantes a texto (Bandeja + agentes).</span>
           </span>
-          <input type="checkbox" checked={data.transcription} disabled={busy} onChange={(e) => void saveToggles({ transcription: e.target.checked })} />
+          <Checkbox checked={data.transcription} disabled={busy} onChange={(e) => void saveToggles({ transcription: e.target.checked })} />
         </label>
         <label className="flex items-center justify-between border-t border-line pt-3 text-sm">
           <span>
             <span className="font-medium">Análisis de imágenes (visión)</span>
             <span className="block text-xs text-ink-subtle">El agente "ve" las imágenes que envía el contacto y responde según su contenido.</span>
           </span>
-          <input type="checkbox" checked={data.vision} disabled={busy} onChange={(e) => void saveToggles({ vision: e.target.checked })} />
+          <Checkbox checked={data.vision} disabled={busy} onChange={(e) => void saveToggles({ vision: e.target.checked })} />
         </label>
         <label className="flex items-center justify-between border-t border-line pt-3 text-sm">
           <span>
             <span className="font-medium">Idioma del asistente del compositor</span>
             <span className="block text-xs text-ink-subtle">Sugerir/mejorar/traducir/resumir responden en este idioma.</span>
           </span>
-          <select value={data.assistantLanguage} disabled={busy} onChange={(e) => void saveToggles({ assistantLanguage: e.target.value })} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-sm">
+          <Select value={data.assistantLanguage} disabled={busy} onChange={(e) => void saveToggles({ assistantLanguage: e.target.value })}>
             <option value="es">Español</option>
             <option value="en">Inglés</option>
             <option value="pt">Portugués</option>
-          </select>
+          </Select>
         </label>
       </div>
 
@@ -140,14 +140,14 @@ export default function IaSettingsPage() {
         </p>
 
         <div className="mt-3 flex gap-2">
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs">
+          <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="text-xs">
             <option value="all">Todos los tipos</option>
             {TYPES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-          </select>
-          <select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="rounded-lg border border-line-strong bg-panel px-2 py-1.5 text-xs">
+          </Select>
+          <Select value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)} className="text-xs">
             <option value="all">Todos los agentes</option>
             {agents.map((a) => (<option key={a.id} value={a.id}>{a.name}</option>))}
-          </select>
+          </Select>
         </div>
 
         <ul className="mt-3 space-y-1.5">
@@ -159,13 +159,13 @@ export default function IaSettingsPage() {
           {filtered.map((t) => (
             <li key={t.id} className="rounded-lg border border-line p-2.5">
               <div className="flex items-center gap-2">
-                <span className="rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300">{typeLabel(t.type)}</span>
+                <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{typeLabel(t.type)}</span>
                 <p className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</p>
                 <span className="shrink-0 text-[10px] text-ink-subtle">
                   {t.agentIds.length === 0 ? "Todos los agentes" : `${t.agentIds.length} agente(s)`}
                 </span>
-                <button onClick={() => setEditing(t)} className="text-ink-subtle hover:text-cyan-700" title="Editar"><Pencil size={13} /></button>
-                <button onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })} className="text-ink-subtle hover:text-cyan-700" title="Duplicar"><Copy size={13} /></button>
+                <button onClick={() => setEditing(t)} className="text-ink-subtle hover:text-brand-700" title="Editar"><Pencil size={13} /></button>
+                <button onClick={() => setCreating({ name: `${t.name} (copia)`, body: t.body, type: t.type, agentIds: t.agentIds })} className="text-ink-subtle hover:text-brand-700" title="Duplicar"><Copy size={13} /></button>
                 <button onClick={() => setDeleting(t)} className="text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={13} /></button>
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-ink-muted">{t.body}</p>
@@ -250,9 +250,9 @@ function TemplateEditor({
         </label>
         <label className="block text-sm">
           <span className="text-xs text-ink-muted">Tipo</span>
-          <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full rounded-lg border border-line-strong bg-panel px-2 py-2 text-sm">
+          <Select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 w-full">
             {TYPES.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-          </select>
+          </Select>
         </label>
       </div>
 
@@ -267,14 +267,14 @@ function TemplateEditor({
       <div className="mt-3">
         <p className="text-xs text-ink-muted">Disponible para</p>
         <div className="mt-1 flex flex-wrap gap-2">
-          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
+          <label className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", agentIds.length === 0 ? "border-brand-400 bg-brand-50 text-brand-800 dark:bg-brand-500/10 dark:text-brand-300" : "border-line text-ink-muted")}>
             <input type="checkbox" checked={agentIds.length === 0} onChange={() => setAgentIds([])} className="hidden" />
             🤖 Todos los agentes
           </label>
           {agents.map((a) => {
             const on = agentIds.includes(a.id);
             return (
-              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-cyan-400 bg-cyan-50 text-cyan-800 dark:bg-cyan-500/10 dark:text-cyan-300" : "border-line text-ink-muted")}>
+              <label key={a.id} className={cn("flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs", on ? "border-brand-400 bg-brand-50 text-brand-800 dark:bg-brand-500/10 dark:text-brand-300" : "border-line text-ink-muted")}>
                 <input
                   type="checkbox"
                   checked={on}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Button, Modal, StatusBadge, cn, useToast } from "@/components/ui";
+import { Button, Checkbox, Modal, Select, StatusBadge, cn, useToast } from "@/components/ui";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
 import { AGENT_ACTIONS, ACTION_GROUPS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
@@ -483,9 +483,9 @@ export default function AgentEditorPage() {
                 </label>
                 <label className="text-sm">
                   <span className="text-xs text-ink-muted">Tipo</span>
-                  <select value={kind} onChange={(e) => setKind(e.target.value)} className="mt-1 block rounded-lg border border-line-strong bg-panel px-3 py-2.5 text-sm">
+                  <Select value={kind} onChange={(e) => setKind(e.target.value)} className="mt-1 block">
                     {KINDS.map(([v, l]) => (<option key={v} value={v}>{l}</option>))}
-                  </select>
+                  </Select>
                 </label>
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
@@ -608,7 +608,7 @@ export default function AgentEditorPage() {
                     {channels.length === 0 && <p className="text-xs text-ink-subtle">Sin canales configurados.</p>}
                     {channels.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 py-0.5 text-sm">
-                        <input type="checkbox" checked={c.defaultAgentId === agent.id} onChange={(e) => void setChannelDefault(c.id, e.target.checked)} />
+                        <Checkbox checked={c.defaultAgentId === agent.id} onChange={(e) => void setChannelDefault(c.id, e.target.checked)} />
                         {c.name} <span className="text-[10px] text-ink-subtle">({c.type})</span>
                       </label>
                     ))}
