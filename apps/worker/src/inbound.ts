@@ -31,8 +31,20 @@ interface ParsedStatus {
   externalId: string;
   status: string;
   recipientId?: string;
+  // Motivo del fallo que manda Meta en un estado "failed" (código + título/detalle).
+  error?: string;
   // Info de precio de Meta (modelo per-message): categoría + si es facturable.
   pricing?: { billable?: boolean; category?: string; pricingModel?: string; conversationId?: string };
+}
+
+/** Arma un motivo legible desde el array `errors` que Meta manda en un estado failed. */
+function metaStatusError(s: any): string | undefined {
+  const e = Array.isArray(s?.errors) ? s.errors[0] : undefined;
+  if (!e) return undefined;
+  const detail = e.error_data?.details || e.message || e.title || "";
+  const code = e.code != null ? `#${e.code}` : "";
+  const out = `Meta ${code}: ${detail}`.replace(/\s+/g, " ").trim();
+  return out.slice(0, 500);
 }
 
 /** Normaliza el payload del webhook de Meta (o del simulador, mismo formato). */
@@ -64,6 +76,7 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
           externalId: s.id,
           status: s.status,
           recipientId: s.recipient_id,
+          error: s.status === "failed" ? metaStatusError(s) : undefined,
           pricing: s.pricing
             ? { billable: s.pricing.billable, category: s.pricing.category, pricingModel: s.pricing.pricing_model, conversationId: s.conversation?.id }
             : undefined,
@@ -134,21 +147,33 @@ export async function processInbound(job: InboundJob): Promise<void> {
   for (const status of statuses) {
     const tenant = await resolveTenant(status.phoneNumberId);
     if (!tenant) continue;
+    const failed = status.status === "failed";
     await withTenant(tenant.organizationId, (tx) =>
       tx.message.updateMany({
         where: { externalId: status.externalId },
         data: {
-          status:
-            status.status === "read"
-              ? "READ"
-              : status.status === "delivered"
-                ? "DELIVERED"
-                : status.status === "failed"
-                  ? "FAILED"
-                  : "SENT",
+          status: status.status === "read" ? "READ" : status.status === "delivered" ? "DELIVERED" : failed ? "FAILED" : "SENT",
+          // Guardamos el MOTIVO que manda Meta para que se vea en la Bandeja
+          // (antes se marcaba FAILED sin razón). Solo en fallo y si vino detalle.
+          ...(failed && status.error ? { error: status.error } : {}),
         },
       }),
     );
+    // Traza en el panel de Salud/Alertas del Super Admin: por qué rebotó el envío.
+    if (failed && status.error) {
+      await withTenant(tenant.organizationId, (tx) =>
+        tx.integrationEvent.create({
+          data: {
+            organizationId: tenant.organizationId,
+            provider: "whatsapp",
+            type: "message.failed",
+            status: "warning",
+            message: status.error!,
+            payload: { externalId: status.externalId, recipient: status.recipientId ?? null },
+          },
+        }),
+      ).catch(() => undefined);
+    }
 
     // Costo que cobra Meta por el mensaje (modelo per-message). Meta manda el
     // objeto `pricing` en el estado; registramos UN usage_event por mensaje
