@@ -89,8 +89,8 @@ export default function ContactFieldsPage() {
               <button onClick={() => idx < fields.length - 1 && void move(idx, 1)} disabled={idx === fields.length - 1} className="text-ink-subtle hover:text-ink-muted disabled:opacity-30"><ArrowDown size={11} /></button>
             </div>
             <span className="min-w-0 flex-1">
-              <span className="text-sm font-medium">{f.label}</span>
-              <span className="ml-2 font-mono text-[10px] text-ink-subtle">{f.key}</span>
+              {/* El slug es dato de desarrollador → tooltip, no fila (B3) */}
+              <span className="text-sm font-medium" title={`Clave interna: ${f.key}`}>{f.label}</span>
               {f.required && <span className="ml-2 text-[10px] text-amber-600 dark:text-amber-400">obligatorio</span>}
             </span>
             <span className="shrink-0 rounded bg-app px-1.5 py-0.5 text-[10px] text-ink-muted">{TYPES.find(([t]) => t === f.type)?.[1] ?? f.type}</span>
