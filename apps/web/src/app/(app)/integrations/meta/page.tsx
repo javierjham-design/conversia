@@ -24,7 +24,7 @@ import {
   cn,
   useToast,
 } from "@/components/ui";
-import { EventMappingEditor, FieldMappingEditor, MetaWizard, PermissionChecklist } from "./panels";
+import { FieldMappingEditor, MetaWizard, PermissionChecklist } from "./panels";
 
 interface Asset {
   id: string;
@@ -280,33 +280,17 @@ export default function MetaCenterPage() {
               )}
 
               {tab === "capi" && (
-                <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-                    <h2 className="mb-1 font-semibold">Reglas de conversión</h2>
-                    <p className="mb-4 text-[13px] text-ink-muted">
-                      Qué eventos del ciclo del lead se envían a Meta y con qué nombre. Con la conexión simulada los
-                      envíos se registran como <b>[SIMULADO]</b> sin salir a Meta.
-                    </p>
-                    <EventMappingEditor initial={data.eventMapping} onSaved={() => void load()} />
-                  </div>
-                  <div className="space-y-4">
-                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-                      <h2 className="mb-2 font-semibold">Evento de prueba</h2>
-                      <Button
-                        variant="secondary"
-                        onClick={async () => {
-                          const r = await api<{ detail: string }>("/integrations/meta/capi-test", { method: "POST", body: JSON.stringify({}) });
-                          toast.push(r.detail, "ok");
-                        }}
-                      >
-                        <Send size={14} /> Enviar evento de prueba
-                      </Button>
-                    </div>
-                    <div className="rounded-card border border-line bg-panel p-5 shadow-card">
-                      <h2 className="mb-2 font-semibold">Registro de envíos</h2>
-                      <RecentEvents provider="capi" />
-                    </div>
-                  </div>
+                <div className="rounded-card border border-brand-200 bg-brand-50/40 p-5 shadow-card dark:border-brand-900 dark:bg-brand-950/20">
+                  <h2 className="mb-1 font-semibold">Conversiones del CRM → Centro Meta CRM</h2>
+                  <p className="mb-3 text-[13px] text-ink-muted">
+                    Las reglas del embudo (etapa → evento), el dataset del CRM, el evento de prueba y el registro de
+                    envíos ahora viven en el <b>Centro Meta CRM → pestaña Conversiones (dataset)</b> — separados de la
+                    configuración de WhatsApp/anuncios de este centro. Usa un <b>conjunto de datos exclusivo del CRM</b>
+                    (el de la WABA recibe los eventos nativos de WhatsApp y no debe mezclarse).
+                  </p>
+                  <a href="/integrations/meta-crm?tab=conversiones" className="text-sm font-medium text-brand-600 hover:underline">
+                    Ir a Conversiones del CRM →
+                  </a>
                 </div>
               )}
 

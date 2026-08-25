@@ -637,6 +637,8 @@ function ConversionsTab() {
         <p className="mb-4 text-[13px] text-ink-muted">
           Cada cambio de etapa del CRM envía un evento al conjunto de datos con el <code className="text-xs">lead_id</code>{" "}
           del formulario — es lo que alimenta la optimización de «clientes potenciales de conversión» en tus campañas.
+          Usa un <b>conjunto de datos EXCLUSIVO del CRM</b> (créalo en el asistente «Conectar CRM» de Meta): el dataset
+          de la WABA recibe los eventos nativos de WhatsApp y no debe mezclarse con el embudo del CRM.
         </p>
         {mapping === null ? <Skeleton className="h-48" /> : <EventMappingEditor initial={mapping} onSaved={loadAll} />}
       </div>
