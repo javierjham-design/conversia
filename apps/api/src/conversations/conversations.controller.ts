@@ -694,16 +694,36 @@ export class ConversationsController {
     const ctx = requireContext();
     const parsed = z
       .object({
-        contactId: z.string().min(1),
+        contactId: z.string().min(1).optional(),
+        /** número nuevo: crea el contacto al vuelo (lead que aún no existe en la base) */
+        phone: z.string().min(8).max(20).optional(),
+        name: z.string().trim().max(120).optional(),
         channelId: z.string().min(1).optional(),
         templateId: z.string().min(1),
       })
+      .refine((v) => v.contactId || v.phone, { message: "contactId o phone requerido" })
       .safeParse(body);
-    if (!parsed.success) throw new BadRequestException("contactId y templateId requeridos");
-    const { contactId, channelId, templateId } = parsed.data;
+    if (!parsed.success) throw new BadRequestException("contactId (o phone) y templateId requeridos");
+    const { contactId, phone: rawPhone, name, channelId, templateId } = parsed.data;
 
     const conversationId = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const contact = await tx.contact.findFirst({ where: { id: contactId, deletedAt: null } });
+      let contact = contactId ? await tx.contact.findFirst({ where: { id: contactId, deletedAt: null } }) : null;
+      if (!contact && rawPhone) {
+        // Normaliza igual que la ingesta de leads: solo dígitos, sin "+".
+        const phone = rawPhone.replace(/[^\d+]/g, "").replace(/^\+/, "");
+        if (phone.length < 8) throw new BadRequestException("Número de teléfono inválido");
+        contact =
+          (await tx.contact.findFirst({ where: { phone, deletedAt: null } })) ??
+          (await tx.contact.create({
+            data: {
+              organizationId: ctx.organizationId,
+              firstName: name || null,
+              phone,
+              source: "manual",
+              acquisitionSource: "organic",
+            },
+          }));
+      }
       if (!contact) throw new NotFoundException("Contacto no encontrado");
       if (!contact.phone) {
         throw new BadRequestException("El contacto no tiene teléfono — las plantillas de WhatsApp necesitan un número");
