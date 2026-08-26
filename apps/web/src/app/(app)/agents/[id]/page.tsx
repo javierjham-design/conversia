@@ -82,6 +82,27 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
+/** Textarea que crece con su contenido (no recorta el texto). */
+function AutoGrowTextarea({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 44)}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={2}
+      placeholder={placeholder}
+      className={cn("resize-none overflow-hidden", className)}
+    />
+  );
+}
+
 function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: AgentActionDef; state?: { enabled: boolean; instructions: string }; onToggle: (en: boolean) => void; onInstructions: (v: string) => void; mentions?: Mention[] }) {
   const enabled = state?.enabled ?? false;
   return (
@@ -99,7 +120,7 @@ function ActionCard({ def, state, onToggle, onInstructions, mentions }: { def: A
           {mentions ? (
             <MentionTextarea value={state?.instructions ?? ""} onChange={onInstructions} placeholder={def.placeholder} mentions={mentions} />
           ) : (
-            <textarea value={state?.instructions ?? ""} onChange={(e) => onInstructions(e.target.value)} rows={2} placeholder={def.placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+            <AutoGrowTextarea value={state?.instructions ?? ""} onChange={onInstructions} placeholder={def.placeholder} className="mt-1 w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
           )}
         </div>
       )}
@@ -197,6 +218,16 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
     return out;
   }, [value, labelAlt]);
 
+  // Auto-crecer: el cuadro se ajusta a su contenido para que el texto se vea
+  // COMPLETO (antes con rows fijo se cortaba). El backdrop es absolute inset-0,
+  // así que sigue al alto del textarea.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 44)}px`;
+  }, [value]);
+
   const empty = query != null && filtered.length === 0;
   // Mismo box-model en backdrop y textarea para que el resaltado quede alineado 1:1.
   const BOX = "w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm leading-5";
@@ -219,7 +250,7 @@ function MentionTextarea({ value, onChange, placeholder, mentions }: { value: st
         // Inline (beats the unlayered `textarea{color/background}` in globals.css): texto y fondo
         // transparentes para que se vea SOLO el backdrop resaltado; el cursor queda visible.
         style={{ color: "transparent", backgroundColor: "transparent", caretColor: "var(--ink)" }}
-        className={cn(BOX, "relative resize-none")}
+        className={cn(BOX, "relative resize-none overflow-hidden")}
       />
       {query != null && (filtered.length > 0 || empty) && (
         <div className="absolute z-20 mt-1 w-64 rounded-lg border border-line bg-panel p-1 shadow-pop">
