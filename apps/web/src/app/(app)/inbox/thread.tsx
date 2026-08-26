@@ -46,10 +46,11 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
   );
 }
 
-/** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → tamaño completo. */
+/** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → visor dentro del chat. */
 function ImageBubble({ conversationId, messageId, caption, outbound }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState(false);
+  const [zoom, setZoom] = useState(false);
   useEffect(() => {
     let alive = true;
     let objUrl: string | null = null;
@@ -71,13 +72,51 @@ function ImageBubble({ conversationId, messageId, caption, outbound }: { convers
       if (objUrl) URL.revokeObjectURL(objUrl);
     };
   }, [conversationId, messageId]);
+  // Cerrar el visor con Esc
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
   return (
     <div>
       {url ? (
-        <a href={url} target="_blank" rel="noreferrer" title="Ver en tamaño completo">
+        <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={caption ?? "Imagen"} className="mb-1 max-h-72 w-auto max-w-full cursor-zoom-in rounded-card" />
-        </a>
+          <img
+            src={url}
+            alt={caption ?? "Imagen"}
+            onClick={() => setZoom(true)}
+            title="Ver más grande"
+            className="mb-1 max-h-72 w-auto max-w-full cursor-zoom-in rounded-card"
+          />
+          {/* Visor dentro del chat: overlay oscuro, clic afuera o Esc para cerrar. Responsive (no se sale en el celular). */}
+          {zoom && (
+            <div
+              onClick={() => setZoom(false)}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+            >
+              <button
+                onClick={() => setZoom(false)}
+                className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-lg text-white hover:bg-white/25"
+                aria-label="Cerrar"
+                title="Cerrar (Esc)"
+              >
+                ✕
+              </button>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt={caption ?? "Imagen"}
+                onClick={(e) => e.stopPropagation()}
+                className="max-h-[90vh] max-w-[95vw] cursor-default rounded-card object-contain shadow-e3"
+              />
+            </div>
+          )}
+        </>
       ) : (
         <div className={cn("mb-1 flex h-24 w-40 items-center justify-center rounded-card text-xs", outbound ? "bg-white/15 text-white/80" : "bg-app text-ink-subtle")}>
           {err ? "🖼️ No disponible" : "🖼️ Cargando…"}
