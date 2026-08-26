@@ -377,15 +377,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
             aria-label="Navegación principal"
           >
-            {/* Marca */}
-            <div className={cn("flex items-center gap-2.5 px-4 pb-4 pt-5", collapsed && "justify-center px-0")}>
-              <img src="/brand/tubot-icon.png" alt="TuBot" className="h-9 w-9 shrink-0 object-contain" />
-              {!collapsed && (
-                <div className="leading-tight">
-                  <p className="font-semibold tracking-tight text-white">TuBot</p>
-                  <p className="text-[11px] text-navy-300">Atención conversacional</p>
-                </div>
-              )}
+            {/* Marca: wordmark compacto (una sola línea). La bajada de marketing
+                sale del chrome (B6) para no competir con el nombre de la
+                organización que va justo debajo. */}
+            <div className={cn("flex items-center gap-2.5 px-4 pb-3 pt-5", collapsed && "justify-center px-0")}>
+              <img src="/brand/tubot-icon.png" alt="TuBot" className="h-8 w-8 shrink-0 object-contain" />
+              {!collapsed && <p className="t-section text-white">TuBot</p>}
             </div>
 
             {/* Tenant activo + selector (si el usuario pertenece a varias orgs) */}
