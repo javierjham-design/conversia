@@ -663,7 +663,14 @@ export class BillingController {
     } else {
       await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });
     }
-    await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id } });
+    // Al pagar, la VIGENCIA salta al fin del período pagado y la prueba queda
+    // "convertida" (el ciclo de trial ya no la toca). Sin esto, un tenant que paga
+    // dentro de la prueba conservaría el `validUntil` del día 7 y `assertOrgActive`
+    // lo bloquearía por "vigencia vencida" pese a haber pagado.
+    const prevSettings = (org.settings as Record<string, unknown> | null) ?? {};
+    const prevTrial = (prevSettings.trial as Record<string, unknown> | undefined) ?? {};
+    const nextSettings = { ...prevSettings, validUntil: periodEnd.toISOString(), trial: { ...prevTrial, state: "converted" } };
+    await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id, settings: nextSettings as object } });
 
     // Bolsa prepagada: el período pagado recarga el cupo del plan, acumulando el
     // saldo no usado hasta 1 mes de bolsa (docs/PREPAID_WALLET_DESIGN.md).

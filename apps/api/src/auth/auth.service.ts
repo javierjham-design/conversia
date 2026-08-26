@@ -45,21 +45,47 @@ export class AuthService {
     // La PRUEBA de 7 días queda fijada DESDE el registro (no espera el tick del
     // worker): el banner de días restantes y el corte del día 7 valen desde ya.
     const now = new Date();
+    const endsAt = new Date(now.getTime() + 7 * 86_400_000).toISOString();
     const trial = {
       startedAt: now.toISOString(),
-      endsAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+      endsAt,
       purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
       state: "active",
       warnedDays: [],
     };
 
+    // La cuenta nace ASIGNADA al plan Free (no "sin plan / todo en 0"): se crea una
+    // suscripción TRIALING al plan gratuito para que la plataforma quede OPERATIVA
+    // (los límites del plan Free aplican y el asistente de montaje puede trabajar) y
+    // el plan se vea asignado en billing. `validUntil` = fin de la prueba: la
+    // "Vigencia del servicio" queda visible y el corte del día 7 se hace cumplir por
+    // vigencia además del ciclo de prueba (ambos apuntan al mismo día → sin conflicto).
+    const freePlan = await db.plan.findUnique({ where: { code: "free" } });
+
     const result = await db.$transaction(async (tx) => {
       const org = await tx.organization.create({
-        data: { name: input.organizationName, slug, settings: { trial } as object },
+        data: {
+          name: input.organizationName,
+          slug,
+          planId: freePlan?.id ?? null,
+          settings: { trial, validUntil: endsAt } as object,
+        },
       });
       // Habilita las políticas RLS para los inserts hijos de esta transacción.
       // (El INSERT en organizations requiere rol admin — ver docs/MULTITENANCY.md.)
       await tx.$queryRaw`SELECT set_config('app.org_id', ${org.id}, true)`;
+      if (freePlan) {
+        await tx.subscription.create({
+          data: {
+            organizationId: org.id,
+            planId: freePlan.id,
+            status: "TRIALING",
+            interval: "monthly",
+            periodStart: now,
+            periodEnd: new Date(endsAt),
+          },
+        });
+      }
       const roles = await Promise.all(
         DEFAULT_ROLES.map((r) =>
           tx.role.create({
