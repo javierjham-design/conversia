@@ -154,7 +154,7 @@ export default function LoginPage() {
       <main className="flex min-h-screen items-center justify-center p-6">
         <form onSubmit={mfaMode === "verify" ? verifyCode : enableForced} className={card}>
           <div className="text-center">
-            <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto" />
+            <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto dark:brightness-0 dark:invert" />
             <h1 className="mt-2 text-lg font-semibold">Verificación en dos pasos</h1>
           </div>
           {mfaMode === "setup" && (
@@ -180,7 +180,7 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-6">
       <form onSubmit={submit} className={card}>
         <div className="text-center">
-          <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto" />
+          <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto dark:brightness-0 dark:invert" />
           <p className="mt-2 text-sm text-ink-muted">Panel de atención conversacional</p>
         </div>
         <div id="google-btn" className="flex justify-center" />
