@@ -167,6 +167,7 @@ export class AgentsController {
           publishedAt: published?.publishedAt ?? null,
           hasDraft: Boolean(draft && (!published || draft.version > published.version)),
           model: ((published ?? draft)?.config as any)?.model ?? null,
+          avatar: ((published ?? draft)?.config as any)?.emoji ?? null,
         };
       });
     });
