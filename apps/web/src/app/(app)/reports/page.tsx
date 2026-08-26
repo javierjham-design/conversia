@@ -21,6 +21,9 @@ interface Overview {
 
 const CHART_DAYS = 14;
 
+// Paleta categórica (B2): los datos NO usan el azul de marca.
+const CAT = ["--color-cat-1", "--color-cat-2", "--color-cat-3", "--color-cat-4", "--color-cat-5", "--color-cat-6", "--color-cat-7", "--color-cat-8"];
+
 function Kpi({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
@@ -84,7 +87,7 @@ function fmtDay(iso: string): string {
 }
 
 /** Barras por día con eje Y (máximo), ticks de fecha, línea base y ceros rellenados. */
-function DayBars({ data }: { data: { day: string; count: number }[] | null | undefined }) {
+function DayBars({ data, color = "--color-cat-1" }: { data: { day: string; count: number }[] | null | undefined; color?: string }) {
   const rows = fillDays(data, CHART_DAYS);
   const max = Math.max(1, ...rows.map((d) => d.count));
   const total = rows.reduce((a, d) => a + d.count, 0);
@@ -103,8 +106,8 @@ function DayBars({ data }: { data: { day: string; count: number }[] | null | und
             {rows.map((d) => (
               <div key={d.day} className="group relative flex flex-1 justify-center">
                 <div
-                  className="w-full rounded-t bg-brand-500/80 transition-colors group-hover:bg-brand-600"
-                  style={{ height: `${(d.count / max) * 92 + (d.count > 0 ? 3 : 1)}px` }}
+                  className="w-full rounded-t transition-opacity group-hover:opacity-80"
+                  style={{ height: `${(d.count / max) * 92 + (d.count > 0 ? 3 : 1)}px`, background: `var(${color})` }}
                 />
                 <span className="pointer-events-none absolute -top-6 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded bg-navy-950 px-1.5 py-0.5 text-[9px] text-white group-hover:block dark:bg-raised dark:text-ink dark:ring-1 dark:ring-line">
                   {fmtDay(d.day)}: {d.count}
@@ -209,13 +212,16 @@ export default function ReportsPage() {
             <p className="text-sm text-ink-subtle">Sin etapas configuradas.</p>
           ) : (
             <div className="space-y-1.5">
-              {leadFunnel.map((f) => (
+              {leadFunnel.map((f, i) => (
                 <div key={f.code} className="flex items-center gap-2 text-sm">
-                  <span className="w-40 shrink-0 truncate text-xs text-ink-muted" title={f.name}>{f.name}</span>
+                  <span className="flex w-40 shrink-0 items-center gap-1.5 truncate text-xs text-ink-muted" title={f.name}>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: `var(${CAT[i % CAT.length]})` }} />
+                    <span className="truncate">{f.name}</span>
+                  </span>
                   <div className="h-5 flex-1 rounded bg-app">
                     <div
-                      className="h-5 rounded bg-brand-500/80"
-                      style={{ width: `${Math.max((f.count / funnelMax) * 100, f.count > 0 ? 6 : 0)}%` }}
+                      className="h-5 rounded"
+                      style={{ width: `${Math.max((f.count / funnelMax) * 100, f.count > 0 ? 6 : 0)}%`, background: `var(${CAT[i % CAT.length]})` }}
                     />
                   </div>
                   <span className="w-8 shrink-0 text-right text-xs font-medium tnum">{f.count}</span>
@@ -243,12 +249,12 @@ export default function ReportsPage() {
 
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Conversaciones nuevas por día ({CHART_DAYS}d)</h2>
-          <DayBars data={data.series?.conversationsPerDay} />
+          <DayBars data={data.series?.conversationsPerDay} color="--color-cat-1" />
         </section>
 
         <section className="rounded-xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-medium">Mensajes recibidos por día ({CHART_DAYS}d)</h2>
-          <DayBars data={data.series?.inboundPerDay} />
+          <DayBars data={data.series?.inboundPerDay} color="--color-cat-6" />
         </section>
       </div>
     </div>
