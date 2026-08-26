@@ -130,7 +130,7 @@ export default function AuditSettingsPage() {
   }, [filtered]);
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Registro de auditoría</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Quién hizo qué y cuándo en tu cuenta (usuarios, agentes IA y sistema). Solo visible para Propietario y Administrador.

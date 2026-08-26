@@ -54,10 +54,10 @@ export default function SnippetsSettingsPage() {
     [items, q, scopeFilter],
   );
 
-  if (!items) return <div className="mx-auto max-w-3xl p-6"><Skeleton className="h-72" /></div>;
+  if (!items) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-72" /></div>;
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Respuestas rápidas</h2>
         <Button onClick={() => setCreating({ scope: "team" })}><Plus size={14} /> Nueva respuesta</Button>

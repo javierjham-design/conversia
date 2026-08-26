@@ -108,12 +108,12 @@ export default function PersonalizationPage() {
     }
   }
 
-  if (!p) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!p) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
   const sel = "mt-1 w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm";
   const rec = recommendedFor(p.industry);
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Rubro y personalización</h2>
       <p className="mt-1 text-xs text-ink-muted">Al elegir tu rubro, la plataforma adapta el vocabulario, los módulos visibles y las plantillas sugeridas.</p>
 

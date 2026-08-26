@@ -69,10 +69,10 @@ export default function ExportSettingsPage() {
     URL.revokeObjectURL(a.href);
   }
 
-  if (!jobs) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!jobs) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Exportar datos</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Las exportaciones se generan en segundo plano y quedan disponibles aquí por <b>7 días</b>. Cada descarga queda

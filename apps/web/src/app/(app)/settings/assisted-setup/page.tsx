@@ -77,10 +77,10 @@ export default function AssistedSetupPage() {
     }
   }
 
-  if (!loaded) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!loaded) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Montaje asistido de TuBot</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Permite que TuBot configure tu cuenta por ti durante la implementación —agentes, flujos, servicios y base de

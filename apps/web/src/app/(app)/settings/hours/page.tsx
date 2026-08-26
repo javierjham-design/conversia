@@ -53,12 +53,12 @@ export default function HoursSettingsPage() {
     }
   }
 
-  if (!data) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-72" /></div>;
+  if (!data) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-72" /></div>;
 
   const setDay = (day: DayKey, intervals: Interval[]) => setData({ ...data, hours: { ...(data.hours ?? {}), [day]: intervals } });
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Horario de atención</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Horario del negocio en <code>{data.timezone}</code> (cámbiala en Información general). Lo usa el nodo «Fecha y

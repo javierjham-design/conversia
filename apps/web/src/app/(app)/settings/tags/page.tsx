@@ -55,10 +55,10 @@ export default function TagsSettingsPage() {
     await load();
   }
 
-  if (!tags) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!tags) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Etiquetas</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Las etiquetas se usan en Contactos, la Bandeja (bandejas personalizadas), workflows (disparador «Etiqueta

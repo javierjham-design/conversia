@@ -73,7 +73,7 @@ export default function LifecycleSettingsPage() {
 
   if (!stages) {
     return (
-      <div className="mx-auto max-w-3xl p-6">
+      <div className="mx-auto max-w-4xl p-6">
         <Skeleton className="h-72" />
       </div>
     );
@@ -113,7 +113,7 @@ export default function LifecycleSettingsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Etapas del ciclo de vida</h2>
         <Button onClick={() => setAdding(true)}><Plus size={14} /> Nueva etapa</Button>

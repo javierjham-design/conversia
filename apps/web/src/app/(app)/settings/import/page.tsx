@@ -53,7 +53,7 @@ export default function ImportSettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Importar contactos</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Sube un CSV (hasta 10.000 filas): se procesa en segundo plano con dedupe por teléfono. La misma herramienta está
