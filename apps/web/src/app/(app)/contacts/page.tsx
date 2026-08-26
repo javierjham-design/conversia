@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Ban,
   Bookmark,
@@ -161,7 +162,18 @@ function isPresetActive(preset: { sec: Record<string, string> }, primary: Primar
 // =============================== Página ===============================
 
 export default function ContactsPage() {
+  // Suspense: ContactsPageInner usa useSearchParams (para reaccionar a ?vista).
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-ink-subtle">Cargando…</div>}>
+      <ContactsPageInner />
+    </Suspense>
+  );
+}
+
+function ContactsPageInner() {
   const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
   const [runWfTarget, setRunWfTarget] = useState<{ id: string; name: string } | null>(null);
@@ -202,28 +214,28 @@ export default function ContactsPage() {
 
   const secCount = Object.values(sec).filter(Boolean).length;
 
-  // Deep-links (B1): ?vista=lista | embudo (se acepta el legado ?vista=tablero).
-  // El menú «Clientes → Embudo» y /crm llegan con ?vista=embudo. ?open=<id> abre
-  // la ficha del contacto.
+  // Vista (B1): derivada de ?vista=lista|embudo (se acepta el legado ?vista=tablero).
+  // Reacciona a la URL — así el sub-ítem del menú «Clientes → Embudo» (que navega
+  // a la MISMA ruta con otra query) SÍ cambia la vista, no solo el conmutador.
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const v = p.get("vista");
+    const v = searchParams.get("vista");
     if (v === "embudo" || v === "tablero") setView("tablero");
     else if (v === "lista" || v === "tabla") setView("tabla");
-    else if (window.localStorage.getItem("personas.view") === "tablero") setView("tablero");
-    const open = p.get("open");
+    else setView(window.localStorage.getItem("personas.view") === "tablero" ? "tablero" : "tabla");
+  }, [searchParams]);
+  // ?open=<id> abre la ficha del contacto (una vez, al montar).
+  useEffect(() => {
+    const open = new URLSearchParams(window.location.search).get("open");
     if (open) setOpenId(open);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function switchView(v: "tabla" | "tablero") {
-    setView(v);
     window.localStorage.setItem("personas.view", v);
-    // Refleja la vista en la URL para que el sub-ítem del menú se ilumine y el
-    // enlace sea compartible (sin recargar).
+    // Cambia la URL (router): actualiza la vista de esta página Y el sub-ítem del
+    // menú de forma reactiva (ambos leen ?vista con useSearchParams).
     const p = new URLSearchParams(window.location.search);
     p.set("vista", v === "tablero" ? "embudo" : "lista");
-    window.history.replaceState(null, "", `/contacts?${p.toString()}`);
-    window.dispatchEvent(new Event("vistachange")); // sincroniza el sub-ítem del menú
+    router.replace(`/contacts?${p.toString()}`);
+    setTimeout(() => window.dispatchEvent(new Event("vistachange")), 60); // resalta el sub-ítem del menú
   }
 
   // Debounce de la búsqueda (300 ms) → resetea a la página 1.

@@ -297,7 +297,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [billingLocked, setBillingLocked] = useState(false);
 
   // Vista activa de Clientes (?vista) para iluminar el sub-ítem correcto (B1).
-  // Se recalcula cuando cambia la ruta o cuando el conmutador emite «vistachange».
+  // Se recalcula al emitirse «vistachange» (lo emiten el conmutador y el clic en
+  // el sub-ítem) o al cambiar el historial. No se usa useSearchParams aquí para
+  // no forzar Suspense en el layout (rompe el prerender de otras páginas).
   const [navTick, setNavTick] = useState(0);
   useEffect(() => {
     const bump = () => setNavTick((n) => n + 1);
@@ -310,7 +312,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
   const activeVista = (() => {
     if (typeof window === "undefined") return "lista";
-    void navTick; // fuerza recomputo al cambiar
+    void navTick;
     const v = new URLSearchParams(window.location.search).get("vista");
     return v === "embudo" || v === "tablero" ? "embudo" : "lista";
   })();
@@ -443,7 +445,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           )}
                         >
                           <Icon size={17} className={active ? "text-accent-400" : ""} />
-                          {!collapsed && labelOf(item)}
+                          {!collapsed && (item.href === "/contacts" ? `${labelOf(item)} / CRM` : labelOf(item))}
                         </Link>
                         {/* Sub-vistas (B1): visibles cuando el ítem está activo */}
                         {item.subs && active && !collapsed && (
@@ -454,7 +456,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                                 <Link
                                   key={s.vista}
                                   href={`${item.href}?vista=${s.vista}`}
-                                  onClick={() => setMobileOpen(false)}
+                                  onClick={() => { setMobileOpen(false); setTimeout(() => window.dispatchEvent(new Event("vistachange")), 60); }}
                                   className={cn(
                                     "block rounded-lg px-2.5 py-1.5 text-[12.5px] transition-colors",
                                     on ? "font-medium text-white" : "text-navy-300 hover:bg-navy-800 hover:text-white",
