@@ -56,7 +56,7 @@ export interface ToolServices {
   updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
-  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null; contactsMonthly: number | null; aiTokensDaily: number | null }>>;
+  listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null; contactsMonthly: number | null; aiTokensDaily: number | null; trialDays: number; isTrial: boolean }>>;
   // Catálogo comercial real del negocio (tienda o menú). Vender con datos vivos.
   searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }): Promise<Array<CatalogHit>>;
   getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
@@ -367,7 +367,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getPlanes",
       description:
-        "Devuelve los planes y PRECIOS VIGENTES de TuBot: nombre, precio CLP/USD (mensual y anual), mensajes de plantilla (templateMessages), y los límites de cada plan: contactos por mes (contactsMonthly) y tope de tokens de IA por día (aiTokensDaily). 0 = ilimitado. Úsalo SIEMPRE antes de cotizar. VENDÉ POR CONTACTOS/MES (contactsMonthly): es la medida clara para el cliente. aiTokensDaily es un límite TÉCNICO INTERNO de capacidad — NO lo cites al cliente (los 'tokens' confunden); úsalo solo para vos, para juzgar si un volumen entra. Reglas: NUNCA digas 'ilimitado' ni 'no lo vas a tocar' si el plan tiene cupo; si contactsMonthly viene vacío/0 NO inventes un número (decí 'uso justo' y, para volumen alto, recomendá un plan mayor o cuota a medida); si el volumen estimado supera el cupo, recomendá el plan que lo cubre. Excedente: pasarse del cupo NO corta el servicio, se cobran packs de +100 contactos en la próxima factura.",
+        "Devuelve los planes y PRECIOS VIGENTES de TuBot: nombre, precio CLP/USD (mensual y anual), mensajes de plantilla (templateMessages), límites (contactsMonthly, aiTokensDaily), y si es prueba (isTrial + trialDays). 0 = ilimitado. Úsalo SIEMPRE antes de cotizar. " +
+        "REGLA CRÍTICA — EL PLAN FREE / PRECIO 0 NO ES GRATIS PARA SIEMPRE: es una PRUEBA/DEMO de {trialDays} días (isTrial=true). SIEMPRE preséntalo como 'prueba gratuita de 7 días para que lo veas funcionando', y deja EXPLÍCITO que al terminar la prueba el cliente DEBE pasar a un plan de PAGO para seguir usándolo (no se queda gratis). Nunca lo vendas como un plan de uso permanente ni digas 'es gratis' a secas. Empujá desde el inicio hacia un plan de pago (Starter en adelante) como el destino real. " +
+        "VENDÉ POR CONTACTOS/MES (contactsMonthly): es la medida clara para el cliente. aiTokensDaily es un límite TÉCNICO INTERNO — NO lo cites (los 'tokens' confunden). Reglas: NUNCA 'ilimitado' ni 'no lo vas a tocar' si hay cupo; si contactsMonthly viene vacío/0 NO inventes (decí 'uso justo' y para volumen alto recomendá plan mayor); si el volumen supera el cupo, recomendá el plan que lo cubre. Excedente: pasarse del cupo NO corta el servicio, se cobran packs de +100 contactos en la próxima factura.",
       inputSchema: z.object({}),
       async execute(ctx) {
         return { plans: await services(ctx).listPlans() };
