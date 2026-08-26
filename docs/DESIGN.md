@@ -237,3 +237,16 @@ Escala de 4px (Tailwind por defecto). Estados: hover/activo/seleccionado + foco
 con anillo propio (`:focus-visible` con `--color-brand-500`), skeletons con
 forma. Íconos: una sola familia de línea (lucide); los emoji salen del chrome del
 producto (siguen permitidos en el contenido que el cliente escribe).
+
+### Movimiento, acciones de fila y accesibilidad (B4/B7/B8)
+- **Movimiento (B7):** `Modal`/`Drawer` entran con animación suave 150–200 ms
+  (`.animate-overlay-in`, `.animate-modal-in`, `.animate-drawer-in` en globals.css),
+  y respetan «prefiere menos movimiento» (la regla `@media (prefers-reduced-motion)`
+  pone las animaciones ~0 ms). Los toasts (`useToast`) son el único sistema de avisos.
+- **Acciones de fila (B4):** las filas/barras con muchos controles dejan 1–2
+  acciones visibles y el resto en un menú «…» (patrón en Flujos, barra masiva de
+  Clientes y fila de Canales). Los cuadros de texto de las Acciones del agente
+  crecen con su contenido (auto-grow), no recortan el texto.
+- **Accesibilidad (B8):** foco con anillo propio (`:focus-visible`); `ink-subtle`
+  en oscuro subido para contraste; los botones de ícono usan el componente
+  `IconButton` con área de clic cómoda.
