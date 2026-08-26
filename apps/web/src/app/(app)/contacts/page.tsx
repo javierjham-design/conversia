@@ -98,6 +98,15 @@ function flag(iso: string | null): string {
 function displayName(c: ContactRow): string {
   return [c.firstName, c.lastName].filter(Boolean).join(" ") || c.profileName || c.phone || "Sin nombre";
 }
+/** Formato único de teléfono (B5.2): normaliza a +56 9 XXXX XXXX en CL móvil,
+ *  y asegura el prefijo «+» en el resto. Antes convivían «+56…» y «56…». */
+function fmtPhone(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  const d = raw.replace(/[^\d]/g, "");
+  if (d.length === 11 && d.startsWith("569")) return `+56 9 ${d.slice(3, 7)} ${d.slice(7)}`;
+  if (d.length === 11 && d.startsWith("56")) return `+56 ${d.slice(2, 3)} ${d.slice(3, 7)} ${d.slice(7)}`;
+  return raw.trim().startsWith("+") ? raw.trim() : `+${d}`;
+}
 function initials(c: ContactRow): string {
   const n = displayName(c).trim();
   if (n === "Sin nombre") return "?";
@@ -673,7 +682,7 @@ export default function ContactsPage() {
                             )}
                           </td>
                         )}
-                        {visibleCols.has("phone") && <td className="px-3 py-2.5 font-mono text-xs text-ink-muted">{c.phone ?? "—"}</td>}
+                        {visibleCols.has("phone") && <td className="px-3 py-2.5 font-mono text-xs text-ink-muted">{c.phone ? fmtPhone(c.phone) : <span className="text-ink-subtle">—</span>}</td>}
                         {visibleCols.has("email") && <td className="max-w-[180px] truncate px-3 py-2.5 text-ink-muted">{c.email ?? "—"}</td>}
                         {visibleCols.has("tags") && (
                           <td className="px-3 py-2.5">
