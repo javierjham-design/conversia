@@ -401,8 +401,8 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-[2px]" onClick={onClose} />
-      <div className={cn("relative max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-line bg-raised p-6 text-ink shadow-e3", wide ? "max-w-3xl" : "max-w-lg")}>
+      <div className="animate-overlay-in absolute inset-0 bg-navy-950/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className={cn("animate-modal-in relative max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-line bg-raised p-6 text-ink shadow-e3", wide ? "max-w-3xl" : "max-w-lg")}>
         <div className="mb-4 flex items-center justify-between">
           {title && <h2 className="text-lg font-semibold text-ink">{title}</h2>}
           <button onClick={onClose} aria-label="Cerrar" className="rounded-control p-1 text-ink-subtle hover:bg-app hover:text-ink">
@@ -434,8 +434,8 @@ export function Drawer({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto bg-raised text-ink shadow-e3">
+      <div className="animate-overlay-in absolute inset-0 bg-navy-950/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="animate-drawer-in absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto bg-raised text-ink shadow-e3">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-raised px-5 py-4">
           <h2 className="text-lg font-semibold text-ink">{title}</h2>
           <button onClick={onClose} aria-label="Cerrar" className="rounded-control p-1 text-ink-subtle hover:bg-app hover:text-ink">
