@@ -156,6 +156,39 @@ async function hasEverPaid(prisma: any, organizationId: string): Promise<boolean
   return Boolean(activeSub);
 }
 
+/**
+ * AUTO-SANADO de la prueba: garantiza que una cuenta en TRIAL tenga el plan Free
+ * ASIGNADO (suscripción TRIALING + org.planId) y VIGENCIA (settings.validUntil = fin
+ * de prueba). Corrige cuentas creadas ANTES del fix de registro —quedaban "sin plan /
+ * todo en 0" y sin vigencia— y cualquier hueco futuro. Idempotente: si ya está sano no
+ * escribe. Devuelve los settings (con validUntil agregado si faltaba) para el resto del
+ * tick. Solo para TRIAL: una prueba ya deshabilitada (día 7) no se resucita.
+ */
+async function ensureFreePlanAndVigencia(
+  prisma: any,
+  withTenant: (id: string, fn: (tx: any) => Promise<void>) => Promise<void>,
+  freePlanId: string | null,
+  org: { id: string; createdAt: Date },
+  settings: Record<string, unknown>,
+  trial: TrialState | null,
+): Promise<Record<string, unknown>> {
+  if (!freePlanId) return settings; // catálogo sin plan free → el fallback de entitlements cubre
+  const endsAt = trial?.endsAt ?? new Date(org.createdAt.getTime() + TRIAL_DAYS * DAY_MS).toISOString();
+  const needsVigencia = typeof settings.validUntil !== "string";
+  const nextSettings = needsVigencia ? { ...settings, validUntil: endsAt } : settings;
+  const hasSub = await prisma.subscription.findFirst({ where: { organizationId: org.id }, select: { id: true } });
+  if (hasSub && !needsVigencia) return nextSettings; // ya sano
+  await withTenant(org.id, async (tx) => {
+    await tx.organization.update({ where: { id: org.id }, data: { planId: freePlanId, settings: nextSettings as object } });
+    if (!hasSub) {
+      await tx.subscription.create({
+        data: { organizationId: org.id, planId: freePlanId, status: "TRIALING", interval: "monthly", periodStart: org.createdAt, periodEnd: new Date(endsAt) },
+      });
+    }
+  });
+  return nextSettings;
+}
+
 /** Escanea pruebas y aplica init/avisos/deshabilitación. Cross-tenant (admin). */
 export function startTrialLifecycle(): () => void {
   const run = async () => {
@@ -169,11 +202,17 @@ export function startTrialLifecycle(): () => void {
         where: { status: { in: ["TRIAL", "SUSPENDED"] }, deletedAt: null },
         select: { id: true, name: true, status: true, settings: true, createdAt: true },
       });
+      // Plan Free (para auto-sanar cuentas sin plan/vigencia). Una vez por tick.
+      const freePlan = await prisma.plan.findUnique({ where: { code: "free" }, select: { id: true } });
       for (const org of orgs) {
-        const settings = { ...((org.settings as Record<string, unknown>) ?? {}) };
+        let settings = { ...((org.settings as Record<string, unknown>) ?? {}) };
         const trial = (settings.trial as TrialState | undefined) ?? null;
         // Un SUSPENDED que no es prueba (impago) no nos incumbe.
         if (org.status === "SUSPENDED" && trial?.state !== "disabled") continue;
+        // Auto-sanado idempotente: prueba en curso siempre con plan Free + vigencia.
+        if (org.status === "TRIAL") {
+          settings = await ensureFreePlanAndVigencia(prisma, withTenant, freePlan?.id ?? null, org, settings, trial);
+        }
         const hasPaid = await hasEverPaid(prisma, org.id);
         const decision = planTrialAction({ now, createdAt: org.createdAt, orgStatus: org.status, trial, hasPaid });
 
