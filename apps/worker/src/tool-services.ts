@@ -601,6 +601,9 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           // Límites que el bot DEBE conocer para vender con la verdad (0 = ilimitado).
           contactsMonthly: num(lim.contactsMonthly),
           aiTokensDaily: num(lim.aiTokensDaily),
+          // Un plan de precio 0 NO es "gratis para siempre": es la PRUEBA/DEMO temporal.
+          trialDays: p.trialDays || 7,
+          isTrial: Number(p.priceClp) === 0 && Number(p.priceUsd) === 0,
         };
       });
     },
