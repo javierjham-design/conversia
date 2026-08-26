@@ -55,9 +55,9 @@ const KINDS: [string, string][] = [
 ];
 
 /** Card de sección con título, ayuda opcional y contenido. */
-function Section({ title, subtitle, helpKey, onHelp, children }: { title: string; subtitle?: string; helpKey?: string; onHelp?: (k: string) => void; children: React.ReactNode }) {
+function Section({ id, title, subtitle, helpKey, onHelp, children }: { id?: string; title: string; subtitle?: string; helpKey?: string; onHelp?: (k: string) => void; children: React.ReactNode }) {
   return (
-    <div className="mb-4 rounded-xl border border-line bg-panel p-4">
+    <div id={id} className="mb-4 scroll-mt-4 rounded-card border border-line bg-panel p-4">
       <div className="mb-1 flex items-start justify-between gap-3">
         <div>
           <h2 className="font-semibold text-ink">{title}</h2>
@@ -432,10 +432,10 @@ export default function AgentEditorPage() {
       {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-panel px-5 py-3">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{emoji}</span>
+          <AgentAvatar value={emoji} size="md" />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-ink">{name || "Agente"}</h1>
+              <h1 className="t-section text-ink">{name || "Agente"}</h1>
               <StatusBadge kind={published && agent.active ? "connected" : "beta"} label={published ? (agent.active ? "activo" : "inactivo") : "borrador"} />
               {dirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">cambios sin guardar</span>}
             </div>
@@ -456,7 +456,21 @@ export default function AgentEditorPage() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Izquierda: formulario */}
         <div className="min-w-0 flex-1 overflow-y-auto bg-app p-5">
-          <div className="mx-auto max-w-2xl">
+          <div className="mx-auto flex max-w-4xl gap-5">
+            {/* Navegación por secciones (fija al costado en pantallas anchas) */}
+            <nav className="sticky top-0 hidden h-fit w-40 shrink-0 space-y-0.5 lg:block">
+              {[
+                ["sec-config", "Configuración"],
+                ["sec-instrucciones", "Instrucciones"],
+                ["sec-acciones", "Acciones"],
+                ["sec-conocimiento", "Conocimiento"],
+              ].map(([id, label]) => (
+                <a key={id} href={`#${id}`} className="block rounded-control px-2.5 py-1.5 t-body-sm text-ink-muted transition-colors hover:bg-panel hover:text-ink">
+                  {label}
+                </a>
+              ))}
+            </nav>
+          <div className="min-w-0 flex-1">
             {/* Punto de partida: plantillas */}
             <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3 dark:border-brand-500/30">
               <p className="text-sm text-ink">
@@ -471,7 +485,7 @@ export default function AgentEditorPage() {
             </div>
 
             {/* Configuración */}
-            <Section title="Configuración">
+            <Section id="sec-config" title="Configuración">
               <div className="flex items-start gap-3">
                 <div className="flex items-center gap-2">
                   <AgentAvatar value={emoji} size="lg" />
@@ -502,7 +516,7 @@ export default function AgentEditorPage() {
             </Section>
 
             {/* Instrucciones */}
-            <Section title="Instrucciones" subtitle="El cerebro del agente: quién es, qué sabe, cómo habla y qué puede hacer." helpKey="instrucciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
+            <Section id="sec-instrucciones" title="Instrucciones" subtitle="El cerebro del agente: quién es, qué sabe, cómo habla y qué puede hacer." helpKey="instrucciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <PromptTemplateMenu onPick={insertSnippet} agentId={id} />
                 <span className="text-xs text-ink-subtle">~{approxTokens.toLocaleString("es-CL")} tokens</span>
@@ -530,7 +544,7 @@ export default function AgentEditorPage() {
             </Section>
 
             {/* Acciones */}
-            <Section title="Acciones" subtitle="Qué puede hacer el agente. Activa una acción y explica en tus palabras cuándo y cómo usarla." helpKey="acciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
+            <Section id="sec-acciones" title="Acciones" subtitle="Qué puede hacer el agente. Activa una acción y explica en tus palabras cuándo y cómo usarla." helpKey="acciones" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               <div className="space-y-5">
                 {ACTION_GROUPS.map((g) => {
                   const items = AGENT_ACTIONS.filter((a) => a.group === g.key);
@@ -564,7 +578,7 @@ export default function AgentEditorPage() {
             </Section>
 
             {/* Fuentes de conocimiento — Fase 5 */}
-            <Section title="Fuentes de conocimiento" subtitle="Qué bases de conocimiento puede consultar este agente para responder dudas." helpKey="knowledge" onHelp={(k) => setHelp(AGENT_HELP[k])}>
+            <Section id="sec-conocimiento" title="Fuentes de conocimiento" subtitle="Qué bases de conocimiento puede consultar este agente para responder dudas." helpKey="knowledge" onHelp={(k) => setHelp(AGENT_HELP[k])}>
               {knowledgeBases.length === 0 ? (
                 <p className="text-sm text-ink-subtle">Aún no hay bases de conocimiento cargadas para esta organización.</p>
               ) : (
@@ -618,6 +632,7 @@ export default function AgentEditorPage() {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
 
