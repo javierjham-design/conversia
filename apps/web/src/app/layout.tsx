@@ -1,5 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, Sora } from "next/font/google";
 import "./globals.css";
+
+// Tipografía del sistema (B2): Inter para texto (excelente soporte de acentos y
+// ñ, rápida) y Sora para títulos (carácter geométrico). Self-hosted por next/font.
+const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+const display = Sora({ subsets: ["latin"], weight: ["500", "600", "700"], variable: "--font-display", display: "swap" });
 
 export const metadata: Metadata = {
   title: "TuBot — Panel",
@@ -32,7 +38,7 @@ const THEME_INIT = `(function(){try{var t=localStorage.getItem('tubot-theme');va
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html lang="es" className={`${sans.variable} ${display.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>

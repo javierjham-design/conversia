@@ -201,3 +201,39 @@ Reestructurar todas las cabeceras a `PageHeader`, unificar anchos máximos y
 sidebars secundarias son de alto churn con riesgo de recortar contenido → pasada
 dedicada con capturas antes/después. Incoherencias que tocan backend/datos de
 producción están inventariadas en `docs/COPY_PENDIENTE_OCT2026.md`.
+
+
+## Etapa 2 — Sistema con carácter (B2: tokens y /styleguide)
+
+Fuente única de la verdad en vivo: **`/styleguide`** (interna). Definido en
+`apps/web/src/app/globals.css` (@theme) y las fuentes en `apps/web/src/app/layout.tsx`.
+
+### Tipografía
+Dos familias self-hosted por `next/font`: **Inter** (texto — buen soporte de
+acentos y ñ) y **Sora** (títulos — carácter geométrico); mono del sistema. Roles
+como clases utilitarias (usar estas, no `text-[10px]` sueltos):
+`.t-display` 30 · `.t-page` 24 · `.t-section` 18 · `.t-card` 15 · `.t-body` 14 ·
+`.t-body-sm` 13 · `.t-label` 12 · `.t-meta` 11 (solo contadores/horas) · `.t-mono` 13.
+Cuerpo mínimo **14px**, etiquetas **12px**, interlínea 1.5 (1.25 en títulos).
+`h1–h3` usan la familia display por defecto.
+
+### Color
+- **Marca** `brand-50→900`: SOLO para la acción primaria (un primario por pantalla).
+- **Superficies** que voltean en oscuro: `app` (fondo), `panel`, `raised`,
+  `line`, `line-strong`, e ink `ink`/`ink-muted`/`ink-subtle`.
+- **Semánticos** `--color-success/-warning/-danger/-info` (con su tinte de fondo).
+- **Paleta categórica** `--color-cat-1..8` (indigo/teal/amber/pink/violet/cyan/
+  lime/orange): SIEMPRE para series de gráficos y para el color de las etapas del
+  ciclo de vida. El nav activo, los chips y las barras de datos usan sus propias
+  escalas — nunca el azul de marca.
+
+### Superficie y profundidad
+Tres elevaciones: base (`bg-app`), elevada (`bg-raised` + `shadow-e1`), flotante
+(`shadow-e3`). Radios semánticos: `rounded-control` 6 · `rounded-card` 10 ·
+`rounded-bubble` 16 · `rounded-pill`.
+
+### Espaciado, estados, iconografía
+Escala de 4px (Tailwind por defecto). Estados: hover/activo/seleccionado + foco
+con anillo propio (`:focus-visible` con `--color-brand-500`), skeletons con
+forma. Íconos: una sola familia de línea (lucide); los emoji salen del chrome del
+producto (siguen permitidos en el contenido que el cliente escribe).
