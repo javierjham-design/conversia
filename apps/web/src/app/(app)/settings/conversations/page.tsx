@@ -34,12 +34,12 @@ export default function ConversationRulesPage() {
     }
   }
 
-  if (!rules) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!rules) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
   const input = "mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm";
   const set = (patch: Partial<InboxRules>) => setRules({ ...rules, ...patch });
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Conversaciones — reglas de la Bandeja</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Reglas automáticas que el sistema aplica cada 10 minutos sobre la Bandeja.

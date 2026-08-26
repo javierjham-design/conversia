@@ -65,12 +65,12 @@ export default function ContactFieldsPage() {
 
   if (!fields) {
     return (
-      <div className="mx-auto max-w-3xl p-6"><Skeleton className="h-64" /></div>
+      <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Campos de contacto</h2>
         <Button onClick={() => setAdding(true)}><Plus size={14} /> Nuevo campo</Button>

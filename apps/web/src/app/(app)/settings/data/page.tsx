@@ -52,10 +52,10 @@ export default function DataSettingsPage() {
     }
   }
 
-  if (!policy) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!policy) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Retención y privacidad</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Define cuánto tiempo conservas los datos. El default es <b>indefinido</b> (no se borra nada). Reducir el plazo

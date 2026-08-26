@@ -46,10 +46,10 @@ export default function TeamsSettingsPage() {
     }
   }
 
-  if (!teams) return <div className="mx-auto max-w-3xl p-6"><Skeleton className="h-64" /></div>;
+  if (!teams) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Equipos</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Ventas, Recepción, Sede… Los equipos se usan en las asignaciones de la <b>Bandeja</b>, la acción «Asignar a» de

@@ -190,10 +190,10 @@ export default function NotificationsSettingsPage() {
     void save({ ...prefs, matrix });
   }
 
-  if (!events || !prefs) return <div className="mx-auto max-w-2xl p-6"><Skeleton className="h-64" /></div>;
+  if (!events || !prefs) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-64" /></div>;
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Notificaciones</h2>
       <p className="mt-1 mb-4 text-xs text-ink-muted">Preferencias personales — solo te afectan a ti. Algunos avisos críticos no se pueden apagar.</p>
 

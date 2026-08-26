@@ -92,7 +92,7 @@ export default function GeneralSettingsPage() {
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-2xl p-6">
+      <div className="mx-auto max-w-4xl p-6">
         <Skeleton className="h-64" />
       </div>
     );
@@ -102,7 +102,7 @@ export default function GeneralSettingsPage() {
   const set = (patch: Partial<GeneralSettings>) => setData({ ...data, ...patch });
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
+    <div className="mx-auto max-w-4xl p-6">
       <h2 className="text-lg font-semibold">Información general</h2>
       <p className="mt-1 text-xs text-ink-muted">
         Datos base del espacio de trabajo. La <b>zona horaria</b> la usan la agenda, los recordatorios, el resumen diario
