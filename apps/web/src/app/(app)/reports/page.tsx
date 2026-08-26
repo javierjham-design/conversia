@@ -9,6 +9,7 @@ interface Overview {
   days: number;
   conversations: { total: number; newInPeriod: number; openNow: number; humanControlNow: number };
   messages: { inbound: number; outbound: number };
+  contactsUsage: { used: number; limit: number | null; remaining: number | null; pct: number | null; periodStart: string };
   humanHandoffs: number;
   appointments: { status: string; count: number }[];
   leadFunnel: { code: string; name: string; category: string; count: number }[];
@@ -27,6 +28,39 @@ function Kpi({ label, value, hint }: { label: string; value: string | number; hi
       <p className="mt-0.5 text-2xl font-semibold tnum">{value}</p>
       {hint && <p className="mt-0.5 text-[11px] text-ink-subtle">{hint}</p>}
     </div>
+  );
+}
+
+/** Barra de uso de contactos del mes: usado vs cupo del plan, con color según nivel. */
+function ContactsUsage({ u }: { u: Overview["contactsUsage"] }) {
+  const pct = u.pct ?? 0;
+  const color = pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <section className="rounded-xl border border-line bg-panel p-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-medium">Contactos de este mes</h2>
+        <span className="text-sm text-ink-subtle tnum">
+          {u.limit != null ? `${u.used.toLocaleString("es-CL")} / ${u.limit.toLocaleString("es-CL")}` : `${u.used.toLocaleString("es-CL")} (sin límite)`}
+        </span>
+      </div>
+      {u.limit != null ? (
+        <>
+          <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-line">
+            <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(100, pct)}%` }} />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink-subtle">
+            <span>{pct}% usado</span>
+            <span>
+              {u.remaining != null && u.remaining > 0
+                ? `Quedan ${u.remaining.toLocaleString("es-CL")} contactos`
+                : "Cupo alcanzado — el excedente se cobra en tu próxima factura"}
+            </span>
+          </div>
+        </>
+      ) : (
+        <p className="mt-1 text-[11px] text-ink-subtle">Aún no hay un cupo de contactos definido para tu plan.</p>
+      )}
+    </section>
   );
 }
 
@@ -158,6 +192,12 @@ export default function ReportsPage() {
         <Kpi label={`Mensajes (${data.days}d)`} value={data.messages.inbound + data.messages.outbound} hint={`${data.messages.inbound} recibidos · ${data.messages.outbound} enviados`} />
         <Kpi label="Escalamientos a humano" value={data.humanHandoffs} hint={`en los últimos ${data.days} días`} />
       </div>
+
+      {data.contactsUsage && (
+        <div className="mb-6">
+          <ContactsUsage u={data.contactsUsage} />
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-line bg-panel p-4">

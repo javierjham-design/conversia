@@ -340,6 +340,7 @@ export class PlatformController {
     return {
       organization: { id: org.id, name: org.name, slug: org.slug, status: org.status, country: org.country, createdAt: org.createdAt, settings: org.settings },
       adminEmail: adminMember?.user.email ?? null,
+      adminName: adminMember?.user.name ?? null,
       subscription: sub ? { status: sub.status, planCode: plan?.code, planName: plan?.name, periodEnd: sub.periodEnd } : null,
       plan: plan ? { code: plan.code, name: plan.name, limits: planLimits, features: plan.features } : null,
       // Límites efectivos = plan + override por-tenant (settings.limits). El override manda.

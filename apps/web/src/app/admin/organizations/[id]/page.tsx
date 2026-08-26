@@ -8,6 +8,7 @@ import { Button, PageHeader, Skeleton, StatusBadge, useToast, type StatusKind } 
 import { MessagingPanel } from "./messaging-panel";
 
 const LIMIT_FIELDS: { key: string; label: string }[] = [
+  { key: "contactsMonthly", label: "Contactos / mes" },
   { key: "aiTokensDaily", label: "Tokens IA / día" },
   { key: "agents", label: "Agentes" },
   { key: "channels", label: "Canales" },
@@ -499,6 +500,12 @@ export default function OrgDetailPage() {
         <section className="rounded-card border border-slate-200 bg-white p-4 shadow-card lg:col-span-2">
           <h2 className="mb-1 font-semibold text-navy-900">Cuenta del administrador</h2>
           <p className="mb-3 text-xs text-slate-500">Correo y contraseña del usuario dueño de este tenant.</p>
+          <div className="mb-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-sm sm:grid-cols-2">
+            <div><span className="text-xs text-slate-500">Nombre (registro)</span><div className="font-medium text-navy-900">{d.adminName ?? "—"}</div></div>
+            <div><span className="text-xs text-slate-500">Negocio (registro)</span><div className="font-medium text-navy-900">{d.organization.name}</div></div>
+            <div><span className="text-xs text-slate-500">Correo</span><div className="font-medium text-navy-900">{d.adminEmail ?? "—"}</div></div>
+            <div><span className="text-xs text-slate-500">Creada</span><div className="font-medium text-navy-900">{new Date(d.organization.createdAt).toLocaleDateString("es-CL")}</div></div>
+          </div>
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-sm">
               Correo del administrador
