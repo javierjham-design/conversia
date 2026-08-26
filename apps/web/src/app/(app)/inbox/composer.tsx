@@ -239,7 +239,7 @@ export function Composer({
 
         {/* Ventana cerrada en modo Responder: estado elegante con CTA de plantilla */}
         {!windowOpen && tab === "reply" ? (
-          <div className="flex flex-col items-center gap-2 rounded-card border border-dashed border-line-strong bg-app px-4 py-4 text-center">
+          <div className="flex flex-col items-center gap-2 rounded-card border border-amber-200 bg-amber-50/60 px-4 py-4 text-center dark:border-amber-500/30 dark:bg-amber-500/5">
             <p className="text-xs text-ink-muted">
               La ventana de 24 h está cerrada. Solo puedes escribir con una <b className="text-ink">plantilla aprobada</b>.
             </p>
