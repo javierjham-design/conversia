@@ -213,6 +213,9 @@ const NAV_GROUPS: Array<{
     perm?: string; // permiso requerido para ver el módulo (undefined = visible para todos)
     term?: string; // clave de vocabulario por rubro (reemplaza label)
     moduleKey?: string; // si el módulo está desactivado por rubro, se oculta
+    // Sub-vistas (B1): al estar activo el ítem, se despliegan debajo y cada una
+    // se ilumina según ?vista. Ej. Clientes → Lista | Embudo.
+    subs?: Array<{ vista: string; label: string }>;
   }>;
 }> = [
   {
@@ -223,8 +226,17 @@ const NAV_GROUPS: Array<{
     label: "Operación",
     items: [
       { href: "/inbox", label: "Bandeja", icon: MessageSquare, perm: "inbox:read" },
-      { href: "/contacts", label: "Contactos", icon: Contact2, perm: "contacts:read", term: "contacts" },
-      { href: "/crm", label: "CRM", icon: KanbanSquare, perm: "leads:read" },
+      {
+        href: "/contacts",
+        label: "Clientes",
+        icon: Contact2,
+        perm: "contacts:read",
+        term: "contacts",
+        subs: [
+          { vista: "lista", label: "Lista" },
+          { vista: "embudo", label: "Embudo" },
+        ],
+      },
       { href: "/catalog", label: "Catálogo", icon: ShoppingBag, perm: "integrations:read" },
       { label: "Agenda", icon: CalendarDays, soon: true, moduleKey: "agenda" },
     ],
@@ -283,6 +295,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Cuenta suspendida (impago o prueba vencida): se esconde el menú lateral y
   // Facturación queda como única vista (BillingBanner además redirige allí).
   const [billingLocked, setBillingLocked] = useState(false);
+
+  // Vista activa de Clientes (?vista) para iluminar el sub-ítem correcto (B1).
+  // Se recalcula cuando cambia la ruta o cuando el conmutador emite «vistachange».
+  const [navTick, setNavTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setNavTick((n) => n + 1);
+    window.addEventListener("vistachange", bump);
+    window.addEventListener("popstate", bump);
+    return () => {
+      window.removeEventListener("vistachange", bump);
+      window.removeEventListener("popstate", bump);
+    };
+  }, []);
+  const activeVista = (() => {
+    if (typeof window === "undefined") return "lista";
+    void navTick; // fuerza recomputo al cambiar
+    const v = new URLSearchParams(window.location.search).get("vista");
+    return v === "embudo" || v === "tablero" ? "embudo" : "lista";
+  })();
 
   // Cierra el menú móvil al navegar.
   useEffect(() => {
@@ -401,22 +432,44 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       );
                     }
                     return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setMobileOpen(false)}
-                        title={collapsed ? item.label : undefined}
-                        className={cn(
-                          "mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors",
-                          collapsed && "justify-center",
-                          active
-                            ? "bg-brand-600/20 text-white shadow-[inset_2px_0_0_0] shadow-accent-400"
-                            : "text-navy-200 hover:bg-navy-800 hover:text-white",
+                      <div key={item.href}>
+                        <Link
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          title={collapsed ? item.label : undefined}
+                          className={cn(
+                            "mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-colors",
+                            collapsed && "justify-center",
+                            active
+                              ? "bg-brand-600/20 text-white shadow-[inset_2px_0_0_0] shadow-accent-400"
+                              : "text-navy-200 hover:bg-navy-800 hover:text-white",
+                          )}
+                        >
+                          <Icon size={17} className={active ? "text-accent-400" : ""} />
+                          {!collapsed && labelOf(item)}
+                        </Link>
+                        {/* Sub-vistas (B1): visibles cuando el ítem está activo */}
+                        {item.subs && active && !collapsed && (
+                          <div className="mb-1 ml-4 border-l border-navy-800 pl-2">
+                            {item.subs.map((s) => {
+                              const on = activeVista === s.vista;
+                              return (
+                                <Link
+                                  key={s.vista}
+                                  href={`${item.href}?vista=${s.vista}`}
+                                  onClick={() => setMobileOpen(false)}
+                                  className={cn(
+                                    "block rounded-lg px-2.5 py-1.5 text-[12.5px] transition-colors",
+                                    on ? "font-medium text-white" : "text-navy-300 hover:bg-navy-800 hover:text-white",
+                                  )}
+                                >
+                                  {s.label}
+                                </Link>
+                              );
+                            })}
+                          </div>
                         )}
-                      >
-                        <Icon size={17} className={active ? "text-accent-400" : ""} />
-                        {!collapsed && labelOf(item)}
-                      </Link>
+                      </div>
                     );
                   })}
                 </div>

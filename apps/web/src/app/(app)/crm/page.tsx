@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
 export default function CrmRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/contacts?vista=tablero");
+    router.replace("/contacts?vista=embudo");
   }, [router]);
   return null;
 }
