@@ -64,7 +64,11 @@ export async function meterContactOverage(): Promise<{ scanned: number; withOver
         admin.organization.findUnique({ where: { id: s.organizationId }, select: { currency: true, settings: true } }),
       ]);
       if (!plan || !org) continue;
-      const cupo = Number((plan.limits as Record<string, unknown> | null)?.contactsMonthly ?? 0);
+      // Cupo = override por-tenant (org.settings.limits.contactsMonthly) → plan. El override manda.
+      const settingsLimits = (org.settings as { limits?: Record<string, unknown> } | null)?.limits;
+      const overrideCupo = typeof settingsLimits?.contactsMonthly === "number" ? settingsLimits.contactsMonthly : undefined;
+      const planCupo = Number((plan.limits as Record<string, unknown> | null)?.contactsMonthly ?? 0);
+      const cupo = overrideCupo ?? planCupo;
       const feat = (plan.features as Record<string, unknown> | null) ?? {};
       const packSize = Number(feat.contactPackSize ?? 100);
       const currency = org.currency ?? "CLP";

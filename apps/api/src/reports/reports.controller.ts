@@ -62,6 +62,28 @@ export class ReportsController {
           GROUP BY 1 ORDER BY 1`,
       ]);
 
+      // Uso de CONTACTOS del mes vs el cupo del plan (con override por-tenant).
+      // El período arranca en el periodStart de la suscripción, o el 1° del mes.
+      const now = new Date();
+      const [sub, orgRow] = await Promise.all([
+        tx.subscription.findFirst({ select: { periodStart: true, planId: true } }),
+        tx.organization.findFirst({ select: { settings: true } }),
+      ]);
+      const periodStart = sub?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
+      const contactsUsed = await tx.contact.count({ where: { createdAt: { gte: periodStart }, deletedAt: null } });
+      const plan = sub?.planId ? await tx.plan.findUnique({ where: { id: sub.planId }, select: { limits: true } }) : null;
+      const override = (orgRow?.settings as { limits?: Record<string, unknown> } | null)?.limits?.contactsMonthly;
+      const planLimit = (plan?.limits as Record<string, unknown> | null)?.contactsMonthly;
+      const rawLimit = typeof override === "number" ? override : typeof planLimit === "number" ? planLimit : 0;
+      const limit = rawLimit > 0 ? rawLimit : null; // null = ilimitado / sin cupo definido
+      const contactsUsage = {
+        used: contactsUsed,
+        limit,
+        remaining: limit != null ? Math.max(0, limit - contactsUsed) : null,
+        pct: limit != null ? Math.min(100, Math.round((contactsUsed / limit) * 100)) : null,
+        periodStart: periodStart.toISOString(),
+      };
+
       return {
         days,
         conversations: {
@@ -71,6 +93,7 @@ export class ReportsController {
           humanControlNow: humanControl,
         },
         messages: { inbound: messagesIn, outbound: messagesOut },
+        contactsUsage,
         humanHandoffs: handoffs,
         appointments: appointments.map((a) => ({ status: a.status, count: a._count._all })),
         leadFunnel: leadStatuses.map((s) => ({
