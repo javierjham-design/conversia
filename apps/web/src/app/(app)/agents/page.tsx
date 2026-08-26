@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState, Select, cn } from "@/components/ui";
+import { EmptyState, Select, StatusBadge, cn } from "@/components/ui";
+import { AgentAvatar } from "@/components/agent-avatars";
 
 interface AgentRow {
   id: string;
@@ -16,6 +17,7 @@ interface AgentRow {
   publishedVersion: number | null;
   hasDraft: boolean;
   model: string | null;
+  avatar: string | null;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -138,37 +140,42 @@ export default function AgentsPage() {
             key={a.id}
             onClick={() => router.push(`/agents/${a.id}`)}
             className={cn(
-              "rounded-xl border bg-panel p-4 text-left shadow-sm transition-colors hover:border-brand-300",
+              "rounded-card border bg-panel p-4 text-left shadow-e1 transition-all hover:border-brand-300 hover:shadow-e2",
               a.active ? "border-line" : "border-dashed border-line opacity-70",
             )}
           >
-            <div className="flex items-center justify-between">
-              <h2 className="font-medium">{a.name}</h2>
-              <span className={`text-[10px] ${a.active ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle"}`}>
-                {a.active ? "● activo" : "○ inactivo"}
-              </span>
+            <div className="flex items-start gap-3">
+              <AgentAvatar value={a.avatar} size="lg" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="t-card truncate text-ink">{a.name}</h2>
+                  <span className={cn("inline-flex shrink-0 items-center gap-1 t-meta font-medium", a.active ? "text-emerald-600 dark:text-emerald-400" : "text-ink-subtle")}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", a.active ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600")} />
+                    {a.active ? "Activo" : "Inactivo"}
+                  </span>
+                </div>
+                <p className="t-body-sm text-ink-subtle">{KIND_LABELS[a.kind] ?? a.kind}</p>
+              </div>
             </div>
-            <p className="text-xs text-ink-subtle">{KIND_LABELS[a.kind] ?? a.kind} · {a.model ?? "—"}</p>
             {a.description ? (
-              <p className="mt-2 line-clamp-2 text-sm text-ink-muted">{a.description}</p>
+              <p className="mt-2 line-clamp-2 t-body-sm text-ink-muted">{a.description}</p>
             ) : (
-              <p className="mt-2 text-sm text-brand-700 underline decoration-dotted underline-offset-2 dark:text-brand-400">
-                Agregar una descripción…
-              </p>
+              <p className="mt-2 t-body-sm italic text-ink-subtle">Sin descripción</p>
             )}
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {a.model && <span className="rounded-pill bg-app px-2 py-0.5 t-meta font-medium text-ink-muted">{a.model}</span>}
               {a.publishedVersion ? (
-                <span className="rounded bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">v{a.publishedVersion} publicada</span>
+                <StatusBadge kind="connected" label={`v${a.publishedVersion} publicada`} />
               ) : (
-                <span className="rounded bg-app px-2 py-0.5 text-ink-muted">sin publicar</span>
+                <span className="rounded-pill bg-app px-2 py-0.5 t-meta text-ink-muted">Sin publicar</span>
               )}
-              {a.hasDraft && <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">borrador pendiente</span>}
+              {a.hasDraft && <StatusBadge kind="beta" label="Borrador pendiente" />}
               {twin && (
                 <span
-                  className="rounded bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                  className="rounded-pill bg-amber-50 px-2 py-0.5 t-meta font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
                   title={`«${a.name}» y «${twin.name}» son del mismo tipo y modelo y están ambos activos — revisa si uno sobra.`}
                 >
-                  ⚠ posible duplicado de «{twin.name}»
+                  ⚠ posible duplicado
                 </span>
               )}
             </div>
