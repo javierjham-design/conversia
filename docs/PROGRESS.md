@@ -1,5 +1,38 @@
 # Registro de progreso
 
+## 2026-08-26 — Diseño etapa 2 (carácter y espacio) — EN CURSO
+
+Segunda etapa de diseño: la plataforma ya estaba ordenada (etapa 1); ahora se le
+da carácter, jerarquía, profundidad y se recupera el espacio desperdiciado. Regla
+igual que antes: no se rompe nada funcional (piel, tipografía, color, layout). Ver
+`docs/DESIGN.md` (sección «Etapa 2») y la página viva `/styleguide`.
+
+Desplegado (PRs, todos con tsc + build + probe verdes):
+- **#268 B2 — el sistema:** tokens, tipografía Inter (texto) + Sora (títulos) por
+  `next/font`, roles `t-*`, paleta categórica (cat-1..8) para gráficos/etapas,
+  semánticos, superficies/elevación, radios; página interna `/styleguide`.
+- **#271 Avatares de agentes IA:** biblioteca de 18 (ícono de rol + color
+  categórico), selector y tarjetas; id en `config.emoji`, sin migración.
+- **#273 B1 — navegación:** un solo ítem «Clientes» con sub-ítems Lista/Embudo
+  (sync con `?vista` y el conmutador); `/crm` → `?vista=embudo`.
+- **#274 B3a:** ancho de contenido de Configuración (max-w-4xl).
+- **#276 B3b:** Plan y facturación (ancho + tarjetas alineadas) + barras de
+  consumo por estado (emerald/ámbar/rojo, sin azul de marca).
+- **#277 B5.7:** Reportes con paleta categórica (datos sin azul de marca).
+- **#279 B5.5:** Detalle del agente — layout a 2 columnas con navegación por
+  secciones + avatar en el header.
+- **#280 B5.2:** Clientes — formato único de teléfono.
+- **#281 B5.8:** Canales — salud de WhatsApp sin inglés ni clave cruda.
+- **#282 B6:** logo del login legible en oscuro.
+- **#283 B6:** sidebar — marca (wordmark compacto) y organización sin competir.
+- **#284 B5.1:** Bandeja — el recuadro cerrado del compositor deja de ser punteado.
+
+Pendiente: B4 (filas con muchos controles → menú «…»; estados vacíos como
+componente; skeletons con forma), B5.1 Bandeja (respirar lista/burbujas), B7
+movimiento, B8 accesibilidad (contraste AA, foco), y el cierre (humo + capturas
+antes/después + reporte final). Intactos: compuertas, billetera, fusible,
+aislamiento por organización, montaje asistido.
+
 ## 2026-08-25 — Armonización de la UI (B0–B10, completa)
 
 Programa de orden visual de toda la plataforma. Regla innegociable: **no se rompe
