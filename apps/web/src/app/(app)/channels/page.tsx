@@ -754,9 +754,13 @@ export default function ChannelsPage() {
  * muestran URLs con business_id/asset_id en la fila (pantallas compartibles).
  */
 function humanizeHealthEvent(type: string, message: string | null): { summary: string; action?: string; technical?: string } {
+  // Normaliza un prefijo de proveedor ("whatsapp.message_template_status_update"
+  // → "message_template_status_update") para que matchee el caso humanizado y no
+  // caiga al genérico mostrando la clave cruda.
+  const t = type.replace(/^[a-z0-9]+\./i, "");
   const raw = message ?? type;
   // Los eventos frecuentes, resumidos:
-  if (type === "message_template_status_update") {
+  if (t === "message_template_status_update") {
     const approved = /APPROVED/i.test(raw);
     const rejected = /REJECTED/i.test(raw);
     return {
@@ -772,15 +776,13 @@ function humanizeHealthEvent(type: string, message: string | null): { summary: s
       technical: raw,
     };
   }
-  if (type === "phone_number_quality_update") {
+  if (t === "phone_number_quality_update") {
     return { summary: "Cambió la calificación de calidad de tu número de WhatsApp", action: "si bajó, modera el volumen de plantillas por unos días", technical: raw };
   }
-  if (type === "account_update") {
+  if (t === "account_update") {
     return { summary: "Meta actualizó el estado de tu cuenta de WhatsApp Business", technical: raw };
   }
-  // Genérico: si el mensaje viene en inglés crudo o trae URLs con IDs, resumir
-  if (/https?:\/\//.test(raw) || /[a-z]_[a-z]/.test(type)) {
-    return { summary: `Aviso de Meta (${type.replace(/_/g, " ")})`, technical: raw };
-  }
-  return { summary: raw };
+  // Genérico: SIEMPRE en español; el texto crudo (inglés, URLs con IDs, clave
+  // técnica) queda colapsado en «detalle técnico», nunca como el resumen visible.
+  return { summary: "Aviso de Meta sobre tu cuenta de WhatsApp", technical: raw };
 }
