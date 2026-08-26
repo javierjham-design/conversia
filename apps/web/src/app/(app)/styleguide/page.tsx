@@ -20,6 +20,7 @@ import {
   StatusBadge,
   Switch,
 } from "@/components/ui";
+import { AGENT_AVATARS, AgentAvatar } from "@/components/agent-avatars";
 
 function Section({ id, title, hint, children }: { id: string; title: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -212,6 +213,15 @@ export default function StyleguidePage() {
           description="Cuando pase algo importante, lo verás acá."
           action={<Button variant="secondary">Configurar avisos</Button>}
         />
+      </Section>
+
+      {/* --------------------------- Avatares de agentes --------------------------- */}
+      <Section id="avatares" title="Avatares de agentes de IA" hint="Biblioteca de 18: ícono de rol + color categórico. Reemplazan el selector de emoji.">
+        <div className="flex flex-wrap gap-2">
+          {AGENT_AVATARS.map((a) => (
+            <AgentAvatar key={a.id} value={a.id} size="lg" />
+          ))}
+        </div>
       </Section>
 
       {/* ------------------------------ Paginación ------------------------------ */}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button, Checkbox, Modal, Select, StatusBadge, cn, useToast } from "@/components/ui";
+import { AgentAvatar, AgentAvatarPicker } from "@/components/agent-avatars";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
 import { AGENT_ACTIONS, ACTION_GROUPS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
@@ -52,7 +53,6 @@ const KINDS: [string, string][] = [
   ["support", "Soporte"],
   ["custom", "Personalizado"],
 ];
-const QUICK_EMOJIS = ["🤖", "💬", "👩‍💼", "🛎️", "🦷", "🏥", "📅", "💡", "🛒", "🎧", "✨", "📞"];
 
 /** Card de sección con título, ayuda opcional y contenido. */
 function Section({ title, subtitle, helpKey, onHelp, children }: { title: string; subtitle?: string; helpKey?: string; onHelp?: (k: string) => void; children: React.ReactNode }) {
@@ -248,7 +248,7 @@ export default function AgentEditorPage() {
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
 
-  const [emoji, setEmoji] = useState("🤖");
+  const [emoji, setEmoji] = useState("bot");
   const [name, setName] = useState("");
   const [kind, setKind] = useState("custom");
   const [description, setDescription] = useState("");
@@ -292,7 +292,7 @@ export default function AgentEditorPage() {
     setShowDescription(!!detail.description);
     const e = detail.editing;
     const cfg = (e?.config ?? {}) as any;
-    const nextEmoji = cfg.emoji ?? "🤖";
+    const nextEmoji = cfg.emoji ?? "bot";
     const nextPrompt = e?.systemPrompt ?? "";
     const nextModel = cfg.model ?? "gpt-4o-mini";
     const nextMaxTokens = cfg.maxTokens ?? 400;
@@ -472,10 +472,9 @@ export default function AgentEditorPage() {
 
             {/* Configuración */}
             <Section title="Configuración">
-              <div className="flex gap-3">
-                <div>
-                  <label className="text-xs text-ink-muted">Ícono</label>
-                  <input value={emoji} onChange={(e) => setEmoji(e.target.value.slice(0, 2))} className="mt-1 h-11 w-14 rounded-lg border border-line-strong text-center text-xl" />
+              <div className="flex items-start gap-3">
+                <div className="flex items-center gap-2">
+                  <AgentAvatar value={emoji} size="lg" />
                 </div>
                 <label className="flex-1 text-sm">
                   <span className="text-xs text-ink-muted">Nombre</span>
@@ -488,10 +487,9 @@ export default function AgentEditorPage() {
                   </Select>
                 </label>
               </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {QUICK_EMOJIS.map((e) => (
-                  <button key={e} onClick={() => setEmoji(e)} className={cn("rounded-lg border px-2 py-1 text-lg", emoji === e ? "border-brand-400 bg-brand-50 dark:bg-brand-500/10" : "border-line hover:bg-app")}>{e}</button>
-                ))}
+              <div className="mt-3">
+                <p className="text-xs text-ink-muted">Avatar del agente</p>
+                <div className="mt-1.5"><AgentAvatarPicker value={emoji} onChange={setEmoji} /></div>
               </div>
               {!showDescription ? (
                 <button onClick={() => setShowDescription(true)} className="mt-3 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">+ Mostrar descripción</button>
