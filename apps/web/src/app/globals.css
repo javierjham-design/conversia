@@ -135,7 +135,7 @@
   --line-strong: #2c3a5c;
   --ink: #e9eef8; /* AA sobre panel/raised */
   --ink-muted: #9fb0c9; /* AA para texto pequeño */
-  --ink-subtle: #6b7a97;
+  --ink-subtle: #8492ab; /* B8: subido para mejor contraste en oscuro (sigue más tenue que ink-muted) */
   --brand-soft: color-mix(in srgb, var(--color-brand-500) 16%, transparent);
   --sh-e1: 0 1px 2px 0 rgb(0 0 0 / 0.45);
   --sh-e2: 0 2px 10px -2px rgb(0 0 0 / 0.55);
@@ -216,6 +216,15 @@ textarea::placeholder {
   background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ink) 8%, transparent), transparent);
   animation: shimmer 1.4s infinite;
 }
+
+/* Entradas consistentes (B7): 150–200 ms, curva suave. Respetan «prefiere menos
+   movimiento» por la regla @media de más abajo (pone las animaciones ~0 ms). */
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes drawerIn { from { transform: translateX(100%); } to { transform: none; } }
+.animate-overlay-in { animation: overlayIn 150ms ease-out; }
+.animate-modal-in { animation: modalIn 180ms cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-drawer-in { animation: drawerIn 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 
 /* Punto "en vivo" que late */
 @keyframes livePulse {
