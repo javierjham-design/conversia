@@ -14,6 +14,7 @@ import {
   Download,
   GitMerge,
   ShieldCheck,
+  MoreHorizontal,
   SlidersHorizontal,
   Sparkles,
   Tag,
@@ -572,8 +573,14 @@ export default function ContactsPage() {
               options={workflows.map((w) => ({ label: w.name, onClick: () => setRunWfTarget(w) }))}
               empty="Sin flujos publicados"
             />
-            <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("block")}><Ban size={14} /> Bloquear</Button>
-            <Button variant="secondary" className="px-2.5 py-1" onClick={() => runBulk("unblock")}><ShieldCheck size={14} /> Desbloquear</Button>
+            <BulkMenu
+              icon={<MoreHorizontal size={14} />}
+              label="Más"
+              options={[
+                { label: "Bloquear", onClick: () => runBulk("block") },
+                { label: "Desbloquear", onClick: () => runBulk("unblock") },
+              ]}
+            />
             <Button variant="danger" className="px-2.5 py-1" onClick={() => setConfirmBulkDel(true)}><Trash2 size={14} /> Eliminar</Button>
             <button onClick={() => setSelected(new Set())} className="ml-auto text-brand-600 hover:underline dark:text-brand-400">Deseleccionar</button>
           </div>
