@@ -192,12 +192,14 @@ export default function ContactsPage() {
 
   const secCount = Object.values(sec).filter(Boolean).length;
 
-  // Deep-links: ?vista=tablero abre el Tablero (así llega el menú CRM);
-  // ?open=<id> abre la ficha del contacto (antes este parámetro se ignoraba
-  // y los enlaces "ver ficha" de otras pantallas no abrían nada).
+  // Deep-links (B1): ?vista=lista | embudo (se acepta el legado ?vista=tablero).
+  // El menú «Clientes → Embudo» y /crm llegan con ?vista=embudo. ?open=<id> abre
+  // la ficha del contacto.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
-    if (p.get("vista") === "tablero") setView("tablero");
+    const v = p.get("vista");
+    if (v === "embudo" || v === "tablero") setView("tablero");
+    else if (v === "lista" || v === "tabla") setView("tabla");
     else if (window.localStorage.getItem("personas.view") === "tablero") setView("tablero");
     const open = p.get("open");
     if (open) setOpenId(open);
@@ -206,6 +208,12 @@ export default function ContactsPage() {
   function switchView(v: "tabla" | "tablero") {
     setView(v);
     window.localStorage.setItem("personas.view", v);
+    // Refleja la vista en la URL para que el sub-ítem del menú se ilumine y el
+    // enlace sea compartible (sin recargar).
+    const p = new URLSearchParams(window.location.search);
+    p.set("vista", v === "tablero" ? "embudo" : "lista");
+    window.history.replaceState(null, "", `/contacts?${p.toString()}`);
+    window.dispatchEvent(new Event("vistachange")); // sincroniza el sub-ítem del menú
   }
 
   // Debounce de la búsqueda (300 ms) → resetea a la página 1.
@@ -420,21 +428,21 @@ export default function ContactsPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Barra de herramientas */}
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
-          {/* Vista única del módulo de personas: Tabla (contactos) | Tablero (etapas) */}
+          {/* Vista única del módulo Clientes: Lista (contactos) | Embudo (etapas) */}
           <div className="flex shrink-0 overflow-hidden rounded-lg border border-line-strong">
             <button
               onClick={() => switchView("tabla")}
               className={cn("flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium", view === "tabla" ? "bg-brand-600 text-white" : "bg-panel text-ink-muted hover:bg-app")}
-              title="Vista tabla"
+              title="Vista de lista"
             >
-              <Columns3 size={13} /> Tabla
+              <Columns3 size={13} /> Lista
             </button>
             <button
               onClick={() => switchView("tablero")}
               className={cn("flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium", view === "tablero" ? "bg-brand-600 text-white" : "bg-panel text-ink-muted hover:bg-app")}
-              title="Vista tablero por etapa"
+              title="Vista de embudo por etapa"
             >
-              <KanbanSquare size={13} /> Tablero
+              <KanbanSquare size={13} /> Embudo
             </button>
           </div>
           {view === "tablero" && boardTotal !== null && (
