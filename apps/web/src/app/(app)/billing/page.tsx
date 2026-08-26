@@ -172,7 +172,7 @@ export default function BillingPage() {
   const cadence = billingInterval === "yearly" ? "año" : "mes";
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    <div className="mx-auto max-w-5xl p-6">
       <h1 className="text-xl font-semibold">Plan y facturación</h1>
       <p className="mb-4 text-sm text-ink-muted">Tu plan, el consumo del período y tus pagos.</p>
 
@@ -286,17 +286,20 @@ export default function BillingPage() {
           const enterprise = !p.isPublic;
           return (
             <div key={p.code} className={cn("flex flex-col rounded-card border bg-panel p-4 shadow-card", isCurrent ? "border-brand-400 ring-1 ring-brand-200" : "border-line")}>
-              <div className="flex items-center justify-between">
-                <p className="font-semibold">{p.name}</p>
-                {isCurrent && <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">Tu plan actual</span>}
+              <div className="flex min-h-[1.5rem] items-start justify-between gap-2">
+                <p className="t-card text-ink">{p.name}</p>
+                {isCurrent && <span className="shrink-0 rounded-pill bg-brand-100 px-2 py-0.5 t-meta font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">Tu plan actual</span>}
               </div>
               {(() => {
                 const showYearly = billingInterval === "yearly" && (yearlyPriceOf(p) ?? 0) > 0;
+                // Altura fija en el bloque de precio: así las viñetas de las 4
+                // tarjetas arrancan en la misma línea base (antes «/mes» de la
+                // tarjeta Enterprise caía aparte y desalineaba todo).
                 return (
-                  <p className="mt-1 text-lg font-semibold text-ink">
-                    {p.custom && <span className="text-xs font-normal text-ink-subtle">Desde </span>}
-                    {enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}
-                    {!(enterprise && priceOf(p) === 0) && <span className="text-xs font-normal text-ink-subtle"> /{showYearly ? "año" : "mes"}</span>}
+                  <p className="mt-1 flex min-h-[2rem] items-baseline gap-1 text-xl font-semibold text-ink">
+                    {p.custom && <span className="text-xs font-normal text-ink-subtle">Desde</span>}
+                    <span>{enterprise && priceOf(p) === 0 ? "A medida" : money(priceOf(p), currency)}</span>
+                    {!(enterprise && priceOf(p) === 0) && <span className="text-xs font-normal text-ink-subtle">/{showYearly ? "año" : "mes"}</span>}
                   </p>
                 );
               })()}

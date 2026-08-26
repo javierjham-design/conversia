@@ -44,11 +44,12 @@ export function UsageBars({ usage }: { usage: Record<string, { used: number; lim
                 {used.toLocaleString("es-CL")} / {unlimited ? "∞" : u.limit!.toLocaleString("es-CL")}
               </span>
             </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-app">
+            <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-app">
               <div
                 className={cn(
-                  "h-full transition-all",
-                  pct === null ? "bg-slate-300 dark:bg-slate-600" : pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-brand-500",
+                  "h-full rounded-full transition-all",
+                  // Color por estado (no la marca): sano/cerca del límite/excedido.
+                  pct === null ? "bg-slate-300 dark:bg-slate-600" : pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-emerald-500",
                 )}
                 style={{ width: `${pct ?? (used > 0 ? 8 : 0)}%` }}
               />
