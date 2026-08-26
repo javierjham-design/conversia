@@ -640,6 +640,49 @@ export class ConversationsController {
   }
 
   /**
+   * Transmite la imagen de un mensaje (la que envió el cliente o la que enviamos):
+   * descarga on-demand de Meta por media id y la proxea al panel. El equipo necesita
+   * VER las imágenes, no solo el caption. Usa el token del canal (WABA propia) con
+   * fallback al token de plataforma, igual que el envío de adjuntos.
+   */
+  @Get(":id/messages/:messageId/image")
+  async messageImage(@Param("id") id: string, @Param("messageId") messageId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    const env = getEnv();
+    const found = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const message = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
+      if (!message) return null;
+      const payload = (message.payload ?? {}) as any;
+      // Entrante: payload.image.id / sticker.id. Saliente (lo que subimos): payload.mediaId.
+      const mediaId = payload?.image?.id ?? payload?.sticker?.id ?? payload?.mediaId;
+      if (!mediaId) return null;
+      // Token del canal de la conversación (WABA propia) → fallback plataforma.
+      let token = env.META_ACCESS_TOKEN;
+      const conversation = await tx.conversation.findUnique({ where: { id } });
+      if (conversation?.channelConnectionId) {
+        const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: conversation.channelConnectionId } });
+        const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
+        const credential = account?.credentialId ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } }) : null;
+        if (credential) token = decryptSecret(credential.ciphertext);
+      }
+      return { mediaId: String(mediaId), token };
+    });
+    if (!found) throw new NotFoundException("Este mensaje no tiene imagen");
+    if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
+    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
+      headers: { authorization: `Bearer ${found.token}` },
+    });
+    const meta: any = await metaRes.json().catch(() => ({}));
+    if (!meta?.url) throw new NotFoundException("Imagen no disponible (puede haber expirado en Meta)");
+    const imgRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
+    if (!imgRes.ok) throw new NotFoundException("No se pudo obtener la imagen");
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    res.setHeader("content-type", meta.mime_type ?? "image/jpeg");
+    res.setHeader("cache-control", "private, max-age=3600");
+    res.send(buf);
+  }
+
+  /**
    * Envío manual desde el panel (autor humano) — o comentario interno si
    * internal=true: queda en el hilo SOLO para el equipo y JAMÁS va al canal
    * (visibility INTERNAL y sin encolar a outbound).

@@ -46,6 +46,48 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
   );
 }
 
+/** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → tamaño completo. */
+function ImageBubble({ conversationId, messageId, caption, outbound }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    let objUrl: string | null = null;
+    (async () => {
+      try {
+        const res = await fetch(`/backend/conversations/${conversationId}/messages/${messageId}/image`, {
+          headers: { authorization: `Bearer ${getToken() ?? ""}` },
+        });
+        if (!res.ok) throw new Error();
+        objUrl = URL.createObjectURL(await res.blob());
+        if (alive) setUrl(objUrl);
+        else URL.revokeObjectURL(objUrl);
+      } catch {
+        if (alive) setErr(true);
+      }
+    })();
+    return () => {
+      alive = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
+  }, [conversationId, messageId]);
+  return (
+    <div>
+      {url ? (
+        <a href={url} target="_blank" rel="noreferrer" title="Ver en tamaño completo">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt={caption ?? "Imagen"} className="mb-1 max-h-72 w-auto max-w-full cursor-zoom-in rounded-card" />
+        </a>
+      ) : (
+        <div className={cn("mb-1 flex h-24 w-40 items-center justify-center rounded-card text-xs", outbound ? "bg-white/15 text-white/80" : "bg-app text-ink-subtle")}>
+          {err ? "🖼️ No disponible" : "🖼️ Cargando…"}
+        </div>
+      )}
+      {caption && <p className="whitespace-pre-wrap">{caption}</p>}
+    </div>
+  );
+}
+
 const STATUS_TICK: Record<string, string> = { PENDING: "🕓", SENT: "✓", DELIVERED: "✓✓", READ: "✓✓", FAILED: "⚠" };
 
 /** Etiqueta de separador de día: "Hoy" / "Ayer" / "5 de agosto". */
@@ -510,7 +552,12 @@ export function Thread({
                     {m.type === "AUDIO" ? (
                       <AudioBubble conversationId={conversation.id} messageId={m.id} transcript={m.body} outbound={outbound} />
                     ) : m.type === "IMAGE" ? (
-                      <p className="whitespace-pre-wrap">📷 {payload.caption ?? m.body ?? "Imagen"}</p>
+                      <ImageBubble
+                        conversationId={conversation.id}
+                        messageId={m.id}
+                        caption={payload.caption ?? payload.image?.caption ?? (m.body && !/^\[.*\]$/.test(m.body) && m.body !== "📷 Imagen" ? m.body : null)}
+                        outbound={outbound}
+                      />
                     ) : m.type === "DOCUMENT" ? (
                       <p className="whitespace-pre-wrap">📎 {payload.filename ?? m.body ?? "Documento"}</p>
                     ) : m.type === "TEMPLATE" ? (

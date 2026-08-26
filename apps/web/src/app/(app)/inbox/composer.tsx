@@ -43,6 +43,7 @@ export function Composer({
   const [showVars, setShowVars] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLInputElement>(null);
@@ -61,9 +62,51 @@ export function Composer({
     textareaRef.current?.focus();
   }
 
+  /** Prepara una imagen (pegada o elegida) para enviar con preview + caption opcional. */
+  function stageImage(file: File) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      toast.push("Imágenes: JPG, PNG o WebP", "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.push("Máximo 5 MB", "error");
+      return;
+    }
+    setPending((p) => {
+      if (p) URL.revokeObjectURL(p.url);
+      return { file, url: URL.createObjectURL(file) };
+    });
+    textareaRef.current?.focus();
+  }
+
+  function clearPending() {
+    setPending((p) => {
+      if (p) URL.revokeObjectURL(p.url);
+      return null;
+    });
+  }
+
+  /** Pegar (Ctrl+V) una imagen del portapapeles → preview, sin enviar aún. */
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (tab === "note") return;
+    const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+    const file = item?.getAsFile();
+    if (file) {
+      e.preventDefault();
+      stageImage(file);
+    }
+  }
+
   async function send() {
+    if (busy) return;
+    // Si hay una imagen preparada, se envía con el borrador como caption.
+    if (pending && tab === "reply") {
+      await attach("image", pending.file);
+      clearPending();
+      return;
+    }
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text) return;
     setBusy(true);
     try {
       await api(`/conversations/${conversation.id}/messages`, {
@@ -248,6 +291,21 @@ export function Composer({
             </button>
           </div>
         ) : (
+          <div>
+          {/* Preview de imagen preparada (pegada o elegida): se envía con el texto como caption */}
+          {pending && tab === "reply" && (
+            <div className="mb-2 flex items-start gap-2 rounded-card border border-line bg-app p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={pending.url} alt="Imagen a enviar" className="h-16 w-16 shrink-0 rounded-control object-cover" />
+              <div className="min-w-0 flex-1 text-xs text-ink-muted">
+                <p className="font-medium text-ink">Imagen lista para enviar</p>
+                <p className="truncate">{pending.file.name || "captura.png"} · escribe un texto abajo para acompañarla (opcional)</p>
+              </div>
+              <button onClick={clearPending} className="shrink-0 rounded-control px-2 py-1 text-xs text-ink-subtle hover:bg-panel hover:text-red-500" title="Quitar imagen">
+                Quitar
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <div className="flex shrink-0 items-center gap-0.5 pb-1.5 text-ink-subtle">
               <button onClick={() => { setShowEmojis(!showEmojis); setShowSnippets(false); setShowVars(false); }} className="rounded-control p-1 transition-colors hover:bg-app hover:text-ink" title="Emojis">
@@ -259,7 +317,7 @@ export function Composer({
               <button onClick={() => fileRef.current?.click()} disabled={tab === "note"} className="rounded-control p-1 transition-colors hover:bg-app hover:text-ink disabled:opacity-30" title="Enviar documento">
                 <Paperclip size={16} />
               </button>
-              <input ref={imgRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void attach("image", e.target.files[0])} />
+              <input ref={imgRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { if (e.target.files?.[0]) stageImage(e.target.files[0]); e.target.value = ""; }} />
               <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && void attach("document", e.target.files[0])} />
             </div>
             <textarea
@@ -276,11 +334,14 @@ export function Composer({
                   void send();
                 }
               }}
+              onPaste={onPaste}
               rows={2}
               placeholder={
                 tab === "note"
                   ? "Comentario para el equipo (el cliente NO lo ve)…"
-                  : "Escribe… ( / respuestas rápidas · $ variables )"
+                  : pending
+                    ? "Texto para acompañar la imagen (opcional)…"
+                    : "Escribe… ( / respuestas rápidas · $ variables · pega una imagen con Ctrl+V )"
               }
               className={cn(
                 "flex-1 resize-none rounded-control border px-3 py-2 text-sm text-ink placeholder:text-ink-subtle",
@@ -299,15 +360,16 @@ export function Composer({
               )}
               <button
                 onClick={() => void send()}
-                disabled={busy || !draft.trim()}
+                disabled={busy || (!draft.trim() && !(pending && tab === "reply"))}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-control px-4 py-1.5 text-sm font-semibold text-white transition-colors disabled:opacity-40",
                   tab === "note" ? "bg-amber-600 hover:bg-amber-700" : "bg-brand-600 hover:bg-brand-700",
                 )}
               >
-                <Send size={14} /> {tab === "note" ? "Guardar" : "Enviar"}
+                <Send size={14} /> {tab === "note" ? "Guardar" : pending ? "Enviar imagen" : "Enviar"}
               </button>
             </div>
+          </div>
           </div>
         )}
       </div>
