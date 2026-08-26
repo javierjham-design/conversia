@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { MoreVertical } from "lucide-react";
 import { api } from "@/lib/api";
-import { Checkbox, Select } from "@/components/ui";
+import { Checkbox, Select, cn } from "@/components/ui";
 import { InstagramIcon, MessengerIcon, TikTokIcon, WhatsAppIcon } from "@/components/brand-icons";
 import { TemplatesPanel } from "./templates-panel";
 
@@ -590,41 +591,22 @@ export default function ChannelsPage() {
                     Configurar
                   </a>
                 )}
+                {/* Acción primaria visible + el resto en el menú «…» (B4) */}
                 <button onClick={() => void test(c.id)} className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app">
                   Probar conexión
                 </button>
-                {c.type === "WHATSAPP_CLOUD" && (
-                  <button
-                    onClick={() => void registerNumber(c.id)}
-                    disabled={registering === c.id}
-                    className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app disabled:opacity-50"
-                    title="Suscribe la app al WABA (entrantes) y registra el número (salientes). Úsalo si el número quedó «Pendiente» o no recibe/envía."
-                  >
-                    {registering === c.id ? "Activando…" : "Activar número"}
-                  </button>
-                )}
-                <button
-                  onClick={() => (editingId === c.id ? setEditingId(null) : openEdit(c))}
-                  className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app"
-                  title="Editar datos del canal (nombre, número, WABA, token) sin borrarlo"
-                >
-                  {editingId === c.id ? "Cerrar" : "Editar"}
-                </button>
-                {c.type === "WHATSAPP_CLOUD" && (
-                  <button
-                    onClick={() => setTemplatesOpen((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                    className="rounded-lg border border-line-strong px-3 py-1.5 text-xs hover:bg-app"
-                  >
-                    {templatesOpen[c.id] ? "Ocultar plantillas" : "Plantillas"}
-                  </button>
-                )}
-                <button
-                  onClick={() => void removeChannel(c.id, c.name)}
-                  className="rounded-lg border border-red-300 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10"
-                  title="Eliminar este canal"
-                >
-                  Eliminar
-                </button>
+                <ChannelMenu
+                  items={[
+                    ...(c.type === "WHATSAPP_CLOUD"
+                      ? [{ label: registering === c.id ? "Activando…" : "Activar número", onClick: () => void registerNumber(c.id), disabled: registering === c.id }]
+                      : []),
+                    { label: editingId === c.id ? "Cerrar edición" : "Editar canal", onClick: () => (editingId === c.id ? setEditingId(null) : openEdit(c)) },
+                    ...(c.type === "WHATSAPP_CLOUD"
+                      ? [{ label: templatesOpen[c.id] ? "Ocultar plantillas" : "Plantillas", onClick: () => setTemplatesOpen((p) => ({ ...p, [c.id]: !p[c.id] })) }]
+                      : []),
+                    { label: "Eliminar canal", onClick: () => void removeChannel(c.id, c.name), danger: true },
+                  ]}
+                />
               </div>
             </div>
             {c.status === "error" && (
@@ -785,4 +767,38 @@ function humanizeHealthEvent(type: string, message: string | null): { summary: s
   // Genérico: SIEMPRE en español; el texto crudo (inglés, URLs con IDs, clave
   // técnica) queda colapsado en «detalle técnico», nunca como el resumen visible.
   return { summary: "Aviso de Meta sobre tu cuenta de WhatsApp", technical: raw };
+}
+
+/** Menú «…» de la fila de canal (B4): agrupa las acciones secundarias en vez de
+ *  una fila de botones parejos. Cierra al hacer clic fuera. */
+function ChannelMenu({ items }: { items: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen((v) => !v)} className="rounded-lg border border-line-strong p-1.5 text-ink-subtle hover:bg-app hover:text-ink" aria-label="Más acciones" title="Más acciones">
+        <MoreVertical size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-line bg-panel py-1 shadow-pop">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              onClick={() => { setOpen(false); it.onClick(); }}
+              disabled={it.disabled}
+              className={cn("block w-full px-3 py-1.5 text-left text-sm hover:bg-app disabled:opacity-50", it.danger ? "text-red-600 dark:text-red-400" : "text-ink")}
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
