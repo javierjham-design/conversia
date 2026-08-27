@@ -165,6 +165,36 @@ async function resolveAssistedClientOrg(
     : null;
 }
 
+/**
+ * Bloque para el system prompt del agente de implementación: si el contacto YA vinculó
+ * su cuenta (grant activo, válido 14 días), le dice al agente que NO vuelva a pedir el
+ * código y desde qué paso continuar. Sin esto el agente re-pedía el código en cada turno
+ * porque el vínculo solo se resolvía dentro de una tool, no al armar el prompt. Devuelve
+ * "" si no hay vínculo (o el agente no es el de montaje del proveedor).
+ */
+export async function buildAssistedSetupStatusBlock(
+  agentOrgId: string,
+  contactId: string | null | undefined,
+): Promise<string> {
+  const linked = await resolveAssistedClientOrg(agentOrgId, contactId);
+  if (!linked) return "";
+  const admin = getAdminPrisma();
+  const [org, ch] = await Promise.all([
+    admin.organization.findUnique({ where: { id: linked.orgId }, select: { name: true } }),
+    linked.scopeChannelId ? admin.channelConnection.findUnique({ where: { id: linked.scopeChannelId }, select: { name: true } }) : Promise.resolve(null),
+  ]);
+  const empresa = org?.name ?? "la empresa del cliente";
+  const canal = ch?.name ? ` (canal «${ch.name}»)` : "";
+  const paso = linked.journeyLabel ?? (linked.journeyStep ? `paso ${linked.journeyStep} del montaje` : "donde quedaron");
+  return (
+    `\n\n## MONTAJE ASISTIDO — YA VINCULADO (NO vuelvas a pedir el código)\n` +
+    `Este cliente YA autorizó y vinculó su cuenta: «${empresa}»${canal}. El vínculo está ACTIVO (válido 14 días). ` +
+    `NO pidas otro código ni repitas el flujo de autorización: ya tienes acceso. Usa directamente tus herramientas ` +
+    `de montaje (getClientSetupState, upsertClientAgent, etc.) y continúa desde ${paso}. ` +
+    `Solo si una herramienta te responde que el vínculo venció o fue revocado, recién ahí pídele un código nuevo.`
+  );
+}
+
 /** Mapea una fila de catalog_items a lo que el bot necesita (usa botDescription si existe). */
 function toCatalogHit(c: {
   name: string; sku: string | null; price: unknown; compareAtPrice: unknown; currency: string;

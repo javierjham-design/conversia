@@ -14,6 +14,7 @@ function fakeTx() {
     tx: {
       agent: {
         findFirst: async () => { rec("agent.read"); return null; },
+        findMany: async () => { rec("agent.read"); return []; },
         create: async () => { rec("agent.write"); return { id: "a1" }; },
         update: async () => { rec("agent.write"); return { id: "a1" }; },
         count: async () => { rec("agent.read"); return 0; },
