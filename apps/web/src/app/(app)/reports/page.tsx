@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { API_URL, api, getToken } from "@/lib/api";
-import { Select } from "@/components/ui";
+import { Select, Skeleton } from "@/components/ui";
 
 interface Overview {
   days: number;
@@ -152,7 +152,22 @@ export default function ReportsPage() {
   }
 
   if (error) return <div className="p-6 text-red-600 dark:text-red-400">{error}</div>;
-  if (!data) return <div className="p-6 text-ink-subtle">Cargando…</div>;
+  // Skeleton con la forma real: 4 KPIs + tarjetas (B4).
+  if (!data)
+    return (
+      <div className="space-y-6 p-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
+          ))}
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-40 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
 
   const leadFunnel = data.leadFunnel ?? [];
   const appointments = data.appointments ?? [];
