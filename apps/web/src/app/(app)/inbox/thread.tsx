@@ -8,10 +8,27 @@ import { Button, ConfirmDialog, Modal, Select, cn, useToast } from "@/components
 import { Composer } from "./composer";
 import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext, type ConversationFull, type Msg, type Stage } from "./types";
 
+/**
+ * Fuerza a Chromium a calcular la duración real de un OGG/Opus en streaming (las notas
+ * de voz de WhatsApp): sin esto reporta duration=Infinity, la barra queda en 0:00 y a
+ * veces no arranca. Truco: saltar a un tiempo enorme y volver a 0 al recibir timeupdate.
+ */
+function fixStreamedDuration(el: HTMLAudioElement) {
+  if (el.duration !== Infinity && el.duration > 0) return;
+  const onT = () => {
+    el.removeEventListener("timeupdate", onT);
+    if (el.duration === Infinity) return;
+    el.currentTime = 0;
+  };
+  el.addEventListener("timeupdate", onT);
+  try { el.currentTime = 1e101; } catch { el.removeEventListener("timeupdate", onT); }
+}
+
 function AudioBubble({ conversationId, messageId, transcript, outbound }: { conversationId: string; messageId: string; transcript: string | null; outbound: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(false);
+  const [playErr, setPlayErr] = useState(false);
   async function load() {
     if (url || loading) return;
     setLoading(true);
@@ -21,7 +38,10 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
         headers: { authorization: `Bearer ${getToken() ?? ""}` },
       });
       if (!res.ok) throw new Error();
-      setUrl(URL.createObjectURL(await res.blob()));
+      // Re-envolvemos con un tipo MIME limpio (sin "; codecs=…") para el <audio>.
+      const raw = await res.blob();
+      const type = (raw.type || "audio/ogg").split(";")[0].trim();
+      setUrl(URL.createObjectURL(new Blob([raw], { type })));
     } catch {
       setErr(true);
     } finally {
@@ -31,7 +51,21 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
   return (
     <div>
       {url ? (
-        <audio controls src={url} className="mb-1 h-9 w-56" />
+        <div className="mb-1">
+          <audio
+            controls
+            src={url}
+            preload="metadata"
+            className="h-9 w-56 max-w-full"
+            onLoadedMetadata={(e) => fixStreamedDuration(e.currentTarget)}
+            onError={() => setPlayErr(true)}
+          />
+          {playErr && (
+            <a href={url} download="audio-cliente.ogg" className={cn("mt-0.5 block text-2xs underline", outbound ? "text-white/80" : "text-brand-700 dark:text-brand-300")}>
+              Tu navegador no pudo reproducirlo — descargar el audio
+            </a>
+          )}
+        </div>
       ) : (
         <button
           onClick={() => void load()}
