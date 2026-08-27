@@ -338,7 +338,7 @@ export function Composer({
               rows={2}
               placeholder={
                 tab === "note"
-                  ? "Comentario para el equipo (el cliente NO lo ve)…"
+                  ? "Comentario para el equipo (el cliente NO lo ve). Empieza con @bot para que la IA lo siga como indicación…"
                   : pending
                     ? "Texto para acompañar la imagen (opcional)…"
                     : "Escribe… ( / respuestas rápidas · $ variables · pega una imagen con Ctrl+V )"

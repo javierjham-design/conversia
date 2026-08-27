@@ -34,3 +34,42 @@ export async function getActiveConversationInstructions(
     }),
   );
 }
+
+/**
+ * Un comentario interno dirigido al BOT empieza con `@bot` / `@ia` / `bot:` / `ia:`
+ * (sin distinguir mayúsculas). Devuelve la indicación SIN el marcador, o null si el
+ * comentario NO va dirigido al bot (queda privado del equipo). Puro y testeable.
+ */
+const BOT_MARKER = /^\s*[@#]?(bot|ia)\b[\s:.,;–-]*/i;
+export function extractBotIndication(body: string | null | undefined): string | null {
+  const b = (body ?? "").trim();
+  if (!BOT_MARKER.test(b)) return null;
+  const rest = b.replace(BOT_MARKER, "").trim();
+  return rest.length ? rest : null;
+}
+
+/**
+ * Comentarios internos DIRIGIDOS al bot (empiezan con @bot/@ia): el equipo puede dejar
+ * feedback inline en el hilo y el agente lo lee como indicación (prioridad alta). Los
+ * comentarios internos SIN marcador siguen siendo solo del equipo (no los ve el bot).
+ * Devuelve las últimas ~15 en orden cronológico.
+ */
+export async function getMarkedInternalNotes(
+  organizationId: string,
+  conversationId: string,
+): Promise<{ body: string }[]> {
+  const rows = await withTenant(organizationId, (tx) =>
+    tx.message.findMany({
+      where: { conversationId, visibility: "INTERNAL", type: "NOTE" },
+      orderBy: { createdAt: "desc" },
+      select: { body: true },
+      take: 40,
+    }),
+  );
+  const marked: { body: string }[] = [];
+  for (const r of rows) {
+    const ind = extractBotIndication(r.body);
+    if (ind) marked.push({ body: ind });
+  }
+  return marked.reverse().slice(-15); // cronológico, tope defensivo
+}
