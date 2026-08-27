@@ -911,7 +911,7 @@ function TesterBubble({ m }: { m: TestMsg }) {
   }
   const isUser = m.role === "user";
   const tools = m.meta?.toolEvents?.filter((t) => !["transferToAgent", "transferToHuman"].includes(t.name)) ?? [];
-  const hasFooter = tools.length > 0 || (m.meta?.simulated?.length ?? 0) > 0 || !!m.meta?.usage;
+  const hasFooter = tools.length > 0 || (m.meta?.simulated?.length ?? 0) > 0;
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", isUser ? "bg-brand-600 text-white" : "bg-app text-ink")}>
@@ -924,12 +924,7 @@ function TesterBubble({ m }: { m: TestMsg }) {
             {m.meta?.simulated?.map((s, i) => (
               <div key={`s${i}`}>✓ {s.action}: {s.detail} <span className="opacity-60">(simulado)</span></div>
             ))}
-            {m.meta?.usage && (
-              <div className="opacity-70">
-                {m.meta.usage.inputTokens + m.meta.usage.outputTokens} tok · US${m.meta.usage.costUsd.toFixed(5)}
-                {m.meta.latencyMs ? ` · ${(m.meta.latencyMs / 1000).toFixed(1)}s` : ""}
-              </div>
-            )}
+            {/* El consumo/costo de IA (tokens, USD, latencia) es telemetría interna: NO se muestra al cliente. */}
           </div>
         )}
       </div>
