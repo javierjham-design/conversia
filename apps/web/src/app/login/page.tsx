@@ -181,7 +181,7 @@ export default function LoginPage() {
       <form onSubmit={submit} className={card}>
         <div className="text-center">
           <img src="/brand/tubot-horizontal.png" alt="TuBot.cl" className="mx-auto h-9 w-auto dark:brightness-0 dark:invert" />
-          <p className="mt-2 text-sm text-ink-muted">Panel de atención conversacional</p>
+          <p className="mt-2 text-sm text-ink-muted">Conversa. Automatiza. Crece.</p>
         </div>
         <div id="google-btn" className="flex justify-center" />
         {googleReady && (

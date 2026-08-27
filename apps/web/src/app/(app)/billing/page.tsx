@@ -152,7 +152,24 @@ export default function BillingPage() {
     }
   }
 
-  if (!data) return <div className="mx-auto max-w-4xl p-6"><Skeleton className="h-96" /></div>;
+  // Skeleton con la FORMA del contenido real (B4): plan actual + bolsa + grilla
+  // de 4 planes, en vez de un bloque gris genérico.
+  if (!data)
+    return (
+      <div className="mx-auto max-w-5xl space-y-4 p-6">
+        <Skeleton className="h-7 w-48" />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Skeleton className="h-40 rounded-card" />
+          <Skeleton className="h-40 rounded-card" />
+        </div>
+        <Skeleton className="h-4 w-40" />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-56 rounded-card" />
+          ))}
+        </div>
+      </div>
+    );
 
   const currency = data.organization.currency ?? "CLP";
   const currentCode = data.plan?.code ?? null;
