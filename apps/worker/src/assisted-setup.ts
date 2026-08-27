@@ -132,7 +132,21 @@ export async function openAssistedSetup(
     async upsertClientAgent(input) {
       requireScope("agents");
       return deps.runInTenant(clientOrgId, async (tx) => {
-        const existing = await tx.agent.findFirst({ where: { organizationId: clientOrgId, slug: input.slug, deletedAt: null } });
+        // Resolver el agente OBJETIVO evitando duplicados: si el LLM cambia el nombre/slug
+        // entre turnos, NO debe crear un agente nuevo (bug real: el cliente probaba un
+        // agente mientras el montaje editaba otro). Prioridad: (1) predeterminado del canal
+        // autorizado, (2) por slug, (3) el único agente activo del cliente. Recién si no hay
+        // ninguno, se crea uno.
+        let existing = null as Awaited<ReturnType<typeof tx.agent.findFirst>>;
+        if (opts.scopeChannelId) {
+          const ch = await tx.channelConnection.findUnique({ where: { id: opts.scopeChannelId }, select: { defaultAgentId: true } });
+          if (ch?.defaultAgentId) existing = await tx.agent.findFirst({ where: { id: ch.defaultAgentId, deletedAt: null } });
+        }
+        if (!existing) existing = await tx.agent.findFirst({ where: { organizationId: clientOrgId, slug: input.slug, deletedAt: null } });
+        if (!existing) {
+          const actives = await tx.agent.findMany({ where: { organizationId: clientOrgId, deletedAt: null, active: true }, orderBy: { updatedAt: "desc" }, take: 2 });
+          if (actives.length === 1) existing = actives[0]; // un solo agente → actualízalo, no dupliques
+        }
         const config = input.model ? { model: input.model } : {};
         let agentId: string;
         if (existing) {
