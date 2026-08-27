@@ -105,7 +105,8 @@ export default function OrgDetailPage() {
     try {
       const res = await padmin<{ token: string; user: { email: string } }>(`/platform/organizations/${id}/impersonate`, { method: "POST" });
       window.localStorage.setItem("conversia_token", res.token);
-      window.open("/", "_blank");
+      // Abre el PANEL del tenant (/inbox), no la raíz "/" (que es la landing de tubot.cl).
+      window.open("/inbox", "_blank");
     } catch (e) {
       toast.push((e as Error).message, "error");
     }
