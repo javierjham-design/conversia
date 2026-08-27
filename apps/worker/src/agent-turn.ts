@@ -14,7 +14,7 @@ import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
-import { buildToolServices } from "./tool-services";
+import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
 
 const registry = new ToolRegistry();
 for (const tool of buildCoreTools()) registry.register(tool);
@@ -307,6 +307,11 @@ export async function runAgentTurn(opts: {
   // que se guarda en contact.attributes.profile). Saneado (sin saltos/llaves).
   const knownContactBlock = buildKnownContactBlock(conversation.contact);
 
+  // Montaje asistido: si este contacto YA vinculó su cuenta (grant activo 14 días), se
+  // inyecta un bloque que le dice al agente que NO vuelva a pedir el código. Sin esto el
+  // vínculo solo se veía dentro de una tool y el agente re-pedía el código en cada turno.
+  const assistedSetupBlock = await buildAssistedSetupStatusBlock(organizationId, conversation.contactId);
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -322,6 +327,7 @@ export async function runAgentTurn(opts: {
       buildConversationInstructions(aiNotes) +
       contactMemoryBlock +
       knownContactBlock +
+      assistedSetupBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma

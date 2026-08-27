@@ -10,8 +10,13 @@ import { requirePermission } from "../tenancy/permissions";
 /** Audiencia del token del enlace de montaje asistido (firmado con JWT_SECRET). */
 export const ASSISTED_LINK_AUD = "assisted-setup-link";
 
-/** Vida del código corto de vinculación (el grant dura 14 días; el código, minutos). */
-const REDEEM_CODE_TTL_MIN = 30;
+/**
+ * Vida del código corto de vinculación. Se alinea con el grant (14 días): el montaje
+ * por WhatsApp es conversacional y puede tomar días, así que un código de 30 min hacía
+ * que el cliente tuviera que regenerarlo una y otra vez. El código es de UN SOLO USO
+ * (se anula al canjear) y está acotado a un canal, así que una ventana larga es segura.
+ */
+const REDEEM_CODE_TTL_MIN = 14 * 24 * 60;
 /** Alfabeto sin caracteres ambiguos (sin 0/O/1/I/L) para dictar el código por voz. */
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
