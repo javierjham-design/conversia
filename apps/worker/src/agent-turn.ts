@@ -290,9 +290,15 @@ export async function runAgentTurn(opts: {
     if (!history.length) return;
   }
 
-  // Indicaciones del equipo para ESTA conversación (panel derecho de la Bandeja).
-  const { buildConversationInstructions, getActiveConversationInstructions } = await import("./ai-notes.js");
-  const aiNotes = await getActiveConversationInstructions(organizationId, conversationId);
+  // Indicaciones del equipo para ESTA conversación: las del panel derecho de la Bandeja
+  // + los comentarios internos dirigidos al bot (los que empiezan con @bot / @ia). Así el
+  // equipo puede darle feedback inline en el hilo y el agente lo sigue con prioridad.
+  const { buildConversationInstructions, getActiveConversationInstructions, getMarkedInternalNotes } = await import("./ai-notes.js");
+  const [panelNotes, markedNotes] = await Promise.all([
+    getActiveConversationInstructions(organizationId, conversationId),
+    getMarkedInternalNotes(organizationId, conversationId),
+  ]);
+  const aiNotes = [...panelNotes, ...markedNotes];
 
   // Ficha viva del contacto: memoria compartida entre agentes/conversaciones. Se
   // recuerda semánticamente respecto del último mensaje del cliente (o por recencia).

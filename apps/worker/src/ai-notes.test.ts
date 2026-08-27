@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConversationInstructions } from "./ai-notes";
+import { buildConversationInstructions, extractBotIndication } from "./ai-notes";
 
 /**
  * Punto 5 de la Bandeja Pro: una indicación activa cambia el prompt del agente
@@ -32,5 +32,21 @@ describe("indicaciones al bot por conversación", () => {
     expect(convA).not.toContain("VIP");
     expect(convB).toContain("VIP");
     expect(convB).not.toContain("implantes");
+  });
+});
+
+describe("comentario interno dirigido al bot (@bot / @ia)", () => {
+  it("detecta el marcador y devuelve la indicación sin el prefijo", () => {
+    expect(extractBotIndication("@bot ofrece siempre la promo del flyer")).toBe("ofrece siempre la promo del flyer");
+    expect(extractBotIndication("@IA: trata de usted")).toBe("trata de usted");
+    expect(extractBotIndication("ia - retoma el montaje")).toBe("retoma el montaje");
+    expect(extractBotIndication("bot: pregunta la comuna")).toBe("pregunta la comuna");
+    expect(extractBotIndication("#bot corrige el precio")).toBe("corrige el precio");
+  });
+  it("los comentarios SIN marcador quedan privados del equipo (null)", () => {
+    expect(extractBotIndication("cliente moroso, ojo con el cobro")).toBeNull();
+    expect(extractBotIndication("robot de cocina")).toBeNull(); // 'robot' no es el marcador 'bot'
+    expect(extractBotIndication("")).toBeNull();
+    expect(extractBotIndication("@bot   ")).toBeNull(); // marcador sin contenido
   });
 });
