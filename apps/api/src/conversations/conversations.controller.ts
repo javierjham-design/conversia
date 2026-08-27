@@ -12,6 +12,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
+import type { TenantTx } from "@conversia/database";
 import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
@@ -614,24 +615,44 @@ export class ConversationsController {
     });
   }
 
+  /**
+   * Token de Meta del canal de una conversación (WABA propia) con fallback al de
+   * plataforma. La descarga de media (audio/imagen) debe usar el MISMO token con el
+   * que se recibió: si la WABA tiene credencial propia, el token global no accede al
+   * media (por eso el audio daba "No disponible" aunque la transcripción sí llegaba).
+   */
+  private async resolveConversationMediaToken(tx: TenantTx, conversationId: string): Promise<string> {
+    const env = getEnv();
+    const conversation = await tx.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation?.channelConnectionId) return env.META_ACCESS_TOKEN;
+    const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: conversation.channelConnectionId } });
+    const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
+    const credential = account?.credentialId ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } }) : null;
+    return credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN;
+  }
+
   /** Transmite el audio original de una nota de voz (descarga on-demand de Meta). */
   @Get(":id/messages/:messageId/audio")
   async messageAudio(@Param("id") id: string, @Param("messageId") messageId: string, @Res() res: Response) {
     const ctx = requireContext();
-    const message = await this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.message.findFirst({ where: { id: messageId, conversationId: id } }),
-    );
-    if (!message) throw new NotFoundException("Mensaje no encontrado");
-    const payload = (message.payload ?? {}) as any;
-    const mediaId = payload?.audio?.id ?? payload?.voice?.id;
-    if (!mediaId) throw new NotFoundException("Este mensaje no tiene audio");
     const env = getEnv();
-    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(String(mediaId))}`, env.META_ACCESS_TOKEN), {
-      headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` },
+    const found = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const message = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
+      if (!message) return null;
+      const payload = (message.payload ?? {}) as any;
+      const mediaId = payload?.audio?.id ?? payload?.voice?.id;
+      if (!mediaId) return null;
+      const token = await this.resolveConversationMediaToken(tx, id);
+      return { mediaId: String(mediaId), token };
+    });
+    if (!found) throw new NotFoundException("Este mensaje no tiene audio");
+    if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
+    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
+      headers: { authorization: `Bearer ${found.token}` },
     });
     const meta: any = await metaRes.json().catch(() => ({}));
     if (!meta?.url) throw new NotFoundException("Audio no disponible (puede haber expirado en Meta)");
-    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${env.META_ACCESS_TOKEN}` } });
+    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
     if (!audioRes.ok) throw new NotFoundException("No se pudo obtener el audio");
     const buf = Buffer.from(await audioRes.arrayBuffer());
     res.setHeader("content-type", meta.mime_type ?? "audio/ogg");
@@ -657,14 +678,7 @@ export class ConversationsController {
       const mediaId = payload?.image?.id ?? payload?.sticker?.id ?? payload?.mediaId;
       if (!mediaId) return null;
       // Token del canal de la conversación (WABA propia) → fallback plataforma.
-      let token = env.META_ACCESS_TOKEN;
-      const conversation = await tx.conversation.findUnique({ where: { id } });
-      if (conversation?.channelConnectionId) {
-        const number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: conversation.channelConnectionId } });
-        const account = number ? await tx.whatsappAccount.findUnique({ where: { id: number.accountId } }) : null;
-        const credential = account?.credentialId ? await tx.integrationCredential.findUnique({ where: { id: account.credentialId } }) : null;
-        if (credential) token = decryptSecret(credential.ciphertext);
-      }
+      const token = await this.resolveConversationMediaToken(tx, id);
       return { mediaId: String(mediaId), token };
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene imagen");
