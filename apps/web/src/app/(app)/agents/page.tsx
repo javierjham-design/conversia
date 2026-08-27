@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot } from "lucide-react";
+import { Bot, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { EmptyState, Select, StatusBadge, cn } from "@/components/ui";
+import { EmptyState, Select, StatusBadge, cn, useToast } from "@/components/ui";
 import { AgentAvatar } from "@/components/agent-avatars";
 
 interface AgentRow {
@@ -31,7 +31,9 @@ const KIND_LABELS: Record<string, string> = {
 
 export default function AgentsPage() {
   const router = useRouter();
+  const toast = useToast();
   const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("custom");
@@ -50,6 +52,21 @@ export default function AgentsPage() {
       .then((ch) => setHasWhatsapp(ch.some((c) => c.type === "WHATSAPP_CLOUD" && c.status !== "inactive")))
       .catch(() => setHasWhatsapp(null));
   }, [load]);
+
+  async function removeAgent(a: AgentRow) {
+    if (!window.confirm(`¿Eliminar el agente «${a.name}»? Deja de operar y sale de la lista. Las conversaciones históricas conservan su trazabilidad.`)) return;
+    setDeleting(a.id);
+    try {
+      await api(`/agents/${a.id}`, { method: "DELETE" });
+      toast.push("Agente eliminado", "ok");
+      await load();
+    } catch (e) {
+      // El backend bloquea borrar el agente predeterminado de un canal (avisa cuál).
+      toast.push((e as Error).message, "error");
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   async function createAgent(e: React.FormEvent) {
     e.preventDefault();
@@ -136,11 +153,11 @@ export default function AgentsPage() {
           // dato del tenant (no se borra nada), pero la lista lo advierte.
           const twin = a.active && agents.find((b) => b.id !== a.id && b.active && b.kind === a.kind && b.model === a.model);
           return (
+          <div key={a.id} className="group relative">
           <button
-            key={a.id}
             onClick={() => router.push(`/agents/${a.id}`)}
             className={cn(
-              "rounded-card border bg-panel p-4 text-left shadow-e1 transition-all hover:border-brand-300 hover:shadow-e2",
+              "w-full rounded-card border bg-panel p-4 text-left shadow-e1 transition-all hover:border-brand-300 hover:shadow-e2",
               a.active ? "border-line" : "border-dashed border-line opacity-70",
             )}
           >
@@ -180,6 +197,16 @@ export default function AgentsPage() {
               )}
             </div>
           </button>
+            <button
+              onClick={() => void removeAgent(a)}
+              disabled={deleting === a.id}
+              title="Eliminar agente"
+              aria-label={`Eliminar agente ${a.name}`}
+              className="absolute right-2 top-2 rounded-lg bg-panel/80 p-1.5 text-ink-subtle opacity-70 backdrop-blur transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40 dark:hover:bg-red-500/10"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
           );
         })}
         {agents.length === 0 && (
