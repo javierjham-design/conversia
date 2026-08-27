@@ -179,7 +179,7 @@ export default function AgentsPage() {
             ) : (
               <p className="mt-2 t-body-sm italic text-ink-subtle">Sin descripción</p>
             )}
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 pr-9">
               {a.model && <span className="rounded-pill bg-app px-2 py-0.5 t-meta font-medium text-ink-muted">{a.model}</span>}
               {a.publishedVersion ? (
                 <StatusBadge kind="connected" label={`v${a.publishedVersion} publicada`} />
@@ -202,7 +202,7 @@ export default function AgentsPage() {
               disabled={deleting === a.id}
               title="Eliminar agente"
               aria-label={`Eliminar agente ${a.name}`}
-              className="absolute right-2 top-2 rounded-lg bg-panel/80 p-1.5 text-ink-subtle opacity-70 backdrop-blur transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40 dark:hover:bg-red-500/10"
+              className="absolute bottom-2 right-2 rounded-lg bg-panel/80 p-1.5 text-ink-subtle opacity-70 backdrop-blur transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40 dark:hover:bg-red-500/10"
             >
               <Trash2 size={15} />
             </button>
