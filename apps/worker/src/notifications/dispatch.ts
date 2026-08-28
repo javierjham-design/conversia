@@ -99,9 +99,13 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
       ).catch(() => undefined);
     }
 
-    const title = render(event.title, job.data);
-    const body = render(event.body, job.data);
-    const link = event.link ? render(event.link, job.data) : undefined;
+    // Incluye conversationId (va en job.conversationId, no en job.data) para que el
+    // deep link "/inbox?c={conversationId}" se rellene y la notificación abra el mensaje
+    // correcto — sin esto el link salía "/inbox?c=" y caía en una pantalla vacía.
+    const renderData = { ...job.data, conversationId: job.conversationId };
+    const title = render(event.title, renderData);
+    const body = render(event.body, renderData);
+    const link = event.link ? render(event.link, renderData) : undefined;
 
     for (const channel of channels) {
       const impl = CHANNELS[channel];

@@ -366,7 +366,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       <MeContext.Provider value={me}>
-        <div className="flex h-screen overflow-hidden">
+        <div className="flex h-[100svh] overflow-hidden supports-[height:100dvh]:h-[100dvh]">
           {/* Backdrop del drawer en móvil */}
           {mobileOpen && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />}
           {/* ------------------------------ Sidebar ------------------------------ */}

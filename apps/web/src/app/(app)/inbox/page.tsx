@@ -267,9 +267,29 @@ export default function InboxPage() {
       }
     }
     void connect();
+    // Al volver a primer plano (móvil: minimizar/cambiar de app), el stream puede quedar
+    // congelado sin dar error: refrescamos de inmediato para no perder mensajes nuevos.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      // Deep link de notificación: si el SW navegó a /inbox?c=<id> en una ventana ya
+      // abierta, abrimos esa conversación (además de refrescar).
+      const convId = new URLSearchParams(window.location.search).get("c");
+      if (convId && convId !== selectedRef.current) {
+        setSelectedId(convId);
+        void refreshersRef.current.loadContext(convId);
+        window.history.replaceState(null, "", "/inbox");
+      }
+      void refreshersRef.current.loadList();
+      void refreshersRef.current.loadCounters();
+      if (selectedRef.current) void refreshersRef.current.loadMessages(selectedRef.current);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     return () => {
       stopped = true;
       stopFallback();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
     };
   }, []);
 
@@ -460,9 +480,16 @@ export default function InboxPage() {
         </aside>
 
         {/* Zona 3 — conversación */}
-        {!selectedId || !conversation ? (
+        {!selectedId ? (
+          // Sin selección: en móvil se ve la lista; el vacío es solo para escritorio.
           <section className="hidden flex-1 items-center justify-center lg:flex">
             <EmptyState title="Selecciona una conversación" description="Elige una bandeja en el clasificador y una conversación de la lista." />
+          </section>
+        ) : !conversation ? (
+          // Seleccionada pero aún cargando: pantalla completa (NO blanco en móvil) + volver.
+          <section className="relative flex flex-1 flex-col items-center justify-center gap-3 text-ink-subtle">
+            <button onClick={() => setSelectedId(null)} className="absolute left-2 top-2 rounded-control p-2 text-xl text-ink-muted lg:hidden" aria-label="Volver">←</button>
+            <span className="text-sm">Cargando conversación…</span>
           </section>
         ) : (
           <Thread
