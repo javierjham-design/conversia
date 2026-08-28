@@ -590,21 +590,21 @@ export class ConversationsController {
   }
 
   @Get(":id/messages")
-  messages(@Param("id") id: string) {
+  messages(@Param("id") id: string, @Query("full") full?: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conversation = await tx.conversation.findUnique({ where: { id }, include: { contact: true } });
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
-      // Los ÚLTIMOS 300 mensajes en orden cronológico. Antes traía los primeros 300
-      // (asc + take) → en conversaciones largas (>300) los mensajes nuevos nunca se
-      // cargaban y el hilo quedaba congelado. Traemos desc y revertimos.
-      const messages = (
-        await tx.message.findMany({
-          where: { conversationId: id },
-          orderBy: { createdAt: "desc" },
-          take: 300,
-        })
-      ).reverse();
+      // Por defecto, los ÚLTIMOS 300 en orden cronológico (abre rápido). Antes traía los
+      // primeros 300 (asc) → en conversaciones largas los mensajes nuevos no cargaban.
+      // Con ?full=1 el equipo pide TODA la conversación bajo demanda (tope alto 5000).
+      const wantFull = full === "1" || full === "true";
+      const rows = await tx.message.findMany({
+        where: { conversationId: id },
+        orderBy: { createdAt: "desc" },
+        take: wantFull ? 5000 : 300,
+      });
+      const messages = rows.reverse();
       // Nombres de autores humanos (comentarios internos / envíos del panel)
       const authorIds = [...new Set(messages.map((m) => m.authorUserId).filter(Boolean))] as string[];
       const authors = await this.userNames(tx, authorIds);

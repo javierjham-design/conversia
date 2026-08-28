@@ -203,6 +203,8 @@ function NoteCard({ body, author, at }: { body: string; author: string; at: stri
 export function Thread({
   conversation,
   messages,
+  hasMore,
+  onLoadFull,
   context,
   stages,
   users,
@@ -218,6 +220,8 @@ export function Thread({
 }: {
   conversation: ConversationFull;
   messages: Msg[];
+  hasMore?: boolean;
+  onLoadFull?: () => Promise<void> | void;
   context: ConvContext | null;
   stages: Stage[];
   users: { userId: string; name: string }[];
@@ -235,6 +239,7 @@ export function Thread({
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showJump, setShowJump] = useState(false);
+  const [loadingFull, setLoadingFull] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<{ id: string; name: string; language: string; bodyText: string }[]>([]);
   const [sendingTemplate, setSendingTemplate] = useState(false);
@@ -275,6 +280,17 @@ export function Thread({
   function nearBottom(px = 240) {
     const el = scrollRef.current;
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < px;
+  }
+  // Cargar TODA la conversación (no solo los últimos 300) y llevar al inicio para leer desde el principio.
+  async function handleLoadFull() {
+    if (loadingFull || !onLoadFull) return;
+    setLoadingFull(true);
+    try {
+      await onLoadFull();
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: 0 })));
+    } finally {
+      setLoadingFull(false);
+    }
   }
   // Al ABRIR o CAMBIAR de conversación: siempre al último mensaje, al instante (sin flash).
   // Doble rAF: espera a que el hilo nuevo termine de pintar antes de saltar al fondo.
@@ -547,6 +563,18 @@ export function Thread({
           }}
           className="h-full space-y-2 overflow-y-auto p-4"
         >
+        {/* Cargar el historial completo (por defecto se muestran los últimos 300) */}
+        {hasMore && (
+          <div className="flex justify-center pb-1">
+            <button
+              onClick={() => void handleLoadFull()}
+              disabled={loadingFull}
+              className="rounded-full border border-line bg-raised px-3 py-1 text-xs text-ink-muted shadow-e1 transition-colors hover:text-ink disabled:opacity-50"
+            >
+              {loadingFull ? "Cargando…" : "↑ Ver mensajes anteriores"}
+            </button>
+          </div>
+        )}
         {/* Banner de origen por anuncio CTWA */}
         {context?.ad && (
           <div className="mx-auto max-w-lg rounded-card border-l-[3px] border-violet-400 bg-raised p-3 text-xs text-ink shadow-e1 dark:border-violet-500">
