@@ -81,7 +81,7 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
 }
 
 /** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → visor dentro del chat. */
-function ImageBubble({ conversationId, messageId, caption, outbound }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean }) {
+function ImageBubble({ conversationId, messageId, caption, outbound, onLoaded }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean; onLoaded?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState(false);
   const [zoom, setZoom] = useState(false);
@@ -122,6 +122,7 @@ function ImageBubble({ conversationId, messageId, caption, outbound }: { convers
             src={url}
             alt={caption ?? "Imagen"}
             onClick={() => setZoom(true)}
+            onLoad={() => onLoaded?.()}
             title="Ver más grande"
             className="mb-1 max-h-72 w-auto max-w-full cursor-zoom-in rounded-card"
           />
@@ -264,8 +265,28 @@ export function Thread({
     }
   }
 
+  // Baja al final del hilo usando el CONTENEDOR directo (más fiable que scrollIntoView).
+  function scrollToBottom(smooth = false) {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }
+  // ¿El usuario está mirando cerca del final? (si sí, seguimos pegados al último mensaje).
+  function nearBottom(px = 240) {
+    const el = scrollRef.current;
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < px;
+  }
+  // Al ABRIR o CAMBIAR de conversación: siempre al último mensaje, al instante (sin flash).
+  // Doble rAF: espera a que el hilo nuevo termine de pintar antes de saltar al fondo.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom(false)));
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation.id]);
+  // Al LLEGAR mensajes nuevos: baja solo si ya estabas abajo (no te saca de leer el historial).
+  useEffect(() => {
+    if (nearBottom()) scrollToBottom(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
   useEffect(() => {
@@ -630,6 +651,7 @@ export function Thread({
                         messageId={m.id}
                         caption={payload.caption ?? payload.image?.caption ?? (m.body && !/^\[.*\]$/.test(m.body) && m.body !== "📷 Imagen" ? m.body : null)}
                         outbound={outbound}
+                        onLoaded={() => { if (nearBottom(400)) scrollToBottom(false); }}
                       />
                     ) : m.type === "DOCUMENT" ? (
                       <p className="whitespace-pre-wrap">📎 {payload.filename ?? m.body ?? "Documento"}</p>
@@ -672,7 +694,7 @@ export function Thread({
         {/* Botón flotante: ir al último mensaje */}
         {showJump && (
           <button
-            onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })}
+            onClick={() => scrollToBottom(true)}
             className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-raised text-ink-muted shadow-e2 transition-colors hover:text-ink"
             title="Ir al último mensaje"
             aria-label="Ir al último mensaje"
