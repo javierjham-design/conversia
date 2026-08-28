@@ -122,6 +122,14 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     group: "comercio",
   },
   {
+    key: "cobro",
+    label: "Cobrar con link de pago (Flow)",
+    description: "Enviar un link de pago Flow con el monto EXACTO acordado con el cliente, usando la cuenta Flow del negocio. Requiere configurar la cuenta de cobros (más abajo).",
+    tools: ["enviarLinkDePago"],
+    placeholder: "Cuando el cliente confirme el pedido y el monto, genera y envía el link de pago con ese monto exacto. Pide la foto/dato que falte antes de cobrar si corresponde.",
+    group: "comercio",
+  },
+  {
     key: "pricing",
     label: "Cotizar precios vigentes",
     description: "Consultar los planes y precios actuales de TuBot desde el sistema, para cotizar sin inventar ni memorizar valores.",

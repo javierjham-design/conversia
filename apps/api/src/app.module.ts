@@ -43,6 +43,7 @@ import { PlatformGuard } from "./platform/platform.guard";
 import { PlatformSessionService } from "./platform/platform-session.service";
 import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
+import { ChargingController, ChargingWebhookController } from "./charging/charging.controller";
 import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
@@ -88,6 +89,8 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     // Plataforma (super-admin) — autenticación y audiencia separadas
     PlatformAuthController,
     PlatformController,
+    ChargingController,
+    ChargingWebhookController,
   ],
   providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })

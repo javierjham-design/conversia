@@ -1514,6 +1514,28 @@ model IntegrationCredential {
   @@map("integration_credentials")
 }
 
+// Pago RECIBIDO de un cliente del tenant (cobro que el bot generó por Flow con la
+// cuenta Flow del propio tenant). Registro para conciliar + reportar. Monto entero
+// (CLP). commerceOrder es único (idempotencia del webhook de Flow).
+model CustomerPayment {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  contactId      String?   @map("contact_id")
+  conversationId String?   @map("conversation_id")
+  amount         Int
+  currency       String    @default("CLP")
+  subject        String
+  status         String    @default("pending") // pending | paid | failed
+  flowToken      String?   @map("flow_token")
+  commerceOrder  String    @unique @map("commerce_order")
+  paidAt         DateTime? @map("paid_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+  @@map("customer_payments")
+}
+
 // Webhook ENTRANTE por tenant: URL pública /hooks/t/{token} que dispara el
 // trigger "Webhook entrante" de workflows (Make/Zapier/landings → Conversia).
 model InboundWebhook {
