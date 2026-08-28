@@ -10,6 +10,7 @@ interface Overview {
   conversations: { total: number; newInPeriod: number; openNow: number; humanControlNow: number };
   messages: { inbound: number; outbound: number };
   contactsUsage: { used: number; limit: number | null; remaining: number | null; pct: number | null; periodStart: string };
+  payments?: { count: number; total: number };
   humanHandoffs: number;
   appointments: { status: string; count: number }[];
   leadFunnel: { code: string; name: string; category: string; count: number }[];
@@ -210,6 +211,13 @@ export default function ReportsPage() {
         <Kpi label={`Mensajes (${data.days}d)`} value={data.messages.inbound + data.messages.outbound} hint={`${data.messages.inbound} recibidos · ${data.messages.outbound} enviados`} />
         <Kpi label="Escalamientos a humano" value={data.humanHandoffs} hint={`en los últimos ${data.days} días`} />
       </div>
+
+      {data.payments && (
+        <div className="mb-6 grid gap-3 sm:grid-cols-2">
+          <Kpi label={`Pagos recibidos (${data.days}d)`} value={data.payments.count} hint="cobros confirmados por Flow" />
+          <Kpi label={`Total cobrado (${data.days}d)`} value={`$${(data.payments.total ?? 0).toLocaleString("es-CL")}`} hint="suma de pagos recibidos" />
+        </div>
+      )}
 
       {data.contactsUsage && (
         <div className="mb-6">

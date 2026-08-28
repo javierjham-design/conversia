@@ -318,6 +318,15 @@ export async function runAgentTurn(opts: {
   // vínculo solo se veía dentro de una tool y el agente re-pedía el código en cada turno.
   const assistedSetupBlock = await buildAssistedSetupStatusBlock(organizationId, conversation.contactId);
 
+  // Instrucciones de COBRO del tenant (settings.charging.instructions): se inyectan si el
+  // agente tiene habilitado el link de pago, para guiar el momento del cobro.
+  const agentTools = Array.isArray(version.tools) ? (version.tools as string[]) : [];
+  const chargingCfg = (orgSettings.charging ?? {}) as { instructions?: string };
+  const chargingBlock =
+    agentTools.includes("enviarLinkDePago") && chargingCfg.instructions?.trim()
+      ? `\n\n## Cobros (link de pago) — indicaciones del negocio\n${chargingCfg.instructions.trim()}`
+      : "";
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -334,6 +343,7 @@ export async function runAgentTurn(opts: {
       contactMemoryBlock +
       knownContactBlock +
       assistedSetupBlock +
+      chargingBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma

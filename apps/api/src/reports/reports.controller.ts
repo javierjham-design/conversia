@@ -36,6 +36,7 @@ export class ReportsController {
         leadsByStatus,
         convSeries,
         msgSeries,
+        paymentsAgg,
       ] = await Promise.all([
         tx.conversation.count(),
         tx.conversation.count({ where: { createdAt: { gte: since } } }),
@@ -60,6 +61,8 @@ export class ReportsController {
           FROM messages
           WHERE organization_id = ${ctx.organizationId} AND direction = 'INBOUND' AND created_at >= ${sinceDays(14)}
           GROUP BY 1 ORDER BY 1`,
+        // Pagos RECIBIDOS de clientes (Flow) en el período: cantidad + monto total.
+        tx.customerPayment.aggregate({ where: { status: "paid", paidAt: { gte: since } }, _count: { _all: true }, _sum: { amount: true } }),
       ]);
 
       // Uso de CONTACTOS del mes vs el cupo del plan (con override por-tenant).
@@ -94,6 +97,7 @@ export class ReportsController {
         },
         messages: { inbound: messagesIn, outbound: messagesOut },
         contactsUsage,
+        payments: { count: paymentsAgg._count._all, total: Number(paymentsAgg._sum.amount ?? 0) },
         humanHandoffs: handoffs,
         appointments: appointments.map((a) => ({ status: a.status, count: a._count._all })),
         leadFunnel: leadStatuses.map((s) => ({

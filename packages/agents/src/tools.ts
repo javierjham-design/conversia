@@ -60,6 +60,9 @@ export interface ToolServices {
   // Catálogo comercial real del negocio (tienda o menú). Vender con datos vivos.
   searchCatalog(input: { query: string; category?: string; maxPrice?: number; onlyAvailable?: boolean }): Promise<Array<CatalogHit>>;
   getCatalogItem(idOrSku: string): Promise<CatalogHit | null>;
+  // Cobro: genera un LINK DE PAGO (Flow, con la cuenta del propio tenant) por el monto
+  // EXACTO acordado con el cliente. Devuelve la URL para enviársela en el mensaje.
+  enviarLinkDePago(input: { monto: number; concepto: string }): Promise<{ ok: boolean; url?: string; error?: string }>;
   // Leer una página web (p. ej. el sitio del prospecto) y devolver su texto legible.
   readWebPage(url: string): Promise<{ url: string; title: string | null; text: string } | { error: string }>;
   // Anotar un hecho duradero del cliente en su "ficha" (memoria compartida entre agentes).
@@ -373,6 +376,18 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       inputSchema: z.object({}),
       async execute(ctx) {
         return { plans: await services(ctx).listPlans() };
+      },
+    },
+    {
+      name: "enviarLinkDePago",
+      description:
+        "Genera un LINK DE PAGO por el monto EXACTO acordado con el cliente y devuelve la URL para que se la envíes en tu mensaje. Úsalo SOLO cuando el cliente confirmó lo que va a pagar y el monto. `monto` es un entero en pesos chilenos (CLP, sin decimales ni puntos). `concepto` describe el pedido (p. ej. 'Lavado frazada 2P + delivery'). Muestra SIEMPRE el monto y el concepto al enviar el link. Si devuelve un error (cobros no configurados), dile con honestidad que en un momento le confirmas el medio de pago y NO inventes un link.",
+      inputSchema: z.object({
+        monto: z.number().int().positive().describe("Monto EXACTO a cobrar, entero en CLP (ej: 12700)"),
+        concepto: z.string().min(2).max(120).describe("Descripción del pedido/cobro"),
+      }),
+      async execute(ctx, input: { monto: number; concepto: string }) {
+        return services(ctx).enviarLinkDePago(input);
       },
     },
     {

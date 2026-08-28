@@ -729,6 +729,66 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       );
     },
 
+    // ---------------- Cobro a clientes (Flow, cuenta del tenant) ----------------
+    async enviarLinkDePago(input: { monto: number; concepto: string }) {
+      const env = getEnv();
+      const monto = Math.round(Number(input.monto) || 0);
+      if (monto <= 0) return { ok: false, error: "El monto debe ser mayor a 0." };
+      // Config + credenciales del tenant (RLS).
+      const setup = await withTenant(orgId, async (tx) => {
+        const [org, cred, contact] = await Promise.all([
+          tx.organization.findUnique({ where: { id: orgId }, select: { settings: true, currency: true } }),
+          tx.integrationCredential.findFirst({ where: { organizationId: orgId, provider: "flow_charge" } }),
+          t.contactId ? tx.contact.findUnique({ where: { id: t.contactId }, select: { email: true } }) : Promise.resolve(null),
+        ]);
+        const charging = ((org?.settings as Record<string, unknown> | null)?.charging as { enabled?: boolean; sandbox?: boolean }) ?? {};
+        return { charging, cred, currency: org?.currency ?? "CLP", email: contact?.email ?? null };
+      });
+      if (!setup.charging.enabled || !setup.cred) {
+        return { ok: false, error: "El cobro no está configurado para esta cuenta. Avísale al cliente que en un momento le confirmas el medio de pago (NO inventes un link)." };
+      }
+      let creds: { apiKey: string; secretKey: string };
+      try {
+        creds = JSON.parse(decryptCredential(setup.cred.ciphertext));
+      } catch {
+        return { ok: false, error: "Las credenciales de cobro no son legibles. Avisa al equipo." };
+      }
+      const baseUrl = setup.charging.sandbox ? "https://sandbox.flow.cl/api" : "https://www.flow.cl/api";
+      const commerceOrder = `cp-${orgId.slice(-6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const { createFlowPaymentLink } = await import("./customer-charge.js");
+      const link = await createFlowPaymentLink(
+        { apiKey: creds.apiKey, secretKey: creds.secretKey, baseUrl },
+        {
+          commerceOrder,
+          subject: input.concepto,
+          amount: monto,
+          currency: setup.currency,
+          email: setup.email || `pagos+${commerceOrder}@tubot.cl`,
+          urlConfirmation: `${env.API_URL}/webhooks/flow-charge`,
+          urlReturn: `${env.WEB_URL}`,
+        },
+      );
+      if (!link.ok || !link.url) {
+        return { ok: false, error: `No se pudo generar el link de pago (${link.error ?? "error de Flow"}). No inventes un link; ofrece confirmar el pago en un momento.` };
+      }
+      await withTenant(orgId, (tx) =>
+        tx.customerPayment.create({
+          data: {
+            organizationId: orgId,
+            contactId: t.contactId ?? null,
+            conversationId: t.conversationId ?? null,
+            amount: monto,
+            currency: setup.currency,
+            subject: input.concepto.slice(0, 120),
+            status: "pending",
+            flowToken: link.token ?? null,
+            commerceOrder,
+          },
+        }),
+      );
+      return { ok: true, url: link.url };
+    },
+
     // ---------------- Montaje asistido (agente de implementación de TuBot) ----------------
     async generateAssistedLink() {
       const env = getEnv();
