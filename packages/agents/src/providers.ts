@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type { AIChatMessage, AIChatRequest, AIChatResponse, AIProvider, AIToolCall, AIUsage } from "@conversia/types";
-import { computeCostUsd } from "./pricing.js";
+import { computeCostUsd, computeCostUsdCached } from "./pricing.js";
 
 /**
  * Contenido de un mensaje para el proveedor: string si es solo texto, o bloques
@@ -61,7 +61,11 @@ export class AnthropicProvider implements AIProvider {
     const params: any = {
       model: req.model,
       max_tokens: req.maxTokens ?? 2048,
-      system: req.system,
+      // Caché de prompt: el system prompt (playbook largo) se marca como cacheable.
+      // El punto de corte en `system` cachea TODO el prefijo estable —herramientas
+      // + system— que se re-manda en cada mensaje y cada ronda; solo el historial
+      // variable se cobra a precio pleno. La lectura de caché cuesta ~10% del input.
+      system: req.system ? [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }] : undefined,
       messages,
     };
     if (req.tools?.length) {
@@ -84,10 +88,23 @@ export class AnthropicProvider implements AIProvider {
       }
     }
 
+    // Con caché de prompt, la API separa el input: `input_tokens` es el NO
+    // cacheado; `cache_read_input_tokens` (0.1×) y `cache_creation_input_tokens`
+    // (1.25×) se cobran distinto. Reportamos el total de tokens procesados y el
+    // costo YA con el descuento de caché.
+    const inputT = resp.usage?.input_tokens ?? 0;
+    const cacheRead = resp.usage?.cache_read_input_tokens ?? 0;
+    const cacheWrite = resp.usage?.cache_creation_input_tokens ?? 0;
+    const outputT = resp.usage?.output_tokens ?? 0;
     const usage: AIUsage = {
-      inputTokens: resp.usage?.input_tokens ?? 0,
-      outputTokens: resp.usage?.output_tokens ?? 0,
-      costUsd: computeCostUsd(req.model, resp.usage?.input_tokens ?? 0, resp.usage?.output_tokens ?? 0),
+      inputTokens: inputT + cacheRead + cacheWrite,
+      outputTokens: outputT,
+      costUsd: computeCostUsdCached(req.model, {
+        inputTokens: inputT,
+        cacheReadTokens: cacheRead,
+        cacheCreationTokens: cacheWrite,
+        outputTokens: outputT,
+      }),
     };
 
     const stopMap: Record<string, AIChatResponse["stopReason"]> = {

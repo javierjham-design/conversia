@@ -27,6 +27,29 @@ export function computeCostUsd(model: string, inputTokens: number, outputTokens:
 }
 
 /**
+ * Costo con caché de prompt (Anthropic): la escritura de caché cuesta 1.25× el
+ * input y la lectura 0.1×. `inputTokens` es el input NO cacheado que reporta la
+ * API. Con un system prompt/playbook largo cacheado, la lectura repetida abarata
+ * el grueso del costo (fuente de multiplicadores: platform.claude.com/docs).
+ */
+export function computeCostUsdCached(
+  model: string,
+  t: { inputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; outputTokens: number },
+): number {
+  const p = MODEL_PRICING[model];
+  if (!p) return 0;
+  const read = t.cacheReadTokens ?? 0;
+  const write = t.cacheCreationTokens ?? 0;
+  return (
+    (t.inputTokens * p.inputPerMTok +
+      write * p.inputPerMTok * 1.25 +
+      read * p.inputPerMTok * 0.1 +
+      t.outputTokens * p.outputPerMTok) /
+    1_000_000
+  );
+}
+
+/**
  * Precio que Meta cobra por mensaje de WhatsApp (per-message, vigente 2025+), por
  * categoría de plantilla y país del destinatario. Los mensajes de SERVICIO
  * (respuestas dentro de la ventana de 24 h) son GRATIS.
