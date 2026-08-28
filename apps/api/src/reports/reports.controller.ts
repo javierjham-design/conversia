@@ -36,7 +36,6 @@ export class ReportsController {
         leadsByStatus,
         convSeries,
         msgSeries,
-        paymentsAgg,
       ] = await Promise.all([
         tx.conversation.count(),
         tx.conversation.count({ where: { createdAt: { gte: since } } }),
@@ -61,9 +60,17 @@ export class ReportsController {
           FROM messages
           WHERE organization_id = ${ctx.organizationId} AND direction = 'INBOUND' AND created_at >= ${sinceDays(14)}
           GROUP BY 1 ORDER BY 1`,
-        // Pagos RECIBIDOS de clientes (Flow) en el período: cantidad + monto total.
-        tx.customerPayment.aggregate({ where: { status: "paid", paidAt: { gte: since } }, _count: { _all: true }, _sum: { amount: true } }),
       ]);
+
+      // Pagos RECIBIDOS de clientes (Flow) en el período. Defensivo: si la tabla aún no
+      // fue migrada en este entorno, no rompe el reporte (devuelve 0).
+      let payments = { count: 0, total: 0 };
+      try {
+        const agg = await tx.customerPayment.aggregate({ where: { status: "paid", paidAt: { gte: since } }, _count: { _all: true }, _sum: { amount: true } });
+        payments = { count: agg._count._all, total: Number(agg._sum.amount ?? 0) };
+      } catch {
+        /* tabla customer_payments aún no migrada */
+      }
 
       // Uso de CONTACTOS del mes vs el cupo del plan (con override por-tenant).
       // El período arranca en el periodStart de la suscripción, o el 1° del mes.
@@ -97,7 +104,7 @@ export class ReportsController {
         },
         messages: { inbound: messagesIn, outbound: messagesOut },
         contactsUsage,
-        payments: { count: paymentsAgg._count._all, total: Number(paymentsAgg._sum.amount ?? 0) },
+        payments,
         humanHandoffs: handoffs,
         appointments: appointments.map((a) => ({ status: a.status, count: a._count._all })),
         leadFunnel: leadStatuses.map((s) => ({
