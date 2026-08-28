@@ -51,6 +51,11 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationFull | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
+  // ¿Se cargó la conversación COMPLETA (no solo los últimos 300)? Se preserva en los
+  // refrescos en vivo y se resetea al cambiar de conversación.
+  const [fullLoaded, setFullLoaded] = useState(false);
+  const fullRef = useRef(false);
+  fullRef.current = fullLoaded;
   const [context, setContext] = useState<ConvContext | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
@@ -96,11 +101,19 @@ export default function InboxPage() {
     [filter, q, order, onlyUnanswered],
   );
 
-  const loadMessages = useCallback(async (id: string) => {
-    const res = await api<{ conversation: ConversationFull; messages: Msg[] }>(`/conversations/${id}/messages`);
+  const loadMessages = useCallback(async (id: string, full?: boolean) => {
+    const useFull = full ?? fullRef.current; // en refrescos en vivo conserva el modo actual
+    const res = await api<{ conversation: ConversationFull; messages: Msg[] }>(`/conversations/${id}/messages${useFull ? "?full=1" : ""}`);
     setConversation(res.conversation);
     setMessages(res.messages);
   }, []);
+
+  /** Carga TODA la conversación (no solo los últimos 300) — bajo demanda desde el hilo. */
+  const loadFull = useCallback(async () => {
+    if (!selectedRef.current) return;
+    setFullLoaded(true);
+    await loadMessages(selectedRef.current, true);
+  }, [loadMessages]);
 
   const loadContext = useCallback(async (id: string) => {
     try {
@@ -114,7 +127,8 @@ export default function InboxPage() {
     (id: string) => {
       setSelectedId(id);
       setContext(null);
-      void loadMessages(id);
+      setFullLoaded(false); // cada conversación abre con los últimos 300 (rápido)
+      void loadMessages(id, false);
       void loadContext(id);
       // En escritorio ancho el panel del contacto se abre solo; en chico queda como drawer bajo demanda.
       if (typeof window !== "undefined" && window.innerWidth >= 1280) setPanelOpen(true);
@@ -454,6 +468,8 @@ export default function InboxPage() {
           <Thread
             conversation={conversation}
             messages={messages}
+            hasMore={!fullLoaded && messages.length >= 300}
+            onLoadFull={loadFull}
             context={context}
             stages={stagesForHeader}
             users={users}
