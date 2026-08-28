@@ -143,7 +143,10 @@ export async function runAgentTurn(opts: {
       tx.message.findMany({
         where: { conversationId, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
         orderBy: { createdAt: "desc" },
-        take: 20,
+        // Se traen hasta 50; la VENTANA real se decide luego de forma adaptativa
+        // (20 en un chat normal; hasta 50 si un humano tomó el control, para no
+        // perder la conversación manual ni los acuerdos al devolver a la IA).
+        take: 50,
       }),
     ]);
 
@@ -240,12 +243,39 @@ export async function runAgentTurn(opts: {
   }
 
   // 2. Historial ventaneado (el primer mensaje debe ser del usuario)
+  // Ventana ADAPTATIVA: normalmente 20 mensajes; pero si un HUMANO del equipo intervino
+  // (tomó el control y conversó con el cliente), la ampliamos hasta 50. Así, al devolver
+  // el control a la IA, el agente VE esa conversación manual y —sobre todo— los ACUERDOS
+  // que el humano cerró con el cliente. Sin esto, el bot quedaba ciego a lo pactado a mano
+  // (se salía de la ventana de 20) y proponía cosas contradictorias que el humano tenía
+  // que corregir una y otra vez.
+  const humanIntervened = rawMessages.some((m) => m.direction === "OUTBOUND" && m.authorType === "USER");
+  const windowMessages = humanIntervened ? rawMessages.slice(-50) : rawMessages.slice(-20);
+
+  // Nombres de los compañeros humanos que escribieron: se usan para ATRIBUIR sus mensajes
+  // en el historial ("[Javier (humano del equipo): ...]"), de modo que el modelo sepa que
+  // eso lo dijo una persona del equipo (un acuerdo), no el propio bot.
+  const humanNames = new Map<string, string>();
+  const humanAuthorIds = [
+    ...new Set(
+      windowMessages
+        .filter((m) => m.direction === "OUTBOUND" && m.authorType === "USER" && m.authorUserId)
+        .map((m) => m.authorUserId as string),
+    ),
+  ];
+  if (humanAuthorIds.length) {
+    const users = await withTenant(organizationId, (tx) =>
+      tx.user.findMany({ where: { id: { in: humanAuthorIds } }, select: { id: true, name: true } }),
+    );
+    for (const u of users) humanNames.set(u.id, u.name);
+  }
+
   // Visión: el agente "ve" las imágenes recientes que envió el contacto. Se
   // descargan de Meta y se adjuntan al mensaje (modelos multimodales). Toggle por
   // tenant (org.settings.vision.enabled, activado por defecto).
   const visionOn = orgSettings.vision !== false; // activada por defecto
   let visionToken: string | null = null;
-  if (visionOn && rawMessages.some((m) => m.type === "IMAGE" && m.direction === "INBOUND")) {
+  if (visionOn && windowMessages.some((m) => m.type === "IMAGE" && m.direction === "INBOUND")) {
     try {
       const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
       visionToken = auth.accessToken ?? null;
@@ -258,13 +288,21 @@ export async function runAgentTurn(opts: {
   const MAX_IMAGES = 3;
   let imagesUsed = 0;
   const history: AIChatMessage[] = [];
-  for (let i = 0; i < rawMessages.length; i++) {
-    const m = rawMessages[i];
+  for (let i = 0; i < windowMessages.length; i++) {
+    const m = windowMessages[i];
+    // Un OUTBOUND escrito por un HUMANO del equipo se marca con su nombre para que el
+    // modelo lo distinga de sus propias respuestas y respete lo que ese humano pactó.
+    const isHuman = m.direction === "OUTBOUND" && m.authorType === "USER";
+    let content = m.body ?? `[${m.type.toLowerCase()}]`;
+    if (isHuman) {
+      const who = (m.authorUserId && humanNames.get(m.authorUserId)) || "un compañero del equipo";
+      content = `[${who} (humano del equipo, escribiéndole al cliente): ${content}]`;
+    }
     const msg: AIChatMessage = {
       role: m.direction === "INBOUND" ? "user" : "assistant",
-      content: m.body ?? `[${m.type.toLowerCase()}]`,
+      content,
     };
-    const recent = i >= rawMessages.length - IMAGE_WINDOW;
+    const recent = i >= windowMessages.length - IMAGE_WINDOW;
     if (visionToken && m.type === "IMAGE" && m.direction === "INBOUND" && recent && imagesUsed < MAX_IMAGES) {
       const mediaId = (m.payload as any)?.image?.id ?? (m.payload as any)?.id;
       if (mediaId) {
@@ -327,6 +365,15 @@ export async function runAgentTurn(opts: {
       ? `\n\n## Cobros (link de pago) — indicaciones del negocio\n${chargingCfg.instructions.trim()}`
       : "";
 
+  // Si hubo intervención humana, se le explica al modelo cómo tratar esos mensajes:
+  // son acuerdos ya cerrados con el cliente, hay que respetarlos y continuar desde ahí.
+  const humanHandoffNote = humanIntervened
+    ? "\n\n## Intervención del equipo humano en este chat (IMPORTANTE)\n" +
+      "Algunos mensajes del historial los envió un COMPAÑERO HUMANO del equipo (van prefijados con su nombre, p. ej. «[Javier (humano del equipo...): ...]»). " +
+      "Trátalos como decisiones y ACUERDOS ya tomados con el cliente: respétalos, NO los contradigas ni vuelvas a proponer algo distinto, y CONTINÚA desde lo que quedó acordado. " +
+      "Si el cliente dice «esto lo vimos con Javier» o similar, es real: guíate por esos mensajes humanos. Nunca copies ese prefijo en tus propias respuestas."
+    : "";
+
   const cfg = (version.config ?? {}) as Record<string, any>;
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
@@ -340,6 +387,7 @@ export async function runAgentTurn(opts: {
     systemPrompt:
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
       buildConversationInstructions(aiNotes) +
+      humanHandoffNote +
       contactMemoryBlock +
       knownContactBlock +
       assistedSetupBlock +
