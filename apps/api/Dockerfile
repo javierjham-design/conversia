@@ -1,6 +1,8 @@
 # API NestJS — build desde la raíz del monorepo (RAILWAY_DOCKERFILE_PATH=apps/api/Dockerfile)
 FROM node:22-alpine
-RUN apk add --no-cache libc6-compat openssl
+# ffmpeg: transcodifica las notas de voz OGG/Opus de WhatsApp a MP3 para que se
+# reproduzcan en iOS Safari (que NO decodifica OGG/Opus). Ver messageAudio.
+RUN apk add --no-cache libc6-compat openssl ffmpeg
 RUN corepack enable
 WORKDIR /app
 

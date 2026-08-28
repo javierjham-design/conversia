@@ -12,6 +12,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
+import { spawn } from "node:child_process";
 import type { TenantTx } from "@conversia/database";
 import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
@@ -21,6 +22,31 @@ import { RealtimeService } from "../common/realtime.service";
 import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+
+/**
+ * Transcodifica un audio (OGG/Opus de WhatsApp) a MP3 con ffmpeg, para que iOS Safari
+ * lo reproduzca. Devuelve el MP3 o null si ffmpeg no está o falla (→ el llamador sirve
+ * el original). Buffer en memoria: las notas de voz son cortas.
+ */
+function transcodeToMp3(input: Buffer): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    try {
+      const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-f", "mp3", "-b:a", "64k", "pipe:1"]);
+      const chunks: Buffer[] = [];
+      let done = false;
+      const finish = (v: Buffer | null) => { if (!done) { done = true; resolve(v); } };
+      const timer = setTimeout(() => { try { ff.kill("SIGKILL"); } catch { /* noop */ } finish(null); }, 15_000);
+      ff.stdout.on("data", (d: Buffer) => chunks.push(d));
+      ff.on("error", () => { clearTimeout(timer); finish(null); }); // ffmpeg no instalado
+      ff.on("close", (code) => { clearTimeout(timer); finish(code === 0 && chunks.length ? Buffer.concat(chunks) : null); });
+      ff.stdin.on("error", () => { /* EPIPE si ffmpeg cierra antes */ });
+      ff.stdin.write(input);
+      ff.stdin.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 const sendMessageSchema = z.object({
   text: z.string().min(1).max(4096),
@@ -660,7 +686,19 @@ export class ConversationsController {
     const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
     if (!audioRes.ok) throw new NotFoundException("No se pudo obtener el audio");
     const buf = Buffer.from(await audioRes.arrayBuffer());
-    res.setHeader("content-type", meta.mime_type ?? "audio/ogg");
+    // WhatsApp entrega OGG/Opus, que iOS Safari NO reproduce. Transcodificamos a MP3
+    // (reproducible en todos los navegadores). Si ffmpeg falla, servimos el OGG original.
+    const mime = String(meta.mime_type ?? "audio/ogg");
+    if (/ogg|opus/i.test(mime)) {
+      const mp3 = await transcodeToMp3(buf);
+      if (mp3) {
+        res.setHeader("content-type", "audio/mpeg");
+        res.setHeader("cache-control", "private, max-age=3600");
+        res.send(mp3);
+        return;
+      }
+    }
+    res.setHeader("content-type", mime);
     res.setHeader("cache-control", "private, max-age=3600");
     res.send(buf);
   }
