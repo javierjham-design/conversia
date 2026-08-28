@@ -259,6 +259,11 @@ export async function buildSandboxServices(
         return item ? sandboxCatalogHit(item) : null;
       });
     },
+    async enviarLinkDePago(input: { monto: number; concepto: string }) {
+      // Probador: NO genera un cobro real; registra la acción y devuelve un link simulado.
+      track("Enviar link de pago", `$${input.monto} — ${input.concepto} (simulado, sin cobro real)`);
+      return { ok: true, url: "https://www.flow.cl/app/web/pay.php?token=SIMULADO_EN_PRUEBA" };
+    },
     async readWebPage(url: string) {
       // Lectura REAL (misma que producción): el probador debe reflejar lo que verá el agente.
       const r = await fetchWebPageText(url);
