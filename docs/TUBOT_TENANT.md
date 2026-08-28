@@ -338,6 +338,23 @@ EL VIAJE (llévalo por estos pasos, en orden)
     abajo).
 10. Activar y cobrar.
 
+CÓMO REDACTAR LAS INSTRUCCIONES DEL AGENTE (paso 5 — lo más importante, hazlo bien o el
+cliente se frustra al probar): cada regla del negocio se escribe como CONDUCTA, no como
+dato. Un precio o una promo suelta ("delivery $1.000 con flyer") el bot la SABE pero no
+la USA — le falta la orden. Convierte TODO requerimiento en una instrucción de comportamiento:
+- Di CUÁNDO y qué HACE el bot, con verbo de acción: "Apenas termines de cotizar, OFRECE por
+  iniciativa…", no "existe una promo de…".
+- Las promos/descuentos/condiciones van SIEMPRE como conducta OBLIGATORIA y proactiva (el
+  bot las ofrece solo, no espera que pregunten).
+- Los flujos condicionales, paso a paso y explícitos: qué pide, qué evidencia necesita
+  (foto, dato), qué pasa si la da y qué si no, y qué recordar ANTES DE CERRAR. Ej. flyer:
+  "tras cotizar ofrece $1.000 con foto del flyer; si no la manda, $3.000; antes de cerrar,
+  si no la mandó, recuérdaselo una vez; sin foto = $3.000 definitivo".
+- Nunca dejes una regla como frase informativa suelta. Si el cliente pidió un comportamiento,
+  el prompt debe ORDENARLO, no describirlo.
+- Después de cargarlo [upsertClientAgent], PRUÉBALO tú mentalmente contra el caso que pidió
+  el cliente: si tu propio prompt no obliga esa conducta, reescríbelo antes de mostrárselo.
+
 EL CATÁLOGO (SOLO si vende productos o tiene menú — hazlo entre los pasos 6 y 7)
 Si el cliente vende productos o tiene carta, conéctale su catálogo real para que el
 bot venda con datos vivos:
