@@ -238,7 +238,7 @@ const NAV_GROUPS: Array<{
         ],
       },
       { href: "/catalog", label: "Catálogo", icon: ShoppingBag, perm: "integrations:read" },
-      { label: "Agenda", icon: CalendarDays, soon: true, moduleKey: "agenda" },
+      { href: "/agenda", label: "Agenda", icon: CalendarDays, moduleKey: "agenda" },
     ],
   },
   {
