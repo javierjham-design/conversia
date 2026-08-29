@@ -62,6 +62,10 @@ const envSchema = z.object({
   // Resiliencia de las llamadas al proveedor de IA (nunca dejar al cliente en silencio).
   AI_MAX_ATTEMPTS: z.coerce.number().default(3), // intentos por modelo antes de pasar al fallback
   AI_CALL_TIMEOUT_MS: z.coerce.number().default(45_000), // timeout por llamada al proveedor
+  // Debounce de ráfagas: cuando el contacto manda varios mensajes seguidos, se espera esta
+  // ventana para agrupar la ráfaga y responder UNA sola vez (mejor UX + menos costo de IA).
+  // 0 = desactivado (responde por cada mensaje, comportamiento anterior).
+  AI_INBOUND_DEBOUNCE_MS: z.coerce.number().default(8_000),
   // Modelo de respaldo si el principal falla todos los intentos. claude-haiku-4-5 cubre
   // sobrecarga/429 del principal; poner un gpt-* da resiliencia ante caída total de Anthropic.
   AI_FALLBACK_MODEL: z.string().default("claude-haiku-4-5"),

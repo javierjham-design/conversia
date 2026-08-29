@@ -4,7 +4,7 @@ import { computeWhatsappCostUsd } from "@conversia/agents";
 import { geoFromPhone } from "./phone-geo";
 import { getWhatsappRatesOverride } from "./cost-settings";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
-import { runAgentTurn } from "./agent-turn";
+import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
 import { transcribeWhatsappAudio } from "./audio";
 import { resolveChannelAuth } from "./channel-auth";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
@@ -461,9 +461,12 @@ export async function processInbound(job: InboundJob): Promise<void> {
       );
     if (!flowTookMessage) {
       try {
-        await runAgentTurn({ organizationId, conversationId: result.conversationId });
+        // DEBOUNCE de ráfagas: no corremos el turno aquí mismo; lo encolamos con una ventana
+        // para que, si el contacto sigue escribiendo, se agrupen todos sus mensajes en UNA
+        // respuesta (mejor UX + menos costo). El turno lo corre el agentTurnWorker.
+        await enqueueDebouncedAgentTurn({ organizationId, conversationId: result.conversationId });
       } catch (err) {
-        console.error(`✖ Error en turno de agente (${result.conversationId}):`, (err as Error).message);
+        console.error(`✖ Error al encolar turno de agente (${result.conversationId}):`, (err as Error).message);
       }
     }
 
