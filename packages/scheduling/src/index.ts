@@ -3,6 +3,7 @@
  * Cada tenant (o sede) elige su proveedor vía scheduling_connections.
  * La IA solo ve la interfaz SchedulingProvider; nunca el proveedor real.
  */
+export * from "./availability";
 import { createHmac } from "node:crypto";
 import type {
   AvailabilityQuery,
