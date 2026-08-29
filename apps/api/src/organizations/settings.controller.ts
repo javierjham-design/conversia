@@ -6,6 +6,7 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { signAppToken } from "../auth/jwt";
 import { validateUploadedImage } from "../common/images";
 import { BASE_VOCAB, INDUSTRIES, resolvePersonalization } from "../common/industries";
 
@@ -43,6 +44,21 @@ export class SettingsController {
     private prisma: PrismaService,
     private queues: QueueService,
   ) {}
+
+  /**
+   * Emite un token de LARGA DURACIÓN (1 año) para conectar el MCP de TuBot con Claude
+   * (por-tenant: lleva el orgId + permisos del usuario). Se muestra una sola vez. Así el
+   * usuario no regenera autorizaciones a cada rato. Requiere permiso de escritura de agentes.
+   */
+  @Post("mcp-token")
+  async mcpToken() {
+    const ctx = requirePermission("agents:write");
+    const token = signAppToken(
+      { sub: ctx.userId, orgId: ctx.organizationId, role: ctx.roleCode, perms: ctx.permissions },
+      { expiresIn: "365d", extra: { mcp: true } },
+    );
+    return { token, apiUrl: getEnv().API_URL, expiresInDays: 365 };
+  }
 
   @Get("general")
   general() {

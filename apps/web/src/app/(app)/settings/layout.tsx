@@ -63,6 +63,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     pages: [
       { href: "/settings/ia", label: "Ajustes de IA", keywords: "ia modelo tokens transcripcion idioma prompts plantillas asistente", perm: "settings:write", ready: true },
       { href: "/settings/cobros", label: "Cobros (Flow)", keywords: "cobros pagos flow link de pago cobrar tarjeta transferencia clientes monto", perm: "settings:write", ready: true },
+      { href: "/settings/conectar-claude", label: "Conectar con Claude (MCP)", keywords: "mcp claude conector token montar agentes claude desktop model context protocol", perm: "agents:write", ready: true },
       { href: "/agents", label: "Agentes IA", keywords: "agentes bots", external: true, ready: true },
     ],
   },
