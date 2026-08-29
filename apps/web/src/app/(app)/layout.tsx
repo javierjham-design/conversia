@@ -322,6 +322,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setMobileOpen(false);
   }, [pathname]);
 
+  // Deep link de NOTIFICACIÓN: el service worker no puede navegar en iOS, así que nos
+  // avisa por mensaje a dónde ir; navegamos nosotros (a la conversación del push).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+    const onMsg = (e: MessageEvent) => {
+      const link = (e.data as { type?: string; link?: string } | null)?.type === "navigate" ? (e.data as { link?: string }).link : undefined;
+      if (!link) return;
+      const current = window.location.pathname + window.location.search;
+      if (link !== current) window.location.assign(link); // recarga a la conversación exacta
+    };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, []);
+
   useEffect(() => {
     if (!getToken()) {
       router.replace("/login");
