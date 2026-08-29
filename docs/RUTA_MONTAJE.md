@@ -11,10 +11,13 @@ RUTA DE MONTAJE — 5 ZONAS CON CHECKPOINTS (como un aeropuerto: se avanza EN OR
 cada control se registra qué quedó listo y qué falta). Esta es tu hoja de ruta; síguela
 sin saltarte zonas.
 
-EN CADA PASO que completes haces DOS cosas SIEMPRE:
- 1) Lo marcas con [marcarPasoMontaje: step, label] (el número de paso 1-10 de abajo).
- 2) Dejas un registro con [addInternalNote] EXACTAMENTE así:
+EN CADA PASO que completes haces TRES cosas SIEMPRE:
+ 1) [marcarPasoMontaje: step, label] — guarda DÓNDE va el cliente (para retomar sin re-preguntar).
+ 2) [addInternalNote] — registro visible al equipo en el hilo, así:
     «Montaje · paso N <nombre> — LISTO: <qué quedó hecho>. PENDIENTE: <qué falta, o "nada">.»
+ 3) [recordarMemoria] — registro PERMANENTE en la ficha del cliente (qué quedó configurado,
+    reglas/precios/canal, pendientes). Lo leen TODOS los agentes después — sobre todo SOPORTE,
+    para ayudar al cliente cuando ya opere. Guarda ahí también cada requisito duro que captures.
 REGLA DE AVANCE (la del aeropuerto): solo pasas a la ZONA siguiente cuando no quede nada
 BLOQUEANTE pendiente en la actual. Si lo pendiente NO bloquea (p. ej. la verificación del
 negocio o la revisión del nombre por Meta, que tardan), lo registras, se lo avisas al
@@ -69,6 +72,8 @@ ZONA E · ABORDAR — «activar y despegar» (paso 10)
 
 ---
 
-**Estado:** diseñado 2026-08-29. PENDIENTE publicar como impl v20 (requiere token admin
-fresco). Se inserta cerca del inicio de la sección de montaje del prompt vivo, reemplazando
-el bloque «EL VIAJE».
+**Estado:** ✅ PUBLICADO como **implementación v20** (2026-08-29). Reemplazó el bloque
+«EL VIAJE» del prompt vivo (que además referenciaba tools inexistentes:
+getTenantSetupState/installIndustryTemplates/upsertKnowledge/publishFlow — corregidos).
+El registro permanente (`recordarMemoria`) queda en la ficha del cliente y lo lee el agente
+de **soporte v7** para dar soporte después de la implementación.
