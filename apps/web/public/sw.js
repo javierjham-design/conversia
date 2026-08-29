@@ -3,7 +3,7 @@
  * (nunca se cachea /backend). Página offline decente. Actualización avisada, sin
  * romper lo que el usuario esté haciendo (no hace skipWaiting automático).
  */
-const CACHE = "tubot-shell-v1";
+const CACHE = "tubot-shell-v2";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE = [OFFLINE_URL, "/brand/tubot-icon.png"];
 
@@ -86,23 +86,40 @@ self.addEventListener("push", (event) => {
     icon: "/brand/tubot-icon.png",
     tag: data.tag || undefined,
     renotify: Boolean(data.tag),
-    data: { link: data.link || "/", eventKey: data.eventKey || null },
+    data: { link: data.link || "/inbox", eventKey: data.eventKey || null },
   };
   event.waitUntil(self.registration.showNotification(data.title || "TuBot", options));
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const link = (event.notification.data && event.notification.data.link) || "/";
+  const link = (event.notification.data && event.notification.data.link) || "/inbox";
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if ("focus" in client) {
-          client.navigate?.(link);
-          return client.focus();
+    (async () => {
+      const clientsArr = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // Ventana de la app ya abierta: enfocarla y AVISARLE a dónde ir por mensaje.
+      // (En iOS Safari client.navigate() NO funciona; por eso la app navega sola al recibir el mensaje.)
+      for (const client of clientsArr) {
+        try {
+          if (new URL(client.url).origin !== self.location.origin) continue;
+        } catch (_) {
+          continue;
         }
+        try {
+          client.postMessage({ type: "navigate", link });
+        } catch (_) {
+          /* noop */
+        }
+        try {
+          await client.focus();
+        } catch (_) {
+          /* noop */
+        }
+        client.navigate?.(link); // en Chrome ayuda; en iOS lo cubre el postMessage
+        return;
       }
-      return self.clients.openWindow ? self.clients.openWindow(link) : undefined;
-    }),
+      // No hay ventana abierta: abrir una nueva directo en el link.
+      if (self.clients.openWindow) await self.clients.openWindow(link);
+    })(),
   );
 });
