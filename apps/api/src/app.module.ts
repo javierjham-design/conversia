@@ -45,6 +45,7 @@ import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
 import { ChargingController, ChargingWebhookController } from "./charging/charging.controller";
 import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
+import { AgendaController } from "./scheduling/agenda.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
 import { WorkflowsController } from "./workflows/workflows.controller";
@@ -91,6 +92,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     PlatformController,
     ChargingController,
     ChargingWebhookController,
+    AgendaController,
   ],
   providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })
