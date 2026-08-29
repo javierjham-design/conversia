@@ -1217,6 +1217,7 @@ model Professional {
   specialty      String?
   externalRef    String?  @map("external_ref") // id en Cláriva/Dentalink/etc.
   active         Boolean  @default(true)
+  // meta.workingHours = [{day:0-6, start:"HH:MM", end:"HH:MM"}] → horario de la agenda nativa (sin columna nueva).
   meta           Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
 

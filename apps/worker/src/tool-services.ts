@@ -20,15 +20,9 @@ import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
-
-/**
- * Mock de agenda por tenant, persistente durante la vida del proceso para
- * que la validación de doble reserva funcione entre mensajes.
- */
-const mockProviders = new Map<string, MockSchedulingProvider>();
 
 export async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvider> {
   const env = getEnv();
@@ -90,33 +84,43 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
     });
   }
 
-  let mock = mockProviders.get(orgId);
-  if (!mock) {
-    // El mock se alimenta con los datos REALES del tenant (sedes,
-    // profesionales, servicios) — misma información que vería Cláriva.
-    const data = await withTenant(orgId, async (tx) => {
-      const [clinics, professionals, services] = await Promise.all([
-        tx.clinic.findMany({ where: { active: true, deletedAt: null } }),
-        tx.professional.findMany({ where: { active: true } }),
-        tx.service.findMany({ where: { active: true } }),
-      ]);
-      return { clinics, professionals, services };
-    });
-    mock = new MockSchedulingProvider({
-      clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
-      professionals: data.professionals.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? undefined })),
-      services: data.services.map((s) => ({
-        id: s.code,
-        name: s.name,
-        durationMin: s.durationMin,
-        price: s.price ? Number(s.price) : undefined,
-        currency: s.currency,
-      })),
-      utcOffset: "-04:00",
-    });
-    mockProviders.set(orgId, mock);
-  }
-  return mock;
+  // AGENDA NATIVA de TuBot (default cuando no hay proveedor externo conectado):
+  // disponibilidad REAL desde los horarios de cada persona + las citas ya tomadas.
+  // Se reconstruye en cada llamada (sin caché) para reflejar las citas actuales.
+  const data = await withTenant(orgId, async (tx) => {
+    const now = new Date();
+    const [org, clinics, professionals, services, appts] = await Promise.all([
+      tx.organization.findUnique({ where: { id: orgId }, select: { settings: true, timezone: true } }),
+      tx.clinic.findMany({ where: { active: true, deletedAt: null } }),
+      tx.professional.findMany({ where: { active: true } }),
+      tx.service.findMany({ where: { active: true } }),
+      tx.appointment.findMany({
+        where: { startsAt: { gte: now }, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+        select: { professionalId: true, startsAt: true, endsAt: true },
+      }),
+    ]);
+    return { org, clinics, professionals, services, appts };
+  });
+  const agenda = ((data.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as {
+    slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string;
+  };
+  return new NativeSchedulingProvider({
+    clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
+    professionals: data.professionals.map((p) => {
+      const wh = (p.meta as any)?.workingHours;
+      return {
+        id: p.id,
+        name: p.name,
+        specialty: p.specialty ?? undefined,
+        workingHours: Array.isArray(wh) ? (wh as { day: number; start: string; end: string }[]) : [],
+      };
+    }),
+    services: data.services.map((s) => ({ id: s.code, name: s.name, durationMin: s.durationMin, price: s.price ? Number(s.price) : undefined, currency: s.currency })),
+    busy: data.appts
+      .filter((a) => a.professionalId)
+      .map((a) => ({ professionalId: a.professionalId as string, start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
+    config: { slotStepMin: agenda.slotStepMin, bufferMin: agenda.bufferMin, minAdvanceMin: agenda.minAdvanceMin, offset: agenda.offset ?? "-04:00" },
+  });
 }
 
 export interface ToolTargets {

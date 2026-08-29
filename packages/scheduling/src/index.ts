@@ -4,7 +4,8 @@
  * La IA solo ve la interfaz SchedulingProvider; nunca el proveedor real.
  */
 export * from "./availability";
-import { createHmac } from "node:crypto";
+import { computeNativeSlots, type WorkBlock } from "./availability";
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   AvailabilityQuery,
   CreateAppointmentInput,
@@ -178,6 +179,117 @@ export class MockSchedulingProvider implements SchedulingProvider {
     if (!appt) throw new Error(`Cita no encontrada: ${id}`);
     return appt;
   }
+}
+
+// ------------------------------------------------------------------
+// AGENDA NATIVA de TuBot: disponibilidad real desde los horarios de cada persona
+// (WorkBlock por día) + citas ocupadas, con el motor computeNativeSlots. Los datos
+// (personas con horarios, servicios, citas ocupadas, config) los carga el worker desde
+// la BD y los pasa aquí; la persistencia de la cita creada la hace recordAppointment.
+// ------------------------------------------------------------------
+
+export interface NativeAgendaConfig {
+  slotStepMin?: number; // granularidad (mínimo 5)
+  bufferMin?: number; // separación entre citas
+  minAdvanceMin?: number; // anticipación mínima
+  offset?: string; // ej "-04:00"
+}
+export interface NativeProfessional {
+  id: string;
+  name: string;
+  specialty?: string;
+  clinicIds?: string[];
+  workingHours: WorkBlock[]; // bloques de trabajo por día de semana
+}
+export interface NativeSchedulingData {
+  clinics: SchedClinic[];
+  professionals: NativeProfessional[];
+  services: SchedService[];
+  busy: { professionalId: string; start: string; end: string }[]; // citas ocupadas (futuras)
+  config?: NativeAgendaConfig;
+}
+
+export class NativeSchedulingProvider implements SchedulingProvider {
+  readonly kind = "native";
+  constructor(private data: NativeSchedulingData) {}
+
+  async getClinics(): Promise<SchedClinic[]> {
+    return this.data.clinics;
+  }
+  async getProfessionals(clinicId?: string): Promise<SchedProfessional[]> {
+    return this.data.professionals
+      .filter((p) => !clinicId || !p.clinicIds?.length || p.clinicIds.includes(clinicId))
+      .map((p) => ({ id: p.id, name: p.name, specialty: p.specialty, clinicIds: p.clinicIds }));
+  }
+  async getServices(): Promise<SchedService[]> {
+    return this.data.services;
+  }
+  async getProfessionalServices(): Promise<SchedService[]> {
+    return this.data.services;
+  }
+
+  async getAvailableSlots(query: AvailabilityQuery): Promise<SchedSlot[]> {
+    const cfg = this.data.config ?? {};
+    const svc = query.serviceId ? this.data.services.find((s) => s.id === query.serviceId) : undefined;
+    const durationMin = svc?.durationMin ?? 30;
+    const clinicId = query.clinicId ?? this.data.clinics[0]?.id ?? "";
+    const pros = query.professionalId ? this.data.professionals.filter((p) => p.id === query.professionalId) : this.data.professionals;
+
+    const out: SchedSlot[] = [];
+    for (const prof of pros) {
+      if (!prof.workingHours?.length) continue;
+      const slots = computeNativeSlots({
+        fromDate: query.from,
+        toDate: query.to,
+        workBlocks: prof.workingHours,
+        busy: this.data.busy.filter((b) => b.professionalId === prof.id),
+        durationMin,
+        slotStepMin: cfg.slotStepMin,
+        bufferMin: cfg.bufferMin,
+        minAdvanceMin: cfg.minAdvanceMin,
+        offset: cfg.offset,
+      });
+      for (const s of slots) out.push({ start: s.start, end: s.end, professionalId: prof.id, clinicId, serviceId: query.serviceId });
+    }
+    out.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return out.slice(0, 200);
+  }
+
+  async createAppointment(input: CreateAppointmentInput): Promise<SchedAppointment> {
+    // Anti doble-reserva contra las citas ya ocupadas cargadas.
+    const s = new Date(input.start).getTime();
+    const e = new Date(input.end).getTime();
+    const buf = (this.data.config?.bufferMin ?? 0) * 60000;
+    const clash = this.data.busy
+      .filter((b) => b.professionalId === input.professionalId)
+      .some((b) => s < new Date(b.end).getTime() + buf && e + buf > new Date(b.start).getTime());
+    if (clash) throw new Error("El horario ya no está disponible (doble reserva evitada)");
+    return {
+      id: randomUUID(),
+      clinicId: input.clinicId,
+      professionalId: input.professionalId,
+      serviceId: input.serviceId,
+      patient: input.patient,
+      start: input.start,
+      end: input.end,
+      status: "pending",
+      notes: input.notes,
+    };
+  }
+
+  // Las mutaciones sobre citas existentes (reagendar/cancelar/confirmar/asistencia) viven
+  // en la BD local; se cablearán a tool-services en la Fase 2. Por ahora, informan claro.
+  private notYet(): never {
+    throw new Error("Esta acción de agenda (reagendar/cancelar) aún no está disponible en la agenda nativa; deriva al equipo.");
+  }
+  async updateAppointment(): Promise<SchedAppointment> { return this.notYet(); }
+  async cancelAppointment(): Promise<SchedAppointment> { return this.notYet(); }
+  async confirmAppointment(): Promise<SchedAppointment> { return this.notYet(); }
+  async getAppointment(): Promise<SchedAppointment | null> { return null; }
+  async getPatientAppointments(): Promise<SchedAppointment[]> { return []; }
+  async createOrUpdatePatient(patient: SchedPatient): Promise<SchedPatient> { return patient; }
+  async markAttendance(): Promise<void> { /* se maneja en la BD (Fase 2) */ }
+  async markNoShow(): Promise<void> { /* se maneja en la BD (Fase 2) */ }
 }
 
 // ------------------------------------------------------------------
