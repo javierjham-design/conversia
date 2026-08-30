@@ -165,7 +165,7 @@ export class AgendaController {
       return appts.map((a) => ({
         id: a.id,
         professionalId: a.professionalId,
-        serviceId: a.serviceId,
+        serviceId: a.serviceId ?? null,
         status: a.status,
         startsAt: a.startsAt.toISOString(),
         endsAt: a.endsAt.toISOString(),
