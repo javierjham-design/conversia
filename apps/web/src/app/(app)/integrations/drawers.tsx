@@ -26,6 +26,9 @@ export interface ClarivaState {
   apiKeyMasked: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
+  connectionId?: string | null;
+  webhookSecret?: string | null;
+  webhookUrl?: string | null;
 }
 
 export function ClarivaDrawer({
@@ -152,6 +155,8 @@ export function ClarivaDrawer({
           </div>
           {testDetail && <p className="rounded-lg bg-app px-3 py-2 text-xs text-ink-muted">{testDetail}</p>}
 
+          <ClarivaWebhookPanel state={state} onChanged={onChanged} />
+
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-sm font-medium"><Activity size={14} /> Actividad reciente</p>
             {activity === null ? (
@@ -193,6 +198,66 @@ export function ClarivaDrawer({
         danger
       />
     </Drawer>
+  );
+}
+
+/** Datos que Cláriva pide en "Avisos a TuBot (webhooks)": connectionId + secreto + URL. */
+function ClarivaWebhookPanel({ state, onChanged }: { state: ClarivaState | null; onChanged: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const connectionId = state?.connectionId ?? null;
+  const secret = state?.webhookSecret ?? null;
+  const url = state?.webhookUrl ?? null;
+
+  const copy = (value: string, label: string) => {
+    void navigator.clipboard.writeText(value).then(() => toast.push(`${label} copiado`, "ok")).catch(() => toast.push("No se pudo copiar", "error"));
+  };
+  async function generate() {
+    setBusy(true);
+    try {
+      await api("/integrations/clariva/webhook-secret", { method: "POST" });
+      toast.push(secret ? "Secreto regenerado — actualízalo en Cláriva" : "Secreto generado", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const Row = ({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) => (
+    <div>
+      <p className="mb-1 text-xs font-medium text-ink-muted">{label}</p>
+      <div className="flex items-stretch gap-2">
+        <code className={`min-w-0 flex-1 truncate rounded-lg border border-line bg-app px-3 py-2 text-xs ${mono ? "font-mono" : ""}`}>{value}</code>
+        <Button variant="secondary" onClick={() => copy(value, label)}>Copiar</Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-line bg-panel p-4">
+      <p className="mb-1 text-sm font-medium">Avisos de Cláriva → TuBot</p>
+      <p className="mb-3 text-xs text-ink-subtle">
+        Pega estos datos en Cláriva, en <b>Configuración → Agenda TuBot → “Avisos a TuBot (webhooks)”</b>, y activa. Así,
+        cada cambio de cita/paciente en Cláriva se le avisa a TuBot (firmado).
+      </p>
+      {!secret ? (
+        <div className="space-y-2">
+          <p className="text-xs text-ink-muted">Aún no has generado el secreto para esta conexión.</p>
+          <Button onClick={() => void generate()} disabled={busy}>{busy ? "Generando…" : "Generar Connection ID y secreto"}</Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {connectionId && <Row label="Connection ID" value={connectionId} />}
+          <SecretField value={secret} label="Secreto del webhook" />
+          {url && <Row label="URL del webhook (si Cláriva la pide)" value={url} />}
+          <button onClick={() => void generate()} disabled={busy} className="text-xs text-ink-subtle hover:text-red-500 disabled:opacity-50">
+            Regenerar secreto (tendrás que actualizarlo en Cláriva)
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
