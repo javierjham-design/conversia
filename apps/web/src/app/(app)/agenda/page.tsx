@@ -109,10 +109,10 @@ function Citas() {
         .catch(() => { setAppts([]); setMeta({ source: "native", live: false }); }),
       api<Prof[]>("/agenda/professionals").then(setPros).catch(() => {}),
       api<Svc[]>("/agenda/services").then(setSvcs).catch(() => {}),
-      // La disponibilidad (huecos libres) solo se pinta en la vista Día → solo se pide ahí.
-      view === "dia"
-        ? api<AvailResponse>(`/agenda/availability?${range}`).then((r) => setAvail(r.slots ?? [])).catch(() => setAvail([]))
-        : Promise.resolve(setAvail([])),
+      // Disponibilidad (huecos libres) para pintar la franja disponible en Semana y Día.
+      view === "lista"
+        ? Promise.resolve(setAvail([]))
+        : api<AvailResponse>(`/agenda/availability?${range}`).then((r) => setAvail(r.slots ?? [])).catch(() => setAvail([])),
     ]);
   }, [weekStart, anchor, view]);
   useEffect(() => void load(), [load]);
@@ -129,6 +129,7 @@ function Citas() {
   // Filtro por profesional (chips): las citas de profesionales ocultos no se muestran.
   const visible = useMemo(() => (appts ?? []).filter((a) => !hidden.has(a.professionalId ?? "")), [appts, hidden]);
   const visibleRefs = useMemo(() => colorRefs.filter((r) => !hidden.has(r.id)), [colorRefs, hidden]);
+  const visibleAvail = useMemo(() => avail.filter((s) => !hidden.has(s.professionalId)), [avail, hidden]);
   const toggle = (id: string) => setHidden((h) => { const n = new Set(h); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // Rango horario visible: se ajusta a los horarios cargados + a las citas.
@@ -193,10 +194,11 @@ function Citas() {
         </div>
       )}
 
-      {view === "dia" && (
+      {view !== "lista" && (
         <p className="mb-2 flex items-center gap-3 text-2xs text-ink-subtle">
           <span className="inline-flex items-center gap-1"><span className="h-2.5 w-3 rounded-sm bg-emerald-500/20 ring-1 ring-inset ring-emerald-500/30" /> Disponible</span>
           <span className="inline-flex items-center gap-1"><span className="h-2.5 w-3 rounded-sm bg-violet-500" /> Cita agendada</span>
+          <span className="text-ink-subtle/70">· vista Día = cada profesional por separado</span>
         </p>
       )}
 
@@ -205,7 +207,7 @@ function Citas() {
       ) : view === "lista" ? (
         <ListaCitas appts={visible} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
       ) : view === "dia" ? (
-        <DiaView date={anchor} refs={visibleRefs} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} avail={avail.filter((s) => sameDay(new Date(s.start), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
+        <DiaView date={anchor} refs={visibleRefs} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-panel">
           <div className="min-w-[720px]">
@@ -231,7 +233,7 @@ function Citas() {
                 ))}
               </div>
               {week.map((d, di) => (
-                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} pros={pros} refs={colorRefs} readOnly={meta.live} appts={visible.filter((a) => sameDay(new Date(a.startsAt), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
+                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} refs={colorRefs} readOnly={meta.live} appts={visible.filter((a) => sameDay(new Date(a.startsAt), d))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
               ))}
             </div>
           </div>
@@ -334,17 +336,15 @@ function ResourceColumn({ date, profId, refs, gridH, hours, rangeStart, readOnly
   );
 }
 
-function DayColumn({ date, gridH, hours, rangeStart, pros, refs, readOnly, appts, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; pros: Prof[]; refs: ColorRef[]; readOnly?: boolean; appts: Appt[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
-  const dow = date.getDay();
-  // bandas de disponibilidad (unión de horarios de todas las personas ese día)
+function DayColumn({ date, gridH, hours, rangeStart, refs, readOnly, appts, avail, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; refs: ColorRef[]; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
+  // Bandas VERDES = disponibilidad (unión de los huecos libres de todos los profesionales
+  // ese día). Delimita disponible vs no disponible en la vista Semana.
   const bands = useMemo(() => {
-    const ivs: Array<[number, number]> = [];
-    for (const p of pros) for (const b of p.workingHours ?? []) if (b.day === dow) ivs.push([toMin(b.start), toMin(b.end)]);
-    ivs.sort((a, b) => a[0] - b[0]);
+    const ivs = avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number]).sort((a, b) => a[0] - b[0]);
     const merged: Array<[number, number]> = [];
     for (const iv of ivs) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv] as [number, number]); }
     return merged;
-  }, [pros, dow]);
+  }, [avail]);
 
   // layout de solapamientos en carriles
   const laid = useMemo(() => {
@@ -374,9 +374,9 @@ function DayColumn({ date, gridH, hours, rangeStart, pros, refs, readOnly, appts
       }}>
       {/* líneas de hora */}
       {hours.slice(1).map((h, i) => (<div key={h} className="pointer-events-none absolute inset-x-0 border-t border-line/60" style={{ top: (i + 1) * HOUR_H }} />))}
-      {/* bandas disponibles */}
+      {/* bandas disponibles (verde) */}
       {bands.map(([s, e], i) => (
-        <div key={i} className="pointer-events-none absolute inset-x-0.5 rounded bg-brand-500/[0.07] ring-1 ring-inset ring-brand-500/10" style={{ top: (s - rangeStart) * PX_MIN, height: (e - s) * PX_MIN }} />
+        <div key={i} className="pointer-events-none absolute inset-x-0.5 rounded bg-emerald-500/[0.12] ring-1 ring-inset ring-emerald-500/20" style={{ top: (s - rangeStart) * PX_MIN, height: (e - s) * PX_MIN }} title="Disponible" />
       ))}
       {/* línea "ahora" */}
       {today && nowMin >= rangeStart && (
