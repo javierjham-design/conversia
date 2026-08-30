@@ -24,7 +24,7 @@ import {
   Smartphone,
   Workflow,
 } from "lucide-react";
-import { api, clearToken, getToken } from "@/lib/api";
+import { api, clearToken, getToken, setToken } from "@/lib/api";
 import { disablePush, enablePush, permissionState, pushSupport, registerServiceWorker } from "@/lib/push";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
@@ -335,6 +335,36 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     navigator.serviceWorker.addEventListener("message", onMsg);
     return () => navigator.serviceWorker.removeEventListener("message", onMsg);
   }, []);
+
+  // Notificación de OTRA cuenta (multi-org): si el deep link trae ?org=<id> distinta a la
+  // organización activa, cambiamos a esa cuenta (token nuevo) y recargamos, para que la
+  // conversación abra en la cuenta correcta en vez de quedar cargando en la equivocada.
+  // (Solo se puede cambiar a orgs donde el usuario es miembro: /auth/switch lo valida.)
+  useEffect(() => {
+    const orgId = me?.organization?.id;
+    if (!orgId) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetOrg = params.get("org");
+    if (!targetOrg) return;
+    if (targetOrg === orgId) {
+      // Ya estamos en la cuenta correcta: quitamos el parámetro (cosmético) y seguimos.
+      params.delete("org");
+      const qs = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      return;
+    }
+    let cancelled = false;
+    void api<{ token: string }>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: targetOrg }) })
+      .then((res) => {
+        if (cancelled) return;
+        setToken(res.token); // recarga: todo el panel se re-lee para la cuenta correcta
+        window.location.reload();
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [me]);
 
   useEffect(() => {
     if (!getToken()) {
