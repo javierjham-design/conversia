@@ -81,6 +81,7 @@ export default function BillingPage() {
   const [mockBanner, setMockBanner] = useState(false);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "yearly">("monthly");
   const plansRef = useRef<HTMLDivElement>(null);
+  const [planMenuOpen, setPlanMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     const [o, p] = await Promise.all([api<Overview>("/billing/me"), api<Plan[]>("/billing/plans")]);
@@ -203,7 +204,8 @@ export default function BillingPage() {
   // Plan actual SIN monto a cobrar (Free/$0 o sin plan): "Pagar ahora" no tiene qué
   // cobrar (el backend rechaza el plan $0). En ese caso el CTA lleva a elegir un plan.
   const currentIsFree = !data.plan || priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly") <= 0;
-  const goToPlans = () => plansRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Planes que se pueden contratar/pagar: excluye el actual y los de $0 / solo-contacto.
+  const payablePlans = plans.filter((p) => p.code !== currentCode && priceOf(p) > 0);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -273,10 +275,38 @@ export default function BillingPage() {
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             {currentIsFree ? (
-              // Plan Free/$0: no hay nada que cobrar. El CTA lleva a elegir un plan de pago.
-              <Button onClick={goToPlans}>
-                <CreditCard size={14} /> Elegir un plan
-              </Button>
+              // Plan Free/$0: no hay nada que cobrar. El botón DESPLIEGA la lista de planes
+              // de pago ahí mismo; al elegir uno se abre la confirmación y va al pago.
+              <div className="relative">
+                <Button onClick={() => setPlanMenuOpen((v) => !v)} disabled={busy || payablePlans.length === 0}>
+                  <CreditCard size={14} /> Elegir un plan
+                </Button>
+                {planMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setPlanMenuOpen(false)} />
+                    <div className="absolute left-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-lg border border-line bg-panel shadow-lg">
+                      <p className="border-b border-line px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-ink-subtle">
+                        Elige tu plan
+                      </p>
+                      {payablePlans.map((p) => (
+                        <button
+                          key={p.code}
+                          onClick={() => {
+                            setPlanMenuOpen(false);
+                            setChanging(p);
+                          }}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-app"
+                        >
+                          <span className="text-sm font-medium text-ink">{p.name}</span>
+                          <span className="text-xs text-ink-muted">
+                            {money(priceOf(p), currency)}/{cadence}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             ) : (
               <Button onClick={() => (data.plan ? pay(data.plan.code) : undefined)} disabled={busy || !data.plan}>
                 <CreditCard size={14} /> Pagar ahora
