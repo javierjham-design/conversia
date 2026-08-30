@@ -16,6 +16,7 @@ type Status = { provider: string; external: boolean };
 type Config = { slotStepMin: number; bufferMin: number; minAdvanceMin: number };
 
 const input = "rounded-control border border-line-strong bg-panel px-2 py-1 text-sm text-ink";
+const TAB_LABELS: Record<string, string> = { citas: "Citas", personas: "Recursos", servicios: "Servicios", config: "Configuración" };
 
 // Paleta por persona — clases literales para que Tailwind las incluya en el build.
 const PALETTE = [
@@ -37,13 +38,6 @@ const PX_MIN = HOUR_H / 60;
 const pad = (n: number) => String(n).padStart(2, "0");
 const toMin = (hhmm: string) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
 const minsOf = (d: Date) => d.getHours() * 60 + d.getMinutes();
-function startOfWeek(offset: number): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const dow = (d.getDay() + 6) % 7; // lunes = 0
-  d.setDate(d.getDate() - dow + offset * 7);
-  return d;
-}
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export default function AgendaPage() {
@@ -63,13 +57,13 @@ export default function AgendaPage() {
             Tu agenda está conectada a <b>{status.provider}</b>. Las citas y la disponibilidad se gestionan allá; aquí verás lo que sincronice.
           </div>
         ) : (
-          <p className="mt-1 text-sm text-ink-muted">Agenda nativa de TuBot: define personas, horarios y servicios; el bot busca disponibilidad y agenda solo.</p>
+          <p className="mt-1 text-sm text-ink-muted">Agenda nativa de TuBot: define recursos (personas o servicios: box, sala, equipo…), sus horarios y los servicios que ofreces; el bot busca disponibilidad y agenda solo.</p>
         )}
 
         <div className="mt-4 flex gap-1 border-b border-line">
           {(["citas", "personas", "servicios", "config"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={cn("border-b-2 px-3 py-2 text-sm font-medium capitalize", tab === t ? "border-brand-600 text-brand-700 dark:text-brand-300" : "border-transparent text-ink-subtle hover:text-ink")}>
-              {t === "config" ? "Configuración" : t}
+            <button key={t} onClick={() => setTab(t)} className={cn("border-b-2 px-3 py-2 text-sm font-medium", tab === t ? "border-brand-600 text-brand-700 dark:text-brand-300" : "border-transparent text-ink-subtle hover:text-ink")}>
+              {TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -86,21 +80,25 @@ export default function AgendaPage() {
 }
 
 // ------------------------------ Citas (calendario) ------------------------------
+const VIEW_LABELS: Record<string, string> = { semana: "Semana", dia: "Día", lista: "Lista" };
+
 function Citas() {
   const [appts, setAppts] = useState<Appt[] | null>(null);
   const [meta, setMeta] = useState<{ source: string; live: boolean }>({ source: "native", live: false });
   const [pros, setPros] = useState<Prof[]>([]);
   const [svcs, setSvcs] = useState<Svc[]>([]);
-  const [view, setView] = useState<"semana" | "lista">("semana");
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [modal, setModal] = useState<null | { date?: Date; appt?: Appt }>(null);
+  const [view, setView] = useState<"semana" | "dia" | "lista">("semana");
+  const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [modal, setModal] = useState<null | { date?: Date; appt?: Appt; profId?: string }>(null);
 
-  const weekStart = useMemo(() => startOfWeek(weekOffset), [weekOffset]);
+  const weekStart = useMemo(() => { const d = new Date(anchor); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return d; }, [anchor]);
   const week = useMemo(() => Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; }), [weekStart]);
 
   const load = useCallback(() => {
-    const from = new Date(weekStart); from.setDate(from.getDate() - 1);
-    const to = new Date(weekStart); to.setDate(to.getDate() + 8);
+    const base = view === "dia" ? anchor : weekStart;
+    const from = new Date(base); from.setDate(from.getDate() - 1);
+    const to = new Date(base); to.setDate(to.getDate() + (view === "dia" ? 2 : 8));
     return Promise.all([
       api<ApptsResponse>(`/agenda/appointments?from=${from.toISOString()}&to=${to.toISOString()}`)
         .then((r) => { setAppts(r.appointments ?? []); setMeta({ source: r.source ?? "native", live: !!r.live }); })
@@ -108,7 +106,7 @@ function Citas() {
       api<Prof[]>("/agenda/professionals").then(setPros).catch(() => {}),
       api<Svc[]>("/agenda/services").then(setSvcs).catch(() => {}),
     ]);
-  }, [weekStart]);
+  }, [weekStart, anchor, view]);
   useEffect(() => void load(), [load]);
 
   // Referencia de color/leyenda por profesional: personas nativas si las hay;
@@ -120,7 +118,12 @@ function Citas() {
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
   }, [pros, appts]);
 
-  // Rango horario visible: se ajusta a los horarios cargados + a las citas de la semana.
+  // Filtro por profesional (chips): las citas de profesionales ocultos no se muestran.
+  const visible = useMemo(() => (appts ?? []).filter((a) => !hidden.has(a.professionalId ?? "")), [appts, hidden]);
+  const visibleRefs = useMemo(() => colorRefs.filter((r) => !hidden.has(r.id)), [colorRefs, hidden]);
+  const toggle = (id: string) => setHidden((h) => { const n = new Set(h); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  // Rango horario visible: se ajusta a los horarios cargados + a las citas.
   const [rangeStart, rangeEnd] = useMemo(() => {
     let lo = 8 * 60, hi = 20 * 60;
     for (const p of pros) for (const b of p.workingHours ?? []) { lo = Math.min(lo, toMin(b.start)); hi = Math.max(hi, toMin(b.end)); }
@@ -133,21 +136,25 @@ function Citas() {
   const hours = useMemo(() => Array.from({ length: (rangeEnd - rangeStart) / 60 + 1 }, (_, i) => rangeStart / 60 + i), [rangeStart, rangeEnd]);
   const gridH = ((rangeEnd - rangeStart) / 60) * HOUR_H;
 
-  const monthLabel = `${week[0].toLocaleDateString("es-CL", { day: "numeric", month: "short" })} – ${week[6].toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}`;
+  const shift = (n: number) => setAnchor((a) => { const d = new Date(a); d.setDate(d.getDate() + n); return d; });
+  const step = view === "dia" ? 1 : 7;
+  const navLabel = view === "dia"
+    ? anchor.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })
+    : `${week[0].toLocaleDateString("es-CL", { day: "numeric", month: "short" })} – ${week[6].toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}`;
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1">
-          <button onClick={() => setWeekOffset((w) => w - 1)} className="rounded-control border border-line px-2 py-1 text-sm text-ink-muted hover:bg-app" aria-label="Semana anterior">‹</button>
-          <button onClick={() => setWeekOffset(0)} className="rounded-control border border-line px-3 py-1 text-sm font-medium text-ink hover:bg-app">Hoy</button>
-          <button onClick={() => setWeekOffset((w) => w + 1)} className="rounded-control border border-line px-2 py-1 text-sm text-ink-muted hover:bg-app" aria-label="Semana siguiente">›</button>
-          <span className="ml-2 text-sm font-medium capitalize text-ink">{monthLabel}</span>
+          <button onClick={() => shift(-step)} className="rounded-control border border-line px-2 py-1 text-sm text-ink-muted hover:bg-app" aria-label="Anterior">‹</button>
+          <button onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setAnchor(d); }} className="rounded-control border border-line px-3 py-1 text-sm font-medium text-ink hover:bg-app">Hoy</button>
+          <button onClick={() => shift(step)} className="rounded-control border border-line px-2 py-1 text-sm text-ink-muted hover:bg-app" aria-label="Siguiente">›</button>
+          <span className="ml-2 text-sm font-medium capitalize text-ink">{navLabel}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex overflow-hidden rounded-control border border-line text-sm">
-            {(["semana", "lista"] as const).map((v) => (
-              <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1 capitalize", view === v ? "bg-brand-600 text-white" : "text-ink-muted hover:bg-app")}>{v}</button>
+            {(["semana", "dia", "lista"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1", view === v ? "bg-brand-600 text-white" : "text-ink-muted hover:bg-app")}>{VIEW_LABELS[v]}</button>
             ))}
           </div>
           {!meta.live && <Button onClick={() => setModal({ date: new Date() })}>＋ Nueva cita</Button>}
@@ -155,27 +162,34 @@ function Citas() {
       </div>
 
       {meta.live && (
-        <p className="mb-3 text-2xs text-ink-subtle">Vista de la agenda de {meta.source === "clariva" ? "Cláriva" : meta.source}. Las citas se crean y modifican en {meta.source === "clariva" ? "Cláriva" : "el proveedor"} o las agenda el bot; aquí las ves en tiempo real.</p>
-      )}
-
-      {meta.live && (
-        <div className="mb-3 inline-flex items-center gap-1.5 rounded-pill bg-emerald-50 px-2.5 py-1 text-2xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> En vivo desde {meta.source === "clariva" ? "Cláriva" : meta.source === "dentalink" ? "Dentalink" : meta.source}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-pill bg-emerald-50 px-2.5 py-1 text-2xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> En vivo desde {meta.source === "clariva" ? "Cláriva" : meta.source === "dentalink" ? "Dentalink" : meta.source}
+          </span>
+          <span className="text-2xs text-ink-subtle">Las citas se gestionan en {meta.source === "clariva" ? "Cláriva" : "el proveedor"} o las agenda el bot; aquí las ves en tiempo real.</span>
         </div>
       )}
 
       {colorRefs.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
-          {colorRefs.map((p) => (
-            <span key={p.id} className="inline-flex items-center gap-1.5 text-xs text-ink-muted"><span className={cn("h-2.5 w-2.5 rounded-full", palOf(p.id, colorRefs).dot)} />{p.name}</span>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          {colorRefs.map((p) => {
+            const off = hidden.has(p.id);
+            return (
+              <button key={p.id} onClick={() => toggle(p.id)} title={off ? "Mostrar" : "Ocultar"} className={cn("inline-flex items-center gap-1.5 rounded-pill border px-2 py-0.5 text-xs transition", off ? "border-line text-ink-subtle line-through opacity-60" : "border-line-strong text-ink-muted hover:bg-app")}>
+                <span className={cn("h-2.5 w-2.5 rounded-full", palOf(p.id, colorRefs).dot, off && "opacity-40")} />{p.name}
+              </button>
+            );
+          })}
+          {hidden.size > 0 && <button onClick={() => setHidden(new Set())} className="ml-1 text-2xs text-brand-700 hover:underline dark:text-brand-300">Ver todos</button>}
         </div>
       )}
 
-      {view === "lista" ? (
-        <ListaCitas appts={appts} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
-      ) : appts === null ? (
+      {appts === null ? (
         <p className="text-sm text-ink-subtle">Cargando…</p>
+      ) : view === "lista" ? (
+        <ListaCitas appts={visible} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
+      ) : view === "dia" ? (
+        <DiaView date={anchor} refs={visibleRefs} pros={pros} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-panel">
           <div className="min-w-[720px]">
@@ -201,7 +215,7 @@ function Citas() {
                 ))}
               </div>
               {week.map((d, di) => (
-                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} pros={pros} refs={colorRefs} readOnly={meta.live} appts={(appts ?? []).filter((a) => sameDay(new Date(a.startsAt), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
+                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} pros={pros} refs={colorRefs} readOnly={meta.live} appts={visible.filter((a) => sameDay(new Date(a.startsAt), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
               ))}
             </div>
           </div>
@@ -209,6 +223,98 @@ function Citas() {
       )}
 
       {modal && <ApptModal init={modal} pros={pros} svcs={svcs} readOnly={meta.live} onClose={() => setModal(null)} onSaved={() => { setModal(null); void load(); }} />}
+    </div>
+  );
+}
+
+// Vista "Día": una columna por profesional/recurso (des-mezclada, estilo Cláriva).
+function DiaView({ date, refs, pros, readOnly, gridH, hours, rangeStart, appts, onSlot, onAppt }: { date: Date; refs: ColorRef[]; pros: Prof[]; readOnly?: boolean; gridH: number; hours: number[]; rangeStart: number; appts: Appt[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+  const cols = refs.length ? refs : [{ id: "", name: "Agenda" }];
+  const tmpl = `48px repeat(${cols.length}, minmax(140px, 1fr))`;
+  return (
+    <div className="overflow-x-auto rounded-xl border border-line bg-panel">
+      <div style={{ minWidth: Math.max(480, 48 + cols.length * 150) }}>
+        <div className="grid border-b border-line" style={{ gridTemplateColumns: tmpl }}>
+          <div />
+          {cols.map((c) => (
+            <div key={c.id} className="flex items-center justify-center gap-1.5 border-l border-line px-2 py-2 text-center">
+              <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", palOf(c.id || null, refs).dot)} />
+              <span className="truncate text-xs font-medium text-ink">{c.name}</span>
+            </div>
+          ))}
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: tmpl }}>
+          <div className="relative" style={{ height: gridH }}>
+            {hours.slice(0, -1).map((h, i) => (
+              <div key={h} className="absolute right-1 text-2xs tabular-nums text-ink-subtle" style={{ top: i * HOUR_H - 6 }}>{pad(h)}:00</div>
+            ))}
+          </div>
+          {cols.map((c) => (
+            <ResourceColumn key={c.id} date={date} profId={c.id || null} refs={refs} prof={pros.find((p) => p.id === c.id)} gridH={gridH} hours={hours} rangeStart={rangeStart} readOnly={readOnly} appts={appts.filter((a) => (a.professionalId ?? "") === c.id)} onSlot={onSlot} onAppt={onAppt} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResourceColumn({ date, profId, refs, prof, gridH, hours, rangeStart, readOnly, appts, onSlot, onAppt }: { date: Date; profId: string | null; refs: ColorRef[]; prof?: Prof; gridH: number; hours: number[]; rangeStart: number; readOnly?: boolean; appts: Appt[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+  const dow = date.getDay();
+  const bands = useMemo(() => {
+    const ivs: Array<[number, number]> = [];
+    for (const b of prof?.workingHours ?? []) if (b.day === dow) ivs.push([toMin(b.start), toMin(b.end)]);
+    ivs.sort((a, b) => a[0] - b[0]);
+    const merged: Array<[number, number]> = [];
+    for (const iv of ivs) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv] as [number, number]); }
+    return merged;
+  }, [prof, dow]);
+  const laid = useMemo(() => {
+    const sorted = [...appts].sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
+    const laneEnds: number[] = [];
+    const out = sorted.map((a) => {
+      const s = +new Date(a.startsAt), e = +new Date(a.endsAt);
+      let lane = laneEnds.findIndex((end) => end <= s);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(e); } else laneEnds[lane] = e;
+      return { a, lane };
+    });
+    return { items: out, lanes: Math.max(1, laneEnds.length) };
+  }, [appts]);
+  const today = sameDay(date, new Date());
+  const nowMin = minsOf(new Date());
+  const pal = palOf(profId, refs);
+
+  return (
+    <div className={cn("relative border-l border-line", !readOnly && "cursor-pointer")} style={{ height: gridH }}
+      onClick={(e) => {
+        if (readOnly) return;
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const min = Math.round((rangeStart + y / PX_MIN) / 15) * 15;
+        const d = new Date(date); d.setHours(Math.floor(min / 60), min % 60, 0, 0);
+        onSlot(d, profId ?? undefined);
+      }}>
+      {hours.slice(1).map((h, i) => (<div key={h} className="pointer-events-none absolute inset-x-0 border-t border-line/60" style={{ top: (i + 1) * HOUR_H }} />))}
+      {bands.map(([s, e], i) => (
+        <div key={i} className="pointer-events-none absolute inset-x-0.5 rounded bg-brand-500/[0.07] ring-1 ring-inset ring-brand-500/10" style={{ top: (s - rangeStart) * PX_MIN, height: (e - s) * PX_MIN }} />
+      ))}
+      {today && nowMin >= rangeStart && (
+        <div className="pointer-events-none absolute inset-x-0 z-10" style={{ top: (nowMin - rangeStart) * PX_MIN }}>
+          <div className="relative"><span className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-red-500" /><div className="border-t border-red-500" /></div>
+        </div>
+      )}
+      {laid.items.map(({ a, lane }) => {
+        const s = minsOf(new Date(a.startsAt)), e = minsOf(new Date(a.endsAt));
+        const cancelled = a.status === "CANCELLED";
+        const w = 100 / laid.lanes;
+        return (
+          <button key={a.id} onClick={(ev) => { ev.stopPropagation(); onAppt(a); }}
+            className={cn("absolute overflow-hidden rounded-md border-l-4 px-1.5 py-1 text-left text-white shadow-sm transition hover:brightness-105", cancelled ? "border-line bg-app text-ink-subtle line-through" : pal.block)}
+            style={{ top: (s - rangeStart) * PX_MIN + 1, height: Math.max(16, (e - s) * PX_MIN - 2), left: `calc(${lane * w}% + 2px)`, width: `calc(${w}% - 4px)` }}>
+            <div className="truncate text-2xs font-semibold leading-tight tabular-nums">{pad(Math.floor(s / 60))}:{pad(s % 60)}</div>
+            <div className="truncate text-xs font-medium leading-tight">{a.contact.name}</div>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -319,7 +425,7 @@ function ListaCitas({ appts, refs, onOpen }: { appts: Appt[] | null; refs: Color
 }
 
 // ------------------------------ Modal Nueva/Editar cita ------------------------------
-function ApptModal({ init, pros, svcs, readOnly, onClose, onSaved }: { init: { date?: Date; appt?: Appt }; pros: Prof[]; svcs: Svc[]; readOnly?: boolean; onClose: () => void; onSaved: () => void }) {
+function ApptModal({ init, pros, svcs, readOnly, onClose, onSaved }: { init: { date?: Date; appt?: Appt; profId?: string }; pros: Prof[]; svcs: Svc[]; readOnly?: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const editing = !!init.appt;
 
@@ -350,7 +456,7 @@ function ApptModal({ init, pros, svcs, readOnly, onClose, onSaved }: { init: { d
   }
   const base = init.appt ? new Date(init.appt.startsAt) : init.date ?? new Date();
   const [contact, setContact] = useState<{ id: string; name: string } | null>(init.appt ? { id: "", name: init.appt.contact.name } : null);
-  const [profId, setProfId] = useState(init.appt?.professionalId ?? "");
+  const [profId, setProfId] = useState(init.appt?.professionalId ?? init.profId ?? "");
   const [svcId, setSvcId] = useState(init.appt?.serviceId ?? "");
   const [date, setDate] = useState(`${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`);
   const [time, setTime] = useState(`${pad(base.getHours())}:${pad(base.getMinutes())}`);
@@ -397,7 +503,7 @@ function ApptModal({ init, pros, svcs, readOnly, onClose, onSaved }: { init: { d
         )}
 
         <div className="grid grid-cols-2 gap-2">
-          <label className="text-xs text-ink-muted">Persona
+          <label className="text-xs text-ink-muted">Recurso
             <Select className="mt-1 w-full" value={profId} onChange={(e) => setProfId(e.target.value)} disabled={editing}>
               <option value="">— cualquiera —</option>
               {pros.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -495,21 +601,22 @@ function Personas() {
     catch (e) { toast.push((e as Error).message, "error"); }
   }
   async function remove(id: string) {
-    if (!confirm("¿Quitar esta persona de la agenda?")) return;
+    if (!confirm("¿Quitar este recurso de la agenda?")) return;
     try { await api(`/agenda/professionals/${id}`, { method: "DELETE" }); await load(); } catch (e) { toast.push((e as Error).message, "error"); }
   }
 
   if (!pros) return <p className="text-sm text-ink-subtle">Cargando…</p>;
   return (
     <div className="space-y-4">
+      <p className="text-xs text-ink-subtle">Un recurso es cualquier cosa que se agenda: una persona (Dra. Pérez), un box, una sala o un equipo. Cada recurso tiene su propio horario disponible; el bot solo ofrece horas dentro de esos horarios.</p>
       <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void create()} placeholder="Nombre de la persona (ej: Dra. Pérez)" className={cn(input, "flex-1")} />
-        <Button onClick={() => void create()}>Agregar persona</Button>
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void create()} placeholder="Nombre del recurso (ej: Dra. Pérez, Box 1, Sala A)" className={cn(input, "flex-1")} />
+        <Button onClick={() => void create()}>Agregar recurso</Button>
       </div>
       {pros.map((p, i) => (
         <HoursEditor key={p.id} prof={p} color={PALETTE[i % PALETTE.length]} onSave={(wh) => void saveHours(p.id, wh)} onRemove={() => void remove(p.id)} />
       ))}
-      {!pros.length && <p className="text-sm text-ink-subtle">Aún no hay personas. Agrega la primera para que el bot pueda agendar con ella.</p>}
+      {!pros.length && <p className="text-sm text-ink-subtle">Aún no hay recursos. Agrega el primero (una persona o un servicio) para que el bot pueda agendar con él.</p>}
     </div>
   );
 }
