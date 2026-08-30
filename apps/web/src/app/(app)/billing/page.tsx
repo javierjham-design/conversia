@@ -6,7 +6,7 @@
  * con la pasarela ya configurada (Flow CLP / Lemon Squeezy USD / Mock en dev).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CreditCard } from "lucide-react";
+import { CreditCard, Timer } from "lucide-react";
 import { api } from "@/lib/api";
 import { SubscriptionSelfService } from "./subscription-self-service";
 import { WalletCard } from "./wallet-card";
@@ -35,6 +35,7 @@ interface Overview {
   invoices: { id: string; number: string; status: string; currency: string; amountDue: number; createdAt: string; dueAt: string | null; paidAt: string | null }[];
   paymentMethod: { provider: string; brand: string | null; last4: string | null } | null;
   paymentProvider: string;
+  billing?: { state: string; trial?: { state: "active" | "disabled"; endsAt: string; daysLeft: number } | null } | null;
 }
 
 const LIMIT_LABELS: Record<string, string> = {
@@ -206,6 +207,17 @@ export default function BillingPage() {
   const currentIsFree = !data.plan || priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly") <= 0;
   // Planes que se pueden contratar/pagar: excluye el actual y los de $0 / solo-contacto.
   const payablePlans = plans.filter((p) => p.code !== currentCode && priceOf(p) > 0);
+  // Cuenta regresiva de la prueba para la tarjeta del plan: DÍAS normalmente; cuando
+  // queda menos de un día pasa a HORAS (más urgente y preciso) y sube la intensidad.
+  const trialInfo = (() => {
+    const t = data.billing?.trial;
+    if (!t || t.state !== "active") return null;
+    const hours = Math.max(0, Math.ceil((new Date(t.endsAt).getTime() - Date.now()) / 3_600_000));
+    if (hours <= 24) {
+      return { label: hours <= 0 ? "Tu prueba termina hoy" : `Te queda${hours === 1 ? "" : "n"} ${hours} hora${hours === 1 ? "" : "s"} de prueba`, urgent: true };
+    }
+    return { label: `Te quedan ${Math.ceil(hours / 24)} días de prueba`, urgent: false };
+  })();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -271,6 +283,19 @@ export default function BillingPage() {
             </>
           ) : (
             <p className="mt-2 text-sm text-ink-subtle">Sin plan asignado — elige uno abajo o contacta a TuBot.</p>
+          )}
+
+          {trialInfo && (
+            <div
+              className={cn(
+                "mt-3 flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium",
+                trialInfo.urgent
+                  ? "border-orange-400 bg-orange-100 text-orange-900 dark:border-orange-500/50 dark:bg-orange-500/15 dark:text-orange-200"
+                  : "border-orange-300 bg-orange-50 text-orange-800 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-300",
+              )}
+            >
+              <Timer size={14} className="shrink-0" /> {trialInfo.label}. Al terminar, el asistente se pausa hasta que actives un plan.
+            </div>
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
