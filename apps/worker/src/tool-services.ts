@@ -184,7 +184,7 @@ export async function buildAssistedSetupStatusBlock(
   if (!linked) return "";
   const admin = getAdminPrisma();
   const [org, ch] = await Promise.all([
-    admin.organization.findUnique({ where: { id: linked.orgId }, select: { name: true } }),
+    admin.organization.findUnique({ where: { id: linked.orgId }, select: { name: true, status: true, settings: true, createdAt: true } }),
     linked.scopeChannelId ? admin.channelConnection.findUnique({ where: { id: linked.scopeChannelId }, select: { name: true } }) : Promise.resolve(null),
   ]);
   const empresa = org?.name ?? "la empresa del cliente";
@@ -195,8 +195,46 @@ export async function buildAssistedSetupStatusBlock(
     `Este cliente YA autorizó y vinculó su cuenta: «${empresa}»${canal}. El vínculo está ACTIVO (válido 14 días). ` +
     `NO pidas otro código ni repitas el flujo de autorización: ya tienes acceso. Usa directamente tus herramientas ` +
     `de montaje (getClientSetupState, upsertClientAgent, etc.) y continúa desde ${paso}. ` +
-    `Solo si una herramienta te responde que el vínculo venció o fue revocado, recién ahí pídele un código nuevo.`
+    `Solo si una herramienta te responde que el vínculo venció o fue revocado, recién ahí pídele un código nuevo.` +
+    buildTrialPhaseBlock(org)
   );
+}
+
+/**
+ * Fase de la cuenta del CLIENTE (prueba vs activa) + días/horas de prueba restantes, para
+ * que el agente de implementación dé urgencia real y empuje la activación en el momento
+ * justo. Replica el cálculo de la prueba de 7 días de la API (billing): si aún no se fijó
+ * settings.trial, cae a createdAt+7d. Muestra HORAS cuando queda menos de un día.
+ */
+function buildTrialPhaseBlock(
+  org: { status: string; settings: unknown; createdAt: Date } | null,
+): string {
+  if (!org) return "";
+  if (org.status === "TRIAL") {
+    const trial = (org.settings as Record<string, any> | null)?.trial as { endsAt?: string } | undefined;
+    const endsAt = new Date(trial?.endsAt ?? new Date(org.createdAt).getTime() + 7 * 86_400_000);
+    const ms = endsAt.getTime() - Date.now();
+    let restante: string;
+    if (ms <= 0) {
+      restante = "su prueba está por terminar (hoy mismo)";
+    } else {
+      const horas = Math.ceil(ms / 3_600_000);
+      restante = horas <= 24 ? `le queda${horas === 1 ? "" : "n"} ${horas} hora${horas === 1 ? "" : "s"} de prueba` : `le quedan ${Math.ceil(horas / 24)} días de prueba`;
+    }
+    return (
+      `\n\n## FASE DE LA CUENTA DEL CLIENTE — EN PRUEBA\n` +
+      `El cliente está en FASE DE PRUEBA: ${restante} antes de que su prueba termine y su asistente se pause. ` +
+      `Tenlo presente y recuérdaselo con naturalidad cuando calce, empujándolo a activar un plan ANTES de que venza ` +
+      `(sin agobiar); mientras menos tiempo quede, más directo. Al activar NO pierde nada de lo que montaron juntos.`
+    );
+  }
+  if (org.status === "ACTIVE") {
+    return (
+      `\n\n## FASE DE LA CUENTA DEL CLIENTE — ACTIVA\n` +
+      `El cliente YA activó su plan (no está en prueba). No lo empujes a activar; enfócate en dejar su montaje impecable.`
+    );
+  }
+  return "";
 }
 
 /** Mapea una fila de catalog_items a lo que el bot necesita (usa botDescription si existe). */
