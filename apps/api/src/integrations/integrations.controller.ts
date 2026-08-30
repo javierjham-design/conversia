@@ -184,6 +184,10 @@ export class IntegrationsController {
               apiKeyMasked: cred ? maskSecret(decryptSecret(cred.ciphertext)) : null,
               lastSyncAt: scheduling.lastSyncAt,
               lastError: scheduling.lastError,
+              // Datos que Cláriva pide en "Avisos a TuBot (webhooks)":
+              connectionId: scheduling.id,
+              webhookSecret: ((scheduling.config as Record<string, unknown> | null)?.webhookSecret as string | undefined) ?? null,
+              webhookUrl: `${getEnv().API_URL.replace(/\/$/, "")}/webhooks/clariva/${scheduling.id}`,
             }
           : null,
         email: emailConn
@@ -1330,17 +1334,21 @@ export class IntegrationsController {
         },
       });
       const existing = await tx.schedulingConnection.findFirst({ where: { provider: "CLARIVA" } });
+      // Secreto de webhook (Cláriva → TuBot): se conserva entre reconexiones para
+      // no romper el aviso ya cargado en Cláriva; se genera si aún no existe.
+      const prevSecret = (existing?.config as Record<string, unknown> | null)?.webhookSecret;
+      const webhookSecret = typeof prevSecret === "string" && prevSecret ? prevSecret : `clsec_${randomBytes(24).toString("base64url")}`;
       const connection = existing
         ? await tx.schedulingConnection.update({
             where: { id: existing.id },
-            data: { status: "active", config: { baseUrl: input.baseUrl }, credentialId: credential.id, lastError: null },
+            data: { status: "active", config: { baseUrl: input.baseUrl, webhookSecret }, credentialId: credential.id, lastError: null },
           })
         : await tx.schedulingConnection.create({
             data: {
               organizationId: ctx.organizationId,
               provider: "CLARIVA",
               status: "active",
-              config: { baseUrl: input.baseUrl },
+              config: { baseUrl: input.baseUrl, webhookSecret },
               credentialId: credential.id,
             },
           });
@@ -1351,6 +1359,29 @@ export class IntegrationsController {
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.clariva.connect", entityType: "scheduling_connection", entityId: connection.id },
       });
       return { ok: true };
+    });
+  }
+
+  /**
+   * Genera (o regenera) el secreto del webhook Cláriva → TuBot. Sirve para las
+   * conexiones creadas antes de que el secreto existiera (backfill) y para rotarlo.
+   * Devuelve connectionId + secreto para pegarlos en "Avisos a TuBot" de Cláriva.
+   */
+  @Post("clariva/webhook-secret")
+  regenerateClarivaWebhookSecret() {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.schedulingConnection.findFirst({ where: { provider: "CLARIVA" } });
+      if (!conn) throw new BadRequestException("Cláriva no está conectado");
+      const webhookSecret = `clsec_${randomBytes(24).toString("base64url")}`;
+      await tx.schedulingConnection.update({
+        where: { id: conn.id },
+        data: { config: { ...((conn.config as object) ?? {}), webhookSecret } as object },
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.clariva.webhook_secret", entityType: "scheduling_connection", entityId: conn.id },
+      });
+      return { connectionId: conn.id, webhookSecret, webhookUrl: `${getEnv().API_URL.replace(/\/$/, "")}/webhooks/clariva/${conn.id}` };
     });
   }
 
