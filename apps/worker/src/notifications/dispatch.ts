@@ -105,7 +105,14 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
     const renderData = { ...job.data, conversationId: job.conversationId };
     const title = render(event.title, renderData);
     const body = render(event.body, renderData);
-    const link = event.link ? render(event.link, renderData) : undefined;
+    let link = event.link ? render(event.link, renderData) : undefined;
+    // Deep link MULTI-TENANT: adjuntamos la org del evento (?org=). Un mismo usuario puede
+    // manejar varias cuentas; sin esto, al tocar una notificación de otra cuenta la app
+    // abría la conversación en la cuenta activa equivocada y quedaba cargando. Con el org,
+    // la app cambia a esa cuenta antes de mostrar la conversación.
+    if (link && job.organizationId) {
+      link += (link.includes("?") ? "&" : "?") + "org=" + encodeURIComponent(job.organizationId);
+    }
 
     for (const channel of channels) {
       const impl = CHANNELS[channel];
