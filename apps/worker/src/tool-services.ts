@@ -134,6 +134,8 @@ export interface ToolTargets {
 export interface ToolOptions {
   /** Bases de conocimiento habilitadas para el agente. undefined = todas. */
   knowledgeSources?: string[] | null;
+  /** Profesionales/recursos con los que ESTE agente puede agendar. Vacío/undefined = todos. */
+  allowedProfessionalIds?: string[] | null;
 }
 
 /**
@@ -283,8 +285,27 @@ async function refreshIfStale(orgId: string, source: string, syncedAt: Date | nu
 }
 
 export async function buildToolServices(orgId: string, t: ToolTargets, opts: ToolOptions = {}): Promise<ToolServices> {
-  const scheduling = await getSchedulingProviderFor(orgId);
+  const rawScheduling = await getSchedulingProviderFor(orgId);
   const knowledgeSources = opts.knowledgeSources;
+
+  // Segmentación POR AGENTE: si el agente tiene una lista de profesionales/recursos
+  // habilitados, el bot solo ve disponibilidad de esos y no puede reservar con otro.
+  const allowed = Array.isArray(opts.allowedProfessionalIds) && opts.allowedProfessionalIds.length ? new Set(opts.allowedProfessionalIds) : null;
+  let scheduling = rawScheduling;
+  if (allowed) {
+    const scoped = Object.create(rawScheduling) as SchedulingProvider;
+    scoped.getAvailableSlots = async (q) => {
+      const wanted = q.professionalId && !allowed.has(q.professionalId) ? [] : await rawScheduling.getAvailableSlots(q);
+      return wanted.filter((s) => !s.professionalId || allowed.has(s.professionalId));
+    };
+    scoped.createAppointment = async (input) => {
+      if (input.professionalId && !allowed.has(input.professionalId)) {
+        throw new Error("Ese profesional no está habilitado para agendar con este agente");
+      }
+      return rawScheduling.createAppointment(input);
+    };
+    scheduling = scoped;
+  }
 
   return {
     scheduling,
@@ -322,19 +343,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
 
     async listProfessionals(serviceCode?: string) {
       return withTenant(orgId, async (tx) => {
-        if (serviceCode) {
-          const svc = await tx.service.findUnique({
-            where: { organizationId_code: { organizationId: orgId, code: serviceCode } },
-          });
-          if (!svc) return [];
-          const links = await tx.professionalService.findMany({ where: { serviceId: svc.id } });
-          const pros = await tx.professional.findMany({
-            where: { id: { in: links.map((l) => l.professionalId) }, active: true },
-          });
-          return pros.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty }));
-        }
-        const pros = await tx.professional.findMany({ where: { active: true } });
-        return pros.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty }));
+        const ids = serviceCode
+          ? await tx.service
+              .findUnique({ where: { organizationId_code: { organizationId: orgId, code: serviceCode } } })
+              .then(async (svc) => (svc ? (await tx.professionalService.findMany({ where: { serviceId: svc.id } })).map((l) => l.professionalId) : null))
+          : undefined;
+        if (ids === null) return []; // servicio no encontrado
+        const pros = await tx.professional.findMany({ where: { active: true, ...(ids ? { id: { in: ids } } : {}) } });
+        return pros.filter((p) => !allowed || allowed.has(p.id)).map((p) => ({ id: p.id, name: p.name, specialty: p.specialty }));
       });
     },
 

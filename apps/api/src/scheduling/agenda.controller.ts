@@ -42,6 +42,29 @@ export class AgendaController {
     });
   }
 
+  /**
+   * Recursos AGENDABLES del proveedor activo (profesionales de Cláriva/Dentalink en vivo,
+   * o recursos nativos). Se usa para elegir, por AGENTE, con quién puede agendar
+   * (p.ej. campaña de implantes = solo algunos). Devuelve ids que luego el bot respeta.
+   */
+  @Get("resources")
+  async resources() {
+    const ctx = requireContext();
+    const provider = await this.externalProvider(ctx.organizationId);
+    if (provider) {
+      try {
+        const pros = await provider.getProfessionals();
+        return { source: provider.kind, resources: pros.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? null })) };
+      } catch {
+        // cae a nativo
+      }
+    }
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const pros = await tx.professional.findMany({ where: { active: true }, orderBy: { name: "asc" } });
+      return { source: "native", resources: pros.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? null })) };
+    });
+  }
+
   // ------------------------------ Config ------------------------------
   @Get("config")
   async getConfig() {

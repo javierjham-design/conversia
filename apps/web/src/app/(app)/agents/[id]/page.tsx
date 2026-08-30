@@ -293,6 +293,8 @@ export default function AgentEditorPage() {
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [knowledgeSources, setKnowledgeSources] = useState<string[]>([]);
+  const [resources, setResources] = useState<{ id: string; name: string; specialty: string | null }[]>([]);
+  const [schedulingProfs, setSchedulingProfs] = useState<string[]>([]);
 
   const [snapshot, setSnapshot] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -301,17 +303,19 @@ export default function AgentEditorPage() {
   const [showTemplates, setShowTemplates] = useState(false);
 
   const load = useCallback(async () => {
-    const [detail, chans, users, teams, agents, kbs] = await Promise.all([
+    const [detail, chans, users, teams, agents, kbs, res] = await Promise.all([
       api<AgentDetail>(`/agents/${id}`),
       api<Channel[]>("/organizations/me/channels").catch(() => []),
       api<{ userId: string; name: string }[]>("/users/assignable").catch(() => []),
       api<{ id: string; name: string }[]>("/users/teams").catch(() => []),
       api<{ id: string; name: string }[]>("/agents/assignable").catch(() => []),
       api<KnowledgeBase[]>("/agents/meta/knowledge").catch(() => []),
+      api<{ resources: { id: string; name: string; specialty: string | null }[] }>("/agenda/resources").catch(() => ({ resources: [] })),
     ]);
     setAgent(detail);
     setChannels(chans);
     setKnowledgeBases(kbs);
+    setResources(res.resources ?? []);
     setMentions([
       ...teams.map((t) => ({ label: t.name, type: "equipo" as const })),
       ...users.map((u) => ({ label: u.name, type: "usuario" as const })),
@@ -334,6 +338,9 @@ export default function AgentEditorPage() {
     const nextExtra = nextTools.filter((t) => !actionTools.has(t));
     // Fuentes de conocimiento: selección explícita del agente o, si es antiguo, todas.
     const nextKnowledge: string[] = Array.isArray(cfg.knowledgeSources) ? cfg.knowledgeSources : kbs.map((k) => k.id);
+    // Profesionales/recursos habilitados para agendar (vacío = todos).
+    const nextScheduling: string[] = Array.isArray(cfg.scheduling?.professionalIds) ? cfg.scheduling.professionalIds : [];
+    setSchedulingProfs(nextScheduling);
     setEmoji(nextEmoji);
     setSystemPrompt(nextPrompt);
     setModel(nextModel);
@@ -343,7 +350,7 @@ export default function AgentEditorPage() {
     setExtraTools(nextExtra);
     setKnowledgeSources(nextKnowledge);
     setSnapshot(
-      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions, knowledgeSources: nextKnowledge }),
+      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions, knowledgeSources: nextKnowledge, schedulingProfs: nextScheduling }),
     );
   }, [id]);
 
@@ -352,11 +359,14 @@ export default function AgentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions, knowledgeSources });
+  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions, knowledgeSources, schedulingProfs });
   const dirty = snapshot !== "" && current !== snapshot;
 
   function toggleKnowledge(kbId: string, on: boolean) {
     setKnowledgeSources((prev) => (on ? [...new Set([...prev, kbId])] : prev.filter((x) => x !== kbId)));
+  }
+  function toggleSchedulingProf(profId: string, on: boolean) {
+    setSchedulingProfs((prev) => (on ? [...new Set([...prev, profId])] : prev.filter((x) => x !== profId)));
   }
 
   // Tools efectivas: las de las acciones + extras preservadas; si hay al menos
@@ -409,7 +419,7 @@ export default function AgentEditorPage() {
           kind,
           description: description || null,
           systemPrompt,
-          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions, knowledgeSources },
+          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions, knowledgeSources, scheduling: { professionalIds: schedulingProfs } },
           tools: derivedTools,
         }),
       });
@@ -634,6 +644,30 @@ export default function AgentEditorPage() {
                 </div>
               )}
             </Section>
+
+            {/* Agenda — con quién puede agendar este agente (segmentación por campaña) */}
+            {resources.length > 0 && (
+              <Section id="sec-agenda" title="Agenda: con quién agenda" subtitle="Limita los profesionales/recursos con los que ESTE agente puede agendar (ej: la campaña de implantes solo con quienes los hacen). Vacío = todos.">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-ink-muted">{schedulingProfs.length === 0 ? "Puede agendar con TODOS los profesionales." : `Habilitados: ${schedulingProfs.length} de ${resources.length}.`}</p>
+                    {schedulingProfs.length > 0 && <button onClick={() => setSchedulingProfs([])} className="text-2xs text-brand-700 hover:underline dark:text-brand-300">Permitir todos</button>}
+                  </div>
+                  {resources.map((r) => {
+                    const on = schedulingProfs.includes(r.id);
+                    return (
+                      <div key={r.id} className={cn("flex items-center justify-between gap-3 rounded-lg border p-3", on ? "border-brand-300 bg-brand-50/40 dark:border-brand-500/40" : "border-line")}>
+                        <div>
+                          <p className="text-sm font-medium text-ink">{r.name}</p>
+                          {r.specialty && <p className="text-xs text-ink-muted">{r.specialty}</p>}
+                        </div>
+                        <Toggle checked={on} onChange={(v) => toggleSchedulingProf(r.id, v)} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            )}
 
             {/* Avanzado */}
             <div className="rounded-xl border border-line bg-panel">

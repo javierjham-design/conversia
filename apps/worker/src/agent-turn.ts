@@ -411,7 +411,10 @@ export async function runAgentTurn(opts: {
       clinicId: conversation.clinicId,
       agentId: agent.id,
     },
-    { knowledgeSources: Array.isArray(cfg.knowledgeSources) ? (cfg.knowledgeSources as string[]) : null },
+    {
+      knowledgeSources: Array.isArray(cfg.knowledgeSources) ? (cfg.knowledgeSources as string[]) : null,
+      allowedProfessionalIds: Array.isArray(cfg.scheduling?.professionalIds) ? (cfg.scheduling.professionalIds as string[]) : null,
+    },
   );
   const toolCtx: ToolContext = {
     organizationId,
