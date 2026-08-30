@@ -200,6 +200,7 @@ export interface NativeProfessional {
   specialty?: string;
   clinicIds?: string[];
   workingHours: WorkBlock[]; // bloques de trabajo por día de semana
+  defaultDurationMin?: number; // duración propia (recurso tipo servicio, ej "cambio de aceite" 30m)
 }
 export interface NativeSchedulingData {
   clinics: SchedClinic[];
@@ -231,13 +232,14 @@ export class NativeSchedulingProvider implements SchedulingProvider {
   async getAvailableSlots(query: AvailabilityQuery): Promise<SchedSlot[]> {
     const cfg = this.data.config ?? {};
     const svc = query.serviceId ? this.data.services.find((s) => s.id === query.serviceId) : undefined;
-    const durationMin = svc?.durationMin ?? 30;
     const clinicId = query.clinicId ?? this.data.clinics[0]?.id ?? "";
     const pros = query.professionalId ? this.data.professionals.filter((p) => p.id === query.professionalId) : this.data.professionals;
 
     const out: SchedSlot[] = [];
     for (const prof of pros) {
       if (!prof.workingHours?.length) continue;
+      // Duración: la del servicio pedido, o la propia del recurso (tipo servicio), o 30.
+      const durationMin = svc?.durationMin ?? prof.defaultDurationMin ?? 30;
       const slots = computeNativeSlots({
         fromDate: query.from,
         toDate: query.to,
