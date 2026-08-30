@@ -312,7 +312,9 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 10000);
     try {
-      const res = await fetch(`${this.opts.baseUrl}/api/v1${path}`, {
+      // Tolera baseUrl con o sin `/api/v1` (y barra final): evita `/api/v1/api/v1`.
+      const base = this.opts.baseUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
+      const res = await fetch(`${base}/api/v1${path}`, {
         method,
         headers: {
           authorization: `Bearer ${this.opts.apiKey}`,
