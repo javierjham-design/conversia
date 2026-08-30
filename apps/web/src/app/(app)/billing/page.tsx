@@ -38,6 +38,7 @@ interface Overview {
 }
 
 const LIMIT_LABELS: Record<string, string> = {
+  contactsMonthly: "contactos/mes",
   users: "usuarios",
   agents: "agentes IA",
   channels: "canales",
@@ -45,6 +46,17 @@ const LIMIT_LABELS: Record<string, string> = {
   clinics: "sedes",
   aiTokensDaily: "tokens IA/día",
 };
+// Orden de exhibición en las tarjetas de plan: contactos/mes PRIMERO (es el límite
+// máximo de clientes, la métrica de venta principal); los tokens IA quedan al final
+// (no se destacan al cliente). Se muestran los primeros 6.
+const LIMIT_ORDER = ["contactsMonthly", "users", "agents", "channels", "workflows", "clinics", "aiTokensDaily"];
+function orderedLimits(limits: Record<string, number | null>): [string, number | null][] {
+  return Object.entries(limits ?? {}).sort((a, b) => {
+    const ia = LIMIT_ORDER.indexOf(a[0]);
+    const ib = LIMIT_ORDER.indexOf(b[0]);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+}
 const PROVIDER_LABELS: Record<string, string> = {
   flow: "Flow (CLP)",
   lemonsqueezy: "Lemon Squeezy (USD)",
@@ -156,7 +168,7 @@ export default function BillingPage() {
   // de 4 planes, en vez de un bloque gris genérico.
   if (!data)
     return (
-      <div className="mx-auto max-w-5xl space-y-4 p-6">
+      <div className="h-full overflow-y-auto mx-auto max-w-5xl space-y-4 p-6">
         <Skeleton className="h-7 w-48" />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-40 rounded-card" />
@@ -189,6 +201,7 @@ export default function BillingPage() {
   const cadence = billingInterval === "yearly" ? "año" : "mes";
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="mx-auto max-w-5xl p-6">
       <h1 className="text-xl font-semibold">Plan y facturación</h1>
       <p className="mb-4 text-sm text-ink-muted">Tu plan, el consumo del período y tus pagos.</p>
@@ -321,7 +334,7 @@ export default function BillingPage() {
                 );
               })()}
               <ul className="mt-2 flex-1 space-y-0.5 text-[11px] text-ink-muted">
-                {Object.entries(p.limits ?? {}).slice(0, 5).map(([k, v]) => (
+                {orderedLimits(p.limits ?? {}).slice(0, 6).map(([k, v]) => (
                   <li key={k}>• {v == null || v === 0 ? "∞" : Number(v).toLocaleString("es-CL")} {LIMIT_LABELS[k] ?? k}</li>
                 ))}
               </ul>
@@ -401,6 +414,7 @@ export default function BillingPage() {
         }
         confirmLabel="Continuar al pago"
       />
+    </div>
     </div>
   );
 }
