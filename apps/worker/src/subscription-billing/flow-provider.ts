@@ -14,8 +14,10 @@
  * Webhook: Flow no firma con header; llama a urlConfirmation con un `token` y NOSOTROS
  * reconsultamos payment/getStatus (fuente de verdad firmada por nuestra propia clave).
  *
- * NOTA: los NOMBRES exactos de algunos campos de respuesta (status codes de collect,
- * last4) deben confirmarse contra el sandbox de Flow al encender; están marcados con TODO.
+ * VERIFICADO en producción (2026-08-29, E2E con tarjeta real): registro de tarjeta →
+ * primer collect → renovación automática funcionando. Los campos de respuesta usados
+ * (status de getRegisterStatus, last4digits/creditCardType, status 1-4 de payment/getStatus)
+ * quedaron confirmados contra la API real de Flow.
  */
 import { createHmac } from "node:crypto";
 import type { ChargeInput, ChargeResult, CreateCustomerInput, NormalizedEvent, SubscriptionProvider } from "./provider";
@@ -70,7 +72,7 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
 
   async getPaymentMethodStatus(token: string): Promise<{ status: "registered" | "pending" | "failed"; brand: string | null; last4: string | null }> {
     const r = await this.get("customer/getRegisterStatus", { token });
-    // TODO(sandbox): confirmar el código de `status` (1=registrada) y nombres last4/brand.
+    // Verificado en prod: status 1 = tarjeta registrada; creditCardType/last4digits reales.
     const registered = r?.status === 1 || r?.status === "1";
     return {
       status: registered ? "registered" : r?.status === 0 ? "pending" : "failed",

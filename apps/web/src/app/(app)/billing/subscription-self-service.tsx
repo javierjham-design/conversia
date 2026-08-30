@@ -26,6 +26,7 @@ export function SubscriptionSelfService({ planCode, interval }: { planCode: stri
   const toast = useToast();
   const [h, setH] = useState<History | null>(null);
   const [busy, setBusy] = useState(false);
+  const [justPaid, setJustPaid] = useState(false);
   const confirmed = useRef(false);
 
   const load = useCallback(async () => {
@@ -49,7 +50,12 @@ export function SubscriptionSelfService({ planCode, interval }: { planCode: stri
         void api<{ registered: boolean }>("/billing/subscription/confirm-card", { method: "POST", body: JSON.stringify({ token }) })
           .then((r) => {
             sessionStorage.removeItem("sub_card_token");
-            toast.push(r.registered ? "Tarjeta registrada — procesando el primer cobro ✔" : "No se pudo registrar la tarjeta", r.registered ? "ok" : "error");
+            if (r.registered) {
+              setJustPaid(true);
+              toast.push("Tarjeta registrada — procesando el primer cobro ✔", "ok");
+            } else {
+              toast.push("No se pudo registrar la tarjeta", "error");
+            }
             void load();
           })
           .catch((e) => toast.push((e as Error).message, "error"));
@@ -97,6 +103,16 @@ export function SubscriptionSelfService({ planCode, interval }: { planCode: stri
           </span>
         )}
       </div>
+
+      {justPaid && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <span className="text-base leading-none">🎉</span>
+          <p>
+            <b>¡Listo, tu plan quedó activo!</b> Registramos tu tarjeta y el cobro se renovará solo en cada fecha — no
+            tienes que volver a pagar a mano. Puedes cancelar cuando quieras desde aquí.
+          </p>
+        </div>
+      )}
 
       {!hasCard ? (
         <>
