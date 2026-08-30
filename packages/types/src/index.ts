@@ -63,8 +63,11 @@ export interface SchedPatient {
 export interface SchedAppointment {
   id: string; // id en el proveedor externo
   clinicId: string;
+  clinicName?: string;
   professionalId: string;
+  professionalName?: string;
   serviceId?: string;
+  serviceName?: string;
   patient: SchedPatient;
   start: string;
   end: string;
@@ -107,6 +110,8 @@ export interface SchedulingProvider {
   confirmAppointment(id: string): Promise<SchedAppointment>;
   getAppointment(id: string): Promise<SchedAppointment | null>;
   getPatientAppointments(phone: string): Promise<SchedAppointment[]>;
+  /** Lista las citas del proveedor en un rango (para visualizar la agenda real en el panel). Opcional: no todos los proveedores lo exponen. */
+  listAppointments?(query: AvailabilityQuery): Promise<SchedAppointment[]>;
   createOrUpdatePatient(patient: SchedPatient): Promise<SchedPatient>;
   markAttendance(id: string): Promise<void>;
   markNoShow(id: string): Promise<void>;

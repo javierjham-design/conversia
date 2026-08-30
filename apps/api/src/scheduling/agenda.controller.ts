@@ -1,8 +1,13 @@
 import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
+import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider } from "@conversia/scheduling";
 import { PrismaService } from "../prisma.service";
+import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+
+const STATUS_MAP: Record<string, string> = { pending: "PENDING", confirmed: "CONFIRMED", cancelled: "CANCELLED", rescheduled: "RESCHEDULED", completed: "COMPLETED", no_show: "NO_SHOW" };
 
 const workBlock = z.object({
   day: z.number().int().min(0).max(6),
@@ -149,12 +154,57 @@ export class AgendaController {
     return this.prisma.withTenant(ctx.organizationId, (tx) => tx.service.update({ where: { id }, data: { active: false } }).then(() => ({ ok: true })));
   }
 
+  /** Construye el proveedor externo (Cláriva/Dentalink) con credenciales descifradas, o null si no hay conexión activa. */
+  private async externalProvider(orgId: string): Promise<SchedulingProvider | null> {
+    return this.prisma.withTenant(orgId, async (tx) => {
+      const conn = await tx.schedulingConnection.findFirst({ where: { status: "active", provider: { in: ["CLARIVA", "DENTALINK"] } } });
+      if (!conn) return null;
+      const cred = conn.credentialId ? await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } }) : null;
+      const apiKey = cred ? decryptSecret(cred.ciphertext) : "";
+      const baseUrl = (conn.config as Record<string, unknown> | null)?.baseUrl as string | undefined;
+      if (!baseUrl || !apiKey) return null;
+      if (conn.provider === "CLARIVA") return new ClarivaSchedulingProvider({ baseUrl, apiKey });
+      if (conn.provider === "DENTALINK") return new DentalinkSchedulingProvider({ baseUrl, token: apiKey });
+      return null;
+    });
+  }
+
+  private mapSched(a: SchedAppointment) {
+    const name = [a.patient?.firstName, a.patient?.lastName].filter(Boolean).join(" ") || a.patient?.phone || "Sin nombre";
+    return {
+      id: a.id,
+      professionalId: a.professionalId ?? null,
+      professionalName: a.professionalName ?? null,
+      serviceId: a.serviceId ?? null,
+      serviceName: a.serviceName ?? null,
+      status: STATUS_MAP[a.status] ?? String(a.status).toUpperCase(),
+      startsAt: new Date(a.start).toISOString(),
+      endsAt: new Date(a.end).toISOString(),
+      notes: a.notes ?? null,
+      contact: { name, phone: a.patient?.phone ?? null },
+    };
+  }
+
   // ------------------------------ Citas ------------------------------
+  // Si hay Cláriva/Dentalink conectado, trae la agenda REAL en vivo del proveedor
+  // (fuente de verdad, sin desfase). Si el proveedor no expone listado o falla,
+  // cae a la proyección local (alimentada por webhooks) para no quedar en blanco.
   @Get("appointments")
   async listAppointments(@Query("from") from?: string, @Query("to") to?: string) {
     const ctx = requireContext();
     const gte = from ? new Date(from) : new Date(Date.now() - 24 * 3600 * 1000);
     const lte = to ? new Date(to) : new Date(Date.now() + 30 * 24 * 3600 * 1000);
+
+    const provider = await this.externalProvider(ctx.organizationId);
+    if (provider && typeof provider.listAppointments === "function") {
+      try {
+        const live = await provider.listAppointments({ from: gte.toISOString(), to: lte.toISOString() });
+        return { source: provider.kind, live: true, appointments: (live ?? []).map((a) => this.mapSched(a)).sort((x, y) => x.startsAt.localeCompare(y.startsAt)) };
+      } catch {
+        // sigue con la proyección local
+      }
+    }
+
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const appts = await tx.appointment.findMany({
         where: { startsAt: { gte, lte } },
@@ -162,16 +212,23 @@ export class AgendaController {
         include: { contact: { select: { firstName: true, lastName: true, phone: true } } },
         take: 500,
       });
-      return appts.map((a) => ({
-        id: a.id,
-        professionalId: a.professionalId,
-        serviceId: a.serviceId ?? null,
-        status: a.status,
-        startsAt: a.startsAt.toISOString(),
-        endsAt: a.endsAt.toISOString(),
-        notes: a.notes,
-        contact: { name: [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(" ") || a.contact?.phone || "Sin nombre", phone: a.contact?.phone ?? null },
-      }));
+      const meta = (a: (typeof appts)[number]) => (a.meta as Record<string, unknown> | null) ?? {};
+      return {
+        source: provider?.kind ?? "native",
+        live: false,
+        appointments: appts.map((a) => ({
+          id: a.id,
+          professionalId: a.professionalId,
+          professionalName: (meta(a).professionalName as string | undefined) ?? null,
+          serviceId: a.serviceId ?? null,
+          serviceName: (meta(a).serviceName as string | undefined) ?? null,
+          status: a.status,
+          startsAt: a.startsAt.toISOString(),
+          endsAt: a.endsAt.toISOString(),
+          notes: a.notes,
+          contact: { name: [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(" ") || a.contact?.phone || "Sin nombre", phone: a.contact?.phone ?? null },
+        })),
+      };
     });
   }
 

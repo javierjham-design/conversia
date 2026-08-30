@@ -355,6 +355,15 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
   createAppointment(input: CreateAppointmentInput) {
     return this.request<SchedAppointment>("POST", "/appointments", input);
   }
+  listAppointments(q: AvailabilityQuery) {
+    const params = new URLSearchParams();
+    if (q.clinicId) params.set("clinicId", q.clinicId);
+    if (q.professionalId) params.set("professionalId", q.professionalId);
+    if (q.serviceId) params.set("serviceId", q.serviceId);
+    params.set("from", q.from);
+    params.set("to", q.to);
+    return this.request<SchedAppointment[]>("GET", `/appointments?${params.toString()}`);
+  }
   updateAppointment(id: string, changes: Partial<CreateAppointmentInput>) {
     return this.request<SchedAppointment>("PATCH", `/appointments/${id}`, changes);
   }
@@ -451,6 +460,15 @@ export class CustomSchedulingProvider implements SchedulingProvider {
   }
   createAppointment(input: CreateAppointmentInput) {
     return this.request<SchedAppointment>("POST", "/appointments", input);
+  }
+  listAppointments(q: AvailabilityQuery) {
+    const params = new URLSearchParams();
+    if (q.clinicId) params.set("clinicId", q.clinicId);
+    if (q.professionalId) params.set("professionalId", q.professionalId);
+    if (q.serviceId) params.set("serviceId", q.serviceId);
+    params.set("from", q.from);
+    params.set("to", q.to);
+    return this.request<SchedAppointment[]>("GET", `/appointments?${params.toString()}`);
   }
   updateAppointment(id: string, changes: Partial<CreateAppointmentInput>) {
     return this.request<SchedAppointment>("PATCH", `/appointments/${id}`, changes);

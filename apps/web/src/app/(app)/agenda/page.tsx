@@ -9,7 +9,9 @@ const DAYS_LONG = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Vierne
 type Block = { day: number; start: string; end: string };
 type Prof = { id: string; name: string; specialty: string | null; workingHours: Block[] };
 type Svc = { id: string; code: string; name: string; durationMin: number; price: number | null; currency: string };
-type Appt = { id: string; status: string; startsAt: string; endsAt: string; notes: string | null; contact: { name: string; phone: string | null }; professionalId: string | null; serviceId?: string | null };
+type Appt = { id: string; status: string; startsAt: string; endsAt: string; notes: string | null; contact: { name: string; phone: string | null }; professionalId: string | null; professionalName?: string | null; serviceId?: string | null; serviceName?: string | null };
+type ApptsResponse = { source: string; live: boolean; appointments: Appt[] };
+type ColorRef = { id: string; name: string };
 type Status = { provider: string; external: boolean };
 type Config = { slotStepMin: number; bufferMin: number; minAdvanceMin: number };
 
@@ -24,9 +26,9 @@ const PALETTE = [
   { band: "bg-rose-500/10", block: "bg-rose-500 border-rose-600", dot: "bg-rose-500", soft: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300" },
   { band: "bg-teal-500/10", block: "bg-teal-500 border-teal-600", dot: "bg-teal-500", soft: "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300" },
 ];
-const palOf = (profId: string | null, pros: Prof[]) => {
+const palOf = (profId: string | null, refs: ColorRef[]) => {
   if (!profId) return PALETTE[0];
-  const i = pros.findIndex((p) => p.id === profId);
+  const i = refs.findIndex((p) => p.id === profId);
   return PALETTE[((i < 0 ? 0 : i) % PALETTE.length + PALETTE.length) % PALETTE.length];
 };
 
@@ -86,6 +88,7 @@ export default function AgendaPage() {
 // ------------------------------ Citas (calendario) ------------------------------
 function Citas() {
   const [appts, setAppts] = useState<Appt[] | null>(null);
+  const [meta, setMeta] = useState<{ source: string; live: boolean }>({ source: "native", live: false });
   const [pros, setPros] = useState<Prof[]>([]);
   const [svcs, setSvcs] = useState<Svc[]>([]);
   const [view, setView] = useState<"semana" | "lista">("semana");
@@ -99,12 +102,23 @@ function Citas() {
     const from = new Date(weekStart); from.setDate(from.getDate() - 1);
     const to = new Date(weekStart); to.setDate(to.getDate() + 8);
     return Promise.all([
-      api<Appt[]>(`/agenda/appointments?from=${from.toISOString()}&to=${to.toISOString()}`).then(setAppts).catch(() => setAppts([])),
+      api<ApptsResponse>(`/agenda/appointments?from=${from.toISOString()}&to=${to.toISOString()}`)
+        .then((r) => { setAppts(r.appointments ?? []); setMeta({ source: r.source ?? "native", live: !!r.live }); })
+        .catch(() => { setAppts([]); setMeta({ source: "native", live: false }); }),
       api<Prof[]>("/agenda/professionals").then(setPros).catch(() => {}),
       api<Svc[]>("/agenda/services").then(setSvcs).catch(() => {}),
     ]);
   }, [weekStart]);
   useEffect(() => void load(), [load]);
+
+  // Referencia de color/leyenda por profesional: personas nativas si las hay;
+  // si la agenda viene del proveedor externo (Cláriva), se derivan de las citas.
+  const colorRefs = useMemo<ColorRef[]>(() => {
+    if (pros.length) return pros.map((p) => ({ id: p.id, name: p.name }));
+    const seen = new Map<string, string>();
+    for (const a of appts ?? []) if (a.professionalId && !seen.has(a.professionalId)) seen.set(a.professionalId, a.professionalName || "Profesional");
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [pros, appts]);
 
   // Rango horario visible: se ajusta a los horarios cargados + a las citas de la semana.
   const [rangeStart, rangeEnd] = useMemo(() => {
@@ -136,20 +150,30 @@ function Citas() {
               <button key={v} onClick={() => setView(v)} className={cn("px-3 py-1 capitalize", view === v ? "bg-brand-600 text-white" : "text-ink-muted hover:bg-app")}>{v}</button>
             ))}
           </div>
-          <Button onClick={() => setModal({ date: new Date() })}>＋ Nueva cita</Button>
+          {!meta.live && <Button onClick={() => setModal({ date: new Date() })}>＋ Nueva cita</Button>}
         </div>
       </div>
 
-      {pros.length > 0 && (
+      {meta.live && (
+        <p className="mb-3 text-2xs text-ink-subtle">Vista de la agenda de {meta.source === "clariva" ? "Cláriva" : meta.source}. Las citas se crean y modifican en {meta.source === "clariva" ? "Cláriva" : "el proveedor"} o las agenda el bot; aquí las ves en tiempo real.</p>
+      )}
+
+      {meta.live && (
+        <div className="mb-3 inline-flex items-center gap-1.5 rounded-pill bg-emerald-50 px-2.5 py-1 text-2xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> En vivo desde {meta.source === "clariva" ? "Cláriva" : meta.source === "dentalink" ? "Dentalink" : meta.source}
+        </div>
+      )}
+
+      {colorRefs.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1">
-          {pros.map((p) => (
-            <span key={p.id} className="inline-flex items-center gap-1.5 text-xs text-ink-muted"><span className={cn("h-2.5 w-2.5 rounded-full", palOf(p.id, pros).dot)} />{p.name}</span>
+          {colorRefs.map((p) => (
+            <span key={p.id} className="inline-flex items-center gap-1.5 text-xs text-ink-muted"><span className={cn("h-2.5 w-2.5 rounded-full", palOf(p.id, colorRefs).dot)} />{p.name}</span>
           ))}
         </div>
       )}
 
       {view === "lista" ? (
-        <ListaCitas appts={appts} pros={pros} onOpen={(a) => setModal({ appt: a })} />
+        <ListaCitas appts={appts} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
       ) : appts === null ? (
         <p className="text-sm text-ink-subtle">Cargando…</p>
       ) : (
@@ -177,19 +201,19 @@ function Citas() {
                 ))}
               </div>
               {week.map((d, di) => (
-                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} pros={pros} appts={(appts ?? []).filter((a) => sameDay(new Date(a.startsAt), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
+                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} pros={pros} refs={colorRefs} readOnly={meta.live} appts={(appts ?? []).filter((a) => sameDay(new Date(a.startsAt), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
               ))}
             </div>
           </div>
         </div>
       )}
 
-      {modal && <ApptModal init={modal} pros={pros} svcs={svcs} onClose={() => setModal(null)} onSaved={() => { setModal(null); void load(); }} />}
+      {modal && <ApptModal init={modal} pros={pros} svcs={svcs} readOnly={meta.live} onClose={() => setModal(null)} onSaved={() => { setModal(null); void load(); }} />}
     </div>
   );
 }
 
-function DayColumn({ date, gridH, hours, rangeStart, pros, appts, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; pros: Prof[]; appts: Appt[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
+function DayColumn({ date, gridH, hours, rangeStart, pros, refs, readOnly, appts, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; pros: Prof[]; refs: ColorRef[]; readOnly?: boolean; appts: Appt[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
   const dow = date.getDay();
   // bandas de disponibilidad (unión de horarios de todas las personas ese día)
   const bands = useMemo(() => {
@@ -218,8 +242,9 @@ function DayColumn({ date, gridH, hours, rangeStart, pros, appts, onSlot, onAppt
   const nowMin = minsOf(new Date());
 
   return (
-    <div className={cn("relative border-l border-line", today && "bg-brand-500/[0.03]")} style={{ height: gridH }}
+    <div className={cn("relative border-l border-line", today && "bg-brand-500/[0.03]", !readOnly && "cursor-pointer")} style={{ height: gridH }}
       onClick={(e) => {
+        if (readOnly) return;
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const y = e.clientY - rect.top;
         const min = Math.round((rangeStart + y / PX_MIN) / 15) * 15;
@@ -241,7 +266,7 @@ function DayColumn({ date, gridH, hours, rangeStart, pros, appts, onSlot, onAppt
       {/* citas */}
       {laid.items.map(({ a, lane }) => {
         const s = minsOf(new Date(a.startsAt)), e = minsOf(new Date(a.endsAt));
-        const pal = palOf(a.professionalId, pros);
+        const pal = palOf(a.professionalId, refs);
         const cancelled = a.status === "CANCELLED";
         const w = 100 / laid.lanes;
         return (
@@ -257,7 +282,7 @@ function DayColumn({ date, gridH, hours, rangeStart, pros, appts, onSlot, onAppt
   );
 }
 
-function ListaCitas({ appts, pros, onOpen }: { appts: Appt[] | null; pros: Prof[]; onOpen: (a: Appt) => void }) {
+function ListaCitas({ appts, refs, onOpen }: { appts: Appt[] | null; refs: ColorRef[]; onOpen: (a: Appt) => void }) {
   if (!appts) return <p className="text-sm text-ink-subtle">Cargando…</p>;
   if (!appts.length) return <p className="text-sm text-ink-subtle">No hay citas en esta semana. Usa “＋ Nueva cita” o deja que el bot agende.</p>;
   const byDay = new Map<string, Appt[]>();
@@ -272,13 +297,14 @@ function ListaCitas({ appts, pros, onOpen }: { appts: Appt[] | null; pros: Prof[
           <p className="mb-1 text-xs font-semibold uppercase text-ink-subtle">{day}</p>
           <div className="space-y-1">
             {list.map((a) => {
-              const pal = palOf(a.professionalId, pros);
+              const pal = palOf(a.professionalId, refs);
               return (
                 <button key={a.id} onClick={() => onOpen(a)} className="flex w-full items-center justify-between rounded-lg border border-line bg-panel px-3 py-2 text-left text-sm hover:bg-app">
                   <div className="flex items-center gap-2">
                     <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", pal.dot)} />
                     <span className="font-medium tabular-nums">{new Date(a.startsAt).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}</span>
                     <span className="text-ink">{a.contact.name}</span>
+                    {a.professionalName && <span className="text-ink-subtle">· {a.professionalName}</span>}
                     {a.notes && <span className="text-ink-subtle">· {a.notes}</span>}
                   </div>
                   <span className={cn("rounded-pill px-2 py-0.5 text-2xs font-medium", a.status === "CANCELLED" ? "bg-red-50 text-red-600 dark:bg-red-500/10" : a.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10" : "bg-app text-ink-muted")}>{a.status}</span>
@@ -293,9 +319,35 @@ function ListaCitas({ appts, pros, onOpen }: { appts: Appt[] | null; pros: Prof[
 }
 
 // ------------------------------ Modal Nueva/Editar cita ------------------------------
-function ApptModal({ init, pros, svcs, onClose, onSaved }: { init: { date?: Date; appt?: Appt }; pros: Prof[]; svcs: Svc[]; onClose: () => void; onSaved: () => void }) {
+function ApptModal({ init, pros, svcs, readOnly, onClose, onSaved }: { init: { date?: Date; appt?: Appt }; pros: Prof[]; svcs: Svc[]; readOnly?: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const editing = !!init.appt;
+
+  if (readOnly && init.appt) {
+    const a = init.appt;
+    const start = new Date(a.startsAt), end = new Date(a.endsAt);
+    const fmt = (d: Date) => d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+    return (
+      <Modal open onClose={onClose} title="Cita">
+        <div className="space-y-3 text-sm">
+          <div className="rounded-lg border border-line bg-app px-3 py-2">
+            <span className="font-medium">{a.contact.name}</span>
+            {a.contact.phone && <span className="ml-2 text-ink-subtle">{a.contact.phone}</span>}
+            <span className={cn("ml-2 rounded-pill px-2 py-0.5 text-2xs", a.status === "CANCELLED" ? "bg-red-50 text-red-600" : a.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-600" : "bg-panel text-ink-muted")}>{a.status}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div><p className="text-ink-subtle">Fecha</p><p className="text-ink">{start.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}</p></div>
+            <div><p className="text-ink-subtle">Horario</p><p className="tabular-nums text-ink">{fmt(start)} – {fmt(end)}</p></div>
+            {a.professionalName && <div><p className="text-ink-subtle">Profesional</p><p className="text-ink">{a.professionalName}</p></div>}
+            {a.serviceName && <div><p className="text-ink-subtle">Servicio</p><p className="text-ink">{a.serviceName}</p></div>}
+          </div>
+          {a.notes && <div className="text-xs"><p className="text-ink-subtle">Notas</p><p className="text-ink">{a.notes}</p></div>}
+          <p className="text-2xs text-ink-subtle">Esta cita se gestiona en el proveedor conectado. Para reprogramar o cancelar, hazlo allí (o el bot lo hará en vivo).</p>
+          <div className="flex justify-end"><Button variant="secondary" onClick={onClose}>Cerrar</Button></div>
+        </div>
+      </Modal>
+    );
+  }
   const base = init.appt ? new Date(init.appt.startsAt) : init.date ?? new Date();
   const [contact, setContact] = useState<{ id: string; name: string } | null>(init.appt ? { id: "", name: init.appt.contact.name } : null);
   const [profId, setProfId] = useState(init.appt?.professionalId ?? "");

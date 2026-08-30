@@ -20,6 +20,7 @@ Estado: **CONTRATO PRELIMINAR** — propuesto por Conversia, pendiente de valida
 | GET | `/professionals/:id/services` | Prestaciones por profesional |
 | GET | `/availability?clinicId&professionalId&serviceId&from&to` | Slots disponibles `{start,end,professionalId,clinicId}` (ISO 8601 con TZ) |
 | POST | `/appointments` | Crear cita `{clinicId, professionalId, serviceId?, patient{firstName,lastName?,phone,email?}, start, end, notes?}` → 201 / **409 slot_taken** |
+| GET | `/appointments?clinicId&professionalId&serviceId&from&to` | **Listar citas del rango** (para mostrar la agenda real en el panel de TuBot). Devuelve arreglo de citas: `{id, clinicId, clinicName?, professionalId, professionalName?, serviceId?, serviceName?, patient{firstName,lastName?,phone,email?}, start, end, status, notes?}`. `status` ∈ `pending\|confirmed\|cancelled\|rescheduled\|completed\|no_show`. Filtra por `start`∈[from,to]. |
 | GET | `/appointments/:id` | Detalle |
 | PATCH | `/appointments/:id` | Reagendar/editar |
 | POST | `/appointments/:id/cancel` | Cancelar `{reason?}` |
