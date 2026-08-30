@@ -107,12 +107,14 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
   return new NativeSchedulingProvider({
     clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
     professionals: data.professionals.map((p) => {
-      const wh = (p.meta as any)?.workingHours;
+      const m = (p.meta as any) ?? {};
+      const wh = m.workingHours;
       return {
         id: p.id,
         name: p.name,
         specialty: p.specialty ?? undefined,
         workingHours: Array.isArray(wh) ? (wh as { day: number; start: string; end: string }[]) : [],
+        defaultDurationMin: typeof m.durationMin === "number" ? m.durationMin : undefined,
       };
     }),
     services: data.services.map((s) => ({ id: s.code, name: s.name, durationMin: s.durationMin, price: s.price ? Number(s.price) : undefined, currency: s.currency })),

@@ -7,7 +7,9 @@ import { Button, Modal, Select, cn, useToast } from "@/components/ui";
 const DAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 const DAYS_LONG = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 type Block = { day: number; start: string; end: string };
-type Prof = { id: string; name: string; specialty: string | null; workingHours: Block[] };
+type Prof = { id: string; name: string; specialty: string | null; type?: "persona" | "servicio"; durationMin?: number | null; workingHours: Block[] };
+type Slot = { professionalId: string; start: string; end: string };
+type AvailResponse = { source: string; slots: Slot[] };
 type Svc = { id: string; code: string; name: string; durationMin: number; price: number | null; currency: string };
 type Appt = { id: string; status: string; startsAt: string; endsAt: string; notes: string | null; contact: { name: string; phone: string | null }; professionalId: string | null; professionalName?: string | null; serviceId?: string | null; serviceName?: string | null };
 type ApptsResponse = { source: string; live: boolean; appointments: Appt[] };
@@ -87,6 +89,7 @@ function Citas() {
   const [meta, setMeta] = useState<{ source: string; live: boolean }>({ source: "native", live: false });
   const [pros, setPros] = useState<Prof[]>([]);
   const [svcs, setSvcs] = useState<Svc[]>([]);
+  const [avail, setAvail] = useState<Slot[]>([]);
   const [view, setView] = useState<"semana" | "dia" | "lista">("semana");
   const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -99,12 +102,17 @@ function Citas() {
     const base = view === "dia" ? anchor : weekStart;
     const from = new Date(base); from.setDate(from.getDate() - 1);
     const to = new Date(base); to.setDate(to.getDate() + (view === "dia" ? 2 : 8));
+    const range = `from=${from.toISOString()}&to=${to.toISOString()}`;
     return Promise.all([
-      api<ApptsResponse>(`/agenda/appointments?from=${from.toISOString()}&to=${to.toISOString()}`)
+      api<ApptsResponse>(`/agenda/appointments?${range}`)
         .then((r) => { setAppts(r.appointments ?? []); setMeta({ source: r.source ?? "native", live: !!r.live }); })
         .catch(() => { setAppts([]); setMeta({ source: "native", live: false }); }),
       api<Prof[]>("/agenda/professionals").then(setPros).catch(() => {}),
       api<Svc[]>("/agenda/services").then(setSvcs).catch(() => {}),
+      // La disponibilidad (huecos libres) solo se pinta en la vista Día → solo se pide ahí.
+      view === "dia"
+        ? api<AvailResponse>(`/agenda/availability?${range}`).then((r) => setAvail(r.slots ?? [])).catch(() => setAvail([]))
+        : Promise.resolve(setAvail([])),
     ]);
   }, [weekStart, anchor, view]);
   useEffect(() => void load(), [load]);
@@ -128,11 +136,12 @@ function Citas() {
     let lo = 8 * 60, hi = 20 * 60;
     for (const p of pros) for (const b of p.workingHours ?? []) { lo = Math.min(lo, toMin(b.start)); hi = Math.max(hi, toMin(b.end)); }
     for (const a of appts ?? []) { lo = Math.min(lo, minsOf(new Date(a.startsAt))); hi = Math.max(hi, minsOf(new Date(a.endsAt))); }
+    for (const s of avail) { lo = Math.min(lo, minsOf(new Date(s.start))); hi = Math.max(hi, minsOf(new Date(s.end))); }
     lo = Math.max(0, Math.floor(lo / 60) * 60);
     hi = Math.min(24 * 60, Math.ceil(hi / 60) * 60);
     if (hi - lo < 4 * 60) hi = Math.min(24 * 60, lo + 4 * 60);
     return [lo, hi];
-  }, [pros, appts]);
+  }, [pros, appts, avail]);
   const hours = useMemo(() => Array.from({ length: (rangeEnd - rangeStart) / 60 + 1 }, (_, i) => rangeStart / 60 + i), [rangeStart, rangeEnd]);
   const gridH = ((rangeEnd - rangeStart) / 60) * HOUR_H;
 
@@ -184,12 +193,19 @@ function Citas() {
         </div>
       )}
 
+      {view === "dia" && (
+        <p className="mb-2 flex items-center gap-3 text-2xs text-ink-subtle">
+          <span className="inline-flex items-center gap-1"><span className="h-2.5 w-3 rounded-sm bg-emerald-500/20 ring-1 ring-inset ring-emerald-500/30" /> Disponible</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2.5 w-3 rounded-sm bg-violet-500" /> Cita agendada</span>
+        </p>
+      )}
+
       {appts === null ? (
         <p className="text-sm text-ink-subtle">Cargando…</p>
       ) : view === "lista" ? (
         <ListaCitas appts={visible} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
       ) : view === "dia" ? (
-        <DiaView date={anchor} refs={visibleRefs} pros={pros} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
+        <DiaView date={anchor} refs={visibleRefs} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} avail={avail.filter((s) => sameDay(new Date(s.start), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-panel">
           <div className="min-w-[720px]">
@@ -228,7 +244,7 @@ function Citas() {
 }
 
 // Vista "Día": una columna por profesional/recurso (des-mezclada, estilo Cláriva).
-function DiaView({ date, refs, pros, readOnly, gridH, hours, rangeStart, appts, onSlot, onAppt }: { date: Date; refs: ColorRef[]; pros: Prof[]; readOnly?: boolean; gridH: number; hours: number[]; rangeStart: number; appts: Appt[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+function DiaView({ date, refs, readOnly, gridH, hours, rangeStart, appts, avail, onSlot, onAppt }: { date: Date; refs: ColorRef[]; readOnly?: boolean; gridH: number; hours: number[]; rangeStart: number; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
   const cols = refs.length ? refs : [{ id: "", name: "Agenda" }];
   const tmpl = `48px repeat(${cols.length}, minmax(140px, 1fr))`;
   return (
@@ -250,7 +266,7 @@ function DiaView({ date, refs, pros, readOnly, gridH, hours, rangeStart, appts, 
             ))}
           </div>
           {cols.map((c) => (
-            <ResourceColumn key={c.id} date={date} profId={c.id || null} refs={refs} prof={pros.find((p) => p.id === c.id)} gridH={gridH} hours={hours} rangeStart={rangeStart} readOnly={readOnly} appts={appts.filter((a) => (a.professionalId ?? "") === c.id)} onSlot={onSlot} onAppt={onAppt} />
+            <ResourceColumn key={c.id} date={date} profId={c.id || null} refs={refs} gridH={gridH} hours={hours} rangeStart={rangeStart} readOnly={readOnly} appts={appts.filter((a) => (a.professionalId ?? "") === c.id)} avail={avail.filter((s) => s.professionalId === c.id)} onSlot={onSlot} onAppt={onAppt} />
           ))}
         </div>
       </div>
@@ -258,16 +274,15 @@ function DiaView({ date, refs, pros, readOnly, gridH, hours, rangeStart, appts, 
   );
 }
 
-function ResourceColumn({ date, profId, refs, prof, gridH, hours, rangeStart, readOnly, appts, onSlot, onAppt }: { date: Date; profId: string | null; refs: ColorRef[]; prof?: Prof; gridH: number; hours: number[]; rangeStart: number; readOnly?: boolean; appts: Appt[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
-  const dow = date.getDay();
+function ResourceColumn({ date, profId, refs, gridH, hours, rangeStart, readOnly, appts, avail, onSlot, onAppt }: { date: Date; profId: string | null; refs: ColorRef[]; gridH: number; hours: number[]; rangeStart: number; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+  // Bandas VERDES = disponibilidad real (huecos libres de Cláriva o del motor nativo),
+  // fusionando slots contiguos. Refleja el horario disponible de cada profesional/recurso.
   const bands = useMemo(() => {
-    const ivs: Array<[number, number]> = [];
-    for (const b of prof?.workingHours ?? []) if (b.day === dow) ivs.push([toMin(b.start), toMin(b.end)]);
-    ivs.sort((a, b) => a[0] - b[0]);
+    const ivs = avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number]).sort((a, b) => a[0] - b[0]);
     const merged: Array<[number, number]> = [];
     for (const iv of ivs) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv] as [number, number]); }
     return merged;
-  }, [prof, dow]);
+  }, [avail]);
   const laid = useMemo(() => {
     const sorted = [...appts].sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
     const laneEnds: number[] = [];
@@ -295,7 +310,7 @@ function ResourceColumn({ date, profId, refs, prof, gridH, hours, rangeStart, re
       }}>
       {hours.slice(1).map((h, i) => (<div key={h} className="pointer-events-none absolute inset-x-0 border-t border-line/60" style={{ top: (i + 1) * HOUR_H }} />))}
       {bands.map(([s, e], i) => (
-        <div key={i} className="pointer-events-none absolute inset-x-0.5 rounded bg-brand-500/[0.07] ring-1 ring-inset ring-brand-500/10" style={{ top: (s - rangeStart) * PX_MIN, height: (e - s) * PX_MIN }} />
+        <div key={i} className="pointer-events-none absolute inset-x-0.5 rounded bg-emerald-500/[0.12] ring-1 ring-inset ring-emerald-500/20" style={{ top: (s - rangeStart) * PX_MIN, height: (e - s) * PX_MIN }} title="Disponible" />
       ))}
       {today && nowMin >= rangeStart && (
         <div className="pointer-events-none absolute inset-x-0 z-10" style={{ top: (nowMin - rangeStart) * PX_MIN }}>
@@ -583,21 +598,23 @@ function ContactPicker({ value, onChange }: { value: { id: string; name: string 
   );
 }
 
-// ------------------------------ Personas ------------------------------
+// ------------------------------ Recursos ------------------------------
+type ResourcePatch = { workingHours?: Block[]; type?: "persona" | "servicio"; durationMin?: number };
 function Personas() {
   const toast = useToast();
   const [pros, setPros] = useState<Prof[] | null>(null);
   const [name, setName] = useState("");
+  const [type, setType] = useState<"persona" | "servicio">("persona");
   const load = useCallback(() => api<Prof[]>("/agenda/professionals").then(setPros).catch(() => setPros([])), []);
   useEffect(() => void load(), [load]);
 
   async function create() {
     if (!name.trim()) return;
-    try { await api("/agenda/professionals", { method: "POST", body: JSON.stringify({ name: name.trim(), workingHours: [] }) }); setName(""); await load(); }
+    try { await api("/agenda/professionals", { method: "POST", body: JSON.stringify({ name: name.trim(), type, workingHours: [], ...(type === "servicio" ? { durationMin: 30 } : {}) }) }); setName(""); await load(); }
     catch (e) { toast.push((e as Error).message, "error"); }
   }
-  async function saveHours(id: string, workingHours: Block[]) {
-    try { await api(`/agenda/professionals/${id}`, { method: "PUT", body: JSON.stringify({ workingHours }) }); toast.push("Horario guardado", "ok"); await load(); }
+  async function savePatch(id: string, patch: ResourcePatch) {
+    try { await api(`/agenda/professionals/${id}`, { method: "PUT", body: JSON.stringify(patch) }); toast.push("Guardado", "ok"); await load(); }
     catch (e) { toast.push((e as Error).message, "error"); }
   }
   async function remove(id: string) {
@@ -608,21 +625,27 @@ function Personas() {
   if (!pros) return <p className="text-sm text-ink-subtle">Cargando…</p>;
   return (
     <div className="space-y-4">
-      <p className="text-xs text-ink-subtle">Un recurso es cualquier cosa que se agenda: una persona (Dra. Pérez), un box, una sala o un equipo. Cada recurso tiene su propio horario disponible; el bot solo ofrece horas dentro de esos horarios.</p>
-      <div className="flex gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void create()} placeholder="Nombre del recurso (ej: Dra. Pérez, Box 1, Sala A)" className={cn(input, "flex-1")} />
+      <p className="text-xs text-ink-subtle">Un recurso agendable puede ser una <b>persona</b> (Dra. Pérez, mecánico) o un <b>servicio</b> (cambio de aceite, box, sala, equipo). Cada uno tiene su propio <b>horario disponible</b>; el bot solo ofrece y agenda dentro de esos horarios.</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={type} onChange={(e) => setType(e.target.value as "persona" | "servicio")}>
+          <option value="persona">Persona</option>
+          <option value="servicio">Servicio</option>
+        </Select>
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void create()} placeholder={type === "servicio" ? "Nombre del servicio (ej: Cambio de aceite)" : "Nombre de la persona (ej: Dra. Pérez)"} className={cn(input, "min-w-[220px] flex-1")} />
         <Button onClick={() => void create()}>Agregar recurso</Button>
       </div>
       {pros.map((p, i) => (
-        <HoursEditor key={p.id} prof={p} color={PALETTE[i % PALETTE.length]} onSave={(wh) => void saveHours(p.id, wh)} onRemove={() => void remove(p.id)} />
+        <HoursEditor key={p.id} prof={p} color={PALETTE[i % PALETTE.length]} onSave={(patch) => void savePatch(p.id, patch)} onRemove={() => void remove(p.id)} />
       ))}
       {!pros.length && <p className="text-sm text-ink-subtle">Aún no hay recursos. Agrega el primero (una persona o un servicio) para que el bot pueda agendar con él.</p>}
     </div>
   );
 }
 
-function HoursEditor({ prof, color, onSave, onRemove }: { prof: Prof; color: (typeof PALETTE)[number]; onSave: (wh: Block[]) => void; onRemove: () => void }) {
+function HoursEditor({ prof, color, onSave, onRemove }: { prof: Prof; color: (typeof PALETTE)[number]; onSave: (patch: ResourcePatch) => void; onRemove: () => void }) {
   const [blocks, setBlocks] = useState<Block[]>(prof.workingHours ?? []);
+  const [type, setType] = useState<"persona" | "servicio">(prof.type ?? "persona");
+  const [dur, setDur] = useState<number>(prof.durationMin ?? 30);
   const [dirty, setDirty] = useState(false);
   const add = (day: number) => { setBlocks((b) => [...b, { day, start: "09:00", end: "18:00" }]); setDirty(true); };
   const upd = (i: number, patch: Partial<Block>) => { setBlocks((b) => b.map((x, j) => (j === i ? { ...x, ...patch } : x))); setDirty(true); };
@@ -630,8 +653,19 @@ function HoursEditor({ prof, color, onSave, onRemove }: { prof: Prof; color: (ty
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
       <div className="mb-2 flex items-center justify-between">
-        <p className="flex items-center gap-2 font-medium text-ink"><span className={cn("h-2.5 w-2.5 rounded-full", color.dot)} />{prof.name}{prof.specialty ? <span className="text-xs text-ink-subtle">· {prof.specialty}</span> : null}</p>
+        <p className="flex items-center gap-2 font-medium text-ink"><span className={cn("h-2.5 w-2.5 rounded-full", color.dot)} />{prof.name}<span className="rounded-pill bg-app px-1.5 py-0.5 text-2xs text-ink-muted">{type === "servicio" ? "Servicio" : "Persona"}</span></p>
         <button onClick={onRemove} className="text-2xs text-red-600 hover:underline dark:text-red-400">Quitar</button>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <label className="text-xs text-ink-muted">Tipo
+          <Select className="ml-1" value={type} onChange={(e) => { setType(e.target.value as "persona" | "servicio"); setDirty(true); }}>
+            <option value="persona">Persona</option>
+            <option value="servicio">Servicio</option>
+          </Select>
+        </label>
+        <label className="text-xs text-ink-muted">Duración de cada cita (min)
+          <input type="number" min={5} step={5} value={dur} onChange={(e) => { setDur(Number(e.target.value)); setDirty(true); }} className={cn(input, "ml-1 w-20")} />
+        </label>
       </div>
       <div className="space-y-2">
         {DAYS_LONG.map((label, day) => {
@@ -653,7 +687,7 @@ function HoursEditor({ prof, color, onSave, onRemove }: { prof: Prof; color: (ty
           );
         })}
       </div>
-      <div className="mt-3"><Button variant="secondary" onClick={() => { onSave(blocks); setDirty(false); }} disabled={!dirty}>{dirty ? "Guardar horario" : "Guardado"}</Button></div>
+      <div className="mt-3"><Button variant="secondary" onClick={() => { onSave({ workingHours: blocks, type, durationMin: dur }); setDirty(false); }} disabled={!dirty}>{dirty ? "Guardar" : "Guardado"}</Button></div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
-import { ClarivaSchedulingProvider, DentalinkSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, computeNativeSlots } from "@conversia/scheduling";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
@@ -65,6 +65,61 @@ export class AgendaController {
     });
   }
 
+  /**
+   * Disponibilidad (huecos LIBRES) por profesional/recurso en un rango, para PINTARLA en
+   * el calendario. Cláriva/Dentalink → en vivo del proveedor (reflejo). Nativo → se calcula
+   * con los horarios de cada recurso (motor computeNativeSlots) menos las citas ocupadas.
+   */
+  @Get("availability")
+  async availability(@Query("from") from?: string, @Query("to") to?: string) {
+    const ctx = requireContext();
+    const gte = from ? new Date(from) : new Date();
+    const lte = to ? new Date(to) : new Date(Date.now() + 8 * 24 * 3600 * 1000);
+
+    const provider = await this.externalProvider(ctx.organizationId);
+    if (provider) {
+      try {
+        const slots = await provider.getAvailableSlots({ from: gte.toISOString(), to: lte.toISOString() });
+        return { source: provider.kind, slots: (slots ?? []).map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end })) };
+      } catch {
+        return { source: provider.kind, slots: [] };
+      }
+    }
+
+    // Nativo: computa por recurso con su horario y duración.
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [org, pros, appts] = await Promise.all([
+        this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
+        tx.professional.findMany({ where: { active: true } }),
+        tx.appointment.findMany({ where: { startsAt: { gte, lte }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }, select: { professionalId: true, startsAt: true, endsAt: true } }),
+      ]);
+      const cfg = ((org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as { slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string };
+      const fromDate = gte.toISOString().slice(0, 10);
+      const toDate = lte.toISOString().slice(0, 10);
+      const slots: Array<{ professionalId: string; start: string; end: string }> = [];
+      for (const p of pros) {
+        const m = (p.meta as any) ?? {};
+        const workBlocks = Array.isArray(m.workingHours) ? m.workingHours : [];
+        if (!workBlocks.length) continue;
+        const durationMin = typeof m.durationMin === "number" ? m.durationMin : cfg.slotStepMin ?? 30;
+        const free = computeNativeSlots({
+          fromDate,
+          toDate,
+          workBlocks,
+          busy: appts.filter((a) => a.professionalId === p.id).map((a) => ({ start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
+          durationMin,
+          slotStepMin: cfg.slotStepMin,
+          bufferMin: cfg.bufferMin,
+          minAdvanceMin: cfg.minAdvanceMin,
+          offset: cfg.offset ?? "-04:00",
+          maxSlots: 500,
+        });
+        for (const s of free) slots.push({ professionalId: p.id, start: s.start, end: s.end });
+      }
+      return { source: "native", slots };
+    });
+  }
+
   // ------------------------------ Config ------------------------------
   @Get("config")
   async getConfig() {
@@ -87,40 +142,48 @@ export class AgendaController {
     return { ok: true };
   }
 
-  // --------------------------- Personas de agenda ---------------------------
+  // --------------------------- Recursos de agenda (persona o servicio) ---------------------------
   @Get("professionals")
   async listProfessionals() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const pros = await tx.professional.findMany({ where: { active: true }, orderBy: { name: "asc" } });
-      return pros.map((p) => ({
-        id: p.id,
-        name: p.name,
-        specialty: p.specialty,
-        workingHours: Array.isArray((p.meta as any)?.workingHours) ? (p.meta as any).workingHours : [],
-      }));
+      return pros.map((p) => {
+        const m = (p.meta as any) ?? {};
+        return {
+          id: p.id,
+          name: p.name,
+          specialty: p.specialty,
+          type: m.type === "servicio" ? "servicio" : "persona",
+          durationMin: typeof m.durationMin === "number" ? m.durationMin : null,
+          workingHours: Array.isArray(m.workingHours) ? m.workingHours : [],
+        };
+      });
     });
   }
 
   @Post("professionals")
   async createProfessional(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const p = z.object({ name: z.string().min(1).max(120), specialty: z.string().max(120).optional(), workingHours: workingHours.optional() }).safeParse(body);
-    if (!p.success) throw new BadRequestException("Datos de persona inválidos");
+    const p = z.object({ name: z.string().min(1).max(120), specialty: z.string().max(120).optional(), type: z.enum(["persona", "servicio"]).optional(), durationMin: z.number().int().min(5).max(1440).optional(), workingHours: workingHours.optional() }).safeParse(body);
+    if (!p.success) throw new BadRequestException("Datos de recurso inválidos");
     return this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.professional.create({ data: { organizationId: ctx.organizationId, name: p.data.name, specialty: p.data.specialty ?? null, active: true, meta: { workingHours: p.data.workingHours ?? [] } } }),
+      tx.professional.create({ data: { organizationId: ctx.organizationId, name: p.data.name, specialty: p.data.specialty ?? null, active: true, meta: { workingHours: p.data.workingHours ?? [], type: p.data.type ?? "persona", ...(p.data.durationMin ? { durationMin: p.data.durationMin } : {}) } } }),
     );
   }
 
   @Put("professionals/:id")
   async updateProfessional(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const p = z.object({ name: z.string().min(1).max(120).optional(), specialty: z.string().max(120).nullable().optional(), workingHours: workingHours.optional(), active: z.boolean().optional() }).safeParse(body);
+    const p = z.object({ name: z.string().min(1).max(120).optional(), specialty: z.string().max(120).nullable().optional(), type: z.enum(["persona", "servicio"]).optional(), durationMin: z.number().int().min(5).max(1440).nullable().optional(), workingHours: workingHours.optional(), active: z.boolean().optional() }).safeParse(body);
     if (!p.success) throw new BadRequestException("Datos inválidos");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const cur = await tx.professional.findFirst({ where: { id } });
-      if (!cur) throw new NotFoundException("Persona no encontrada");
-      const meta = { ...((cur.meta as object) ?? {}), ...(p.data.workingHours ? { workingHours: p.data.workingHours } : {}) };
+      if (!cur) throw new NotFoundException("Recurso no encontrado");
+      const meta: Record<string, unknown> = { ...((cur.meta as object) ?? {}) };
+      if (p.data.workingHours) meta.workingHours = p.data.workingHours;
+      if (p.data.type) meta.type = p.data.type;
+      if (p.data.durationMin !== undefined) { if (p.data.durationMin === null) delete meta.durationMin; else meta.durationMin = p.data.durationMin; }
       await tx.professional.update({
         where: { id },
         data: {
