@@ -167,6 +167,53 @@ export default function BillingPage() {
     }
   }
 
+  // Comprobante de pago en PDF: se genera en el navegador con jsPDF a partir de los datos
+  // ya cargados (sin trabajo de servidor). jsPDF se importa dinámico para no cargarlo salvo
+  // cuando el cliente descarga.
+  async function downloadInvoicePdf(inv: Overview["invoices"][number]) {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const M = 48;
+    const rgb = (r: number, g: number, b: number) => doc.setTextColor(r, g, b);
+    const fecha = (s: string | null) => (s ? new Date(s).toLocaleDateString("es-CL") : "—");
+    let y = 64;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(22); rgb(30, 41, 59);
+    doc.text("TuBot", M, y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(11); rgb(100, 116, 139);
+    doc.text("Comprobante de pago", M, y + 18);
+    y += 42; doc.setDrawColor(226, 232, 240); doc.line(M, y, 547, y); y += 28;
+    doc.setFontSize(9); rgb(148, 163, 184);
+    doc.text("EMISOR", M, y); doc.text("CLIENTE", 320, y);
+    y += 15; doc.setFontSize(11); rgb(30, 41, 59);
+    doc.text("TuBot", M, y); doc.text(data?.organization.name ?? "Cliente", 320, y);
+    y += 14; doc.setFontSize(9); rgb(100, 116, 139);
+    doc.text("contacto@tubot.cl", M, y);
+    y += 40;
+    const rows: [string, string][] = [
+      ["N° de comprobante", inv.number],
+      ["Fecha de emisión", fecha(inv.createdAt)],
+      ["Fecha de pago", fecha(inv.paidAt)],
+      ["Concepto", data?.plan?.name ? `Suscripción TuBot · Plan ${data.plan.name}` : "Suscripción TuBot"],
+      ["Estado", inv.status === "PAID" ? "PAGADO" : INVOICE_STATUS[inv.status]?.label ?? inv.status],
+    ];
+    doc.setFontSize(10);
+    for (const [k, v] of rows) {
+      rgb(100, 116, 139); doc.text(k, M, y);
+      rgb(30, 41, 59); doc.text(v, 320, y);
+      y += 22;
+    }
+    y += 8; doc.setDrawColor(226, 232, 240); doc.line(M, y, 547, y); y += 26;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13); rgb(30, 41, 59);
+    doc.text("Total pagado", M, y);
+    doc.text(money(Number(inv.amountDue), inv.currency), 547, y, { align: "right" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); rgb(148, 163, 184);
+    doc.text(
+      "Este comprobante da cuenta del pago de tu suscripción a TuBot. Para una factura tributaria formal, escríbenos a contacto@tubot.cl.",
+      M, 790, { maxWidth: 500 },
+    );
+    doc.save(`comprobante-tubot-${inv.number}.pdf`);
+  }
+
   // Skeleton con la FORMA del contenido real (B4): plan actual + bolsa + grilla
   // de 4 planes, en vez de un bloque gris genérico.
   if (!data)
@@ -445,6 +492,7 @@ export default function BillingPage() {
                 <th className="p-2.5">Vencimiento</th>
                 <th className="p-2.5">Monto</th>
                 <th className="p-2.5">Estado</th>
+                <th className="p-2.5 text-right">Comprobante</th>
               </tr>
             </thead>
             <tbody>
@@ -457,13 +505,22 @@ export default function BillingPage() {
                     <td className="p-2.5">{inv.dueAt ? new Date(inv.dueAt).toLocaleDateString("es-CL") : "—"}</td>
                     <td className="p-2.5">{money(Number(inv.amountDue), inv.currency)}</td>
                     <td className="p-2.5"><StatusBadge kind={st.kind} label={st.label} /></td>
+                    <td className="p-2.5 text-right">
+                      {inv.status === "PAID" ? (
+                        <button onClick={() => void downloadInvoicePdf(inv)} className="font-medium text-brand-700 hover:underline dark:text-brand-300">
+                          Descargar PDF
+                        </button>
+                      ) : (
+                        <span className="text-ink-subtle">—</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
           <p className="border-t border-line px-3 py-2 text-[10px] text-ink-subtle">
-            Descarga en PDF: disponible pronto — si necesitas una factura formal escríbenos a contacto@tubot.cl.
+            El comprobante de pago en PDF está disponible en cada factura pagada. Si necesitas una factura tributaria formal, escríbenos a contacto@tubot.cl.
           </p>
         </div>
       )}
