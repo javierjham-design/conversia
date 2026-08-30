@@ -51,6 +51,13 @@ const MeContext = createContext<Me | null>(null);
 export function useMe() {
   return useContext(MeContext);
 }
+
+// Deep-link de la notificación capturado AL CARGAR EL MÓDULO (antes de que cualquier
+// efecto —p. ej. el del inbox— limpie la URL). Una notificación puede traer ?org= de OTRA
+// cuenta; si leyéramos window.location dentro del efecto, el inbox ya la habría borrado.
+// En cada carga completa de página (openWindow / location.assign del push) el módulo se
+// re-importa y esto se recaptura.
+const NOTIF_DEEP_LINK = typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
 /** Etiqueta traducida por rubro: `useTerm()("contacts")` → "Pacientes"/"Clientes"… */
 export function useTerm() {
   const me = useContext(MeContext);
@@ -337,28 +344,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Notificación de OTRA cuenta (multi-org): si el deep link trae ?org=<id> distinta a la
-  // organización activa, cambiamos a esa cuenta (token nuevo) y recargamos, para que la
-  // conversación abra en la cuenta correcta en vez de quedar cargando en la equivocada.
-  // (Solo se puede cambiar a orgs donde el usuario es miembro: /auth/switch lo valida.)
+  // organización activa, cambiamos a esa cuenta (token nuevo) y recargamos AL LINK COMPLETO
+  // (con ?c=), para que la conversación abra en la cuenta correcta en vez de quedar cargando
+  // en la equivocada. Usa NOTIF_DEEP_LINK (capturado al cargar el módulo, antes de que el
+  // inbox limpie la URL). Solo cambia a orgs donde el usuario es miembro (/auth/switch valida).
   useEffect(() => {
     const orgId = me?.organization?.id;
-    if (!orgId) return;
-    const params = new URLSearchParams(window.location.search);
-    const targetOrg = params.get("org");
-    if (!targetOrg) return;
-    if (targetOrg === orgId) {
-      // Ya estamos en la cuenta correcta: quitamos el parámetro (cosmético) y seguimos.
-      params.delete("org");
-      const qs = params.toString();
-      window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
-      return;
-    }
+    if (!orgId || !NOTIF_DEEP_LINK.includes("org=")) return;
+    const targetOrg = new URLSearchParams(NOTIF_DEEP_LINK.split("?")[1] ?? "").get("org");
+    if (!targetOrg || targetOrg === orgId) return;
     let cancelled = false;
     void api<{ token: string }>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: targetOrg }) })
       .then((res) => {
         if (cancelled) return;
-        setToken(res.token); // recarga: todo el panel se re-lee para la cuenta correcta
-        window.location.reload();
+        setToken(res.token);
+        window.location.assign(NOTIF_DEEP_LINK); // recarga con ?c= y ?org= → abre la conversación en la cuenta correcta
       })
       .catch(() => undefined);
     return () => {

@@ -50,6 +50,9 @@ export default function InboxPage() {
   const [onlyUnanswered, setOnlyUnanswered] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationFull | null>(null);
+  // Red de seguridad: si un hilo seleccionado no carga (p. ej. conversación de otra cuenta,
+  // borrada o error), tras unos segundos dejamos de mostrar "Cargando…" y damos salida.
+  const [loadStuck, setLoadStuck] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   // ¿Se cargó la conversación COMPLETA (no solo los últimos 300)? Se preserva en los
   // refrescos en vivo y se resetea al cambiar de conversación.
@@ -154,6 +157,15 @@ export default function InboxPage() {
     };
   }, [selectedId]);
 
+  // Si el hilo seleccionado no cargó en unos segundos, salimos del "Cargando…" y mostramos
+  // una salida (evita la pantalla pegada al abrir una conversación que no está en esta cuenta).
+  useEffect(() => {
+    setLoadStuck(false);
+    if (!selectedId || conversation) return;
+    const t = setTimeout(() => setLoadStuck(true), 8000);
+    return () => clearTimeout(t);
+  }, [selectedId, conversation]);
+
   // Catálogos (una vez)
   useEffect(() => {
     void api<{ userId: string; name: string }[]>("/users/assignable").then(setUsers).catch(() => setUsers([]));
@@ -177,7 +189,14 @@ export default function InboxPage() {
     const teamId = params.get("team");
     const convId = params.get("c");
     if (teamId) setFilter({ kind: "team", id: teamId, label: "Equipo" });
-    if (convId) setSelectedId(convId);
+    if (convId) {
+      // OJO: hay que CARGAR el hilo, no solo seleccionarlo — antes solo se hacía
+      // setSelectedId y como no hay efecto que cargue al cambiar la selección, la
+      // conversación del deep-link quedaba en "Cargando…" para siempre.
+      setSelectedId(convId);
+      void loadMessages(convId, false);
+      void loadContext(convId);
+    }
     if (teamId || convId) window.history.replaceState(null, "", "/inbox");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -276,6 +295,7 @@ export default function InboxPage() {
       const convId = new URLSearchParams(window.location.search).get("c");
       if (convId && convId !== selectedRef.current) {
         setSelectedId(convId);
+        void refreshersRef.current.loadMessages(convId);
         void refreshersRef.current.loadContext(convId);
         window.history.replaceState(null, "", "/inbox");
       }
@@ -487,9 +507,18 @@ export default function InboxPage() {
           </section>
         ) : !conversation ? (
           // Seleccionada pero aún cargando: pantalla completa (NO blanco en móvil) + volver.
-          <section className="relative flex flex-1 flex-col items-center justify-center gap-3 text-ink-subtle">
+          <section className="relative flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-ink-subtle">
             <button onClick={() => setSelectedId(null)} className="absolute left-2 top-2 rounded-control p-2 text-xl text-ink-muted lg:hidden" aria-label="Volver">←</button>
-            <span className="text-sm">Cargando conversación…</span>
+            {loadStuck ? (
+              <>
+                <span className="text-sm">No pudimos abrir esta conversación. Puede ser de otra de tus cuentas o ya no está disponible.</span>
+                <button onClick={() => setSelectedId(null)} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm font-medium text-ink hover:bg-app">
+                  Volver a la bandeja
+                </button>
+              </>
+            ) : (
+              <span className="text-sm">Cargando conversación…</span>
+            )}
           </section>
         ) : (
           <Thread
