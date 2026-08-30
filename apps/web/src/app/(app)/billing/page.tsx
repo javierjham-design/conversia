@@ -80,6 +80,7 @@ export default function BillingPage() {
   const [busy, setBusy] = useState(false);
   const [mockBanner, setMockBanner] = useState(false);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "yearly">("monthly");
+  const plansRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     const [o, p] = await Promise.all([api<Overview>("/billing/me"), api<Plan[]>("/billing/plans")]);
@@ -199,6 +200,10 @@ export default function BillingPage() {
   };
   const priceOf = (p: Priced) => priceAt(p, billingInterval); // catálogo: según el toggle
   const cadence = billingInterval === "yearly" ? "año" : "mes";
+  // Plan actual SIN monto a cobrar (Free/$0 o sin plan): "Pagar ahora" no tiene qué
+  // cobrar (el backend rechaza el plan $0). En ese caso el CTA lleva a elegir un plan.
+  const currentIsFree = !data.plan || priceAt(data.plan, data.plan.interval === "yearly" ? "yearly" : "monthly") <= 0;
+  const goToPlans = () => plansRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
     <div className="h-full overflow-y-auto">
@@ -267,12 +272,25 @@ export default function BillingPage() {
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <Button onClick={() => (data.plan ? pay(data.plan.code) : undefined)} disabled={busy || !data.plan}>
-              <CreditCard size={14} /> Pagar ahora
-            </Button>
+            {currentIsFree ? (
+              // Plan Free/$0: no hay nada que cobrar. El CTA lleva a elegir un plan de pago.
+              <Button onClick={goToPlans}>
+                <CreditCard size={14} /> Elegir un plan
+              </Button>
+            ) : (
+              <Button onClick={() => (data.plan ? pay(data.plan.code) : undefined)} disabled={busy || !data.plan}>
+                <CreditCard size={14} /> Pagar ahora
+              </Button>
+            )}
             <span className="text-xs text-ink-subtle">
-              vía <b>{PROVIDER_LABELS[data.paymentProvider] ?? data.paymentProvider}</b>
-              {data.paymentMethod?.last4 && ` · ${data.paymentMethod.brand ?? "tarjeta"} •••• ${data.paymentMethod.last4}`}
+              {currentIsFree ? (
+                "Elige Starter o superior para activar tu plan y cobrar automáticamente."
+              ) : (
+                <>
+                  vía <b>{PROVIDER_LABELS[data.paymentProvider] ?? data.paymentProvider}</b>
+                  {data.paymentMethod?.last4 && ` · ${data.paymentMethod.brand ?? "tarjeta"} •••• ${data.paymentMethod.last4}`}
+                </>
+              )}
             </span>
           </div>
         </div>
@@ -291,7 +309,7 @@ export default function BillingPage() {
       <SubscriptionSelfService planCode={data.plan?.code ?? null} interval={billingInterval} />
 
       {/* -------- Planes disponibles -------- */}
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+      <div ref={plansRef} className="mt-8 flex flex-wrap items-center justify-between gap-3 scroll-mt-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-subtle">Planes disponibles</h2>
         {anyYearly && (
           <div className="inline-flex rounded-lg border border-line-strong p-0.5 text-xs">
@@ -346,8 +364,8 @@ export default function BillingPage() {
                     Contactar a TuBot
                   </a>
                 ) : (
-                  <Button variant="secondary" className="w-full" onClick={() => setChanging(p)} disabled={busy}>
-                    Cambiar a este plan
+                  <Button variant={currentIsFree ? "primary" : "secondary"} className="w-full" onClick={() => setChanging(p)} disabled={busy}>
+                    {currentIsFree ? "Elegir este plan" : "Cambiar a este plan"}
                   </Button>
                 )}
               </div>
