@@ -430,6 +430,7 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           include: { status: true },
         });
         const prev = lead?.status?.code ?? null;
+        const prevName = lead?.status?.name ?? null;
         if (!lead) {
           lead = await tx.lead.create({
             data: { organizationId: orgId, contactId: t.contactId, statusId: status.id },
@@ -447,6 +448,21 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             actorType: "agent",
           },
         });
+        // Nota interna en la conversación (trazabilidad para el equipo) cuando cambia de verdad.
+        if (prev !== code && t.conversationId) {
+          await tx.message.create({
+            data: {
+              organizationId: orgId,
+              conversationId: t.conversationId,
+              direction: "OUTBOUND",
+              type: "NOTE",
+              visibility: "INTERNAL",
+              body: `🔀 Etapa del lead: ${prevName ?? "—"} → ${status.name} (cambiada por el bot)`,
+              authorType: "AGENT",
+              status: "DELIVERED",
+            },
+          });
+        }
         return prev;
       });
       const contact = await withTenant(orgId, (tx) =>
