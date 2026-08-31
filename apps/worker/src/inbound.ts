@@ -6,6 +6,8 @@ import { getWhatsappRatesOverride } from "./cost-settings";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
 import { transcribeWhatsappAudio } from "./audio";
+import { downloadWhatsappMedia } from "./media";
+import { extractDocumentText } from "./document-text";
 import { resolveChannelAuth } from "./channel-auth";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
@@ -238,6 +240,24 @@ export async function processInbound(job: InboundJob): Promise<void> {
       }
     }
 
+    // Documentos (PDF, texto): extraemos su TEXTO para que el bot pueda LEERLOS. Se guarda
+    // en el payload (NO en el body, para no ensuciar el hilo del humano); el agente lo lee
+    // al armar su contexto. Degrada con gracia si el formato no se soporta o falla.
+    let documentText: string | null = null;
+    if (msg.type === "document") {
+      const docMedia = (msg.payload as any)?.document;
+      const mediaId = docMedia?.id;
+      const readingOn = await withTenant(organizationId, async (tx) => {
+        const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+        return ((org?.settings as any)?.documentReading?.enabled ?? true) !== false;
+      });
+      if (mediaId && readingOn) {
+        const auth = await resolveChannelAuth(organizationId, { phoneNumberId: msg.phoneNumberId });
+        const dl = await downloadWhatsappMedia(String(mediaId), auth.accessToken);
+        if (dl) documentText = await extractDocumentText(dl.buffer, dl.mimeType, docMedia?.filename);
+      }
+    }
+
     const result = await withTenant(organizationId, async (tx) => {
       // Idempotencia por wamid
       const dup = await tx.message.findUnique({
@@ -317,7 +337,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
             : msg.type === "video" ? "VIDEO"
             : "TEXT",
           body: text ?? `[${msg.type}]`,
-          payload: (transcribed ? { ...(msg.payload as object), transcribed: true } : msg.payload) as object,
+          payload: {
+            ...(msg.payload as object),
+            ...(transcribed ? { transcribed: true } : {}),
+            ...(documentText ? { documentText } : {}),
+          } as object,
           externalId: msg.externalId,
           status: "DELIVERED",
           authorType: "CONTACT",
