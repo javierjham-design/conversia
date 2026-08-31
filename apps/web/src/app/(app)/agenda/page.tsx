@@ -207,7 +207,7 @@ function Citas() {
       ) : view === "lista" ? (
         <ListaCitas appts={visible} refs={colorRefs} onOpen={(a) => setModal({ appt: a })} />
       ) : view === "dia" ? (
-        <DiaView date={anchor} refs={visibleRefs} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
+        <DiaView date={anchor} refs={visibleRefs} live={meta.live} pros={pros} readOnly={meta.live} gridH={gridH} hours={hours} rangeStart={rangeStart} appts={visible.filter((a) => sameDay(new Date(a.startsAt), anchor))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), anchor))} onSlot={(date, profId) => setModal({ date, profId })} onAppt={(a) => setModal({ appt: a })} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-line bg-panel">
           <div className="min-w-[720px]">
@@ -233,7 +233,7 @@ function Citas() {
                 ))}
               </div>
               {week.map((d, di) => (
-                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} refs={colorRefs} readOnly={meta.live} appts={visible.filter((a) => sameDay(new Date(a.startsAt), d))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
+                <DayColumn key={di} date={d} gridH={gridH} hours={hours} rangeStart={rangeStart} refs={colorRefs} live={meta.live} pros={pros.filter((p) => !hidden.has(p.id))} readOnly={meta.live} appts={visible.filter((a) => sameDay(new Date(a.startsAt), d))} avail={visibleAvail.filter((s) => sameDay(new Date(s.start), d))} onSlot={(date) => setModal({ date })} onAppt={(a) => setModal({ appt: a })} />
               ))}
             </div>
           </div>
@@ -246,7 +246,7 @@ function Citas() {
 }
 
 // Vista "Día": una columna por profesional/recurso (des-mezclada, estilo Cláriva).
-function DiaView({ date, refs, readOnly, gridH, hours, rangeStart, appts, avail, onSlot, onAppt }: { date: Date; refs: ColorRef[]; readOnly?: boolean; gridH: number; hours: number[]; rangeStart: number; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+function DiaView({ date, refs, live, pros, readOnly, gridH, hours, rangeStart, appts, avail, onSlot, onAppt }: { date: Date; refs: ColorRef[]; live?: boolean; pros: Prof[]; readOnly?: boolean; gridH: number; hours: number[]; rangeStart: number; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
   const cols = refs.length ? refs : [{ id: "", name: "Agenda" }];
   const tmpl = `48px repeat(${cols.length}, minmax(140px, 1fr))`;
   return (
@@ -268,7 +268,7 @@ function DiaView({ date, refs, readOnly, gridH, hours, rangeStart, appts, avail,
             ))}
           </div>
           {cols.map((c) => (
-            <ResourceColumn key={c.id} date={date} profId={c.id || null} refs={refs} gridH={gridH} hours={hours} rangeStart={rangeStart} readOnly={readOnly} appts={appts.filter((a) => (a.professionalId ?? "") === c.id)} avail={avail.filter((s) => s.professionalId === c.id)} onSlot={onSlot} onAppt={onAppt} />
+            <ResourceColumn key={c.id} date={date} profId={c.id || null} refs={refs} live={live} prof={pros.find((p) => p.id === c.id)} gridH={gridH} hours={hours} rangeStart={rangeStart} readOnly={readOnly} appts={appts.filter((a) => (a.professionalId ?? "") === c.id)} avail={avail.filter((s) => s.professionalId === c.id)} onSlot={onSlot} onAppt={onAppt} />
           ))}
         </div>
       </div>
@@ -276,15 +276,19 @@ function DiaView({ date, refs, readOnly, gridH, hours, rangeStart, appts, avail,
   );
 }
 
-function ResourceColumn({ date, profId, refs, gridH, hours, rangeStart, readOnly, appts, avail, onSlot, onAppt }: { date: Date; profId: string | null; refs: ColorRef[]; gridH: number; hours: number[]; rangeStart: number; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
-  // Bandas VERDES = disponibilidad real (huecos libres de Cláriva o del motor nativo),
-  // fusionando slots contiguos. Refleja el horario disponible de cada profesional/recurso.
+function ResourceColumn({ date, profId, refs, live, prof, gridH, hours, rangeStart, readOnly, appts, avail, onSlot, onAppt }: { date: Date; profId: string | null; refs: ColorRef[]; live?: boolean; prof?: Prof; gridH: number; hours: number[]; rangeStart: number; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date, profId?: string) => void; onAppt: (a: Appt) => void }) {
+  // Bandas VERDES = disponibilidad de este recurso. Nativo: su HORARIO configurado (siempre
+  // visible). Cláriva: sus huecos libres en vivo (slots contiguos fusionados).
   const bands = useMemo(() => {
-    const ivs = avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const dow = date.getDay();
+    const ivs: Array<[number, number]> = live
+      ? avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number])
+      : (prof?.workingHours ?? []).filter((b) => b.day === dow).map((b) => [toMin(b.start), toMin(b.end)] as [number, number]);
+    ivs.sort((a, b) => a[0] - b[0]);
     const merged: Array<[number, number]> = [];
     for (const iv of ivs) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv] as [number, number]); }
     return merged;
-  }, [avail]);
+  }, [avail, live, prof, date]);
   const laid = useMemo(() => {
     const sorted = [...appts].sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
     const laneEnds: number[] = [];
@@ -336,15 +340,19 @@ function ResourceColumn({ date, profId, refs, gridH, hours, rangeStart, readOnly
   );
 }
 
-function DayColumn({ date, gridH, hours, rangeStart, refs, readOnly, appts, avail, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; refs: ColorRef[]; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
-  // Bandas VERDES = disponibilidad (unión de los huecos libres de todos los profesionales
-  // ese día). Delimita disponible vs no disponible en la vista Semana.
+function DayColumn({ date, gridH, hours, rangeStart, refs, live, pros, readOnly, appts, avail, onSlot, onAppt }: { date: Date; gridH: number; hours: number[]; rangeStart: number; refs: ColorRef[]; live?: boolean; pros: Prof[]; readOnly?: boolean; appts: Appt[]; avail: Slot[]; onSlot: (d: Date) => void; onAppt: (a: Appt) => void }) {
+  // Bandas VERDES = disponibilidad del día. Nativo: el HORARIO configurado de los recursos
+  // (siempre visible). Cláriva: los huecos libres en vivo. Delimita disponible vs no.
   const bands = useMemo(() => {
-    const ivs = avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number]).sort((a, b) => a[0] - b[0]);
+    const dow = date.getDay();
+    const ivs: Array<[number, number]> = live
+      ? avail.map((s) => [minsOf(new Date(s.start)), minsOf(new Date(s.end))] as [number, number])
+      : pros.flatMap((p) => (p.workingHours ?? []).filter((b) => b.day === dow).map((b) => [toMin(b.start), toMin(b.end)] as [number, number]));
+    ivs.sort((a, b) => a[0] - b[0]);
     const merged: Array<[number, number]> = [];
     for (const iv of ivs) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv] as [number, number]); }
     return merged;
-  }, [avail]);
+  }, [avail, live, pros, date]);
 
   // layout de solapamientos en carriles
   const laid = useMemo(() => {
