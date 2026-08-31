@@ -9,33 +9,37 @@ import { flowTestCredentials, type FlowConfig } from "../billing/flow-subscripti
 import { flowSign } from "../billing/payment-provider";
 
 const FLOW_PROVIDER = "flow_charge"; // credencial Flow del TENANT para cobrar a SUS clientes
+const GETNET_PROVIDER = "getnet_charge"; // credencial Getnet del TENANT
 const FLOW_PROD = "https://www.flow.cl/api";
 const FLOW_SANDBOX = "https://sandbox.flow.cl/api";
+const GETNET_PROD = "https://checkout.getnet.cl";
+const GETNET_SANDBOX = "https://checkout.test.getnet.cl";
 
 interface ChargingSettings {
   enabled?: boolean;
   sandbox?: boolean;
   notifyTeam?: boolean;
   instructions?: string;
+  provider?: "flow" | "getnet";
 }
 
-/** Lee la config de cobros del tenant (settings) + si tiene credenciales cargadas. */
+/** Lee la config de cobros del tenant (settings) + estado de credenciales de cada proveedor. */
 async function readCharging(prisma: PrismaService, orgId: string) {
-  const [org, cred] = await Promise.all([
+  const [org, flowCred, getnetCred] = await Promise.all([
     prisma.admin.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
     prisma.admin.integrationCredential.findFirst({ where: { organizationId: orgId, provider: FLOW_PROVIDER } }),
+    prisma.admin.integrationCredential.findFirst({ where: { organizationId: orgId, provider: GETNET_PROVIDER } }),
   ]);
   const settings = ((org?.settings as Record<string, unknown> | null)?.charging as ChargingSettings) ?? {};
-  let apiKeyMasked = "";
-  if (cred) {
+  const mask = (cred: typeof flowCred, field: "apiKey" | "login") => {
+    if (!cred) return "";
     try {
-      const creds = JSON.parse(decryptSecret(cred.ciphertext)) as { apiKey: string };
-      apiKeyMasked = maskSecret(creds.apiKey);
+      return maskSecret((JSON.parse(decryptSecret(cred.ciphertext)) as Record<string, string>)[field] ?? "");
     } catch {
-      /* credencial ilegible */
+      return "";
     }
-  }
-  return { settings, cred, apiKeyMasked };
+  };
+  return { settings, flowCred, getnetCred, flowApiKeyMasked: mask(flowCred, "apiKey"), getnetLoginMasked: mask(getnetCred, "login") };
 }
 
 /** Resuelve las credenciales Flow del tenant listas para firmar (o null si no hay). */
@@ -64,14 +68,15 @@ export class ChargingController {
   @Get()
   async get() {
     const ctx = requireContext();
-    const { settings, cred, apiKeyMasked } = await readCharging(this.prisma, ctx.organizationId);
+    const { settings, flowCred, getnetCred, flowApiKeyMasked, getnetLoginMasked } = await readCharging(this.prisma, ctx.organizationId);
     return {
       enabled: settings.enabled === true,
       sandbox: settings.sandbox === true,
       notifyTeam: settings.notifyTeam !== false, // por defecto avisa
       instructions: settings.instructions ?? "",
-      hasCredentials: !!cred,
-      apiKeyMasked,
+      provider: settings.provider === "getnet" ? "getnet" : "flow",
+      flow: { hasCredentials: !!flowCred, apiKeyMasked: flowApiKeyMasked },
+      getnet: { hasCredentials: !!getnetCred, loginMasked: getnetLoginMasked },
     };
   }
 
@@ -84,8 +89,10 @@ export class ChargingController {
         sandbox: z.boolean().optional(),
         notifyTeam: z.boolean().optional(),
         instructions: z.string().max(2000).optional(),
-        apiKey: z.string().trim().min(1).optional(),
-        secretKey: z.string().trim().min(1).optional(),
+        provider: z.enum(["flow", "getnet"]).optional(),
+        apiKey: z.string().trim().min(1).optional(), // Flow
+        login: z.string().trim().min(1).optional(), // Getnet
+        secretKey: z.string().trim().min(1).optional(), // ambos
       })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos de cobro inválidos");
@@ -99,28 +106,40 @@ export class ChargingController {
       sandbox: d.sandbox ?? prevCharging.sandbox ?? false,
       notifyTeam: d.notifyTeam ?? prevCharging.notifyTeam ?? true,
       instructions: d.instructions ?? prevCharging.instructions ?? "",
+      provider: d.provider ?? prevCharging.provider ?? "flow",
     };
     await this.prisma.admin.organization.update({
       where: { id: ctx.organizationId },
       data: { settings: { ...prev, charging: nextCharging } as object },
     });
 
-    // Solo se guardan/actualizan las credenciales si vienen AMBAS (nunca se devuelven).
-    if (d.apiKey && d.secretKey) {
-      const ciphertext = encryptSecret(JSON.stringify({ apiKey: d.apiKey, secretKey: d.secretKey }));
-      const existing = await this.prisma.admin.integrationCredential.findFirst({ where: { organizationId: ctx.organizationId, provider: FLOW_PROVIDER } });
-      if (existing) {
-        await this.prisma.admin.integrationCredential.update({ where: { id: existing.id }, data: { ciphertext, rotatedAt: new Date() } });
-      } else {
-        await this.prisma.admin.integrationCredential.create({ data: { organizationId: ctx.organizationId, provider: FLOW_PROVIDER, label: "Flow (cobros a clientes)", ciphertext } });
-      }
-    }
+    // Credenciales por proveedor (nunca se devuelven). Solo se guardan si vienen completas.
+    await this.upsertCred(ctx.organizationId, FLOW_PROVIDER, "Flow (cobros a clientes)", d.apiKey && d.secretKey ? { apiKey: d.apiKey, secretKey: d.secretKey } : null);
+    await this.upsertCred(ctx.organizationId, GETNET_PROVIDER, "Getnet (cobros a clientes)", d.login && d.secretKey ? { login: d.login, secretKey: d.secretKey } : null);
     return { ok: true };
+  }
+
+  private async upsertCred(orgId: string, provider: string, label: string, creds: Record<string, string> | null) {
+    if (!creds) return;
+    const ciphertext = encryptSecret(JSON.stringify(creds));
+    const existing = await this.prisma.admin.integrationCredential.findFirst({ where: { organizationId: orgId, provider } });
+    if (existing) {
+      await this.prisma.admin.integrationCredential.update({ where: { id: existing.id }, data: { ciphertext, rotatedAt: new Date() } });
+    } else {
+      await this.prisma.admin.integrationCredential.create({ data: { organizationId: orgId, provider, label, ciphertext } });
+    }
   }
 
   @Post("test")
   async test() {
     const ctx = requireContext();
+    const { settings, getnetCred } = await readCharging(this.prisma, ctx.organizationId);
+    if ((settings.provider ?? "flow") === "getnet") {
+      if (!getnetCred) throw new BadRequestException("Primero guarda tus credenciales de Getnet");
+      const c = JSON.parse(decryptSecret(getnetCred.ciphertext)) as { login: string; secretKey: string };
+      const { getnetTestCredentials } = await import("./getnet-charge.js");
+      return getnetTestCredentials({ login: c.login, secretKey: c.secretKey, baseUrl: settings.sandbox ? GETNET_SANDBOX : GETNET_PROD });
+    }
     const cfg = await resolveTenantFlow(this.prisma, ctx.organizationId);
     if (!cfg) throw new BadRequestException("Primero guarda tus credenciales de Flow");
     return flowTestCredentials(cfg);
@@ -171,6 +190,65 @@ export class ChargingWebhookController {
           type: "NOTE",
           visibility: "INTERNAL",
           body: `💰 Pago recibido: $${payment.amount.toLocaleString("es-CL")} — ${payment.subject}`,
+          authorType: "SYSTEM",
+          status: "DELIVERED",
+        },
+      });
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Webhook PÚBLICO de confirmación de GETNET. Getnet notifica con { requestId, reference,
+   * signature, status }; validamos la firma y —fuente de verdad— reconsultamos el estado de
+   * la sesión con las llaves del tenant. Idempotente por commerceOrder/estado.
+   */
+  @Post("getnet-charge")
+  async confirmGetnet(@Body() body: any) {
+    const requestId = String(body?.requestId ?? "").trim();
+    const reference = String(body?.reference ?? "").trim();
+    if (!requestId && !reference) return { ok: false };
+    const payment = await this.prisma.admin.customerPayment.findFirst({
+      where: reference ? { commerceOrder: reference } : { flowToken: requestId },
+    });
+    if (!payment) return { ok: false };
+    if (payment.status === "paid") return { ok: true }; // idempotente
+
+    const [cred, org] = await Promise.all([
+      this.prisma.admin.integrationCredential.findFirst({ where: { organizationId: payment.organizationId, provider: GETNET_PROVIDER } }),
+      this.prisma.admin.organization.findUnique({ where: { id: payment.organizationId }, select: { settings: true } }),
+    ]);
+    if (!cred) return { ok: false };
+    let creds: { login: string; secretKey: string };
+    try {
+      creds = JSON.parse(decryptSecret(cred.ciphertext));
+    } catch {
+      return { ok: false };
+    }
+    const charging = ((org?.settings as Record<string, unknown> | null)?.charging as ChargingSettings) ?? {};
+    const baseUrl = charging.sandbox ? GETNET_SANDBOX : GETNET_PROD;
+    const { getGetnetSessionStatus, verifyGetnetSignature } = await import("./getnet-charge.js");
+
+    // Firma de la notificación (defensa); la fuente de verdad es consultar la sesión.
+    if (body?.signature && body?.status?.status && body?.status?.date) {
+      if (!verifyGetnetSignature(creds.secretKey, body.requestId, body.status.status, body.status.date, body.signature)) {
+        return { ok: false };
+      }
+    }
+    const st = await getGetnetSessionStatus({ login: creds.login, secretKey: creds.secretKey, baseUrl }, requestId || String(payment.flowToken ?? ""));
+    if (!st.approved) return { ok: true }; // pendiente/rechazado: no marcamos
+    if (st.amount && st.amount < payment.amount) return { ok: false }; // anti-fraude
+
+    await this.prisma.admin.customerPayment.update({ where: { id: payment.id }, data: { status: "paid", paidAt: new Date() } });
+    if (charging.notifyTeam !== false && payment.conversationId) {
+      await this.prisma.admin.message.create({
+        data: {
+          organizationId: payment.organizationId,
+          conversationId: payment.conversationId,
+          direction: "OUTBOUND",
+          type: "NOTE",
+          visibility: "INTERNAL",
+          body: `💰 Pago recibido (Getnet): $${payment.amount.toLocaleString("es-CL")} — ${payment.subject}`,
           authorType: "SYSTEM",
           status: "DELIVERED",
         },
