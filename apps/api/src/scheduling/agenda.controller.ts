@@ -101,6 +101,23 @@ export class AgendaController {
           d.aggSlots = slots.length;
           if (agg[0]) d.sampleSlot = agg[0];
         }
+        // Probe: si vino vacío, prueba variantes de parámetros con el 1er profesional
+        // para saber QUÉ necesita el /availability de Cláriva (fecha sin hora, serviceId, clinicId).
+        if (dbg && !slots.length && list.length) {
+          const p0 = (list[0] as { id: string }).id;
+          const fromDate = iso.from.slice(0, 10), toDate = iso.to.slice(0, 10);
+          const clinics = await provider.getClinics().catch(() => [] as Array<{ id: string }>);
+          const services = await provider.getServices().catch(() => [] as Array<{ id: string }>);
+          d.clinics = clinics.length; d.services = services.length;
+          const tryVar = async (label: string, q: Record<string, string>) => {
+            try { const r = (await provider.getAvailableSlots(q as never)) ?? []; (d as Record<string, unknown>)[`probe_${label}`] = r.length; if (r[0]) (d as Record<string, unknown>)[`probe_${label}_sample`] = r[0]; }
+            catch (e) { (d as Record<string, unknown>)[`probe_${label}_err`] = String((e as Error).message).slice(0, 150); }
+          };
+          await tryVar("isoRange", { from: iso.from, to: iso.to, professionalId: p0 });
+          await tryVar("dateOnly", { from: fromDate, to: toDate, professionalId: p0 });
+          if (clinics[0]) await tryVar("withClinic", { from: iso.from, to: iso.to, professionalId: p0, clinicId: clinics[0].id });
+          if (services[0]) await tryVar("withService", { from: iso.from, to: iso.to, professionalId: p0, serviceId: services[0].id });
+        }
         return dbg ? { source: provider.kind, slots, debug: d } : { source: provider.kind, slots };
       } catch (e) {
         return dbg ? { source: provider.kind, slots: [], debug: { ...d, fatal: String((e as Error).message).slice(0, 300) } } : { source: provider.kind, slots: [] };
