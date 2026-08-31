@@ -7,6 +7,7 @@ import { Button, Checkbox, Modal, Select, StatusBadge, cn, useToast } from "@/co
 import { AgentAvatar, AgentAvatarPicker } from "@/components/agent-avatars";
 import { AGENT_HELP, AGENT_VARIABLES, AGENT_VARIABLE_KEYS, PROMPT_SNIPPETS, type SectionHelp } from "@/lib/agent-help";
 import { AGENT_ACTIONS, ACTION_GROUPS, deriveTools, inferActions, type AgentActionDef } from "@/lib/agent-actions";
+import { FlowChargingConfig } from "@/components/flow-charging-config";
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 
 type ActionState = Record<string, { enabled: boolean; instructions: string }>;
@@ -690,6 +691,16 @@ export default function AgentEditorPage() {
                       </label>
                     ))}
                   </div>
+                  {actions["cobro"]?.enabled && (
+                    <div className="border-t border-line pt-3">
+                      <p className="mb-1 text-xs font-semibold text-ink">Cuenta de cobros (Flow)</p>
+                      <p className="mb-2 text-[11px] text-ink-subtle">
+                        La acción “Cobrar con link de pago” usa TU cuenta de Flow para generar los links con el monto exacto.
+                        Pega aquí tu API Key y Secret Key (aplica a toda tu cuenta; también está en Configuración → Cobros).
+                      </p>
+                      <FlowChargingConfig showInstructions={false} />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between border-t border-line pt-3">
                     <button onClick={() => void toggleActive()} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app">{agent.active ? "Desactivar agente" : "Activar agente"}</button>
                     <button onClick={() => void removeAgent()} className="text-sm text-red-600 hover:underline dark:text-red-400">Eliminar agente</button>
