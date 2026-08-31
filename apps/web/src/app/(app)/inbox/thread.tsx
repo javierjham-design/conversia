@@ -80,6 +80,52 @@ function AudioBubble({ conversationId, messageId, transcript, outbound }: { conv
   );
 }
 
+/** Adjunto de documento (PDF, etc.): baja el binario de Meta (vía backend, con token) y lo
+ *  abre/descarga con su nombre real. En iPhone, descargar un PDF lo abre en el visor. */
+function DocumentBubble({ conversationId, messageId, filename, caption, outbound }: { conversationId: string; messageId: string; filename: string; caption: string | null; outbound: boolean }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(false);
+  async function open() {
+    if (loading) return;
+    setLoading(true);
+    setErr(false);
+    try {
+      const res = await fetch(`/backend/conversations/${conversationId}/messages/${messageId}/document`, {
+        headers: { authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) throw new Error();
+      const objUrl = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = objUrl;
+      a.download = filename || "documento";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
+    } catch {
+      setErr(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <div>
+      <button
+        onClick={() => void open()}
+        disabled={loading}
+        className={cn("mb-1 flex items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-xs", outbound ? "bg-white/20 text-white" : "bg-app text-ink-muted hover:bg-line/40")}
+      >
+        <span className="shrink-0 text-base leading-none">📄</span>
+        <span className="min-w-0">
+          <span className="block max-w-[13rem] truncate font-medium">{filename || "Documento"}</span>
+          <span className="block text-2xs opacity-70">{loading ? "Descargando…" : err ? "No disponible" : "Toca para ver / descargar"}</span>
+        </span>
+      </button>
+      {caption && <p className="whitespace-pre-wrap">{caption}</p>}
+    </div>
+  );
+}
+
 /** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → visor dentro del chat. */
 function ImageBubble({ conversationId, messageId, caption, outbound, onLoaded }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean; onLoaded?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -682,7 +728,13 @@ export function Thread({
                         onLoaded={() => { if (nearBottom(400)) scrollToBottom(false); }}
                       />
                     ) : m.type === "DOCUMENT" ? (
-                      <p className="whitespace-pre-wrap">📎 {payload.filename ?? m.body ?? "Documento"}</p>
+                      <DocumentBubble
+                        conversationId={conversation.id}
+                        messageId={m.id}
+                        filename={payload.document?.filename ?? payload.filename ?? "Documento"}
+                        caption={payload.document?.caption ?? (m.body && !/^\[.*\]$/.test(m.body) ? m.body : null)}
+                        outbound={outbound}
+                      />
                     ) : m.type === "TEMPLATE" ? (
                       <div>
                         <p className="mb-0.5 text-2xs opacity-70">📄 Plantilla {payload.templateName ?? ""}</p>

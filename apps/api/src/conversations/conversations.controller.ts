@@ -740,6 +740,44 @@ export class ConversationsController {
   }
 
   /**
+   * Transmite el DOCUMENTO de un mensaje (PDF, etc.) que envió el cliente: descarga
+   * on-demand de Meta por media id y lo proxea al panel con su nombre real, para que el
+   * equipo pueda verlo/descargarlo. Mismo token del canal que la imagen/el audio.
+   */
+  @Get(":id/messages/:messageId/document")
+  async messageDocument(@Param("id") id: string, @Param("messageId") messageId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    const env = getEnv();
+    const found = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const message = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
+      if (!message) return null;
+      const payload = (message.payload ?? {}) as any;
+      const doc = (payload?.document ?? {}) as any;
+      // Entrante: payload.document.id. Saliente (lo que subimos): payload.mediaId.
+      const mediaId = doc?.id ?? payload?.mediaId;
+      if (!mediaId) return null;
+      const token = await this.resolveConversationMediaToken(tx, id);
+      return { mediaId: String(mediaId), token, filename: String(doc?.filename ?? "documento"), mime: doc?.mime_type ?? null };
+    });
+    if (!found) throw new NotFoundException("Este mensaje no tiene documento");
+    if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
+    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
+      headers: { authorization: `Bearer ${found.token}` },
+    });
+    const meta: any = await metaRes.json().catch(() => ({}));
+    if (!meta?.url) throw new NotFoundException("Documento no disponible (puede haber expirado en Meta)");
+    const docRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
+    if (!docRes.ok) throw new NotFoundException("No se pudo obtener el documento");
+    const buf = Buffer.from(await docRes.arrayBuffer());
+    // Nombre saneado para la cabecera (sin comillas ni saltos que rompan el header).
+    const safeName = found.filename.replace(/[^\w.\-() ]+/g, "_").slice(0, 120) || "documento";
+    res.setHeader("content-type", meta.mime_type ?? found.mime ?? "application/octet-stream");
+    res.setHeader("content-disposition", `attachment; filename="${safeName}"`);
+    res.setHeader("cache-control", "private, max-age=3600");
+    res.send(buf);
+  }
+
+  /**
    * Envío manual desde el panel (autor humano) — o comentario interno si
    * internal=true: queda en el hilo SOLO para el equipo y JAMÁS va al canal
    * (visibility INTERNAL y sin encolar a outbound).
