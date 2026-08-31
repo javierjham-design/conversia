@@ -78,9 +78,24 @@ export class AgendaController {
 
     const provider = await this.externalProvider(ctx.organizationId);
     if (provider) {
+      const iso = { from: gte.toISOString(), to: lte.toISOString() };
       try {
-        const slots = await provider.getAvailableSlots({ from: gte.toISOString(), to: lte.toISOString() });
-        return { source: provider.kind, slots: (slots ?? []).map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end })) };
+        // La mayoría de proveedores (Cláriva) devuelven disponibilidad POR profesional:
+        // se consulta a cada uno y se agrega. Si el proveedor la da agregada (sin
+        // professionalId) o no lista profesionales, se cae a una sola consulta.
+        const list = await provider.getProfessionals().catch(() => []);
+        let slots: Array<{ professionalId: string; start: string; end: string }> = [];
+        if (list.length) {
+          const perPro = await Promise.all(
+            list.map((p) => provider.getAvailableSlots({ ...iso, professionalId: p.id }).then((r) => r ?? []).catch(() => [])),
+          );
+          slots = perPro.flat().map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
+        }
+        if (!slots.length) {
+          const agg = await provider.getAvailableSlots(iso).catch(() => []);
+          slots = (agg ?? []).map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
+        }
+        return { source: provider.kind, slots };
       } catch {
         return { source: provider.kind, slots: [] };
       }
