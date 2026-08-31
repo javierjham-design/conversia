@@ -294,6 +294,15 @@ export async function runAgentTurn(opts: {
     // modelo lo distinga de sus propias respuestas y respete lo que ese humano pactó.
     const isHuman = m.direction === "OUTBOUND" && m.authorType === "USER";
     let content = m.body ?? `[${m.type.toLowerCase()}]`;
+    // Documento con TEXTO extraído (PDF, etc.): se lo damos al agente para que lo LEA.
+    // El texto va en el payload (no en el body, para no ensuciar el hilo del humano).
+    if (m.type === "DOCUMENT") {
+      const docText = (m.payload as any)?.documentText;
+      if (docText) {
+        const fname = (m.payload as any)?.document?.filename ?? "documento";
+        content = `[El cliente envió un documento llamado "${fname}". Su contenido en texto es:\n${docText}]`;
+      }
+    }
     if (isHuman) {
       const who = (m.authorUserId && humanNames.get(m.authorUserId)) || "un compañero del equipo";
       content = `[${who} (humano del equipo, escribiéndole al cliente): ${content}]`;
