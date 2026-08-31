@@ -71,56 +71,32 @@ export class AgendaController {
    * con los horarios de cada recurso (motor computeNativeSlots) menos las citas ocupadas.
    */
   @Get("availability")
-  async availability(@Query("from") from?: string, @Query("to") to?: string, @Query("debug") debug?: string) {
+  async availability(@Query("from") from?: string, @Query("to") to?: string) {
     const ctx = requireContext();
     const gte = from ? new Date(from) : new Date();
     const lte = to ? new Date(to) : new Date(Date.now() + 8 * 24 * 3600 * 1000);
-    const dbg = debug === "1";
 
     const provider = await this.externalProvider(ctx.organizationId);
     if (provider) {
-      const iso = { from: gte.toISOString(), to: lte.toISOString() };
-      const d: Record<string, unknown> = { provider: provider.kind, from: iso.from, to: iso.to };
+      // Cláriva/Dentalink esperan el rango como FECHA (YYYY-MM-DD), no timestamp ISO;
+      // con timestamp devuelven vacío. La disponibilidad se pide POR profesional y se agrega.
+      const range = { from: gte.toISOString().slice(0, 10), to: lte.toISOString().slice(0, 10) };
       try {
-        // La mayoría de proveedores (Cláriva) devuelven disponibilidad POR profesional:
-        // se consulta a cada uno y se agrega. Si el proveedor la da agregada (sin
-        // professionalId) o no lista profesionales, se cae a una sola consulta.
-        const list = await provider.getProfessionals().then((r) => { d.professionals = r.length; return r; }).catch((e) => { d.professionalsError = String((e as Error).message).slice(0, 300); return [] as Awaited<ReturnType<typeof provider.getProfessionals>>; });
+        const list = await provider.getProfessionals().catch(() => [] as Awaited<ReturnType<typeof provider.getProfessionals>>);
         let slots: Array<{ professionalId: string; start: string; end: string }> = [];
         if (list.length) {
           const perPro = await Promise.all(
-            list.map((p) => provider.getAvailableSlots({ ...iso, professionalId: p.id }).then((r) => r ?? []).catch((e) => { if (!d.perProError) d.perProError = `${p.id}: ${String((e as Error).message).slice(0, 200)}`; return []; })),
+            list.map((p) => provider.getAvailableSlots({ ...range, professionalId: p.id }).then((r) => r ?? []).catch(() => [])),
           );
           slots = perPro.flat().map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
-          d.perProSlots = slots.length;
-          d.sampleProfId = list[0]?.id ?? null;
         }
         if (!slots.length) {
-          const agg = await provider.getAvailableSlots(iso).then((r) => r ?? []).catch((e) => { d.aggError = String((e as Error).message).slice(0, 300); return []; });
+          const agg = await provider.getAvailableSlots(range).then((r) => r ?? []).catch(() => []);
           slots = agg.map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
-          d.aggSlots = slots.length;
-          if (agg[0]) d.sampleSlot = agg[0];
         }
-        // Probe: si vino vacío, prueba variantes de parámetros con el 1er profesional
-        // para saber QUÉ necesita el /availability de Cláriva (fecha sin hora, serviceId, clinicId).
-        if (dbg && !slots.length && list.length) {
-          const p0 = (list[0] as { id: string }).id;
-          const fromDate = iso.from.slice(0, 10), toDate = iso.to.slice(0, 10);
-          const clinics = await provider.getClinics().catch(() => [] as Array<{ id: string }>);
-          const services = await provider.getServices().catch(() => [] as Array<{ id: string }>);
-          d.clinics = clinics.length; d.services = services.length;
-          const tryVar = async (label: string, q: Record<string, string>) => {
-            try { const r = (await provider.getAvailableSlots(q as never)) ?? []; (d as Record<string, unknown>)[`probe_${label}`] = r.length; if (r[0]) (d as Record<string, unknown>)[`probe_${label}_sample`] = r[0]; }
-            catch (e) { (d as Record<string, unknown>)[`probe_${label}_err`] = String((e as Error).message).slice(0, 150); }
-          };
-          await tryVar("isoRange", { from: iso.from, to: iso.to, professionalId: p0 });
-          await tryVar("dateOnly", { from: fromDate, to: toDate, professionalId: p0 });
-          if (clinics[0]) await tryVar("withClinic", { from: iso.from, to: iso.to, professionalId: p0, clinicId: clinics[0].id });
-          if (services[0]) await tryVar("withService", { from: iso.from, to: iso.to, professionalId: p0, serviceId: services[0].id });
-        }
-        return dbg ? { source: provider.kind, slots, debug: d } : { source: provider.kind, slots };
-      } catch (e) {
-        return dbg ? { source: provider.kind, slots: [], debug: { ...d, fatal: String((e as Error).message).slice(0, 300) } } : { source: provider.kind, slots: [] };
+        return { source: provider.kind, slots };
+      } catch {
+        return { source: provider.kind, slots: [] };
       }
     }
 
