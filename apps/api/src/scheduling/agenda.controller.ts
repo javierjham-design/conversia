@@ -71,33 +71,39 @@ export class AgendaController {
    * con los horarios de cada recurso (motor computeNativeSlots) menos las citas ocupadas.
    */
   @Get("availability")
-  async availability(@Query("from") from?: string, @Query("to") to?: string) {
+  async availability(@Query("from") from?: string, @Query("to") to?: string, @Query("debug") debug?: string) {
     const ctx = requireContext();
     const gte = from ? new Date(from) : new Date();
     const lte = to ? new Date(to) : new Date(Date.now() + 8 * 24 * 3600 * 1000);
+    const dbg = debug === "1";
 
     const provider = await this.externalProvider(ctx.organizationId);
     if (provider) {
       const iso = { from: gte.toISOString(), to: lte.toISOString() };
+      const d: Record<string, unknown> = { provider: provider.kind, from: iso.from, to: iso.to };
       try {
         // La mayoría de proveedores (Cláriva) devuelven disponibilidad POR profesional:
         // se consulta a cada uno y se agrega. Si el proveedor la da agregada (sin
         // professionalId) o no lista profesionales, se cae a una sola consulta.
-        const list = await provider.getProfessionals().catch(() => []);
+        const list = await provider.getProfessionals().then((r) => { d.professionals = r.length; return r; }).catch((e) => { d.professionalsError = String((e as Error).message).slice(0, 300); return [] as Awaited<ReturnType<typeof provider.getProfessionals>>; });
         let slots: Array<{ professionalId: string; start: string; end: string }> = [];
         if (list.length) {
           const perPro = await Promise.all(
-            list.map((p) => provider.getAvailableSlots({ ...iso, professionalId: p.id }).then((r) => r ?? []).catch(() => [])),
+            list.map((p) => provider.getAvailableSlots({ ...iso, professionalId: p.id }).then((r) => r ?? []).catch((e) => { if (!d.perProError) d.perProError = `${p.id}: ${String((e as Error).message).slice(0, 200)}`; return []; })),
           );
           slots = perPro.flat().map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
+          d.perProSlots = slots.length;
+          d.sampleProfId = list[0]?.id ?? null;
         }
         if (!slots.length) {
-          const agg = await provider.getAvailableSlots(iso).catch(() => []);
-          slots = (agg ?? []).map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
+          const agg = await provider.getAvailableSlots(iso).then((r) => r ?? []).catch((e) => { d.aggError = String((e as Error).message).slice(0, 300); return []; });
+          slots = agg.map((s) => ({ professionalId: s.professionalId, start: s.start, end: s.end }));
+          d.aggSlots = slots.length;
+          if (agg[0]) d.sampleSlot = agg[0];
         }
-        return { source: provider.kind, slots };
-      } catch {
-        return { source: provider.kind, slots: [] };
+        return dbg ? { source: provider.kind, slots, debug: d } : { source: provider.kind, slots };
+      } catch (e) {
+        return dbg ? { source: provider.kind, slots: [], debug: { ...d, fatal: String((e as Error).message).slice(0, 300) } } : { source: provider.kind, slots: [] };
       }
     }
 
