@@ -90,6 +90,7 @@ function Citas() {
   const [pros, setPros] = useState<Prof[]>([]);
   const [svcs, setSvcs] = useState<Svc[]>([]);
   const [avail, setAvail] = useState<Slot[]>([]);
+  const [resources, setResources] = useState<ColorRef[]>([]);
   const [view, setView] = useState<"semana" | "dia" | "lista">("semana");
   const [anchor, setAnchor] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -117,14 +118,23 @@ function Citas() {
   }, [weekStart, anchor, view]);
   useEffect(() => void load(), [load]);
 
-  // Referencia de color/leyenda por profesional: personas nativas si las hay;
-  // si la agenda viene del proveedor externo (Cláriva), se derivan de las citas.
+  // Lista COMPLETA de profesionales/recursos del proveedor (Cláriva incluye los que no
+  // tienen cita esta semana) → para poder filtrarlos TODOS con los chips.
+  useEffect(() => {
+    void api<{ resources: Array<{ id: string; name: string }> }>("/agenda/resources")
+      .then((r) => setResources((r.resources ?? []).map((x) => ({ id: x.id, name: x.name }))))
+      .catch(() => {});
+  }, []);
+
+  // Referencia de color/leyenda por profesional: recursos nativos con horario; si es Cláriva,
+  // la lista completa del proveedor; si aún no llega, se deriva de las citas.
   const colorRefs = useMemo<ColorRef[]>(() => {
     if (pros.length) return pros.map((p) => ({ id: p.id, name: p.name }));
+    if (resources.length) return resources;
     const seen = new Map<string, string>();
     for (const a of appts ?? []) if (a.professionalId && !seen.has(a.professionalId)) seen.set(a.professionalId, a.professionalName || "Profesional");
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
-  }, [pros, appts]);
+  }, [pros, resources, appts]);
 
   // Filtro por profesional (chips): las citas de profesionales ocultos no se muestran.
   const visible = useMemo(() => (appts ?? []).filter((a) => !hidden.has(a.professionalId ?? "")), [appts, hidden]);
