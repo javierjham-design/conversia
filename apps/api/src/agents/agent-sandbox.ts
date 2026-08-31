@@ -155,6 +155,13 @@ export async function buildSandboxServices(
       track("Agendar cita", `${new Date(appt.start).toLocaleString("es-CL")} (simulada)`);
     },
 
+    async listLeadStatuses() {
+      const rows = await withTenant(orgId, (tx) =>
+        tx.leadStatus.findMany({ where: { active: true }, orderBy: { order: "asc" }, select: { code: true, name: true } }),
+      );
+      return rows.map((r) => ({ code: r.code, name: r.name }));
+    },
+
     async updateLeadStatus(code: string) {
       // Lectura real para validar que el estado existe; sin persistir el cambio.
       const status = await withTenant(orgId, (tx) =>

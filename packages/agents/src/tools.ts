@@ -42,6 +42,7 @@ export interface ToolServices {
   contactInfo(): Promise<{ firstName: string | null; lastName: string | null; phone: string | null }>;
   recordAppointment(appt: SchedAppointment): Promise<void>;
   updateLeadStatus(code: string): Promise<void>;
+  listLeadStatuses(): Promise<Array<{ code: string; name: string }>>;
   addTag(name: string): Promise<void>;
   searchKnowledge(query: string): Promise<Array<{ title: string; content: string }>>;
   requestHumanHandoff(reason: string): Promise<void>;
@@ -218,8 +219,16 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       },
     },
     {
+      name: "getLeadStatuses",
+      description: "Lista las ETAPAS válidas del lead configuradas por la cuenta (code + nombre). Úsala antes de updateLeadStatus para usar el code exacto; nunca inventes códigos.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        return services(ctx).listLeadStatuses();
+      },
+    },
+    {
       name: "updateLeadStatus",
-      description: "Actualiza el estado del lead de esta conversación (códigos configurados por la clínica, p.ej. hot_lead, agenda, cold_lead).",
+      description: "Actualiza la ETAPA del lead de esta conversación. Usa un code EXACTO de getLeadStatuses (no inventes). Cambia la etapa según el avance real (interés, agendó, cerró, se enfrió).",
       inputSchema: z.object({ statusCode: z.string() }),
       async execute(ctx, input: { statusCode: string }) {
         await services(ctx).updateLeadStatus(input.statusCode);
