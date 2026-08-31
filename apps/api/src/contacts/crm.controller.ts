@@ -261,4 +261,39 @@ export class CrmController {
     }
     return result;
   }
+
+  /**
+   * Cambia la etapa del lead de un CONTACTO (desde el chat). El chat tiene el contacto,
+   * no el lead; se usa/crea el lead más reciente. Emite el mismo `lead.status_changed`
+   * que el tablero → alimenta workflows y reglas (misma verdad canónica).
+   */
+  @Post("contacts/:contactId/stage")
+  async moveContactStage(@Param("contactId") contactId: string, @Body() body: unknown) {
+    const ctx = requirePermission("leads:write");
+    const parsed = z.object({ statusCode: z.string().min(1).max(60) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("statusCode requerido");
+    const result = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const status = await tx.leadStatus.findUnique({ where: { organizationId_code: { organizationId: ctx.organizationId, code: parsed.data.statusCode } } });
+      if (!status || !status.active) throw new BadRequestException("Etapa desconocida");
+      const contact = await tx.contact.findUnique({ where: { id: contactId }, select: { id: true, phone: true } });
+      if (!contact) throw new NotFoundException("Contacto no encontrado");
+      let lead = await tx.lead.findFirst({ where: { contactId }, orderBy: { createdAt: "desc" }, include: { status: true } });
+      const from = lead?.status?.code ?? null;
+      if (lead && lead.statusId === status.id) return { changed: false, from, to: status.code, contactId, contactPhone: contact.phone };
+      if (!lead) lead = await tx.lead.create({ data: { organizationId: ctx.organizationId, contactId, statusId: status.id }, include: { status: true } });
+      else await tx.lead.update({ where: { id: lead.id }, data: { statusId: status.id } });
+      await tx.leadEvent.create({ data: { organizationId: ctx.organizationId, leadId: lead.id, type: "status_changed", data: { from, to: status.code, via: "chat" }, actorType: "user", actorId: ctx.userId } });
+      return { changed: true, from, to: status.code, contactId, contactPhone: contact.phone, conversion: status.category === "WON" };
+    });
+    if (result.changed) {
+      await this.queues.events.add("emit", {
+        organizationId: ctx.organizationId,
+        type: "lead.status_changed",
+        contactId: result.contactId,
+        data: { from: result.from, to: result.to, statusCode: result.to, via: "chat", contactId: result.contactId },
+        occurredAt: new Date().toISOString(),
+      });
+    }
+    return result;
+  }
 }

@@ -1,11 +1,13 @@
 "use client";
 
 /** Panel derecho: datos del contacto, origen, e indicaciones para la IA. */
-import { useState } from "react";
-import { ExternalLink, Megaphone, Sparkles, User, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, ChevronDown, ExternalLink, Megaphone, Sparkles, User, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { StatusBadge, cn, useToast } from "@/components/ui";
 import { avatarColor, displayName, initials, type ConvContext } from "./types";
+
+type StageOpt = { code: string; name: string; color: string | null; emoji?: string | null };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <p className="mb-1 text-2xs font-semibold uppercase tracking-wide text-ink-subtle">{children}</p>;
@@ -28,6 +30,15 @@ export function ContactPanel({
   const toast = useToast();
   const [newNote, setNewNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [stages, setStages] = useState<StageOpt[]>([]);
+  const [stageOpen, setStageOpen] = useState(false);
+  const [savingStage, setSavingStage] = useState(false);
+
+  useEffect(() => {
+    void api<Array<StageOpt & { active: boolean }>>("/lifecycle-stages")
+      .then((r) => setStages(r.filter((s) => s.active).map((s) => ({ code: s.code, name: s.name, color: s.color, emoji: s.emoji }))))
+      .catch(() => {});
+  }, []);
 
   if (!context) {
     return (
@@ -58,6 +69,21 @@ export function ContactPanel({
   async function toggleNote(noteId: string, active: boolean) {
     await api(`/conversations/ai-notes/${noteId}`, { method: "PATCH", body: JSON.stringify({ active }) });
     onChanged();
+  }
+
+  async function setStage(code: string) {
+    if (code === context?.stage?.code) { setStageOpen(false); return; }
+    setSavingStage(true);
+    setStageOpen(false);
+    try {
+      await api(`/crm/contacts/${c.id}/stage`, { method: "POST", body: JSON.stringify({ statusCode: code }) });
+      toast.push("Etapa actualizada", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setSavingStage(false);
+    }
   }
 
   return (
@@ -121,17 +147,45 @@ export function ContactPanel({
           </button>
         </div>
 
-        {/* Etapa + tags */}
+        {/* Etapa (editable) + tags */}
         <div>
           <SectionTitle>Etapa y etiquetas</SectionTitle>
-          {context.stage ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${context.stage.color ?? "#94a3b8"}1f`, color: context.stage.color ?? "#475569" }}>
-              {context.stage.emoji ? <span>{context.stage.emoji}</span> : <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: context.stage.color ?? "#94a3b8" }} />}
-              {context.stage.name}
-            </span>
-          ) : (
-            <p className="text-xs text-ink-subtle">Sin etapa aún</p>
-          )}
+          <div className="relative">
+            <button
+              onClick={() => setStageOpen((v) => !v)}
+              disabled={savingStage || stages.length === 0}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-xs font-medium transition-colors hover:border-line-strong disabled:opacity-60"
+              style={context.stage ? { backgroundColor: `${context.stage.color ?? "#94a3b8"}1f`, color: context.stage.color ?? "#475569" } : undefined}
+              title="Cambiar etapa"
+            >
+              {context.stage ? (
+                <>
+                  {context.stage.emoji ? <span>{context.stage.emoji}</span> : <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: context.stage.color ?? "#94a3b8" }} />}
+                  <span className="truncate">{context.stage.name}</span>
+                </>
+              ) : (
+                <span className="text-ink-subtle">Sin etapa — asignar</span>
+              )}
+              <ChevronDown size={12} className="shrink-0 opacity-70" />
+            </button>
+            {stageOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setStageOpen(false)} />
+                <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-e2">
+                  {stages.map((s) => {
+                    const active = s.code === context.stage?.code;
+                    return (
+                      <button key={s.code} onClick={() => void setStage(s.code)} className={cn("flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-xs hover:bg-app", active && "bg-app")}>
+                        {s.emoji ? <span>{s.emoji}</span> : <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color ?? "#94a3b8" }} />}
+                        <span className="min-w-0 flex-1 truncate text-ink">{s.name}</span>
+                        {active && <Check size={13} className="shrink-0 text-brand-600" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
           {context.tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {context.tags.map((t) => (

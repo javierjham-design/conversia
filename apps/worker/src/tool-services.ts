@@ -411,6 +411,13 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       await scheduleAppointmentReminders(orgId, { id: appt.id, start: appt.start }, { conversationId: t.conversationId, contactId: t.contactId });
     },
 
+    async listLeadStatuses() {
+      return withTenant(orgId, async (tx) => {
+        const rows = await tx.leadStatus.findMany({ where: { active: true }, orderBy: { order: "asc" }, select: { code: true, name: true } });
+        return rows.map((r) => ({ code: r.code, name: r.name }));
+      });
+    },
+
     async updateLeadStatus(code: string) {
       const fromCode = await withTenant(orgId, async (tx) => {
         const status = await tx.leadStatus.findUnique({

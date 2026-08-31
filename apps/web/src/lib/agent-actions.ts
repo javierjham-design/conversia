@@ -35,7 +35,7 @@ export const AGENT_ACTIONS: AgentActionDef[] = [
     key: "lifecycle",
     label: "Actualizar etapa del lead",
     description: "Mover el lead entre etapas (Nuevo, Caliente, Agendado, Cliente…).",
-    tools: ["updateLeadStatus"],
+    tools: ["getLeadStatuses", "updateLeadStatus"],
     placeholder: "Marca 'Caliente' cuando muestre interés real; 'Agendado' cuando reserve una hora.",
     group: "atencion",
   },
