@@ -812,47 +812,76 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       );
     },
 
-    // ---------------- Cobro a clientes (Flow, cuenta del tenant) ----------------
+    // ---------------- Cobro a clientes (Flow o Getnet, cuenta del tenant) ----------------
     async enviarLinkDePago(input: { monto: number; concepto: string }) {
       const env = getEnv();
       const monto = Math.round(Number(input.monto) || 0);
       if (monto <= 0) return { ok: false, error: "El monto debe ser mayor a 0." };
-      // Config + credenciales del tenant (RLS).
+      // Config + credenciales del tenant (RLS). Trae las de AMBOS proveedores; se usa la del
+      // proveedor elegido en la configuración de cobros (charging.provider: flow|getnet).
       const setup = await withTenant(orgId, async (tx) => {
-        const [org, cred, contact] = await Promise.all([
+        const [org, flowCred, getnetCred, contact] = await Promise.all([
           tx.organization.findUnique({ where: { id: orgId }, select: { settings: true, currency: true } }),
           tx.integrationCredential.findFirst({ where: { organizationId: orgId, provider: "flow_charge" } }),
+          tx.integrationCredential.findFirst({ where: { organizationId: orgId, provider: "getnet_charge" } }),
           t.contactId ? tx.contact.findUnique({ where: { id: t.contactId }, select: { email: true } }) : Promise.resolve(null),
         ]);
-        const charging = ((org?.settings as Record<string, unknown> | null)?.charging as { enabled?: boolean; sandbox?: boolean }) ?? {};
-        return { charging, cred, currency: org?.currency ?? "CLP", email: contact?.email ?? null };
+        const charging = ((org?.settings as Record<string, unknown> | null)?.charging as { enabled?: boolean; sandbox?: boolean; provider?: string }) ?? {};
+        return { charging, flowCred, getnetCred, currency: org?.currency ?? "CLP", email: contact?.email ?? null };
       });
-      if (!setup.charging.enabled || !setup.cred) {
+      const provider = setup.charging.provider === "getnet" ? "getnet" : "flow";
+      if (!setup.charging.enabled) {
         return { ok: false, error: "El cobro no está configurado para esta cuenta. Avísale al cliente que en un momento le confirmas el medio de pago (NO inventes un link)." };
       }
-      let creds: { apiKey: string; secretKey: string };
-      try {
-        creds = JSON.parse(decryptCredential(setup.cred.ciphertext));
-      } catch {
-        return { ok: false, error: "Las credenciales de cobro no son legibles. Avisa al equipo." };
-      }
-      const baseUrl = setup.charging.sandbox ? "https://sandbox.flow.cl/api" : "https://www.flow.cl/api";
       const commerceOrder = `cp-${orgId.slice(-6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const { createFlowPaymentLink } = await import("./customer-charge.js");
-      const link = await createFlowPaymentLink(
-        { apiKey: creds.apiKey, secretKey: creds.secretKey, baseUrl },
-        {
-          commerceOrder,
-          subject: input.concepto,
-          amount: monto,
-          currency: setup.currency,
-          email: setup.email || `pagos+${commerceOrder}@tubot.cl`,
-          urlConfirmation: `${env.API_URL}/webhooks/flow-charge`,
-          urlReturn: `${env.WEB_URL}`,
-        },
-      );
+      let link: { ok: boolean; url?: string; token?: string | null; error?: string };
+      if (provider === "getnet") {
+        if (!setup.getnetCred) return { ok: false, error: "El cobro con Getnet no está configurado. Avísale al cliente que en un momento le confirmas el medio de pago (NO inventes un link)." };
+        let creds: { login: string; secretKey: string };
+        try {
+          creds = JSON.parse(decryptCredential(setup.getnetCred.ciphertext));
+        } catch {
+          return { ok: false, error: "Las credenciales de Getnet no son legibles. Avisa al equipo." };
+        }
+        const baseUrl = setup.charging.sandbox ? "https://checkout.test.getnet.cl" : "https://checkout.getnet.cl";
+        const { createGetnetSession } = await import("./getnet-charge.js");
+        const r = await createGetnetSession(
+          { login: creds.login, secretKey: creds.secretKey, baseUrl },
+          {
+            reference: commerceOrder,
+            description: input.concepto,
+            amount: monto,
+            currency: setup.currency,
+            returnUrl: `${env.WEB_URL}`,
+            notificationUrl: `${env.API_URL}/webhooks/getnet-charge`,
+          },
+        );
+        link = { ok: r.ok, url: r.url, token: r.requestId ?? null, error: r.error };
+      } else {
+        if (!setup.flowCred) return { ok: false, error: "El cobro con Flow no está configurado. Avísale al cliente que en un momento le confirmas el medio de pago (NO inventes un link)." };
+        let creds: { apiKey: string; secretKey: string };
+        try {
+          creds = JSON.parse(decryptCredential(setup.flowCred.ciphertext));
+        } catch {
+          return { ok: false, error: "Las credenciales de cobro no son legibles. Avisa al equipo." };
+        }
+        const baseUrl = setup.charging.sandbox ? "https://sandbox.flow.cl/api" : "https://www.flow.cl/api";
+        const { createFlowPaymentLink } = await import("./customer-charge.js");
+        link = await createFlowPaymentLink(
+          { apiKey: creds.apiKey, secretKey: creds.secretKey, baseUrl },
+          {
+            commerceOrder,
+            subject: input.concepto,
+            amount: monto,
+            currency: setup.currency,
+            email: setup.email || `pagos+${commerceOrder}@tubot.cl`,
+            urlConfirmation: `${env.API_URL}/webhooks/flow-charge`,
+            urlReturn: `${env.WEB_URL}`,
+          },
+        );
+      }
       if (!link.ok || !link.url) {
-        return { ok: false, error: `No se pudo generar el link de pago (${link.error ?? "error de Flow"}). No inventes un link; ofrece confirmar el pago en un momento.` };
+        return { ok: false, error: `No se pudo generar el link de pago (${link.error ?? "error del proveedor"}). No inventes un link; ofrece confirmar el pago en un momento.` };
       }
       await withTenant(orgId, (tx) =>
         tx.customerPayment.create({
