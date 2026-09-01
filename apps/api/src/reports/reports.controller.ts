@@ -17,10 +17,23 @@ export class ReportsController {
   constructor(private prisma: PrismaService) {}
 
   @Get("overview")
-  overview(@Query("days") daysParam?: string) {
+  async overview(@Query("days") daysParam?: string) {
     const ctx = requireContext();
     const days = Math.min(Math.max(Number(daysParam ?? 30) || 30, 1), 90);
     const since = sinceDays(days);
+
+    // Pagos RECIBIDOS de clientes (Flow) — en su PROPIA transacción, AISLADO del reporte.
+    // Si la tabla customer_payments aún no fue migrada, la consulta aborta la transacción
+    // en Postgres; corriéndola aparte, ese fallo NO contamina el resto del reporte.
+    let payments = { count: 0, total: 0 };
+    try {
+      payments = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const agg = await tx.customerPayment.aggregate({ where: { status: "paid", paidAt: { gte: since } }, _count: { _all: true }, _sum: { amount: true } });
+        return { count: agg._count._all, total: Number(agg._sum.amount ?? 0) };
+      });
+    } catch {
+      /* tabla customer_payments aún no migrada en este entorno */
+    }
 
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const [
@@ -61,16 +74,6 @@ export class ReportsController {
           WHERE organization_id = ${ctx.organizationId} AND direction = 'INBOUND' AND created_at >= ${sinceDays(14)}
           GROUP BY 1 ORDER BY 1`,
       ]);
-
-      // Pagos RECIBIDOS de clientes (Flow) en el período. Defensivo: si la tabla aún no
-      // fue migrada en este entorno, no rompe el reporte (devuelve 0).
-      let payments = { count: 0, total: 0 };
-      try {
-        const agg = await tx.customerPayment.aggregate({ where: { status: "paid", paidAt: { gte: since } }, _count: { _all: true }, _sum: { amount: true } });
-        payments = { count: agg._count._all, total: Number(agg._sum.amount ?? 0) };
-      } catch {
-        /* tabla customer_payments aún no migrada */
-      }
 
       // Uso de CONTACTOS del mes vs el cupo del plan (con override por-tenant).
       // El período arranca en el periodStart de la suscripción, o el 1° del mes.
