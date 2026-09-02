@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import Link from "next/link";
+import { Download, Receipt } from "lucide-react";
 import { API_URL, api, getToken } from "@/lib/api";
 import { Select, Skeleton } from "@/components/ui";
 
@@ -212,12 +213,18 @@ export default function ReportsPage() {
         <Kpi label="Escalamientos a humano" value={data.humanHandoffs} hint={`en los últimos ${data.days} días`} />
       </div>
 
-      {data.payments && (
-        <div className="mb-6 grid gap-3 sm:grid-cols-2">
-          <Kpi label={`Pagos recibidos (${data.days}d)`} value={data.payments.count} hint="cobros confirmados por Flow" />
-          <Kpi label={`Total cobrado (${data.days}d)`} value={`$${(data.payments.total ?? 0).toLocaleString("es-CL")}`} hint="suma de pagos recibidos" />
+      <div className="mb-6">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-ink-muted">Pagos</h2>
+          <Link href="/reports/pagos" className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-app">
+            <Receipt size={15} /> Reporte de pagos
+          </Link>
         </div>
-      )}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Kpi label={`Pagos recibidos (${data.days}d)`} value={data.payments?.count ?? 0} hint="cobros confirmados por Flow" />
+          <Kpi label={`Total cobrado (${data.days}d)`} value={`$${(data.payments?.total ?? 0).toLocaleString("es-CL")}`} hint="suma de pagos recibidos" />
+        </div>
+      </div>
 
       {data.contactsUsage && (
         <div className="mb-6">

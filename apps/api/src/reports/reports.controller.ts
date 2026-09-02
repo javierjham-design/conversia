@@ -7,6 +7,16 @@ function sinceDays(days: number): Date {
   return new Date(Date.now() - days * 24 * 3600 * 1000);
 }
 
+/** Rango [gte, lte] a partir de from/to (YYYY-MM-DD). Default: últimos 30 días. Bordes de día en UTC. */
+function parseRange(from?: string, to?: string): { gte: Date; lte: Date } {
+  const now = new Date();
+  const g = from ? new Date(`${from.slice(0, 10)}T00:00:00.000Z`) : new Date(now.getTime() - 30 * 24 * 3600 * 1000);
+  const l = to ? new Date(`${to.slice(0, 10)}T23:59:59.999Z`) : now;
+  const gte = isNaN(g.getTime()) ? new Date(now.getTime() - 30 * 24 * 3600 * 1000) : g;
+  const lte = isNaN(l.getTime()) || l < gte ? now : l;
+  return { gte, lte };
+}
+
 function csvEscape(v: unknown): string {
   const s = v === null || v === undefined ? "" : String(v);
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -179,6 +189,93 @@ export class ReportsController {
     );
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="leads.csv"');
+    res.send("﻿" + [header, ...lines].join("\n"));
+  }
+
+  /**
+   * Reporte de PAGOS recibidos (Flow) en un rango de fechas ajustable: resumen, desglose
+   * por ítem cobrado (subject) y detalle de pagos. Resiliente: si la tabla customer_payments
+   * no está migrada, devuelve available=false sin romper.
+   */
+  @Get("payments")
+  async payments(@Query("from") from?: string, @Query("to") to?: string) {
+    const ctx = requireContext();
+    const { gte, lte } = parseRange(from, to);
+    const empty = { available: false, currency: "CLP", range: { from: gte.toISOString(), to: lte.toISOString() }, summary: { paidCount: 0, paidTotal: 0, pendingCount: 0 }, byItem: [] as Array<{ subject: string; count: number; total: number }>, payments: [] as unknown[] };
+    try {
+      return await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const paidWhere = { status: "paid", paidAt: { gte, lte } };
+        const [agg, byItemRaw, pendingCount, list] = await Promise.all([
+          tx.customerPayment.aggregate({ where: paidWhere, _count: { _all: true }, _sum: { amount: true } }),
+          tx.customerPayment.groupBy({ by: ["subject"], where: paidWhere, _count: { _all: true }, _sum: { amount: true } }),
+          tx.customerPayment.count({ where: { status: "pending", createdAt: { gte, lte } } }),
+          tx.customerPayment.findMany({ where: paidWhere, orderBy: { paidAt: "desc" }, take: 1000 }),
+        ]);
+        // CustomerPayment no tiene relación `contact` (solo contactId) → se resuelven aparte.
+        const contactIds = [...new Set(list.map((p) => p.contactId).filter((v): v is string => !!v))];
+        const contacts = contactIds.length ? await tx.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, firstName: true, lastName: true, phone: true } }) : [];
+        const cById = new Map(contacts.map((c) => [c.id, c]));
+        const byItem = byItemRaw
+          .map((r) => ({ subject: r.subject, count: r._count._all, total: Number(r._sum.amount ?? 0) }))
+          .sort((a, b) => b.total - a.total);
+        return {
+          available: true,
+          currency: "CLP",
+          range: { from: gte.toISOString(), to: lte.toISOString() },
+          summary: { paidCount: agg._count._all, paidTotal: Number(agg._sum.amount ?? 0), pendingCount },
+          byItem,
+          payments: list.map((p) => {
+            const c = p.contactId ? cById.get(p.contactId) : null;
+            return {
+              id: p.id,
+              paidAt: (p.paidAt ?? p.createdAt).toISOString(),
+              subject: p.subject,
+              amount: p.amount,
+              currency: p.currency,
+              status: p.status,
+              contact: { name: [c?.firstName, c?.lastName].filter(Boolean).join(" ") || c?.phone || "—", phone: c?.phone ?? null },
+            };
+          }),
+        };
+      });
+    } catch {
+      return empty; // tabla customer_payments aún no migrada
+    }
+  }
+
+  @Get("export/payments")
+  async exportPayments(@Res() res: Response, @Query("from") from?: string, @Query("to") to?: string) {
+    const ctx = requireContext();
+    const { gte, lte } = parseRange(from, to);
+    let lines: string[] = [];
+    try {
+      lines = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const rows = await tx.customerPayment.findMany({ where: { status: "paid", paidAt: { gte, lte } }, orderBy: { paidAt: "desc" }, take: 10000 });
+        const contactIds = [...new Set(rows.map((p) => p.contactId).filter((v): v is string => !!v))];
+        const contacts = contactIds.length ? await tx.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, firstName: true, lastName: true, phone: true } }) : [];
+        const cById = new Map(contacts.map((c) => [c.id, c]));
+        return rows.map((p) => {
+          const c = p.contactId ? cById.get(p.contactId) : null;
+          return [
+            (p.paidAt ?? p.createdAt).toISOString(),
+            [c?.firstName, c?.lastName].filter(Boolean).join(" "),
+            c?.phone ?? "",
+            p.subject,
+            p.amount,
+            p.currency,
+            p.status,
+            p.commerceOrder,
+          ]
+            .map(csvEscape)
+            .join(";");
+        });
+      });
+    } catch {
+      lines = [];
+    }
+    const header = "fecha_pago;contacto;telefono;item;monto;moneda;estado;orden";
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="pagos.csv"');
     res.send("﻿" + [header, ...lines].join("\n"));
   }
 }
