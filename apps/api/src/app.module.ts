@@ -46,6 +46,7 @@ import { ReportsController } from "./reports/reports.controller";
 import { ChargingController, ChargingWebhookController } from "./charging/charging.controller";
 import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
 import { AgendaController } from "./scheduling/agenda.controller";
+import { McpController } from "./mcp/mcp.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
 import { WorkflowsController } from "./workflows/workflows.controller";
@@ -93,6 +94,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     ChargingController,
     ChargingWebhookController,
     AgendaController,
+    McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
   providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })
@@ -103,7 +105,8 @@ export class AppModule implements NestModule {
     // guard y auth); se excluyen del middleware de tenancy.
     consumer
       .apply(TenancyMiddleware, RateLimitMiddleware)
-      .exclude("platform/(.*)", "platform")
+      // /mcp/* se autoautentica reenviando el token a /agents/*; no pasa por tenancy.
+      .exclude("platform/(.*)", "platform", "mcp/(.*)")
       .forRoutes("*");
   }
 }
