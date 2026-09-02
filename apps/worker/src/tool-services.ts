@@ -33,9 +33,19 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
 
   if (kind === "CLARIVA") {
     const cfg = (connection?.config ?? {}) as Record<string, string>;
+    // El apiKey NO está en config (ahí solo van baseUrl + webhookSecret): está CIFRADO en
+    // IntegrationCredential. Hay que descifrarlo (igual que CUSTOM/DENTALINK); si no, el bot
+    // llama a Cláriva sin token → 401 → sin disponibilidad → cae al link de fallback.
+    let apiKey = env.CLARIVA_API_KEY ?? "";
+    if (connection?.credentialId) {
+      const cred = await withTenant(orgId, (tx) => tx.integrationCredential.findUnique({ where: { id: connection.credentialId! } }));
+      if (cred) {
+        try { apiKey = decryptCredential(cred.ciphertext); } catch { /* secreto ilegible → fallará con 401 */ }
+      }
+    }
     return new ClarivaSchedulingProvider({
       baseUrl: cfg.baseUrl ?? env.CLARIVA_BASE_URL,
-      apiKey: cfg.apiKey ?? env.CLARIVA_API_KEY,
+      apiKey,
     });
   }
 
