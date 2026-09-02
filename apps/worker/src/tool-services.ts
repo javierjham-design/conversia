@@ -297,8 +297,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
   if (allowed) {
     const scoped = Object.create(rawScheduling) as SchedulingProvider;
     scoped.getAvailableSlots = async (q) => {
-      const wanted = q.professionalId && !allowed.has(q.professionalId) ? [] : await rawScheduling.getAvailableSlots(q);
-      return wanted.filter((s) => !s.professionalId || allowed.has(s.professionalId));
+      if (q.professionalId) {
+        if (!allowed.has(q.professionalId)) return [];
+        return rawScheduling.getAvailableSlots(q);
+      }
+      // Sin profesional fijo: consultar SOLO los permitidos y agregar (Cláriva requiere
+      // professionalId; así el bot obtiene horarios reales del set habilitado).
+      const per = await Promise.all([...allowed].map((pid) => rawScheduling.getAvailableSlots({ ...q, professionalId: pid }).then((r) => r ?? []).catch(() => [])));
+      return per.flat().filter((s) => !s.professionalId || allowed.has(s.professionalId));
     };
     scoped.createAppointment = async (input) => {
       if (input.professionalId && !allowed.has(input.professionalId)) {
