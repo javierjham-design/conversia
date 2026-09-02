@@ -347,14 +347,26 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
   getProfessionalServices(professionalId: string) {
     return this.request<SchedService[]>("GET", `/professionals/${professionalId}/services`);
   }
-  getAvailableSlots(q: AvailabilityQuery) {
-    const params = new URLSearchParams();
-    if (q.clinicId) params.set("clinicId", q.clinicId);
-    if (q.professionalId) params.set("professionalId", q.professionalId);
-    if (q.serviceId) params.set("serviceId", q.serviceId);
-    params.set("from", q.from);
-    params.set("to", q.to);
-    return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`);
+  async getAvailableSlots(q: AvailabilityQuery): Promise<SchedSlot[]> {
+    // Cláriva espera FECHA (YYYY-MM-DD) y calcula la disponibilidad POR profesional:
+    // sin professionalId devuelve vacío. Si no viene, se consulta a cada profesional
+    // y se agrega (así el bot encuentra horarios aunque no fije un profesional).
+    const from = q.from.slice(0, 10);
+    const to = q.to.slice(0, 10);
+    const one = (professionalId?: string) => {
+      const params = new URLSearchParams();
+      if (q.clinicId) params.set("clinicId", q.clinicId);
+      if (professionalId) params.set("professionalId", professionalId);
+      if (q.serviceId) params.set("serviceId", q.serviceId);
+      params.set("from", from);
+      params.set("to", to);
+      return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`).then((r) => r ?? []);
+    };
+    if (q.professionalId) return one(q.professionalId);
+    const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
+    if (!pros.length) return one();
+    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
+    return per.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     return this.request<SchedAppointment>("POST", "/appointments", input);
@@ -453,14 +465,26 @@ export class CustomSchedulingProvider implements SchedulingProvider {
   getProfessionalServices(professionalId: string) {
     return this.request<SchedService[]>("GET", `/professionals/${professionalId}/services`);
   }
-  getAvailableSlots(q: AvailabilityQuery) {
-    const params = new URLSearchParams();
-    if (q.clinicId) params.set("clinicId", q.clinicId);
-    if (q.professionalId) params.set("professionalId", q.professionalId);
-    if (q.serviceId) params.set("serviceId", q.serviceId);
-    params.set("from", q.from);
-    params.set("to", q.to);
-    return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`);
+  async getAvailableSlots(q: AvailabilityQuery): Promise<SchedSlot[]> {
+    // Cláriva espera FECHA (YYYY-MM-DD) y calcula la disponibilidad POR profesional:
+    // sin professionalId devuelve vacío. Si no viene, se consulta a cada profesional
+    // y se agrega (así el bot encuentra horarios aunque no fije un profesional).
+    const from = q.from.slice(0, 10);
+    const to = q.to.slice(0, 10);
+    const one = (professionalId?: string) => {
+      const params = new URLSearchParams();
+      if (q.clinicId) params.set("clinicId", q.clinicId);
+      if (professionalId) params.set("professionalId", professionalId);
+      if (q.serviceId) params.set("serviceId", q.serviceId);
+      params.set("from", from);
+      params.set("to", to);
+      return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`).then((r) => r ?? []);
+    };
+    if (q.professionalId) return one(q.professionalId);
+    const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
+    if (!pros.length) return one();
+    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
+    return per.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     return this.request<SchedAppointment>("POST", "/appointments", input);
