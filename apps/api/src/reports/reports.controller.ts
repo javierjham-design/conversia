@@ -209,8 +209,12 @@ export class ReportsController {
           tx.customerPayment.aggregate({ where: paidWhere, _count: { _all: true }, _sum: { amount: true } }),
           tx.customerPayment.groupBy({ by: ["subject"], where: paidWhere, _count: { _all: true }, _sum: { amount: true } }),
           tx.customerPayment.count({ where: { status: "pending", createdAt: { gte, lte } } }),
-          tx.customerPayment.findMany({ where: paidWhere, orderBy: { paidAt: "desc" }, take: 1000, include: { contact: { select: { firstName: true, lastName: true, phone: true } } } }),
+          tx.customerPayment.findMany({ where: paidWhere, orderBy: { paidAt: "desc" }, take: 1000 }),
         ]);
+        // CustomerPayment no tiene relación `contact` (solo contactId) → se resuelven aparte.
+        const contactIds = [...new Set(list.map((p) => p.contactId).filter((v): v is string => !!v))];
+        const contacts = contactIds.length ? await tx.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, firstName: true, lastName: true, phone: true } }) : [];
+        const cById = new Map(contacts.map((c) => [c.id, c]));
         const byItem = byItemRaw
           .map((r) => ({ subject: r.subject, count: r._count._all, total: Number(r._sum.amount ?? 0) }))
           .sort((a, b) => b.total - a.total);
@@ -220,15 +224,18 @@ export class ReportsController {
           range: { from: gte.toISOString(), to: lte.toISOString() },
           summary: { paidCount: agg._count._all, paidTotal: Number(agg._sum.amount ?? 0), pendingCount },
           byItem,
-          payments: list.map((p) => ({
-            id: p.id,
-            paidAt: (p.paidAt ?? p.createdAt).toISOString(),
-            subject: p.subject,
-            amount: p.amount,
-            currency: p.currency,
-            status: p.status,
-            contact: { name: [p.contact?.firstName, p.contact?.lastName].filter(Boolean).join(" ") || p.contact?.phone || "—", phone: p.contact?.phone ?? null },
-          })),
+          payments: list.map((p) => {
+            const c = p.contactId ? cById.get(p.contactId) : null;
+            return {
+              id: p.id,
+              paidAt: (p.paidAt ?? p.createdAt).toISOString(),
+              subject: p.subject,
+              amount: p.amount,
+              currency: p.currency,
+              status: p.status,
+              contact: { name: [c?.firstName, c?.lastName].filter(Boolean).join(" ") || c?.phone || "—", phone: c?.phone ?? null },
+            };
+          }),
         };
       });
     } catch {
@@ -240,34 +247,33 @@ export class ReportsController {
   async exportPayments(@Res() res: Response, @Query("from") from?: string, @Query("to") to?: string) {
     const ctx = requireContext();
     const { gte, lte } = parseRange(from, to);
-    let rows: Array<{ paidAt: Date | null; createdAt: Date; subject: string; amount: number; currency: string; status: string; commerceOrder: string; contact: { firstName: string | null; lastName: string | null; phone: string | null } | null }> = [];
+    let lines: string[] = [];
     try {
-      rows = await this.prisma.withTenant(ctx.organizationId, (tx) =>
-        tx.customerPayment.findMany({
-          where: { status: "paid", paidAt: { gte, lte } },
-          orderBy: { paidAt: "desc" },
-          take: 10000,
-          include: { contact: { select: { firstName: true, lastName: true, phone: true } } },
-        }),
-      );
+      lines = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const rows = await tx.customerPayment.findMany({ where: { status: "paid", paidAt: { gte, lte } }, orderBy: { paidAt: "desc" }, take: 10000 });
+        const contactIds = [...new Set(rows.map((p) => p.contactId).filter((v): v is string => !!v))];
+        const contacts = contactIds.length ? await tx.contact.findMany({ where: { id: { in: contactIds } }, select: { id: true, firstName: true, lastName: true, phone: true } }) : [];
+        const cById = new Map(contacts.map((c) => [c.id, c]));
+        return rows.map((p) => {
+          const c = p.contactId ? cById.get(p.contactId) : null;
+          return [
+            (p.paidAt ?? p.createdAt).toISOString(),
+            [c?.firstName, c?.lastName].filter(Boolean).join(" "),
+            c?.phone ?? "",
+            p.subject,
+            p.amount,
+            p.currency,
+            p.status,
+            p.commerceOrder,
+          ]
+            .map(csvEscape)
+            .join(";");
+        });
+      });
     } catch {
-      rows = [];
+      lines = [];
     }
     const header = "fecha_pago;contacto;telefono;item;monto;moneda;estado;orden";
-    const lines = rows.map((p) =>
-      [
-        (p.paidAt ?? p.createdAt).toISOString(),
-        [p.contact?.firstName, p.contact?.lastName].filter(Boolean).join(" "),
-        p.contact?.phone ?? "",
-        p.subject,
-        p.amount,
-        p.currency,
-        p.status,
-        p.commerceOrder,
-      ]
-        .map(csvEscape)
-        .join(";"),
-    );
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="pagos.csv"');
     res.send("﻿" + [header, ...lines].join("\n"));
