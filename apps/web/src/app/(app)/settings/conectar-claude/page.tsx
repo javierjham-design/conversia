@@ -47,8 +47,8 @@ export default function ConectarClaudePage() {
         <h1 className="text-xl font-semibold">Conectar con Claude (MCP)</h1>
         <p className="mt-1 text-sm text-ink-muted">
           Genera un token de <b>larga duración</b> (1 año) para montar y gestionar tus agentes de IA desde{" "}
-          <b>Claude Desktop</b> en lenguaje natural (listar, crear, editar el prompt, probar, publicar). El token es{" "}
-          <b>de esta cuenta</b>: Claude solo verá tus agentes.
+          <b>Claude</b> en lenguaje natural (listar, crear, editar el prompt, probar, publicar): por <b>URL</b> (Claude web / conectores) o en{" "}
+          <b>Claude Desktop</b>. El token es <b>de esta cuenta</b>: Claude solo verá tus agentes.
         </p>
       </div>
 
@@ -71,9 +71,21 @@ export default function ConectarClaudePage() {
               <textarea readOnly value={data.token} rows={3} className="w-full rounded-control border border-line-strong bg-app px-3 py-2 font-mono text-2xs text-ink" />
             </div>
 
+            {/* Opción A: por URL (Claude web / conectores). El token va en la URL. */}
+            <div className="rounded-lg border border-brand-200 bg-brand-soft p-3 dark:border-brand-500/30">
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs font-semibold text-brand-700 dark:text-brand-300">🔗 Conectar por URL (Claude web / conectores)</p>
+                <button onClick={() => copy(`${data.apiUrl.replace(/\/$/, "")}/mcp/${data.token}`, "URL")} className="text-2xs text-brand-700 underline dark:text-brand-300">Copiar URL</button>
+              </div>
+              <textarea readOnly value={`${data.apiUrl.replace(/\/$/, "")}/mcp/${data.token}`} rows={3} className="w-full rounded-control border border-line-strong bg-app px-3 py-2 font-mono text-2xs text-ink" />
+              <p className="mt-1 text-[11px] text-ink-subtle">
+                En Claude → <b>Configuración → Conectores → Agregar conector personalizado</b>, pega esta URL. El token ya va incluido, así que no pide nada más.
+              </p>
+            </div>
+
             <div>
               <div className="mb-1 flex items-center justify-between">
-                <p className="text-xs font-medium text-ink-muted">Configuración para Claude Desktop</p>
+                <p className="text-xs font-medium text-ink-muted">Opción B — Configuración para Claude Desktop (local)</p>
                 <button onClick={() => copy(configJson, "Config")} className="text-2xs text-brand-700 underline dark:text-brand-300">Copiar config</button>
               </div>
               <pre className="max-h-64 overflow-auto rounded-control border border-line-strong bg-app p-3 text-2xs text-ink">{configJson}</pre>
