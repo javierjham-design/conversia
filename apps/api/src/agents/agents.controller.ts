@@ -351,7 +351,10 @@ export class AgentsController {
       },
       simulated: [],
     };
-    const services = await buildSandboxServices(orgId, state, { knowledgeSources: input.knowledgeSources ?? null });
+    const services = await buildSandboxServices(orgId, state, {
+      knowledgeSources: input.knowledgeSources ?? null,
+      allowedProfessionalIds: Array.isArray((input.config as any)?.scheduling?.professionalIds) ? (input.config as any).scheduling.professionalIds : null,
+    });
     const toolCtx: ToolContext = {
       organizationId: orgId,
       clinicId: clinic?.id ?? null,

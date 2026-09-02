@@ -1,7 +1,8 @@
 import { resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
-import { MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
-import type { SchedAppointment } from "@conversia/types";
+import type { CreateAppointmentInput, SchedAppointment, SchedulingProvider } from "@conversia/types";
+import { decryptSecret } from "../common/crypto";
 
 export interface SandboxContact {
   firstName: string | null;
@@ -48,34 +49,54 @@ function sandboxCatalogHit(c: any) {
 export async function buildSandboxServices(
   orgId: string,
   state: SandboxState,
-  opts: { knowledgeSources?: string[] | null } = {},
+  opts: { knowledgeSources?: string[] | null; allowedProfessionalIds?: string[] | null } = {},
 ): Promise<ToolServices> {
   const knowledgeSources = opts.knowledgeSources;
-  // Agenda mock alimentada con datos REALES del tenant (idéntica a la de
-  // producción cuando no hay proveedor externo). createAppointment queda en
-  // memoria del mock; recordAppointment (que sí escribiría en BD) es no-op.
-  const data = await withTenant(orgId, async (tx) => {
-    const [clinics, professionals, services] = await Promise.all([
-      tx.clinic.findMany({ where: { active: true, deletedAt: null } }),
-      tx.professional.findMany({ where: { active: true } }),
-      tx.service.findMany({ where: { active: true } }),
-    ]);
-    return { clinics, professionals, services };
-  });
-  const scheduling = new MockSchedulingProvider({
-    clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
-    professionals: data.professionals.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? undefined })),
-    services: data.services.map((s) => ({
-      id: s.code,
-      name: s.name,
-      durationMin: s.durationMin,
-      price: s.price ? Number(s.price) : undefined,
-      currency: s.currency,
-    })),
-    utcOffset: "-04:00",
-  });
-
   const track = (action: string, detail: string) => state.simulated.push({ action, detail });
+
+  // Agenda del PROBADOR: se LEE disponibilidad REAL (Cláriva/Dentalink si está conectado;
+  // si no, agenda nativa con los datos del tenant) y se SIMULA el agendar (no toca nada).
+  const allowed = Array.isArray(opts.allowedProfessionalIds) && opts.allowedProfessionalIds.length ? new Set(opts.allowedProfessionalIds) : null;
+  const simulateCreate = (input: CreateAppointmentInput): SchedAppointment =>
+    // No registra aquí: recordAppointment (que llama la tool tras crear) ya marca la simulación.
+    ({ id: `sim-${Date.now()}`, clinicId: input.clinicId, professionalId: input.professionalId, serviceId: input.serviceId, patient: input.patient, start: input.start, end: input.end, status: "pending", notes: input.notes });
+  // Envuelve un proveedor: filtra disponibilidad por los profesionales habilitados del
+  // agente y simula createAppointment (lecturas reales, escrituras simuladas).
+  const scoped = (base: SchedulingProvider): SchedulingProvider => {
+    const s = Object.create(base) as SchedulingProvider;
+    const rawGet = base.getAvailableSlots.bind(base);
+    s.getAvailableSlots = async (q) => {
+      const slots = await rawGet(q);
+      return allowed ? slots.filter((x) => !x.professionalId || allowed.has(x.professionalId)) : slots;
+    };
+    s.createAppointment = async (input) => simulateCreate(input);
+    return s;
+  };
+
+  const conn = await withTenant(orgId, (tx) => tx.schedulingConnection.findFirst({ where: { status: "active" } }));
+  let scheduling: SchedulingProvider;
+  if (conn && (conn.provider === "CLARIVA" || conn.provider === "DENTALINK")) {
+    const cred = conn.credentialId ? await withTenant(orgId, (tx) => tx.integrationCredential.findUnique({ where: { id: conn.credentialId! } })) : null;
+    let apiKey = "";
+    if (cred) { try { apiKey = decryptSecret(cred.ciphertext); } catch { /* ilegible */ } }
+    const baseUrl = ((conn.config as Record<string, unknown> | null)?.baseUrl as string | undefined) ?? "";
+    scheduling = scoped(conn.provider === "CLARIVA" ? new ClarivaSchedulingProvider({ baseUrl, apiKey }) : new DentalinkSchedulingProvider({ baseUrl, token: apiKey }));
+  } else {
+    const data = await withTenant(orgId, async (tx) => {
+      const [clinics, professionals, services] = await Promise.all([
+        tx.clinic.findMany({ where: { active: true, deletedAt: null } }),
+        tx.professional.findMany({ where: { active: true } }),
+        tx.service.findMany({ where: { active: true } }),
+      ]);
+      return { clinics, professionals, services };
+    });
+    scheduling = scoped(new MockSchedulingProvider({
+      clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
+      professionals: data.professionals.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? undefined })),
+      services: data.services.map((s) => ({ id: s.code, name: s.name, durationMin: s.durationMin, price: s.price ? Number(s.price) : undefined, currency: s.currency })),
+      utcOffset: "-04:00",
+    }));
+  }
 
   return {
     scheduling,
