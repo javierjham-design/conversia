@@ -722,6 +722,7 @@ export default function AgentEditorPage() {
           actions={actions}
           tools={derivedTools}
           knowledgeSources={knowledgeSources}
+          schedulingProfs={schedulingProfs}
         />
       </div>
 
@@ -794,7 +795,7 @@ type TestResponse = {
   humanHandoff?: boolean;
 };
 
-function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools, knowledgeSources }: {
+function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools, knowledgeSources, schedulingProfs }: {
   id: string;
   systemPrompt: string;
   model: string;
@@ -803,6 +804,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
   actions: ActionState;
   tools: string[];
   knowledgeSources: string[];
+  schedulingProfs: string[];
 }) {
   const [tab, setTab] = useState<"chat" | "contact">("chat");
   const [messages, setMessages] = useState<TestMsg[]>([]);
@@ -825,7 +827,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
     try {
       const payload = {
         systemPrompt,
-        config: { model, maxTokens, maxToolRounds },
+        config: { model, maxTokens, maxToolRounds, scheduling: { professionalIds: schedulingProfs } },
         tools,
         actions,
         knowledgeSources,
