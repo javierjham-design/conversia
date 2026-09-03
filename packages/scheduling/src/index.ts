@@ -310,7 +310,7 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
 
   constructor(private opts: ClarivaClientOptions) {}
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 10000);
     try {
@@ -321,6 +321,7 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
         headers: {
           authorization: `Bearer ${this.opts.apiKey}`,
           "content-type": "application/json",
+          ...(extraHeaders ?? {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
@@ -382,7 +383,11 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
     return per.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
-    return this.request<SchedAppointment>("POST", "/appointments", input);
+    // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
+    // dedupe reintentos idénticos aunque lleguen de réplicas distintas del worker.
+    const raw = `tubot|${input.professionalId}|${input.start}|${input.patient?.phone ?? ""}`;
+    const idem = Buffer.from(raw).toString("base64url").slice(0, 64);
+    return this.request<SchedAppointment>("POST", "/appointments", input, { "Idempotency-Key": idem });
   }
   listAppointments(q: AvailabilityQuery) {
     const params = new URLSearchParams();
@@ -440,7 +445,7 @@ export class CustomSchedulingProvider implements SchedulingProvider {
 
   constructor(private opts: CustomClientOptions) {}
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 8000);
     const payload = body === undefined ? "" : JSON.stringify(body);
@@ -452,6 +457,7 @@ export class CustomSchedulingProvider implements SchedulingProvider {
           "content-type": "application/json",
           "x-conversia-timestamp": timestamp,
           "x-conversia-signature": buildCustomSignature(this.opts.secret, timestamp, method, path, payload),
+          ...(extraHeaders ?? {}),
         },
         body: payload || undefined,
         signal: controller.signal,
@@ -513,7 +519,11 @@ export class CustomSchedulingProvider implements SchedulingProvider {
     return per.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
-    return this.request<SchedAppointment>("POST", "/appointments", input);
+    // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
+    // dedupe reintentos idénticos aunque lleguen de réplicas distintas del worker.
+    const raw = `tubot|${input.professionalId}|${input.start}|${input.patient?.phone ?? ""}`;
+    const idem = Buffer.from(raw).toString("base64url").slice(0, 64);
+    return this.request<SchedAppointment>("POST", "/appointments", input, { "Idempotency-Key": idem });
   }
   listAppointments(q: AvailabilityQuery) {
     const params = new URLSearchParams();
