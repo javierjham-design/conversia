@@ -259,7 +259,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         }
         const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
         // Firma de origen en el comentario de la cita: siempre se sabe qué agente agendó.
-        const firma = `Agendado por TuBot · Agente ${ctx.agentName ?? "IA"}`;
+        // Sin duplicar "Agente" si el nombre del agente ya lo incluye.
+        const nombreAgente = ctx.agentName ?? "IA";
+        const firma = `Agendado por TuBot · ${/^agente\b/i.test(nombreAgente) ? nombreAgente : `Agente ${nombreAgente}`}`;
         const notes = input.notes ? `${firma}. ${input.notes}` : firma;
         let appt: SchedAppointment;
         try {
