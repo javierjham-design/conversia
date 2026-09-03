@@ -67,6 +67,25 @@ export async function flowRegisterStatus(cfg: FlowConfig, token: string): Promis
   return { registered, brand: r?.creditCardType ?? null, last4: r?.last4digits ?? null };
 }
 
+/** Diagnóstico: datos del cliente Flow (incluye la tarjeta registrada) para el Super Admin. */
+export async function flowCustomerGet(cfg: FlowConfig, customerId: string): Promise<{ registered: boolean; creditCardType: string | null; last4: string | null; raw: any }> {
+  const r = await get(cfg, "customer/get", { customerId });
+  return {
+    registered: Number(r?.status) === 1,
+    creditCardType: r?.creditCardType ?? null,
+    last4: r?.last4CardDigits ?? r?.last4digits ?? null,
+    raw: r,
+  };
+}
+
+/** Diagnóstico: estado real de un cobro en Flow (status + mensaje) por su token. */
+export async function flowPaymentStatus(cfg: FlowConfig, token: string): Promise<{ status: number | null; label: string; message: string | null; amount: number | null }> {
+  const r = await get(cfg, "payment/getStatus", { token });
+  const s = Number(r?.status);
+  const label = s === 2 ? "pagado" : s === 3 ? "rechazado" : s === 4 ? "anulado" : Number.isFinite(s) ? "pendiente" : "sin estado";
+  return { status: Number.isFinite(s) ? s : null, label, message: r?.message ?? null, amount: r?.amount != null ? Number(r.amount) : null };
+}
+
 /** Cobra a la tarjeta guardada. Devuelve el token del cobro (providerRef) para reconciliar. */
 export async function flowCollect(cfg: FlowConfig, input: { customerId: string; commerceOrder: string; subject: string; amount: number; currency: string; urlConfirmation: string; urlReturn: string }): Promise<{ ok: boolean; token: string | null; reason: string | null }> {
   const r = await post(cfg, "customer/collect", {

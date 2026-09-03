@@ -31,6 +31,7 @@ export default function OrgDetailPage() {
   const [aiMaxTokens, setAiMaxTokens] = useState(400);
   const [aiMaxToolRounds, setAiMaxToolRounds] = useState(5);
   const [saving, setSaving] = useState(false);
+  const [diag, setDiag] = useState<any | null>(null);
   const [billables, setBillables] = useState<Array<{ concept: string; amount: number }>>([]);
   const [adminEmail, setAdminEmail] = useState("");
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
@@ -77,6 +78,18 @@ export default function OrgDetailPage() {
         "ok",
       );
       await load();
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runDiagnose() {
+    setSaving(true);
+    setDiag(null);
+    try {
+      setDiag(await padmin(`/platform/organizations/${id}/billing-diagnose`));
     } catch (e) {
       toast.push((e as Error).message, "error");
     } finally {
@@ -327,7 +340,44 @@ export default function OrgDetailPage() {
               <Button disabled={saving} onClick={() => void billingAction("reactivate")}>Reactivar</Button>
               <button disabled={saving} onClick={() => void billingAction("extend_window", 24)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Extender ventana 48 h (+24 h)</button>
               <button disabled={saving} onClick={() => { if (confirm("¿Registrar un pago recibido POR FUERA (transferencia, etc.)? Renueva el período y reactiva la cuenta.")) void billingAction("register_payment"); }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Registrar pago externo</button>
+              <button disabled={saving} onClick={() => void runDiagnose()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">🔎 Diagnosticar cobro (Flow)</button>
             </div>
+            {diag && (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                {diag.ok === false ? (
+                  <p className="text-red-600">{diag.error}</p>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-700">
+                      Tarjeta en Flow:{" "}
+                      {diag.card
+                        ? "error" in diag.card
+                          ? <span className="text-red-600">error — {diag.card.error}</span>
+                          : diag.card.registered
+                            ? <span className="text-slate-800">{diag.card.brand ?? "tarjeta"} •••• {diag.card.last4 ?? "?"} <span className="text-emerald-600">(registrada)</span></span>
+                            : <span className="text-amber-600">no registrada del todo</span>
+                        : <span className="text-slate-500">sin tarjeta</span>}
+                    </p>
+                    <p className="mt-1 text-slate-500">Estado REAL de los últimos cobros en Flow (vs. lo que ve nuestro sistema):</p>
+                    <div className="mt-1 overflow-hidden rounded border border-slate-200 bg-white">
+                      {(diag.attempts ?? []).map((a: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 border-b border-slate-100 px-2 py-1 last:border-0">
+                          <span className="text-slate-500">{new Date(a.createdAt).toLocaleString("es-CL")} · ${Number(a.amount).toLocaleString("es-CL")} · {a.kind}</span>
+                          <span>
+                            <span className="text-slate-400">nuestro: {a.ourStatus}</span>
+                            {" · "}
+                            <span className={a.flow?.label === "pagado" ? "font-medium text-emerald-600" : a.flow?.label === "rechazado" || a.flow?.label === "anulado" ? "font-medium text-red-600" : "font-medium text-amber-600"}>
+                              Flow: {a.flow?.label ?? "—"}{a.flow?.message ? ` (${a.flow.message})` : ""}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {diag.hint && <p className="mt-2 text-[11px] text-slate-500">💡 {diag.hint}</p>}
+                  </>
+                )}
+              </div>
+            )}
             {Array.isArray(d.paymentAttempts) && d.paymentAttempts.length > 0 && (
               <div className="mt-3 overflow-hidden rounded-lg border border-slate-100 text-xs">
                 {d.paymentAttempts.slice(0, 6).map((a: any) => (
