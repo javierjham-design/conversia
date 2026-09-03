@@ -263,6 +263,8 @@ export interface ToolContext extends TenantContext {
   conversationId?: string;
   contactId?: string;
   agentId?: string;
+  /** Nombre visible del agente (para firmar notas: "Agendado por TuBot · Agente X"). */
+  agentName?: string;
   agentVersionId?: string;
   workflowRunId?: string;
   /** Dependencias inyectadas por el runtime (BD, agenda, canal, colas). */

@@ -384,7 +384,14 @@ export async function runAgentTurn(opts: {
   const currentDateBlock =
     `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). ` +
     `Interpreta "hoy", "mañana", "pasado mañana", "el lunes", "esta semana" con ESTA fecha real. ` +
-    `Al ofrecer o confirmar horarios, nombra el día de la semana y la fecha correctos. Nunca asumas otra fecha.`;
+    `Al ofrecer o confirmar horarios, nombra el día de la semana y la fecha correctos. Nunca asumas otra fecha.` +
+    `\n\n## Reglas ESTRICTAS de agendamiento (OBLIGATORIAS)\n` +
+    `- Solo puedes ofrecer horarios que getAvailability devolvió EXACTAMENTE (copia su campo "cuando" tal cual). PROHIBIDO mencionar cualquier otra hora, extrapolar ("también a las 18:15") o suponer horarios de atención.\n` +
+    `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
+    `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
+    `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
+    `- Agenda UNA sola cita por conversación: elige el horario con el paciente y llama a createAppointment UNA vez. Si responde alreadyBooked, la cita YA existe: confírmala, no crees otra.\n` +
+    `- Tras agendar con éxito, SIEMPRE confirma al paciente día, fecha y hora exactos de la cita.`;
 
   // Si hubo intervención humana, se le explica al modelo cómo tratar esos mensajes:
   // son acuerdos ya cerrados con el cliente, hay que respetarlos y continuar desde ahí.
@@ -444,6 +451,7 @@ export async function runAgentTurn(opts: {
     conversationId,
     contactId: conversation.contactId,
     agentId: agent.id,
+    agentName: agent.name,
     agentVersionId: version.id,
     services: services as unknown as Record<string, unknown>,
   };
