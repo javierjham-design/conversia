@@ -132,6 +132,16 @@ export class ToolRegistry {
 export function buildCoreTools(): ToolDefinition<any, any>[] {
   const isoDate = z.string().describe("Fecha ISO YYYY-MM-DD");
 
+  // Token opaco de un slot: encapsula profesional + fecha/hora EXACTAS + sede. El modelo
+  // NO debe reconstruir fechas ni ids (los inventa mal); copia este id y lo pasa a
+  // createAppointment, que lo decodifica y agenda con los valores reales del slot.
+  const encodeSlot = (s: { professionalId: string; start: string; end: string; clinicId: string; serviceId?: string }) =>
+    Buffer.from(JSON.stringify({ p: s.professionalId, s: s.start, e: s.end, c: s.clinicId, sv: s.serviceId })).toString("base64url");
+  const decodeSlot = (id: string): { p?: string; s?: string; e?: string; c?: string; sv?: string } | null => {
+    try { return JSON.parse(Buffer.from(id, "base64url").toString("utf8")); } catch { return null; }
+  };
+  const slotWhen = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false });
+
   return [
     {
       name: "getServices",
@@ -162,7 +172,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getAvailability",
       description:
-        "Consulta disponibilidad REAL de horas en la agenda. Úsala siempre antes de ofrecer horarios; nunca inventes disponibilidad.",
+        "Consulta disponibilidad REAL de horas. Úsala siempre antes de ofrecer horarios; nunca inventes. Cada opción trae `id` (úsalo tal cual en createAppointment) y `cuando` (día+fecha+hora reales para mostrar al paciente).",
       inputSchema: z.object({
         serviceCode: z.string().optional(),
         professionalId: z.string().optional(),
@@ -180,18 +190,26 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           from,
           to,
         });
-        return slots.slice(0, 6);
+        // Se entrega un `id` opaco (con fecha/profesional exactos) + un `cuando` legible.
+        return slots.slice(0, 6).map((s) => ({
+          id: encodeSlot(s),
+          cuando: slotWhen.format(new Date(s.start)),
+          start: s.start,
+          end: s.end,
+          professionalId: s.professionalId,
+        }));
       },
     },
     {
       name: "createAppointment",
       description:
-        "Crea una cita en la agenda tras confirmar con el paciente servicio, profesional, fecha y hora exactos (obtenidos de getAvailability).",
+        "Agenda una cita. IMPORTANTE: pasa `slotId` = el `id` EXACTO del slot elegido en getAvailability. Así la fecha y el profesional son los reales (no los reconstruyas ni inventes). clinicId/professionalId/startIso son solo respaldo si no hay slotId.",
       inputSchema: z.object({
-        clinicId: z.string(),
-        professionalId: z.string(),
+        slotId: z.string().optional().describe("`id` del slot elegido de getAvailability (recomendado; trae fecha y profesional exactos)"),
+        clinicId: z.string().optional(),
+        professionalId: z.string().optional(),
         serviceCode: z.string().optional(),
-        startIso: z.string().describe("Inicio ISO 8601 exacto de un slot devuelto por getAvailability"),
+        startIso: z.string().optional().describe("Inicio ISO 8601 exacto de un slot (solo si no usas slotId)"),
         endIso: z.string().optional(),
         notes: z.string().optional(),
       }),
@@ -199,18 +217,26 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const s = services(ctx);
         const contact = await s.contactInfo();
         if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
-        const end =
-          input.endIso ?? new Date(new Date(input.startIso).getTime() + 30 * 60000).toISOString();
+        // Preferir el slot exacto (evita fechas/profesionales inventados por el modelo).
+        const slot = input.slotId ? decodeSlot(input.slotId) : null;
+        const clinicId = slot?.c ?? input.clinicId;
+        const professionalId = slot?.p ?? input.professionalId;
+        const startIso = slot?.s ?? input.startIso;
+        const serviceCode = input.serviceCode ?? slot?.sv;
+        if (!clinicId || !professionalId || !startIso) {
+          return { error: "Falta el slot: llama a getAvailability y pasa el `id` del horario elegido en slotId." };
+        }
+        const end = slot?.e ?? input.endIso ?? new Date(new Date(startIso).getTime() + 30 * 60000).toISOString();
         const appt = await s.scheduling.createAppointment({
-          clinicId: input.clinicId,
-          professionalId: input.professionalId,
-          serviceId: input.serviceCode,
+          clinicId,
+          professionalId,
+          serviceId: serviceCode,
           patient: {
             firstName: contact.firstName ?? "Paciente",
             lastName: contact.lastName ?? undefined,
             phone: contact.phone,
           },
-          start: input.startIso,
+          start: startIso,
           end,
           notes: input.notes,
         });
