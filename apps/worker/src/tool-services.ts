@@ -24,6 +24,11 @@ import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulin
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
+/** ¿El proveedor de agenda es externo (los servicios/profesionales viven allá, no en la BD)? */
+function isExternalKind(kind: string): boolean {
+  return kind === "clariva" || kind === "dentalink" || kind === "custom";
+}
+
 export async function getSchedulingProviderFor(orgId: string): Promise<SchedulingProvider> {
   const env = getEnv();
   const connection = await withTenant(orgId, (tx) =>
@@ -329,6 +334,14 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     scheduling,
 
     async listServices() {
+      // Con proveedor externo (Cláriva/Dentalink/Custom) los servicios viven ALLÁ, no en la
+      // tabla nativa (vacía) → se leen del proveedor; si falla, cae a nativo.
+      if (isExternalKind(scheduling.kind)) {
+        try {
+          const svcs = await scheduling.getServices();
+          return svcs.map((s) => ({ code: s.id, name: s.name, price: s.price ?? null, currency: s.currency ?? "CLP", durationMin: s.durationMin, category: null as string | null }));
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         const services = await tx.service.findMany({ where: { active: true }, orderBy: { name: "asc" } });
         return services.map((s) => ({
@@ -343,6 +356,12 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async getServiceByCode(code: string) {
+      if (isExternalKind(scheduling.kind)) {
+        try {
+          const s = (await scheduling.getServices()).find((x) => x.id === code);
+          return s ? { code: s.id, name: s.name, price: s.price ?? null, currency: s.currency ?? "CLP", durationMin: s.durationMin, description: null as string | null } : null;
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         const s = await tx.service.findUnique({
           where: { organizationId_code: { organizationId: orgId, code } },
@@ -360,6 +379,13 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async listProfessionals(serviceCode?: string) {
+      // Externo: profesionales del proveedor (filtrados por los habilitados del agente).
+      if (isExternalKind(scheduling.kind)) {
+        try {
+          const pros = await scheduling.getProfessionals();
+          return pros.filter((p) => !allowed || allowed.has(p.id)).map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? null }));
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         const ids = serviceCode
           ? await tx.service
