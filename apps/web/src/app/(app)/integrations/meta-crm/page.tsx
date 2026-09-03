@@ -215,6 +215,28 @@ export default function MetaCrmPage() {
                   >
                     <Send size={14} /> Simular lead entrante
                   </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        const r = await api<{ queued: number; forms: number; errors: string[] }>(
+                          "/integrations/meta-crm/leads/backfill",
+                          { method: "POST", body: JSON.stringify({ days: 90 }) },
+                        );
+                        toast.push(
+                          r.queued > 0
+                            ? `${r.queued} lead(s) de ${r.forms} formulario(s) en camino al CRM (los ya ingresados no se duplican)`
+                            : "Sin leads nuevos que recuperar en los últimos 90 días",
+                          "ok",
+                        );
+                        if (r.errors?.length) toast.push(r.errors[0], "error");
+                      } catch (e: any) {
+                        toast.push(e.message ?? "No se pudo recuperar leads", "error");
+                      }
+                    }}
+                  >
+                    <KanbanSquare size={14} /> Recuperar leads históricos (90 días)
+                  </Button>
                   <Link href="/crm">
                     <Button variant="secondary">
                       <KanbanSquare size={14} /> Abrir el CRM

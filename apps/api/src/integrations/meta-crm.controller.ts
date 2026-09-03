@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requirePermission } from "../tenancy/permissions";
 import { signState, verifyState } from "./oauth.controller";
@@ -21,7 +22,10 @@ const RECOMMENDED_SCOPES = ["pages_manage_metadata", "pages_manage_ads", "pages_
  */
 @Controller("integrations/meta-crm")
 export class MetaCrmController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private queues: QueueService,
+  ) {}
 
   private async graph(path: string, token: string, init?: RequestInit): Promise<any> {
     const v = getEnv().META_GRAPH_VERSION;
@@ -187,6 +191,96 @@ export class MetaCrmController {
     );
     const connectedIds = new Set(registered.map((r) => r.externalId));
     return { pages: pages.map((p) => ({ ...p, connected: connectedIds.has(p.id) })) };
+  }
+
+  /**
+   * RECUPERACIÓN RETROACTIVA de leads: lista los leads históricos de los
+   * formularios de las páginas conectadas (requiere `leads_retrieval` AVANZADO,
+   * App Review aprobada) y los encola por el MISMO pipeline del webhook
+   * (parseLeadgenChanges → processLeadgen). La ingesta es idempotente por
+   * leadgen_id → los ya recibidos no se duplican; solo entran los que faltaban.
+   */
+  @Post("leads/backfill")
+  async backfillLeads(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = z.object({ days: z.coerce.number().int().min(1).max(365).default(90) }).parse(body ?? {});
+    const token = await this.crmToken(ctx.organizationId);
+    const sinceSec = Math.floor(Date.now() / 1000) - input.days * 24 * 3600;
+
+    const pages = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.metaAsset.findMany({ where: { kind: "page", enabled: true }, select: { externalId: true, name: true } }),
+    );
+    if (!pages.length) throw new BadRequestException("No hay páginas conectadas en Meta CRM.");
+    // Token de PÁGINA (vía canónica para leer leads); cae al token de usuario si no está.
+    const accounts = await this.graph("me/accounts?fields=id,access_token&limit=100", token).catch(() => ({ data: [] }));
+    const pageTokens = new Map<string, string>(
+      ((accounts.data ?? []) as Array<{ id: unknown; access_token?: unknown }>)
+        .map((p) => [String(p.id), String(p.access_token ?? "")] as [string, string])
+        .filter(([, t]) => Boolean(t)),
+    );
+
+    let forms = 0;
+    let found = 0;
+    const errors: string[] = [];
+    for (const page of pages) {
+      const pt = pageTokens.get(page.externalId) || token;
+      const formsJson = await this.graph(`${encodeURIComponent(page.externalId)}/leadgen_forms?fields=id,name&limit=100`, pt).catch((e: Error) => {
+        errors.push(`Página ${page.name ?? page.externalId}: ${e.message}`);
+        return { data: [] };
+      });
+      for (const form of (formsJson.data ?? []) as Array<{ id: unknown }>) {
+        forms++;
+        const formId = String(form.id);
+        let after: string | null = null;
+        // Páginas de 100, más recientes primero; corta al pasar la ventana pedida.
+        for (let i = 0; i < 50; i++) {
+          const path = `${encodeURIComponent(formId)}/leads?fields=id,created_time&limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+          const json = await this.graph(path, pt).catch((e: Error) => {
+            errors.push(`Formulario ${formId}: ${e.message}`);
+            return null;
+          });
+          if (!json) break;
+          const rows = (json.data ?? []) as Array<{ id: unknown; created_time?: string }>;
+          let anyInWindow = false;
+          for (const lead of rows) {
+            const createdSec = lead.created_time ? Math.floor(Date.parse(lead.created_time) / 1000) : sinceSec;
+            if (Number.isFinite(createdSec) && createdSec < sinceSec) continue;
+            anyInWindow = true;
+            found++;
+            // MISMA forma que el webhook real → pipeline intacto (ruteo por asset,
+            // dedupe, mapeo, CRM, workflows, CAPI). Sin organization_hint: el
+            // tenant se resuelve por el asset del formulario/página registrado.
+            await this.queues.inbound.add(
+              "inbound",
+              {
+                raw: {
+                  object: "page",
+                  entry: [{ id: page.externalId, changes: [{ field: "leadgen", value: { page_id: page.externalId, form_id: formId, leadgen_id: String(lead.id), created_time: createdSec } }] }],
+                },
+                receivedAt: new Date().toISOString(),
+              },
+              { removeOnComplete: 1000, removeOnFail: 5000 },
+            );
+          }
+          after = json.paging?.cursors?.after ?? null;
+          if (!after || !json.paging?.next) break;
+          if (rows.length > 0 && !anyInWindow) break; // toda la página quedó fuera de la ventana
+        }
+      }
+    }
+
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: {
+          organizationId: ctx.organizationId,
+          provider: "lead_ads",
+          type: "lead.backfill",
+          message: `Recuperación retroactiva (${input.days} días): ${found} leads encolados de ${forms} formularios${errors.length ? ` · ${errors.length} errores` : ""}`,
+          payload: { days: input.days, found, forms, errors } as object,
+        },
+      }),
+    );
+    return { ok: true, pages: pages.length, forms, queued: found, errors, note: "Los leads ya ingresados no se duplican (dedupe por leadgen_id); en unos minutos aparecerán en el CRM los que faltaban." };
   }
 
   /**
