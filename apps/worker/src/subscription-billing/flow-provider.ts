@@ -73,9 +73,9 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
   async getPaymentMethodStatus(token: string): Promise<{ status: "registered" | "pending" | "failed"; brand: string | null; last4: string | null }> {
     const r = await this.get("customer/getRegisterStatus", { token });
     // Verificado en prod: status 1 = tarjeta registrada; creditCardType/last4digits reales.
-    const registered = r?.status === 1 || r?.status === "1";
+    const registered = Number(r?.status) === 1;
     return {
-      status: registered ? "registered" : r?.status === 0 ? "pending" : "failed",
+      status: registered ? "registered" : Number(r?.status) === 0 ? "pending" : "failed",
       brand: r?.creditCardType ?? null,
       last4: r?.last4digits ?? null,
     };
@@ -100,9 +100,13 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
 
   async getChargeStatus(providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }> {
     // providerRef = token de collect. status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado.
+    // OJO: Flow a veces devuelve `status` como STRING ("2") — hay que coercer a número, si no
+    // un cobro PAGADO se leía como "no resuelto" y el intento quedaba pendiente para siempre
+    // (y el motor lo re-cobraba en cada tick). Igual que getRegisterStatus y el webhook de cobros.
     const st = await this.get("payment/getStatus", { token: providerRef });
-    if (st?.status === 2) return { settled: true, ok: true, reason: null };
-    if (st?.status === 3 || st?.status === 4) return { settled: true, ok: false, reason: st?.status === 4 ? "anulado" : "rechazado" };
+    const s = Number(st?.status);
+    if (s === 2) return { settled: true, ok: true, reason: null };
+    if (s === 3 || s === 4) return { settled: true, ok: false, reason: s === 4 ? "anulado" : "rechazado" };
     return { settled: false, ok: false, reason: null };
   }
 
@@ -121,12 +125,13 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
     const token = (payload as { token?: string })?.token;
     if (!token) return { type: "ignored", reason: "sin token" };
     const st = await this.get("payment/getStatus", { token });
-    // status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
-    if (st?.status === 2 && st?.commerceOrder) {
+    // status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado (Flow puede devolverlo como STRING).
+    const s = Number(st?.status);
+    if (s === 2 && st?.commerceOrder) {
       return { type: "payment_succeeded", commerceOrder: String(st.commerceOrder), amount: Number(st.amount ?? 0), providerRef: token };
     }
-    if ((st?.status === 3 || st?.status === 4) && st?.commerceOrder) {
-      return { type: "payment_failed", commerceOrder: String(st.commerceOrder), reason: st?.status === 4 ? "anulado" : "rechazado", providerRef: token };
+    if ((s === 3 || s === 4) && st?.commerceOrder) {
+      return { type: "payment_failed", commerceOrder: String(st.commerceOrder), reason: s === 4 ? "anulado" : "rechazado", providerRef: token };
     }
     return { type: "ignored", reason: `status ${st?.status ?? "?"}` };
   }
