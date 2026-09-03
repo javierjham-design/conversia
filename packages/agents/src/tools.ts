@@ -190,9 +190,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         toDate: isoDate.optional(),
       }),
       async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string }) {
-        const from = input.fromDate ?? new Date().toISOString().slice(0, 10);
-        const to =
-          input.toDate ?? new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+        // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…")
+        // o un rango de 1 solo día que cae en un día sin atención → vacío → link.
+        // Se ancla SIEMPRE desde hoy (Chile) y se garantiza una ventana amplia.
+        const todayChile = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+        const from = input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
+        const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
+        // Se pide al menos 14 días de ventana; si el modelo pidió un rango más corto, se amplía.
+        const wide = plus(14);
+        const to = input.toDate && input.toDate > from && input.toDate > wide ? input.toDate : wide;
         const slots = await services(ctx).scheduling.getAvailableSlots({
           serviceId: input.serviceCode,
           professionalId: input.professionalId,

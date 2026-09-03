@@ -353,14 +353,27 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
     // y se agrega (así el bot encuentra horarios aunque no fije un profesional).
     const from = q.from.slice(0, 10);
     const to = q.to.slice(0, 10);
-    const one = (professionalId?: string) => {
+    // NOTA: NO se envía serviceId. La disponibilidad de Cláriva no filtra por
+    // servicio de forma confiable (confirmado por su dev) → mandarlo producía
+    // resultados intermitentes/vacíos. La duración se fija en createAppointment.
+    const one = async (professionalId?: string): Promise<SchedSlot[]> => {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
-      if (q.serviceId) params.set("serviceId", q.serviceId);
       params.set("from", from);
       params.set("to", to);
-      return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`).then((r) => r ?? []);
+      const path = `/availability?${params.toString()}`;
+      // Reintento ante fallo transitorio de red/timeout (evita vacíos espurios).
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const r = await this.request<SchedSlot[]>("GET", path);
+          return r ?? [];
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr;
     };
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
@@ -471,14 +484,27 @@ export class CustomSchedulingProvider implements SchedulingProvider {
     // y se agrega (así el bot encuentra horarios aunque no fije un profesional).
     const from = q.from.slice(0, 10);
     const to = q.to.slice(0, 10);
-    const one = (professionalId?: string) => {
+    // NOTA: NO se envía serviceId. La disponibilidad de Cláriva no filtra por
+    // servicio de forma confiable (confirmado por su dev) → mandarlo producía
+    // resultados intermitentes/vacíos. La duración se fija en createAppointment.
+    const one = async (professionalId?: string): Promise<SchedSlot[]> => {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
-      if (q.serviceId) params.set("serviceId", q.serviceId);
       params.set("from", from);
       params.set("to", to);
-      return this.request<SchedSlot[]>("GET", `/availability?${params.toString()}`).then((r) => r ?? []);
+      const path = `/availability?${params.toString()}`;
+      // Reintento ante fallo transitorio de red/timeout (evita vacíos espurios).
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const r = await this.request<SchedSlot[]>("GET", path);
+          return r ?? [];
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr;
     };
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
