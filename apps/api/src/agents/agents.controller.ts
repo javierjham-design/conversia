@@ -368,12 +368,16 @@ export class AgentsController {
     // El modelo/límites los fija el Super Admin por tenant (org.settings.ai);
     // el probador usa esos mismos valores, no los del cuerpo.
     const aiCfg = (orgSettings.ai ?? {}) as Record<string, any>;
+    // Fecha/hora reales (Chile) — igual que en producción, para que el probador
+    // interprete "hoy/mañana/esta semana" y nombre los días correctamente.
+    const nowChile = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+    const currentDateBlock = `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). Interpreta "hoy", "mañana", "el lunes", "esta semana" con ESTA fecha real; al ofrecer/confirmar horarios nombra el día y la fecha correctos.`;
     const runtime: AgentRuntime = {
       agentId: agent.id,
       agentVersionId: "sandbox",
       slug: agent.slug,
       name: agent.name,
-      systemPrompt: assembleSystemPrompt(input.systemPrompt, input.actions),
+      systemPrompt: assembleSystemPrompt(input.systemPrompt, input.actions) + currentDateBlock,
       model: aiCfg.model ?? env.AI_DEFAULT_MODEL,
       maxTokens: aiCfg.maxTokens ?? 400,
       maxToolRounds: aiCfg.maxToolRounds ?? 5,

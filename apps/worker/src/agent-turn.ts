@@ -374,6 +374,18 @@ export async function runAgentTurn(opts: {
       ? `\n\n## Cobros (link de pago) — indicaciones del negocio\n${chargingCfg.instructions.trim()}`
       : "";
 
+  // Fecha/hora REALES (zona de Chile). Sin esto el modelo usa la fecha de su entrenamiento
+  // (equivocada) y falla al interpretar "hoy/mañana/esta semana" o al nombrar los días.
+  const nowChile = new Intl.DateTimeFormat("es-CL", {
+    timeZone: "America/Santiago",
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(new Date());
+  const currentDateBlock =
+    `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). ` +
+    `Interpreta "hoy", "mañana", "pasado mañana", "el lunes", "esta semana" con ESTA fecha real. ` +
+    `Al ofrecer o confirmar horarios, nombra el día de la semana y la fecha correctos. Nunca asumas otra fecha.`;
+
   // Si hubo intervención humana, se le explica al modelo cómo tratar esos mensajes:
   // son acuerdos ya cerrados con el cliente, hay que respetarlos y continuar desde ahí.
   const humanHandoffNote = humanIntervened
@@ -395,6 +407,7 @@ export async function runAgentTurn(opts: {
     // Prompt base + instrucciones NL de cada acción + objetivo puntual del flujo.
     systemPrompt:
       assembleSystemPrompt(version.systemPrompt, cfg.actions) +
+      currentDateBlock +
       buildConversationInstructions(aiNotes) +
       humanHandoffNote +
       contactMemoryBlock +
