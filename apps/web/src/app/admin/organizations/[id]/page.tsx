@@ -71,8 +71,11 @@ export default function OrgDetailPage() {
   async function billingAction(action: string, hours?: number) {
     setSaving(true);
     try {
-      await padmin(`/platform/organizations/${id}/billing-action`, { method: "POST", body: JSON.stringify({ action, hours }) });
-      toast.push("Hecho ✔", "ok");
+      const r = (await padmin(`/platform/organizations/${id}/billing-action`, { method: "POST", body: JSON.stringify({ action, hours }) })) as { amount?: number } | undefined;
+      toast.push(
+        action === "charge_now" && r?.amount ? `Cobro iniciado por $${r.amount.toLocaleString("es-CL")} — se confirma en unos segundos ✔` : "Hecho ✔",
+        "ok",
+      );
       await load();
     } catch (e) {
       toast.push((e as Error).message, "error");
@@ -312,6 +315,15 @@ export default function OrgDetailPage() {
               {d.recurring.cancelAtPeriodEnd && <span className="text-amber-600">Cancelada al fin del período</span>}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
+              {d.recurring.hasCard && (
+                <button
+                  disabled={saving}
+                  onClick={() => { if (confirm("¿Cobrar AHORA el plan a la tarjeta registrada del cliente? El cobro se hace de inmediato (el resultado se confirma en unos segundos por Flow).")) void billingAction("charge_now"); }}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  💳 Cobrar ahora
+                </button>
+              )}
               <Button disabled={saving} onClick={() => void billingAction("reactivate")}>Reactivar</Button>
               <button disabled={saving} onClick={() => void billingAction("extend_window", 24)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Extender ventana 48 h (+24 h)</button>
               <button disabled={saving} onClick={() => { if (confirm("¿Registrar un pago recibido POR FUERA (transferencia, etc.)? Renueva el período y reactiva la cuenta.")) void billingAction("register_payment"); }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Registrar pago externo</button>
