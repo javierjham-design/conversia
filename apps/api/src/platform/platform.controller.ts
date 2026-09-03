@@ -20,7 +20,7 @@ import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
 import { AuthService } from "../auth/auth.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
-import { flowCollect } from "../billing/flow-subscriptions";
+import { flowCollect, flowCustomerGet, flowPaymentStatus } from "../billing/flow-subscriptions";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -1497,6 +1497,53 @@ export class PlatformController {
     }
     await this.audit(req, `platform.billing.${parsed.data.action}`, "subscription", sub.id, { hours: parsed.data.hours ?? null });
     return { ok: true };
+  }
+
+  /**
+   * DIAGNÓSTICO de cobro: consulta a Flow la tarjeta registrada del cliente y el estado REAL
+   * de sus últimos intentos (para entender por qué no se concreta un cobro — p. ej. tarjeta de
+   * débito que no admite cargo automático, o el motivo de rechazo). Solo lectura.
+   */
+  @Get("organizations/:id/billing-diagnose")
+  async billingDiagnose(@Param("id") id: string) {
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
+    if (!sub) return { ok: false, error: "El tenant no tiene suscripción." };
+    const s = await this.paymentSettings.get();
+    if (!s.flow?.apiKey || !s.flow?.secretKey || !s.flow?.baseUrl) return { ok: false, error: "Flow no está configurado para suscripciones." };
+    const cfg = s.flow;
+
+    let card: { registered: boolean; brand: string | null; last4: string | null } | { error: string } | null = null;
+    if (sub.providerCustomerRef) {
+      try {
+        const c = await flowCustomerGet(cfg, sub.providerCustomerRef);
+        card = { registered: c.registered, brand: c.creditCardType, last4: c.last4 };
+      } catch (e) {
+        card = { error: (e as Error).message };
+      }
+    }
+
+    const rows = await this.prisma.admin.paymentAttempt.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 8 });
+    const attempts: Array<Record<string, unknown>> = [];
+    for (const a of rows) {
+      let flow: { status: number | null; label: string; message: string | null } | null = null;
+      if (a.providerRef) {
+        try {
+          const f = await flowPaymentStatus(cfg, a.providerRef);
+          flow = { status: f.status, label: f.label, message: f.message };
+        } catch (e) {
+          flow = { status: null, label: "error", message: (e as Error).message };
+        }
+      }
+      attempts.push({ createdAt: a.createdAt, amount: a.amount, currency: a.currency, kind: a.kind, ourStatus: a.status, reason: a.reason, flow });
+    }
+
+    return {
+      ok: true,
+      subscription: { status: sub.status, interval: sub.interval, hasCard: !!sub.providerCustomerRef },
+      card,
+      attempts,
+      hint: "Si el ESTADO EN FLOW de los cobros es 'pendiente' y la tarjeta es de débito, Flow no admite cargo automático (customer/collect) en débito: el cliente debe registrar una tarjeta de CRÉDITO.",
+    };
   }
 
   // ------------------------------ Facturas ------------------------------
