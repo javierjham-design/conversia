@@ -140,6 +140,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
   // fecha/profesional. buildCoreTools se ejecuta 1 vez → la Map es de proceso, aislada por
   // conversationId; se limpia por antigüedad para no crecer.
   type CachedSlot = { start: string; end: string; professionalId: string; clinicId: string; serviceId?: string };
+  // Clave por org+conversación: nunca compartir estado entre tenants (el probador
+  // u otro runtime podría reutilizar ids de conversación).
+  const cacheKey = (ctx: ToolContext) => `${ctx.organizationId}:${ctx.conversationId ?? "default"}`;
   const slotCache = new Map<string, { slots: CachedSlot[]; at: number }>();
   const putSlots = (convId: string, slots: CachedSlot[]) => {
     slotCache.set(convId, { slots, at: Date.now() });
@@ -214,7 +217,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           if (wide > to) slots = await sched.getAvailableSlots({ ...query, from, to: wide });
         }
         const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
-        putSlots(ctx.conversationId ?? "default", top);
+        putSlots(cacheKey(ctx), top);
         // Se entregan ids CORTOS (h1, h2…) + `cuando` legible. Para agendar, pasa el id corto
         // a createAppointment. No se exponen fecha/profesional crudos (evita que el modelo
         // los reconstruya mal) ni un token largo (el modelo lo corrompe al copiar).
@@ -224,14 +227,14 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "createAppointment",
       description:
-        "Agenda una cita. Pasa en `slotId` el `id` CORTO (ej. h2) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional.",
+        "Agenda una cita. Pasa en `slotId` el `id` CORTO (ej. h2) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional. NUNCA pidas el teléfono al paciente: ya se usa automáticamente el número del chat.",
       inputSchema: z.object({
         slotId: z.string().describe("El `id` corto del slot elegido (ej. h1, h2) tal como lo dio getAvailability"),
         notes: z.string().optional(),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
-        const convId = ctx.conversationId ?? "default";
+        const convId = cacheKey(ctx);
         // GUARDIA: si ya se agendó una cita en esta conversación hace poco, NO crear otra
         // (el modelo a veces reintenta/agenda dos slots) → se devuelve la ya creada.
         const prior = bookedCache.get(convId);
@@ -251,6 +254,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return { error: "No encuentro ese horario. Llama a getAvailability y pasa el `id` corto (ej. h1) del horario que eligió el paciente." };
         }
         const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
+        // Firma de origen en el comentario de la cita: siempre se sabe qué agente agendó.
+        const firma = `Agendado por TuBot · Agente ${ctx.agentName ?? "IA"}`;
+        const notes = input.notes ? `${firma}. ${input.notes}` : firma;
         let appt: SchedAppointment;
         try {
           appt = await s.scheduling.createAppointment({
@@ -264,7 +270,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             },
             start: slot.start,
             end,
-            notes: input.notes,
+            notes,
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

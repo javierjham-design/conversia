@@ -358,9 +358,12 @@ export class AgentsController {
     const toolCtx: ToolContext = {
       organizationId: orgId,
       clinicId: clinic?.id ?? null,
-      conversationId: "sandbox",
+      // Por-org y por-corrida: las cachés de slots/reservas de las tools se indexan por
+      // conversación; un id fijo compartiría estado entre tenants y entre pruebas.
+      conversationId: `sandbox:${orgId}:${Date.now()}`,
       contactId: "sandbox",
       agentId: agent.id,
+      agentName: agent.name,
       agentVersionId: "sandbox",
       services: services as unknown as Record<string, unknown>,
     };
@@ -371,7 +374,15 @@ export class AgentsController {
     // Fecha/hora reales (Chile) — igual que en producción, para que el probador
     // interprete "hoy/mañana/esta semana" y nombre los días correctamente.
     const nowChile = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-    const currentDateBlock = `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). Interpreta "hoy", "mañana", "el lunes", "esta semana" con ESTA fecha real; al ofrecer/confirmar horarios nombra el día y la fecha correctos.`;
+    const currentDateBlock =
+      `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). Interpreta "hoy", "mañana", "el lunes", "esta semana" con ESTA fecha real; al ofrecer/confirmar horarios nombra el día y la fecha correctos.` +
+      `\n\n## Reglas ESTRICTAS de agendamiento (OBLIGATORIAS)\n` +
+      `- Solo puedes ofrecer horarios que getAvailability devolvió EXACTAMENTE (copia su campo "cuando" tal cual). PROHIBIDO mencionar cualquier otra hora, extrapolar ("también a las 18:15") o suponer horarios de atención.\n` +
+      `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
+      `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
+      `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
+      `- Agenda UNA sola cita por conversación: elige el horario con el paciente y llama a createAppointment UNA vez. Si responde alreadyBooked, la cita YA existe: confírmala, no crees otra.\n` +
+      `- Tras agendar con éxito, SIEMPRE confirma al paciente día, fecha y hora exactos de la cita.`;
     const runtime: AgentRuntime = {
       agentId: agent.id,
       agentVersionId: "sandbox",
