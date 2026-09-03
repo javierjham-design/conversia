@@ -152,6 +152,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     return i >= 0 && c.slots[i] ? c.slots[i] : null;
   };
 
+  // GUARDIA anti doble-agendamiento: el modelo a veces llama createAppointment varias
+  // veces en el mismo turno (dos slots distintos + reintentos) → creaba 2-3 citas reales
+  // y luego chocaba (409) contra su propia cita. Una vez agendada una cita en la
+  // conversación, no se crea otra dentro de la ventana; se devuelve la ya creada.
+  const BOOKING_LOCK_MS = 3 * 60000;
+  const bookedCache = new Map<string, { appt: SchedAppointment; cuando: string; at: number }>();
+
   return [
     {
       name: "getServices",
@@ -190,22 +197,22 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         toDate: isoDate.optional(),
       }),
       async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string }) {
-        // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…")
-        // o un rango de 1 solo día que cae en un día sin atención → vacío → link.
-        // Se ancla SIEMPRE desde hoy (Chile) y se garantiza una ventana amplia.
+        // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…").
+        // Se ancla el inicio desde HOY (Chile) y se RESPETA el rango que pidió el modelo
+        // (si pide un día, se le dan las horas de ESE día, sin mezclar días lejanos).
         const todayChile = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
         const from = input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
-        // Se pide al menos 14 días de ventana; si el modelo pidió un rango más corto, se amplía.
-        const wide = plus(14);
-        const to = input.toDate && input.toDate > from && input.toDate > wide ? input.toDate : wide;
-        const slots = await services(ctx).scheduling.getAvailableSlots({
-          serviceId: input.serviceCode,
-          professionalId: input.professionalId,
-          clinicId: ctx.clinicId ?? undefined,
-          from,
-          to,
-        });
+        const to = input.toDate && input.toDate >= from ? input.toDate : plus(14);
+        const sched = services(ctx).scheduling;
+        const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined };
+        let slots = await sched.getAvailableSlots({ ...query, from, to });
+        // Si el rango pedido era angosto y no hay horas, se ensancha a 14 días (para
+        // no responder "no hay" cuando sí hay más adelante) — pero solo como respaldo.
+        if (!slots.length) {
+          const wide = plus(14);
+          if (wide > to) slots = await sched.getAvailableSlots({ ...query, from, to: wide });
+        }
         const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
         putSlots(ctx.conversationId ?? "default", top);
         // Se entregan ids CORTOS (h1, h2…) + `cuando` legible. Para agendar, pasa el id corto
@@ -224,27 +231,51 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
+        const convId = ctx.conversationId ?? "default";
+        // GUARDIA: si ya se agendó una cita en esta conversación hace poco, NO crear otra
+        // (el modelo a veces reintenta/agenda dos slots) → se devuelve la ya creada.
+        const prior = bookedCache.get(convId);
+        if (prior && Date.now() - prior.at < BOOKING_LOCK_MS) {
+          return {
+            ok: true,
+            alreadyBooked: true,
+            appointment: prior.appt,
+            message: `Ya quedó agendada la cita para ${prior.cuando}. No se creó otra. Confírmasela al paciente; si pide una hora DISTINTA, avísale que ya tiene una reservada.`,
+          };
+        }
         const contact = await s.contactInfo();
         if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
-        const slot = getSlot(ctx.conversationId ?? "default", String(input.slotId ?? ""));
+        const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
           return { error: "No encuentro ese horario. Llama a getAvailability y pasa el `id` corto (ej. h1) del horario que eligió el paciente." };
         }
         const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
-        const appt = await s.scheduling.createAppointment({
-          clinicId: slot.clinicId,
-          professionalId: slot.professionalId,
-          serviceId: slot.serviceId,
-          patient: {
-            firstName: contact.firstName ?? "Paciente",
-            lastName: contact.lastName ?? undefined,
-            phone: contact.phone,
-          },
-          start: slot.start,
-          end,
-          notes: input.notes,
-        });
+        let appt: SchedAppointment;
+        try {
+          appt = await s.scheduling.createAppointment({
+            clinicId: slot.clinicId,
+            professionalId: slot.professionalId,
+            serviceId: slot.serviceId,
+            patient: {
+              firstName: contact.firstName ?? "Paciente",
+              lastName: contact.lastName ?? undefined,
+              phone: contact.phone,
+            },
+            start: slot.start,
+            end,
+            notes: input.notes,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          // 409 slot_taken: la hora se ocupó (por otro canal o por una reserva previa).
+          if (/409|slot_taken|ya tiene una cita/i.test(msg)) {
+            return { error: "Esa hora ya está ocupada. Llama de nuevo a getAvailability y ofrécele al paciente otro horario disponible; no repitas el mismo." };
+          }
+          throw e;
+        }
+        bookedCache.set(convId, { appt, cuando: slotWhen.format(new Date(slot.start)), at: Date.now() });
+        if (bookedCache.size > 1000) for (const [k, v] of bookedCache) if (Date.now() - v.at > BOOKING_LOCK_MS) bookedCache.delete(k);
         await s.recordAppointment(appt);
         return { ok: true, appointment: appt };
       },
