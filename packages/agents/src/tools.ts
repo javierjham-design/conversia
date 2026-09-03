@@ -190,53 +190,43 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           from,
           to,
         });
-        // Se entrega un `id` opaco (con fecha/profesional exactos) + un `cuando` legible.
+        // SOLO se entrega `id` (opaco, con profesional+fecha+sede exactos) y `cuando` (legible).
+        // Nada de start/professionalId crudos: así el modelo NO puede reconstruir/inventar
+        // fecha ni profesional; para agendar solo puede pasar el `id`.
         return slots.slice(0, 6).map((s) => ({
           id: encodeSlot(s),
           cuando: slotWhen.format(new Date(s.start)),
-          start: s.start,
-          end: s.end,
-          professionalId: s.professionalId,
         }));
       },
     },
     {
       name: "createAppointment",
       description:
-        "Agenda una cita. IMPORTANTE: pasa `slotId` = el `id` EXACTO del slot elegido en getAvailability. Así la fecha y el profesional son los reales (no los reconstruyas ni inventes). clinicId/professionalId/startIso son solo respaldo si no hay slotId.",
+        "Agenda una cita. Pasa en `slotId` el `id` EXACTO (copiado tal cual) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional: van dentro del `id`.",
       inputSchema: z.object({
-        slotId: z.string().optional().describe("`id` del slot elegido de getAvailability (recomendado; trae fecha y profesional exactos)"),
-        clinicId: z.string().optional(),
-        professionalId: z.string().optional(),
-        serviceCode: z.string().optional(),
-        startIso: z.string().optional().describe("Inicio ISO 8601 exacto de un slot (solo si no usas slotId)"),
-        endIso: z.string().optional(),
+        slotId: z.string().describe("El `id` EXACTO del slot elegido, copiado de getAvailability"),
         notes: z.string().optional(),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
         const contact = await s.contactInfo();
         if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
-        // Preferir el slot exacto (evita fechas/profesionales inventados por el modelo).
-        const slot = input.slotId ? decodeSlot(input.slotId) : null;
-        const clinicId = slot?.c ?? input.clinicId;
-        const professionalId = slot?.p ?? input.professionalId;
-        const startIso = slot?.s ?? input.startIso;
-        const serviceCode = input.serviceCode ?? slot?.sv;
-        if (!clinicId || !professionalId || !startIso) {
-          return { error: "Falta el slot: llama a getAvailability y pasa el `id` del horario elegido en slotId." };
+        // El slot exacto viene codificado en el id → cero invención de fecha/profesional.
+        const slot = decodeSlot(String(input.slotId ?? ""));
+        if (!slot || !slot.p || !slot.s || !slot.c) {
+          return { error: "slotId inválido. Llama a getAvailability y copia EXACTO el `id` del horario elegido; no lo inventes." };
         }
-        const end = slot?.e ?? input.endIso ?? new Date(new Date(startIso).getTime() + 30 * 60000).toISOString();
+        const end = slot.e ?? new Date(new Date(slot.s).getTime() + 30 * 60000).toISOString();
         const appt = await s.scheduling.createAppointment({
-          clinicId,
-          professionalId,
-          serviceId: serviceCode,
+          clinicId: slot.c,
+          professionalId: slot.p,
+          serviceId: slot.sv,
           patient: {
             firstName: contact.firstName ?? "Paciente",
             lastName: contact.lastName ?? undefined,
             phone: contact.phone,
           },
-          start: startIso,
+          start: slot.s,
           end,
           notes: input.notes,
         });
