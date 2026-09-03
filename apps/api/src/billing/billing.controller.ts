@@ -481,8 +481,8 @@ export class BillingController {
     params.s = flowSign(params, settings.flow.secretKey);
     const res = await fetch(`${settings.flow.baseUrl}/payment/getStatus?${new URLSearchParams(params).toString()}`);
     const status: any = await res.json().catch(() => ({}));
-    // status.status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
-    if (status?.status === 2 && status?.optional) {
+    // status.status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado (Flow puede mandarlo como STRING).
+    if (Number(status?.status) === 2 && status?.optional) {
       let meta: any = {};
       try {
         meta = typeof status.optional === "string" ? JSON.parse(status.optional) : status.optional;
