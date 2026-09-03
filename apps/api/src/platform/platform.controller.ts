@@ -20,6 +20,7 @@ import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
 import { AuthService } from "../auth/auth.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
+import { flowCollect } from "../billing/flow-subscriptions";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -1431,11 +1432,51 @@ export class PlatformController {
   /** Acciones del Super Admin sobre el cobro recurrente de un tenant. */
   @Post("organizations/:id/billing-action")
   async billingAction(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
-    const parsed = z.object({ action: z.enum(["reactivate", "extend_window", "register_payment"]), hours: z.coerce.number().int().min(1).max(240).optional() }).safeParse(body);
+    const parsed = z.object({ action: z.enum(["reactivate", "extend_window", "register_payment", "charge_now"]), hours: z.coerce.number().int().min(1).max(240).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Acción inválida");
     const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
     if (!sub) throw new BadRequestException("El tenant no tiene suscripción");
     const admin = this.prisma.admin;
+
+    if (parsed.data.action === "charge_now") {
+      // COBRAR AHORA: dispara el cobro del plan contra la tarjeta ya registrada del cliente
+      // (p. ej. quedó en prueba tras registrar la TC y nunca se le cobró el plan). El collect
+      // de Flow es asíncrono: el worker (reconciliación) confirma y activa la suscripción.
+      if (!sub.providerCustomerRef) throw new BadRequestException("El cliente no tiene una tarjeta registrada para cobrar.");
+      const s = await this.paymentSettings.get();
+      if (!s.flow?.apiKey || !s.flow?.secretKey || !s.flow?.baseUrl) throw new BadRequestException("Flow no está configurado para suscripciones.");
+      const [plan, org] = await Promise.all([
+        admin.plan.findUnique({ where: { id: sub.planId } }),
+        admin.organization.findUnique({ where: { id } }),
+      ]);
+      if (!plan) throw new BadRequestException("El cliente no tiene un plan de pago asignado.");
+      const currency = org?.currency ?? "CLP";
+      const yearly = sub.interval === "yearly";
+      const base = currency === "CLP"
+        ? Number((yearly && plan.priceClpYearly != null ? plan.priceClpYearly : plan.priceClp) ?? 0)
+        : Number((yearly && plan.priceUsdYearly != null ? plan.priceUsdYearly : plan.priceUsd) ?? 0);
+      const billablesArr = (org?.settings as Record<string, unknown> | null)?.billables;
+      const billables = Array.isArray(billablesArr)
+        ? billablesArr.filter((x: any) => x && typeof x.concept === "string" && Number(x.amount) > 0).reduce((a: number, x: any) => a + Math.round(Number(x.amount)), 0)
+        : 0;
+      const amount = Math.round(base) + billables;
+      if (amount <= 0) throw new BadRequestException("El plan del cliente no tiene un monto a cobrar (¿es Free?).");
+      const commerceOrder = `sub-${sub.id}-${Date.now()}`;
+      await admin.paymentAttempt.create({ data: { organizationId: id, subscriptionId: sub.id, commerceOrder, amount, currency, kind: "manual", attemptNumber: (sub.retriesDone ?? 0) + 1, status: "pending", provider: "flow" } });
+      const r = await flowCollect(s.flow, {
+        customerId: sub.providerCustomerRef,
+        commerceOrder,
+        subject: `Plan ${plan.name} (${yearly ? "anual" : "mensual"})`,
+        amount,
+        currency,
+        urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`,
+        urlReturn: `${getEnv().WEB_URL}/billing`,
+      });
+      await admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
+      if (!r.ok) throw new BadRequestException(`Flow rechazó el cobro: ${r.reason ?? "error del proveedor"}`);
+      await this.audit(req, "platform.billing.charge_now", "subscription", sub.id, { amount, currency });
+      return { ok: true, amount, currency };
+    }
 
     if (parsed.data.action === "reactivate") {
       // Reactivación manual (override del Super Admin): vuelve a ACTIVE sin cobrar.
