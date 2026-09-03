@@ -148,9 +148,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     slotCache.set(convId, { slots, at: Date.now() });
     if (slotCache.size > 1000) for (const [k, v] of slotCache) if (Date.now() - v.at > 30 * 60000) slotCache.delete(k);
   };
+  const SLOTS_TTL_MS = 10 * 60000;
   const getSlot = (convId: string, id: string): CachedSlot | null => {
     const c = slotCache.get(convId);
     if (!c) return null;
+    // Lista vencida: obliga a reconsultar getAvailability (evita agendar de una lista
+    // vieja cuando el paciente ya cambió de día/semana — caso "viernes 10" de Julio).
+    if (Date.now() - c.at > SLOTS_TTL_MS) return null;
     const i = parseInt(String(id).replace(/\D/g, ""), 10) - 1;
     return i >= 0 && c.slots[i] ? c.slots[i] : null;
   };
@@ -280,10 +284,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           }
           throw e;
         }
-        bookedCache.set(convId, { appt, cuando: slotWhen.format(new Date(slot.start)), at: Date.now() });
+        const cuando = slotWhen.format(new Date(slot.start));
+        bookedCache.set(convId, { appt, cuando, at: Date.now() });
         if (bookedCache.size > 1000) for (const [k, v] of bookedCache) if (Date.now() - v.at > BOOKING_LOCK_MS) bookedCache.delete(k);
         await s.recordAppointment(appt);
-        return { ok: true, appointment: appt };
+        // `cuando` legible de la cita REAL: el modelo debe confirmar ESTA fecha/hora
+        // textual (hubo casos donde anunciaba una fecha distinta a la agendada).
+        return { ok: true, cuando, message: `Cita creada para ${cuando}. Confirma al paciente EXACTAMENTE esta fecha y hora (copia "${cuando}" tal cual); si no coincide con lo que pidió, discúlpate y corrige.`, appointment: appt };
       },
     },
     {
@@ -299,8 +306,16 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       description: "Actualiza la ETAPA del lead de esta conversación. Usa un code EXACTO de getLeadStatuses (no inventes). Cambia la etapa según el avance real (interés, agendó, cerró, se enfrió).",
       inputSchema: z.object({ statusCode: z.string() }),
       async execute(ctx, input: { statusCode: string }) {
-        await services(ctx).updateLeadStatus(input.statusCode);
-        return { ok: true };
+        try {
+          await services(ctx).updateLeadStatus(input.statusCode);
+          return { ok: true };
+        } catch (e) {
+          // El modelo suele inventar el código ("interes"): se le devuelven los
+          // válidos para que se corrija solo en vez de fallar en silencio.
+          const valid = await services(ctx).listLeadStatuses().catch(() => []);
+          const codes = Array.isArray(valid) ? valid.map((s: any) => s?.code).filter(Boolean).join(", ") : "";
+          return { error: `Código "${input.statusCode}" inválido. Usa EXACTAMENTE uno de estos: ${codes || "(llama a getLeadStatuses)"}` };
+        }
       },
     },
     {

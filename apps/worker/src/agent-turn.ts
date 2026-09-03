@@ -390,8 +390,9 @@ export async function runAgentTurn(opts: {
     `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
     `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
     `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
+    `- Si el paciente pide un día o semana DISTINTOS a los de la última lista, vuelve a llamar getAvailability con fromDate/toDate de ESE día antes de ofrecer o agendar. Los ids (h1, h2…) solo sirven para la ÚLTIMA lista mostrada.\n` +
     `- Agenda UNA sola cita por conversación: elige el horario con el paciente y llama a createAppointment UNA vez. Si responde alreadyBooked, la cita YA existe: confírmala, no crees otra.\n` +
-    `- Tras agendar con éxito, SIEMPRE confirma al paciente día, fecha y hora exactos de la cita.`;
+    `- Al confirmar la cita, usa EXACTAMENTE el campo "cuando" que devolvió createAppointment (esa es la fecha/hora real agendada). Si no coincide con lo que pidió el paciente, discúlpate y corrige; jamás anuncies otra fecha.`;
 
   // Si hubo intervención humana, se le explica al modelo cómo tratar esos mensajes:
   // son acuerdos ya cerrados con el cliente, hay que respetarlos y continuar desde ahí.
