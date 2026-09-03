@@ -132,15 +132,25 @@ export class ToolRegistry {
 export function buildCoreTools(): ToolDefinition<any, any>[] {
   const isoDate = z.string().describe("Fecha ISO YYYY-MM-DD");
 
-  // Token opaco de un slot: encapsula profesional + fecha/hora EXACTAS + sede. El modelo
-  // NO debe reconstruir fechas ni ids (los inventa mal); copia este id y lo pasa a
-  // createAppointment, que lo decodifica y agenda con los valores reales del slot.
-  const encodeSlot = (s: { professionalId: string; start: string; end: string; clinicId: string; serviceId?: string }) =>
-    Buffer.from(JSON.stringify({ p: s.professionalId, s: s.start, e: s.end, c: s.clinicId, sv: s.serviceId })).toString("base64url");
-  const decodeSlot = (id: string): { p?: string; s?: string; e?: string; c?: string; sv?: string } | null => {
-    try { return JSON.parse(Buffer.from(id, "base64url").toString("utf8")); } catch { return null; }
-  };
   const slotWhen = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false });
+
+  // Caché de horarios por conversación. getAvailability guarda los slots reales y devuelve
+  // ids CORTOS (h1, h2…) que el modelo SÍ copia bien (un token largo lo corrompe). Al
+  // agendar, createAppointment resuelve el id corto al slot exacto → cero invención de
+  // fecha/profesional. buildCoreTools se ejecuta 1 vez → la Map es de proceso, aislada por
+  // conversationId; se limpia por antigüedad para no crecer.
+  type CachedSlot = { start: string; end: string; professionalId: string; clinicId: string; serviceId?: string };
+  const slotCache = new Map<string, { slots: CachedSlot[]; at: number }>();
+  const putSlots = (convId: string, slots: CachedSlot[]) => {
+    slotCache.set(convId, { slots, at: Date.now() });
+    if (slotCache.size > 1000) for (const [k, v] of slotCache) if (Date.now() - v.at > 30 * 60000) slotCache.delete(k);
+  };
+  const getSlot = (convId: string, id: string): CachedSlot | null => {
+    const c = slotCache.get(convId);
+    if (!c) return null;
+    const i = parseInt(String(id).replace(/\D/g, ""), 10) - 1;
+    return i >= 0 && c.slots[i] ? c.slots[i] : null;
+  };
 
   return [
     {
@@ -190,43 +200,42 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           from,
           to,
         });
-        // SOLO se entrega `id` (opaco, con profesional+fecha+sede exactos) y `cuando` (legible).
-        // Nada de start/professionalId crudos: así el modelo NO puede reconstruir/inventar
-        // fecha ni profesional; para agendar solo puede pasar el `id`.
-        return slots.slice(0, 6).map((s) => ({
-          id: encodeSlot(s),
-          cuando: slotWhen.format(new Date(s.start)),
-        }));
+        const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
+        putSlots(ctx.conversationId ?? "default", top);
+        // Se entregan ids CORTOS (h1, h2…) + `cuando` legible. Para agendar, pasa el id corto
+        // a createAppointment. No se exponen fecha/profesional crudos (evita que el modelo
+        // los reconstruya mal) ni un token largo (el modelo lo corrompe al copiar).
+        return top.map((s, i) => ({ id: `h${i + 1}`, cuando: slotWhen.format(new Date(s.start)) }));
       },
     },
     {
       name: "createAppointment",
       description:
-        "Agenda una cita. Pasa en `slotId` el `id` EXACTO (copiado tal cual) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional: van dentro del `id`.",
+        "Agenda una cita. Pasa en `slotId` el `id` CORTO (ej. h2) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional.",
       inputSchema: z.object({
-        slotId: z.string().describe("El `id` EXACTO del slot elegido, copiado de getAvailability"),
+        slotId: z.string().describe("El `id` corto del slot elegido (ej. h1, h2) tal como lo dio getAvailability"),
         notes: z.string().optional(),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
         const contact = await s.contactInfo();
         if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
-        // El slot exacto viene codificado en el id → cero invención de fecha/profesional.
-        const slot = decodeSlot(String(input.slotId ?? ""));
-        if (!slot || !slot.p || !slot.s || !slot.c) {
-          return { error: "slotId inválido. Llama a getAvailability y copia EXACTO el `id` del horario elegido; no lo inventes." };
+        // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
+        const slot = getSlot(ctx.conversationId ?? "default", String(input.slotId ?? ""));
+        if (!slot) {
+          return { error: "No encuentro ese horario. Llama a getAvailability y pasa el `id` corto (ej. h1) del horario que eligió el paciente." };
         }
-        const end = slot.e ?? new Date(new Date(slot.s).getTime() + 30 * 60000).toISOString();
+        const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
         const appt = await s.scheduling.createAppointment({
-          clinicId: slot.c,
-          professionalId: slot.p,
-          serviceId: slot.sv,
+          clinicId: slot.clinicId,
+          professionalId: slot.professionalId,
+          serviceId: slot.serviceId,
           patient: {
             firstName: contact.firstName ?? "Paciente",
             lastName: contact.lastName ?? undefined,
             phone: contact.phone,
           },
-          start: slot.s,
+          start: slot.start,
           end,
           notes: input.notes,
         });
