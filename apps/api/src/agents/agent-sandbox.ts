@@ -97,11 +97,20 @@ export async function buildSandboxServices(
       utcOffset: "-04:00",
     }));
   }
+  // Con proveedor externo, servicios/profesionales se leen del proveedor (la tabla nativa
+  // suele estar vacía en tenants con Cláriva/Dentalink).
+  const external = scheduling.kind === "clariva" || scheduling.kind === "dentalink";
 
   return {
     scheduling,
 
     async listServices() {
+      if (external) {
+        try {
+          const svcs = await scheduling.getServices();
+          return svcs.map((s) => ({ code: s.id, name: s.name, price: s.price ?? null, currency: s.currency ?? "CLP", durationMin: s.durationMin, category: null as string | null }));
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         const services = await tx.service.findMany({ where: { active: true }, orderBy: { name: "asc" } });
         return services.map((s) => ({
@@ -116,6 +125,12 @@ export async function buildSandboxServices(
     },
 
     async getServiceByCode(code: string) {
+      if (external) {
+        try {
+          const s = (await scheduling.getServices()).find((x) => x.id === code);
+          return s ? { code: s.id, name: s.name, price: s.price ?? null, currency: s.currency ?? "CLP", durationMin: s.durationMin, description: null as string | null } : null;
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         const s = await tx.service.findUnique({ where: { organizationId_code: { organizationId: orgId, code } } });
         if (!s || !s.active) return null;
@@ -131,6 +146,12 @@ export async function buildSandboxServices(
     },
 
     async listProfessionals(serviceCode?: string) {
+      if (external) {
+        try {
+          const pros = await scheduling.getProfessionals();
+          return pros.filter((p) => !allowed || allowed.has(p.id)).map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? null }));
+        } catch { /* cae a nativo */ }
+      }
       return withTenant(orgId, async (tx) => {
         if (serviceCode) {
           const svc = await tx.service.findUnique({ where: { organizationId_code: { organizationId: orgId, code: serviceCode } } });
