@@ -71,6 +71,13 @@ export function createDbBillingPort(): BillingPort {
       return rows.map((r) => ({ commerceOrder: r.commerceOrder, providerRef: r.providerRef ?? "", subscriptionId: r.subscriptionId }));
     },
 
+    async pendingSubscriptionIds() {
+      // TODOS los intentos pendientes (sin importar la antigüedad): mientras uno esté en vuelo,
+      // no se re-cobra esa suscripción. La reconciliación (cada tick) los resuelve.
+      const rows = await admin.paymentAttempt.findMany({ where: { status: "pending" }, select: { subscriptionId: true }, distinct: ["subscriptionId"], take: 1000 });
+      return new Set(rows.map((r) => r.subscriptionId));
+    },
+
     async getSub(subscriptionId) {
       const s = await admin.subscription.findUnique({ where: { id: subscriptionId }, select: SUB_SELECT });
       return s ? buildEngineSub(admin, s) : null;

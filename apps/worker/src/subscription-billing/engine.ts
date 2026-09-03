@@ -52,6 +52,9 @@ export interface BillingPort {
   notify(orgId: string, kind: "payment_failed" | "payment_succeeded" | "suspended" | "reactivated", data: Record<string, unknown>): Promise<void>;
   /** Intentos de cobro aún PENDIENTES (para reconciliar contra la pasarela). */
   listPending(now: Date): Promise<Array<{ commerceOrder: string; providerRef: string; subscriptionId: string }>>;
+  /** IDs de suscripciones con un intento de cobro AÚN pendiente: NO se re-cobra mientras haya
+   *  uno en vuelo (evita el loop que dispara N cobras por tick hasta que la pasarela confirme). */
+  pendingSubscriptionIds(now: Date): Promise<Set<string>>;
   /** Carga la suscripción de un intento (para aplicar el resultado reconciliado). */
   getSub(subscriptionId: string): Promise<EngineSub | null>;
 }
@@ -120,6 +123,10 @@ export async function runBillingCycle(
   urls: { confirmation: string; ret: string } = { confirmation: URL_CONFIRM, ret: URL_CONFIRM },
 ): Promise<{ charged: number; suspended: number }> {
   const subs = await port.listActionable(now);
+  // Cobros EN VUELO: si una suscripción ya tiene un intento pendiente (Flow collect asíncrono
+  // sin confirmar), NO se le vuelve a cobrar hasta que se reconcilie. Sin esto, cada tick creaba
+  // un cobro nuevo mientras el anterior no confirmaba → decenas de cobros al mismo cliente.
+  const inFlight = await port.pendingSubscriptionIds(now);
   let charged = 0;
   let suspended = 0;
   for (const sub of subs) {
@@ -132,6 +139,7 @@ export async function runBillingCycle(
     }
     if (action === "charge" || action === "retry") {
       if (!sub.providerCustomerRef) continue; // sin medio de pago no se puede cobrar
+      if (inFlight.has(sub.id)) continue; // ya hay un cobro pendiente: esperar la reconciliación
       const provider = await providerFor(sub.organizationId);
       const commerceOrder = `sub-${sub.id}-${now.getTime()}`;
       const attemptNumber = action === "retry" ? sub.retriesDone + 2 : 1;

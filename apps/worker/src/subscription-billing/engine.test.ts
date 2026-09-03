@@ -27,7 +27,7 @@ function baseSub(over: Partial<EngineSub> = {}): EngineSub {
 
 /** Puerto FALSO que registra efectos y guarda las suscripciones en memoria. */
 function fakePort(subs: EngineSub[]) {
-  const attempts: Array<{ commerceOrder: string; kind: string; n: number; status?: string }> = [];
+  const attempts: Array<{ commerceOrder: string; kind: string; n: number; status?: string; subId: string }> = [];
   const notes: Array<{ orgId: string; kind: string }> = [];
   const successes: Array<{ id: string; periodEnd: Date }> = [];
   const failures: Array<{ id: string; retriesDone: number }> = [];
@@ -38,7 +38,7 @@ function fakePort(subs: EngineSub[]) {
     },
     async createAttempt(sub, kind, n, commerceOrder) {
       if (attempts.some((a) => a.commerceOrder === commerceOrder)) throw new Error("duplicado");
-      attempts.push({ commerceOrder, kind, n });
+      attempts.push({ commerceOrder, kind, n, subId: sub.id });
     },
     async markAttempt(commerceOrder, status) {
       const a = attempts.find((x) => x.commerceOrder === commerceOrder);
@@ -57,7 +57,10 @@ function fakePort(subs: EngineSub[]) {
       notes.push({ orgId, kind });
     },
     async listPending() {
-      return attempts.filter((a) => a.status === "pending").map((a) => ({ commerceOrder: a.commerceOrder, providerRef: "ref", subscriptionId: subs[0]?.id ?? "s1" }));
+      return attempts.filter((a) => a.status === "pending").map((a) => ({ commerceOrder: a.commerceOrder, providerRef: "ref", subscriptionId: a.subId }));
+    },
+    async pendingSubscriptionIds() {
+      return new Set(attempts.filter((a) => a.status === "pending").map((a) => a.subId));
     },
     async getSub(subscriptionId) {
       return subs.find((s) => s.id === subscriptionId) ?? null;
@@ -139,6 +142,19 @@ describe("reconcilePending — cobros asíncronos de Flow y webhooks perdidos", 
     expect(r.reconciled).toBe(1);
     expect(f.successes.length).toBe(1);
     expect(f.notes.map((n) => n.kind)).toContain("payment_succeeded");
+  });
+
+  it("GUARDIA: no re-cobra si ya hay un intento pendiente en vuelo (evita el loop de N cobros)", async () => {
+    const f = fakePort([baseSub({ dueAt: T0, periodEnd: T0 })]);
+    const p = new FakeSubscriptionProvider();
+    p.scheduleCharge(true, null, true); // async: el primer cobro queda PENDIENTE
+    const providerAsync = async () => p;
+    await runBillingCycle(f.port, providerAsync, T0);
+    expect(f.attempts.length).toBe(1);
+    // Segundo tick con el cobro AÚN pendiente y la sub todavía vencida: NO debe re-cobrar.
+    const r2 = await runBillingCycle(f.port, providerAsync, hoursAfter(T0, 1));
+    expect(r2.charged).toBe(0);
+    expect(f.attempts.length).toBe(1);
   });
 });
 
