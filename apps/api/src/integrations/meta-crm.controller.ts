@@ -234,8 +234,10 @@ export class MetaCrmController {
         let after: string | null = null;
         // Páginas de 100, más recientes primero; corta al pasar la ventana pedida.
         for (let i = 0; i < 50; i++) {
-          const path = `${encodeURIComponent(formId)}/leads?fields=id,created_time&limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
-          const json = await this.graph(path, pt).catch((e: Error) => {
+          // Tipos EXPLÍCITOS: sin ellos, tsc acusa TS7022 (inferencia circular
+          // path→after→json→path a través del bucle) con noImplicitAny.
+          const path: string = `${encodeURIComponent(formId)}/leads?fields=id,created_time&limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+          const json: any = await this.graph(path, pt).catch((e: Error) => {
             errors.push(`Formulario ${formId}: ${e.message}`);
             return null;
           });
