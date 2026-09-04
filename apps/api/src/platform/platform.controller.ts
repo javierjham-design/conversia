@@ -21,6 +21,7 @@ import { computeWhatsappCostUsd } from "@conversia/agents";
 import { AuthService } from "../auth/auth.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
 import { flowCollect, flowCustomerGet, flowPaymentStatus } from "../billing/flow-subscriptions";
+import { createPaymentProvider } from "../billing/payment-provider";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -1544,6 +1545,57 @@ export class PlatformController {
       attempts,
       hint: "Si el ESTADO EN FLOW de los cobros es 'pendiente' y la tarjeta es de débito, Flow no admite cargo automático (customer/collect) en débito: el cliente debe registrar una tarjeta de CRÉDITO.",
     };
+  }
+
+  /**
+   * LINK DE PAGO para un tenant (débito o cualquier medio): genera un checkout de Flow
+   * (payment/create) por el monto del plan, con la metadata org+plan. Al pagarlo, el webhook
+   * /billing/webhooks/flow ACTIVA la suscripción automáticamente. Sirve para clientes con
+   * tarjeta de DÉBITO (que no admite cargo automático) — se les envía el link y pagan.
+   */
+  @Post("organizations/:id/payment-link")
+  async paymentLink(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ planCode: z.string().optional(), interval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id } });
+    if (!org) throw new BadRequestException("Organización no encontrada");
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
+    const plan = parsed.data.planCode
+      ? await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } })
+      : sub?.planId
+        ? await this.prisma.admin.plan.findUnique({ where: { id: sub.planId } })
+        : null;
+    if (!plan || !plan.active) throw new BadRequestException("El cliente no tiene un plan de pago asignado (o especifica el plan).");
+    const currency = org.currency ?? "CLP";
+    const wantYearly = parsed.data.interval === "yearly" || (!parsed.data.interval && sub?.interval === "yearly");
+    const yearlyPrice = currency === "CLP" ? Number(plan.priceClpYearly ?? 0) : Number(plan.priceUsdYearly ?? 0);
+    const useYearly = wantYearly && yearlyPrice > 0;
+    const interval = useYearly ? "yearly" : "monthly";
+    const base = useYearly ? yearlyPrice : currency === "CLP" ? Number(plan.priceClp) : Number(plan.priceUsd);
+    const billablesArr = (org.settings as Record<string, unknown> | null)?.billables;
+    const billables = Array.isArray(billablesArr)
+      ? billablesArr.filter((x: any) => x && typeof x.concept === "string" && Number(x.amount) > 0).reduce((a: number, x: any) => a + Math.round(Number(x.amount)), 0)
+      : 0;
+    const amount = Math.round(base) + billables;
+    if (amount <= 0) throw new BadRequestException("El plan no tiene un monto a cobrar (¿es Free?).");
+    const settings = await this.paymentSettings.get();
+    const preferred = (org.settings as Record<string, unknown> | null)?.paymentProvider as string | undefined;
+    const provider = createPaymentProvider(settings, currency, preferred);
+    // Email del dueño (Flow lo pide) — best-effort.
+    const owner = await this.prisma.admin.organizationUser.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "asc" }, select: { userId: true } });
+    const user = owner ? await this.prisma.admin.user.findUnique({ where: { id: owner.userId }, select: { email: true } }) : null;
+    const session = await provider.createCheckout({
+      organizationId: id,
+      planCode: plan.code,
+      amount,
+      currency,
+      email: user?.email ?? `pagos+${id.slice(-8)}@tubot.cl`,
+      interval,
+      successUrl: `${getEnv().WEB_URL}/billing`,
+      cancelUrl: `${getEnv().WEB_URL}/billing`,
+    });
+    await this.audit(req, "platform.billing.payment_link", "subscription", sub?.id ?? id, { planCode: plan.code, amount, interval, provider: session.provider });
+    return { ok: true, url: session.url, amount, currency, planName: plan.name, interval };
   }
 
   // ------------------------------ Facturas ------------------------------

@@ -32,6 +32,7 @@ export default function OrgDetailPage() {
   const [aiMaxToolRounds, setAiMaxToolRounds] = useState(5);
   const [saving, setSaving] = useState(false);
   const [diag, setDiag] = useState<any | null>(null);
+  const [payLink, setPayLink] = useState<{ url: string; amount: number; currency: string; planName: string } | null>(null);
   const [billables, setBillables] = useState<Array<{ concept: string; amount: number }>>([]);
   const [adminEmail, setAdminEmail] = useState("");
   const [resetInfo, setResetInfo] = useState<{ email: string; tempPassword?: string | null; sent?: boolean } | null>(null);
@@ -90,6 +91,19 @@ export default function OrgDetailPage() {
     setDiag(null);
     try {
       setDiag(await padmin(`/platform/organizations/${id}/billing-diagnose`));
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function genPaymentLink() {
+    setSaving(true);
+    try {
+      const r = (await padmin(`/platform/organizations/${id}/payment-link`, { method: "POST", body: JSON.stringify({}) })) as { url: string; amount: number; currency: string; planName: string };
+      setPayLink(r);
+      toast.push("Link de pago generado ✔", "ok");
     } catch (e) {
       toast.push((e as Error).message, "error");
     } finally {
@@ -341,7 +355,19 @@ export default function OrgDetailPage() {
               <button disabled={saving} onClick={() => void billingAction("extend_window", 24)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Extender ventana 48 h (+24 h)</button>
               <button disabled={saving} onClick={() => { if (confirm("¿Registrar un pago recibido POR FUERA (transferencia, etc.)? Renueva el período y reactiva la cuenta.")) void billingAction("register_payment"); }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">Registrar pago externo</button>
               <button disabled={saving} onClick={() => void runDiagnose()} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50">🔎 Diagnosticar cobro (Flow)</button>
+              <button disabled={saving} onClick={() => void genPaymentLink()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">🔗 Generar link de pago</button>
             </div>
+            {payLink && (
+              <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs">
+                <p className="font-medium text-indigo-800">Link de pago — {payLink.planName} · ${Number(payLink.amount).toLocaleString("es-CL")} {payLink.currency}</p>
+                <p className="mt-1 text-slate-600">Envíaselo al cliente. Sirve con débito o cualquier tarjeta; al pagarlo, su plan se activa solo.</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <input readOnly value={payLink.url} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1 font-mono text-[11px]" />
+                  <button onClick={() => { void navigator.clipboard?.writeText(payLink.url); toast.push("Link copiado ✔", "ok"); }} className="shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-white">Copiar</button>
+                  <a href={payLink.url} target="_blank" rel="noreferrer" className="shrink-0 rounded border border-slate-300 px-2 py-1 hover:bg-white">Abrir</a>
+                </div>
+              </div>
+            )}
             {diag && (
               <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
                 {diag.ok === false ? (
