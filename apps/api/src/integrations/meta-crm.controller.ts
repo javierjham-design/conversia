@@ -203,7 +203,9 @@ export class MetaCrmController {
   @Post("leads/backfill")
   async backfillLeads(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
-    const input = z.object({ days: z.coerce.number().int().min(1).max(365).default(90) }).parse(body ?? {});
+    const parsed = z.object({ days: z.coerce.number().int().min(1).max(365).default(90) }).safeParse(body ?? {});
+    if (!parsed.success) throw new BadRequestException("days debe ser un entero entre 1 y 365");
+    const input = parsed.data;
     const token = await this.crmToken(ctx.organizationId);
     const sinceSec = Math.floor(Date.now() / 1000) - input.days * 24 * 3600;
 
