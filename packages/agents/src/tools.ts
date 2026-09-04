@@ -135,18 +135,26 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
   const slotWhen = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false });
 
   // Caché de horarios por conversación. getAvailability guarda los slots reales y devuelve
-  // ids CORTOS (h1, h2…) que el modelo SÍ copia bien (un token largo lo corrompe). Al
-  // agendar, createAppointment resuelve el id corto al slot exacto → cero invención de
-  // fecha/profesional. buildCoreTools se ejecuta 1 vez → la Map es de proceso, aislada por
-  // conversationId; se limpia por antigüedad para no crecer.
+  // ids CORTOS AUTODESCRIPTIVOS con día y hora (h0409-1015 = día 04-09 a las 10:15).
+  // Con ids opacos (h1, h2…) el modelo renumeraba la lista al paciente y luego mapeaba
+  // MAL la elección (caso Macarena: eligió 10:15 y agendó h1=09:15). Con el día y la
+  // hora EN el id, la elección del paciente coincide textualmente con el id correcto.
+  // buildCoreTools se ejecuta 1 vez → la Map es de proceso; se limpia por antigüedad.
   type CachedSlot = { start: string; end: string; professionalId: string; clinicId: string; serviceId?: string };
   // Clave por org+conversación: nunca compartir estado entre tenants (el probador
   // u otro runtime podría reutilizar ids de conversación).
   const cacheKey = (ctx: ToolContext) => `${ctx.organizationId}:${ctx.conversationId ?? "default"}`;
-  const slotCache = new Map<string, { slots: CachedSlot[]; at: number }>();
-  const putSlots = (convId: string, slots: CachedSlot[]) => {
-    slotCache.set(convId, { slots, at: Date.now() });
+  const slotCache = new Map<string, { slots: Map<string, CachedSlot>; at: number }>();
+  const slotIdFmt = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+  const slotId = (startIso: string): string => {
+    const p = new Map(slotIdFmt.formatToParts(new Date(startIso)).map((x) => [x.type, x.value]));
+    return `h${p.get("day")}${p.get("month")}-${p.get("hour")}${p.get("minute")}`;
+  };
+  const putSlots = (convId: string, slots: CachedSlot[]): Map<string, CachedSlot> => {
+    const byId = new Map(slots.map((s) => [slotId(s.start), s]));
+    slotCache.set(convId, { slots: byId, at: Date.now() });
     if (slotCache.size > 1000) for (const [k, v] of slotCache) if (Date.now() - v.at > 30 * 60000) slotCache.delete(k);
+    return byId;
   };
   const SLOTS_TTL_MS = 10 * 60000;
   const getSlot = (convId: string, id: string): CachedSlot | null => {
@@ -155,8 +163,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     // Lista vencida: obliga a reconsultar getAvailability (evita agendar de una lista
     // vieja cuando el paciente ya cambió de día/semana — caso "viernes 10" de Julio).
     if (Date.now() - c.at > SLOTS_TTL_MS) return null;
-    const i = parseInt(String(id).replace(/\D/g, ""), 10) - 1;
-    return i >= 0 && c.slots[i] ? c.slots[i] : null;
+    return c.slots.get(String(id).trim().toLowerCase()) ?? null;
   };
 
   // GUARDIA anti doble-agendamiento: el modelo a veces llama createAppointment varias
@@ -221,19 +228,19 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           if (wide > to) slots = await sched.getAvailableSlots({ ...query, from, to: wide });
         }
         const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
-        putSlots(cacheKey(ctx), top);
-        // Se entregan ids CORTOS (h1, h2…) + `cuando` legible. Para agendar, pasa el id corto
-        // a createAppointment. No se exponen fecha/profesional crudos (evita que el modelo
-        // los reconstruya mal) ni un token largo (el modelo lo corrompe al copiar).
-        return top.map((s, i) => ({ id: `h${i + 1}`, cuando: slotWhen.format(new Date(s.start)) }));
+        const byId = putSlots(cacheKey(ctx), top);
+        // Ids AUTODESCRIPTIVOS (h0409-1015 = 04-09 a las 10:15) + `cuando` legible. Para
+        // agendar, pasa el id EXACTO del horario que eligió el paciente (la hora del id
+        // debe coincidir con la elegida). No se exponen fecha/profesional crudos.
+        return [...byId.entries()].map(([id, s]) => ({ id, cuando: slotWhen.format(new Date(s.start)) }));
       },
     },
     {
       name: "createAppointment",
       description:
-        "Agenda una cita. Pasa en `slotId` el `id` CORTO (ej. h2) del horario que eligió el paciente en getAvailability. NO inventes ni reconstruyas fecha, hora ni profesional. NUNCA pidas el teléfono al paciente: ya se usa automáticamente el número del chat.",
+        "Agenda una cita. Pasa en `slotId` el `id` del horario que eligió el paciente en getAvailability. El id codifica día y hora (h0409-1015 = día 04-09 a las 10:15): VERIFICA que la hora del id coincida EXACTAMENTE con la hora que pidió el paciente. NO inventes ni reconstruyas fecha, hora ni profesional. NUNCA pidas el teléfono al paciente: ya se usa automáticamente el número del chat.",
       inputSchema: z.object({
-        slotId: z.string().describe("El `id` corto del slot elegido (ej. h1, h2) tal como lo dio getAvailability"),
+        slotId: z.string().describe("El `id` del slot elegido tal como lo dio getAvailability (ej. h0409-1015; su hora DEBE coincidir con la que eligió el paciente)"),
         notes: z.string().optional(),
       }),
       async execute(ctx, input: any) {
@@ -255,7 +262,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
         const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
-          return { error: "No encuentro ese horario. Llama a getAvailability y pasa el `id` corto (ej. h1) del horario que eligió el paciente." };
+          return { error: "No encuentro ese horario (o la lista ya venció). Llama de nuevo a getAvailability y pasa el `id` exacto del horario que eligió el paciente (ej. h0409-1015)." };
         }
         const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
         // Firma de origen en el comentario de la cita: siempre se sabe qué agente agendó.

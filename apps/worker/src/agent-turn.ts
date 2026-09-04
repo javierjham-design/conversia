@@ -390,7 +390,9 @@ export async function runAgentTurn(opts: {
     `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
     `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
     `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
-    `- Si el paciente pide un día o semana DISTINTOS a los de la última lista, vuelve a llamar getAvailability con fromDate/toDate de ESE día antes de ofrecer o agendar. Los ids (h1, h2…) solo sirven para la ÚLTIMA lista mostrada.\n` +
+    `- Si el paciente pide un día o semana DISTINTOS a los de la última lista, vuelve a llamar getAvailability con fromDate/toDate de ESE día antes de ofrecer o agendar. Los ids solo sirven para la ÚLTIMA lista mostrada.\n` +
+    `- El id de cada horario codifica día y hora (h0409-1015 = día 04-09 a las 10:15). Al agendar, usa el id cuya hora coincide EXACTAMENTE con la que eligió el paciente; jamás uses otro.\n` +
+    `- Al ofrecer horarios, muestra las horas tal cual ("09:15", "10:15"), NUNCA numeres las opciones (1, 2, 3) — numerar causa confusiones al elegir.\n` +
     `- Agenda UNA sola cita por conversación: elige el horario con el paciente y llama a createAppointment UNA vez. Si responde alreadyBooked, la cita YA existe: confírmala, no crees otra.\n` +
     `- Al confirmar la cita, usa EXACTAMENTE el campo "cuando" que devolvió createAppointment (esa es la fecha/hora real agendada). Si no coincide con lo que pidió el paciente, discúlpate y corrige; jamás anuncies otra fecha.`;
 
