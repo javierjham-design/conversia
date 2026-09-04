@@ -46,6 +46,7 @@ interface ContactRow {
   locale: string | null;
   blocked: boolean;
   acquisitionSource: string | null;
+  source: string | null;
   createdAt: string;
   lastContactAt: string | null;
   stage: { code: string; name: string; color: string | null } | null;
@@ -68,6 +69,7 @@ interface Meta {
   tags: { id: string; name: string; color: string | null }[];
   countries: string[];
   campaigns: { id: string; name: string }[];
+  origins: { value: string; count: number }[];
   segments: { id: string; name: string; isDefault: boolean }[];
 }
 
@@ -83,6 +85,20 @@ const CHANNEL_LABEL: Record<string, string> = {
   MESSENGER: "Messenger",
   WEBCHAT: "Webchat",
 };
+/** Origen de captación (Contact.source) → etiqueta + chip de color. */
+const SOURCE_META: Record<string, { label: string; className: string }> = {
+  meta_lead_ads: { label: "Formulario Meta", className: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300" },
+  whatsapp: { label: "WhatsApp", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" },
+  whatsapp_cloud: { label: "WhatsApp", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" },
+  instagram: { label: "Instagram", className: "bg-pink-50 text-pink-700 dark:bg-pink-500/10 dark:text-pink-300" },
+  messenger: { label: "Messenger", className: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300" },
+  webchat: { label: "Webchat", className: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300" },
+  clariva: { label: "Cláriva", className: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300" },
+  import: { label: "Importado", className: "bg-app text-ink-muted" },
+  manual: { label: "Manual", className: "bg-app text-ink-muted" },
+};
+const sourceMeta = (s: string | null) => (s ? (SOURCE_META[s] ?? { label: s, className: "bg-app text-ink-muted" }) : null);
+
 const CONV_STATUS: Record<string, { label: string; className: string }> = {
   OPEN: { label: "Abierta", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" },
   PENDING: { label: "Pendiente", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300" },
@@ -128,27 +144,29 @@ function fmtDate(s: string | null): string {
 // ------------------------------ Columnas ------------------------------
 
 type ColKey =
-  | "channel" | "stage" | "email" | "phone" | "tags" | "country" | "locale" | "conv" | "assigned" | "lastContactAt" | "createdAt";
+  | "source" | "channel" | "stage" | "email" | "phone" | "tags" | "country" | "locale" | "conv" | "assigned" | "lastContactAt" | "createdAt";
 const COLUMNS: { key: ColKey; label: string; def: boolean }[] = [
-  // "Origen" = de dónde llega la persona (WhatsApp, Instagram, Messenger,
-  // formulario…) — mismo nombre de columna que la vista Tablero (B1.1).
-  { key: "channel", label: "Origen", def: true },
+  // "Origen" = de DÓNDE se captó la persona (Formulario Meta, WhatsApp, manual…).
+  { key: "source", label: "Origen", def: true },
+  // "Canales" = por dónde conversa hoy (WhatsApp, Instagram, Messenger).
+  { key: "channel", label: "Canales", def: false },
   { key: "stage", label: "Etapa", def: true },
   { key: "phone", label: "Teléfono", def: true },
-  { key: "email", label: "Email", def: true },
+  { key: "email", label: "Email", def: false },
   { key: "tags", label: "Etiquetas", def: true },
-  { key: "country", label: "País", def: true },
+  { key: "country", label: "País", def: false },
   { key: "locale", label: "Idioma", def: false },
   { key: "conv", label: "Conversación", def: true },
   { key: "assigned", label: "Asignado", def: false },
-  { key: "lastContactAt", label: "Último mensaje", def: true },
-  { key: "createdAt", label: "Creado", def: false },
+  { key: "lastContactAt", label: "Última actividad", def: true },
+  { key: "createdAt", label: "Ingreso", def: true },
 ];
 
 // Segmentos sugeridos (presets genéricos, sin fila en BD).
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 const SUGGESTED: { key: string; label: string; sec: Record<string, string> }[] = [
   { key: "new7", label: "Nuevos (7 días)", sec: { dateFrom: daysAgo(7) } },
+  { key: "metaleads", label: "De Formulario Meta", sec: { origin: "meta_lead_ads" } },
   { key: "ads", label: "Vinieron de anuncios", sec: { source: "ad" } },
   { key: "organic", label: "Orgánicos", sec: { source: "organic" } },
 ];
@@ -186,7 +204,7 @@ function ContactsPageInner() {
 
   // Filtro primario (sidebar) + secundarios (barra de filtros) + búsqueda.
   const [primary, setPrimary] = useState<Primary>({ kind: "all" });
-  const [sec, setSec] = useState<{ tag?: string; channel?: string; country?: string; source?: string; campaign?: string; dateFrom?: string; dateTo?: string }>({});
+  const [sec, setSec] = useState<{ tag?: string; channel?: string; country?: string; source?: string; origin?: string; campaign?: string; dateFrom?: string; dateTo?: string }>({});
   const [q, setQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
 
@@ -271,6 +289,7 @@ function ContactsPageInner() {
     if (sec.channel) p.set("channel", sec.channel);
     if (sec.country) p.set("country", sec.country);
     if (sec.source) p.set("source", sec.source);
+    if (sec.origin) p.set("origin", sec.origin);
     if (sec.campaign) p.set("campaign", sec.campaign);
     if (sec.dateFrom) p.set("dateFrom", sec.dateFrom);
     if (sec.dateTo) p.set("dateTo", sec.dateTo);
@@ -485,6 +504,25 @@ function ContactsPageInner() {
           >
             <Filter size={15} /> Filtros {secCount > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white">{secCount}</span>}
           </button>
+          {view === "tabla" && (
+            <Select
+              value={`${sortBy}:${sortDir}`}
+              onChange={(e) => {
+                const [by, dir] = e.target.value.split(":") as [typeof sortBy, typeof sortDir];
+                setSortBy(by);
+                setSortDir(dir);
+                setPage(1);
+              }}
+              className="w-auto text-sm"
+              aria-label="Ordenar por"
+              title="Ordenar la lista"
+            >
+              <option value="createdAt:desc">Más recientes primero</option>
+              <option value="createdAt:asc">Más antiguos primero</option>
+              <option value="lastContactAt:desc">Última actividad reciente</option>
+              <option value="firstName:asc">Nombre A→Z</option>
+            </Select>
+          )}
           <div className="relative">
             <button onClick={() => setColMenu((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-panel px-3 py-1.5 text-sm font-medium text-ink-muted hover:bg-app">
               <Columns3 size={15} /> Columnas
@@ -543,9 +581,15 @@ function ContactsPageInner() {
             {meta.campaigns.length > 0 && (
               <FilterSelect label="Campaña" value={sec.campaign} onChange={(v) => setSecReset({ campaign: v })} options={meta.campaigns.map((c) => ({ value: c.id, label: c.name }))} />
             )}
-            <FilterSelect label="Origen" value={sec.source} onChange={(v) => setSecReset({ source: v })} options={[{ value: "ad", label: "Anuncio (CTWA)" }, { value: "organic", label: "Orgánico" }]} />
+            <FilterSelect
+              label="Origen"
+              value={sec.origin}
+              onChange={(v) => setSecReset({ origin: v })}
+              options={(meta.origins ?? []).map((o) => ({ value: o.value, label: `${sourceMeta(o.value)!.label} (${o.count})` }))}
+            />
+            <FilterSelect label="Adquisición" value={sec.source} onChange={(v) => setSecReset({ source: v })} options={[{ value: "ad", label: "Anuncio (CTWA)" }, { value: "organic", label: "Orgánico" }]} />
             <div>
-              <p className="mb-1 text-xs font-medium text-ink-muted">Creado desde</p>
+              <p className="mb-1 text-xs font-medium text-ink-muted">Ingresó desde</p>
               <DateInput value={sec.dateFrom ?? ""} onChange={(e) => setSecReset({ dateFrom: e.target.value || undefined })} />
             </div>
             <div>
@@ -553,7 +597,7 @@ function ContactsPageInner() {
               <DateInput value={sec.dateTo ?? ""} onChange={(e) => setSecReset({ dateTo: e.target.value || undefined })} />
             </div>
             {secCount > 0 && (
-              <button onClick={() => setSecReset({ tag: undefined, channel: undefined, country: undefined, source: undefined, dateFrom: undefined, dateTo: undefined })} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-ink-muted hover:text-ink">
+              <button onClick={() => setSecReset({ tag: undefined, channel: undefined, country: undefined, source: undefined, origin: undefined, campaign: undefined, dateFrom: undefined, dateTo: undefined })} className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-ink-muted hover:text-ink">
                 <X size={14} /> Limpiar
               </button>
             )}
@@ -604,6 +648,9 @@ function ContactsPageInner() {
             <BoardView
               q={q}
               stage={primary.kind === "stage" ? (primary.value ?? "") : ""}
+              origin={sec.origin}
+              dateFrom={sec.dateFrom}
+              dateTo={sec.dateTo}
               refreshKey={refreshKey}
               onOpenContact={setOpenId}
               onTotal={setBoardTotal}
@@ -628,7 +675,8 @@ function ContactsPageInner() {
                   />
                 </th>
                 <Th sortable active={sortBy === "firstName"} dir={sortDir} onSort={() => toggleSort("firstName")}>Contacto</Th>
-                {visibleCols.has("channel") && <Th>Origen</Th>}
+                {visibleCols.has("source") && <Th>Origen</Th>}
+                {visibleCols.has("channel") && <Th>Canales</Th>}
                 {visibleCols.has("stage") && <Th>Etapa</Th>}
                 {visibleCols.has("phone") && <Th>Teléfono</Th>}
                 {visibleCols.has("email") && <Th>Email</Th>}
@@ -638,10 +686,10 @@ function ContactsPageInner() {
                 {visibleCols.has("conv") && <Th>Conversación</Th>}
                 {visibleCols.has("assigned") && <Th>Asignado</Th>}
                 {visibleCols.has("lastContactAt") && (
-                  <Th sortable active={sortBy === "lastContactAt"} dir={sortDir} onSort={() => toggleSort("lastContactAt")}>Último mensaje</Th>
+                  <Th sortable active={sortBy === "lastContactAt"} dir={sortDir} onSort={() => toggleSort("lastContactAt")}>Última actividad</Th>
                 )}
                 {visibleCols.has("createdAt") && (
-                  <Th sortable active={sortBy === "createdAt"} dir={sortDir} onSort={() => toggleSort("createdAt")}>Creado</Th>
+                  <Th sortable active={sortBy === "createdAt"} dir={sortDir} onSort={() => toggleSort("createdAt")}>Ingreso</Th>
                 )}
               </tr>
             </thead>
@@ -649,7 +697,7 @@ function ContactsPageInner() {
               {loading && rows.length === 0
                 ? Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-t border-line">
-                      <td className="px-3 py-3" colSpan={13}>
+                      <td className="px-3 py-3" colSpan={14}>
                         <Skeleton className="h-6 w-full" />
                       </td>
                     </tr>
@@ -688,6 +736,17 @@ function ContactsPageInner() {
                             </div>
                           </div>
                         </td>
+                        {visibleCols.has("source") && (
+                          <td className="px-3 py-2.5">
+                            {c.source ? (
+                              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium", sourceMeta(c.source)!.className)}>
+                                {sourceMeta(c.source)!.label}
+                              </span>
+                            ) : (
+                              <span className="text-ink-subtle">—</span>
+                            )}
+                          </td>
+                        )}
                         {visibleCols.has("channel") && <td className="px-3 py-2.5 text-ink-muted">{(c.channels ?? []).map((ch) => CHANNEL_LABEL[ch] ?? ch).join(", ") || "—"}</td>}
                         {visibleCols.has("stage") && (
                           <td className="px-3 py-2.5">
@@ -730,8 +789,16 @@ function ContactsPageInner() {
                           </td>
                         )}
                         {visibleCols.has("assigned") && <td className="px-3 py-2.5 text-ink-muted">{assigned ?? "—"}</td>}
-                        {visibleCols.has("lastContactAt") && <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted">{fmtDate(c.lastContactAt)}</td>}
-                        {visibleCols.has("createdAt") && <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted">{fmtDate(c.createdAt)}</td>}
+                        {visibleCols.has("lastContactAt") && (
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted" title={c.lastContactAt ? new Date(c.lastContactAt).toLocaleString("es-CL") : undefined}>
+                            {fmtDate(c.lastContactAt)}
+                          </td>
+                        )}
+                        {visibleCols.has("createdAt") && (
+                          <td className="whitespace-nowrap px-3 py-2.5 text-ink-muted" title={new Date(c.createdAt).toLocaleString("es-CL")}>
+                            {fmtDate(c.createdAt)}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

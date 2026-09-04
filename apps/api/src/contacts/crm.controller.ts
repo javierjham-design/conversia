@@ -13,6 +13,9 @@ const boardQuery = z.object({
   q: z.string().trim().max(120).optional(),
   /** leads creados en los últimos N días */
   days: z.coerce.number().int().positive().max(3650).optional(),
+  /** rango de fechas de creación del lead (YYYY-MM-DD) */
+  dateFrom: z.string().max(10).optional(),
+  dateTo: z.string().max(10).optional(),
 });
 
 const PER_COLUMN = 50;
@@ -60,6 +63,13 @@ export class CrmController {
       const leadWhere: Record<string, unknown> = { contact: contactWhere };
       if (q.formId) leadWhere.meta = { path: ["formId"], equals: q.formId };
       if (q.days) leadWhere.createdAt = { gte: new Date(Date.now() - q.days * 86_400_000) };
+      if (q.dateFrom || q.dateTo) {
+        leadWhere.createdAt = {
+          ...((leadWhere.createdAt as object) ?? {}),
+          ...(q.dateFrom ? { gte: new Date(`${q.dateFrom}T00:00:00`) } : {}),
+          ...(q.dateTo ? { lte: new Date(`${q.dateTo}T23:59:59`) } : {}),
+        };
+      }
 
       const [counts, leads] = await Promise.all([
         tx.lead.groupBy({ by: ["statusId"], where: leadWhere as any, _count: { _all: true } }),
@@ -149,6 +159,13 @@ export class CrmController {
       const leadWhere: Record<string, unknown> = { contact: contactWhere };
       if (q.formId) leadWhere.meta = { path: ["formId"], equals: q.formId };
       if (q.days) leadWhere.createdAt = { gte: new Date(Date.now() - q.days * 86_400_000) };
+      if (q.dateFrom || q.dateTo) {
+        leadWhere.createdAt = {
+          ...((leadWhere.createdAt as object) ?? {}),
+          ...(q.dateFrom ? { gte: new Date(`${q.dateFrom}T00:00:00`) } : {}),
+          ...(q.dateTo ? { lte: new Date(`${q.dateTo}T23:59:59`) } : {}),
+        };
+      }
       if (q.stage) {
         const status = await tx.leadStatus.findUnique({
           where: { organizationId_code: { organizationId: ctx.organizationId, code: q.stage } },

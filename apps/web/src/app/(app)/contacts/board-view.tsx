@@ -41,6 +41,14 @@ const SOURCE_LABEL: Record<string, string> = {
   clariva: "Cláriva",
   manual: "Manual",
 };
+/** Chip de color por origen (coherente con la vista Lista). */
+const SOURCE_CLASS: Record<string, string> = {
+  meta_lead_ads: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
+  whatsapp: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+  instagram: "bg-pink-50 text-pink-700 dark:bg-pink-500/10 dark:text-pink-300",
+  messenger: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300",
+  clariva: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300",
+};
 
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
@@ -54,6 +62,9 @@ function timeAgo(iso: string): string {
 export function BoardView({
   q,
   stage,
+  origin,
+  dateFrom,
+  dateTo,
   refreshKey,
   onOpenContact,
   onTotal,
@@ -62,6 +73,11 @@ export function BoardView({
   q: string;
   /** etapa seleccionada en la sidebar ("" = todas las columnas) */
   stage: string;
+  /** origen de captación (Contact.source) — mismo filtro del panel */
+  origin?: string;
+  /** rango de fechas de ingreso del lead (YYYY-MM-DD) */
+  dateFrom?: string;
+  dateTo?: string;
   /** bump para recargar desde el padre */
   refreshKey: number;
   /** abre la ficha del contacto (mismo drawer de la vista Tabla) */
@@ -77,6 +93,9 @@ export function BoardView({
   const load = useCallback(async () => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
+    if (origin) params.set("source", origin);
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
     try {
       const r = await api<{ stages: BoardStage[]; total: number }>(`/crm/board?${params.toString()}`);
       setStages(r.stages);
@@ -85,7 +104,7 @@ export function BoardView({
       toast.push(e.message ?? "Error al cargar el tablero", "error");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, toast]);
+  }, [q, origin, dateFrom, dateTo, toast]);
 
   useEffect(() => {
     void load();
@@ -190,16 +209,13 @@ export function BoardView({
                   </div>
                   {lead.phone && <p className="mt-0.5 truncate text-xs tnum text-ink-subtle">{lead.phone}</p>}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    {lead.source === "meta_lead_ads" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">
-                        <Megaphone size={10} /> {SOURCE_LABEL.meta_lead_ads}
-                      </span>
-                    ) : lead.source ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-app px-1.5 py-0.5 text-[10px] text-ink-subtle">
-                        <User2 size={10} /> {SOURCE_LABEL[lead.source] ?? lead.source}
+                    {lead.source ? (
+                      <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium", SOURCE_CLASS[lead.source] ?? "bg-app text-ink-subtle")}>
+                        {lead.source === "meta_lead_ads" ? <Megaphone size={10} /> : <User2 size={10} />}
+                        {SOURCE_LABEL[lead.source] ?? lead.source}
                       </span>
                     ) : null}
-                    <span className="ml-auto text-[10px] tnum text-ink-subtle" title={new Date(lead.updatedAt).toLocaleString("es-CL")}>
+                    <span className="ml-auto text-[10px] tnum text-ink-subtle" title={`Última actividad: ${new Date(lead.updatedAt).toLocaleString("es-CL")}`}>
                       {timeAgo(lead.updatedAt)}
                     </span>
                   </div>
