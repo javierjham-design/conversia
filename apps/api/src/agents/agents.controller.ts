@@ -381,6 +381,7 @@ export class AgentsController {
       `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
       `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
       `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
+      `- FRANJAS: "mañana" = 09:00–13:59, "tarde" = desde las 14:00–15:00 en adelante. Si el paciente pide mañana o tarde, pasa el parámetro franja a getAvailability (sin él solo verías las horas más tempranas). Si la tool responde sinCupos, eso aplica SOLO al rango consultado: ofrece la otra franja u otro rango; JAMÁS afirmes que no hay cupos "hasta" una fecha que no consultaste.\n` +
       `- Si el paciente pide un día o semana DISTINTOS a los de la última lista, vuelve a llamar getAvailability con fromDate/toDate de ESE día antes de ofrecer o agendar. Los ids solo sirven para la ÚLTIMA lista mostrada.\n` +
       `- El id de cada horario codifica día y hora (h0409-1015 = día 04-09 a las 10:15). Al agendar, usa el id cuya hora coincide EXACTAMENTE con la que eligió el paciente; jamás uses otro.\n` +
       `- Al ofrecer horarios, muestra las horas tal cual ("09:15", "10:15"), NUNCA numeres las opciones (1, 2, 3) — numerar causa confusiones al elegir.\n` +
