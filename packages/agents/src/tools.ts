@@ -203,14 +203,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getAvailability",
       description:
-        "Consulta disponibilidad REAL de horas. Úsala siempre antes de ofrecer horarios; nunca inventes. Cada opción trae `id` (úsalo tal cual en createAppointment) y `cuando` (día+fecha+hora reales para mostrar al paciente).",
+        "Consulta disponibilidad REAL de horas. Úsala siempre antes de ofrecer horarios; nunca inventes. Si el paciente pide 'en la mañana' o 'en la tarde', pasa `franja` (manana = 09:00–13:59, tarde = desde las 14:00) — sin eso solo verías las horas más tempranas. Cada opción trae `id` (úsalo tal cual en createAppointment) y `cuando` (día+fecha+hora reales para mostrar al paciente).",
       inputSchema: z.object({
         serviceCode: z.string().optional(),
         professionalId: z.string().optional(),
         fromDate: isoDate.optional(),
         toDate: isoDate.optional(),
+        franja: z.enum(["manana", "tarde"]).optional().describe("Filtro horario: manana = 09:00–13:59, tarde = desde las 14:00. Úsalo SIEMPRE que el paciente pida mañana/tarde."),
       }),
-      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string }) {
+      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; franja?: "manana" | "tarde" }) {
         // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…").
         // Se ancla el inicio desde HOY (Chile) y se RESPETA el rango que pidió el modelo
         // (si pide un día, se le dan las horas de ESE día, sin mezclar días lejanos).
@@ -220,12 +221,25 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const to = input.toDate && input.toDate >= from ? input.toDate : plus(14);
         const sched = services(ctx).scheduling;
         const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined };
-        let slots = await sched.getAvailableSlots({ ...query, from, to });
-        // Si el rango pedido era angosto y no hay horas, se ensancha a 14 días (para
-        // no responder "no hay" cuando sí hay más adelante) — pero solo como respaldo.
+        // FRANJA (hora de Chile): sin este filtro, el tope de 6 opciones dejaba solo las
+        // horas más tempranas (mañanas) y el modelo concluía "no hay tarde" aunque sí había.
+        const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
+        const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
+        let slots = (await sched.getAvailableSlots({ ...query, from, to })).filter((s) => enFranja(s.start));
+        // Si el rango pedido era angosto y no hay horas (en la franja pedida), se
+        // ensancha a 14 días — pero solo como respaldo.
         if (!slots.length) {
           const wide = plus(14);
-          if (wide > to) slots = await sched.getAvailableSlots({ ...query, from, to: wide });
+          if (wide > to) slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+        }
+        if (!slots.length) {
+          // Vacío EXPLÍCITO con el rango consultado: el modelo solo puede afirmar que no
+          // hay cupos EN ESTE rango/franja — jamás "hasta" una fecha que no consultó.
+          return {
+            sinCupos: true,
+            rangoConsultado: { desde: from, hasta: to, ...(input.franja ? { franja: input.franja } : {}) },
+            nota: `No hay horas${input.franja ? ` de ${input.franja === "manana" ? "mañana" : "tarde"}` : ""} SOLO entre ${from} y ${to}. Ofrece la otra franja u otro rango (vuelve a consultar); NUNCA digas que no hay cupos "hasta" una fecha que no consultaste.`,
+          };
         }
         const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
         const byId = putSlots(cacheKey(ctx), top);
