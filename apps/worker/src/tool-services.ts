@@ -20,7 +20,7 @@ import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider, withAppointmentDuration } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
@@ -153,6 +153,10 @@ export interface ToolOptions {
   knowledgeSources?: string[] | null;
   /** Profesionales/recursos con los que ESTE agente puede agendar. Vacío/undefined = todos. */
   allowedProfessionalIds?: string[] | null;
+  /** Duración de la cita que agenda ESTE agente (min). Si es menor que el bloque del
+   *  proveedor, cada bloque se SUBDIVIDE (bloque de 30 con duración 15 → 2 cupos).
+   *  undefined/null = usar la duración del bloque tal cual. */
+  appointmentDurationMin?: number | null;
 }
 
 /**
@@ -328,6 +332,16 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       return rawScheduling.createAppointment(input);
     };
     scheduling = scoped;
+  }
+
+  // DURACIÓN DE CITA POR AGENTE: si el agente fija una duración menor que el bloque del
+  // proveedor, cada bloque se SUBDIVIDE en cupos de esa duración (30 min con duración 15
+  // → 09:15 y 09:30) y la cita se crea con end = start + duración (así en Cláriva caben
+  // 2 diagnósticos por bloque). Se envuelve DESPUÉS del filtro por profesional para que
+  // la subdivisión aplique sobre los slots ya permitidos.
+  const durMin = typeof opts.appointmentDurationMin === "number" && opts.appointmentDurationMin >= 5 && opts.appointmentDurationMin <= 240 ? Math.round(opts.appointmentDurationMin) : null;
+  if (durMin) {
+    scheduling = withAppointmentDuration(scheduling, durMin);
   }
 
   return {

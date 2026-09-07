@@ -447,6 +447,7 @@ export async function runAgentTurn(opts: {
     {
       knowledgeSources: Array.isArray(cfg.knowledgeSources) ? (cfg.knowledgeSources as string[]) : null,
       allowedProfessionalIds: Array.isArray(cfg.scheduling?.professionalIds) ? (cfg.scheduling.professionalIds as string[]) : null,
+      appointmentDurationMin: typeof cfg.scheduling?.appointmentDurationMin === "number" ? (cfg.scheduling.appointmentDurationMin as number) : null,
     },
   );
   const toolCtx: ToolContext = {
