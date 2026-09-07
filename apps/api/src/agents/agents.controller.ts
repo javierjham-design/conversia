@@ -354,6 +354,7 @@ export class AgentsController {
     const services = await buildSandboxServices(orgId, state, {
       knowledgeSources: input.knowledgeSources ?? null,
       allowedProfessionalIds: Array.isArray((input.config as any)?.scheduling?.professionalIds) ? (input.config as any).scheduling.professionalIds : null,
+      appointmentDurationMin: typeof (input.config as any)?.scheduling?.appointmentDurationMin === "number" ? (input.config as any).scheduling.appointmentDurationMin : null,
     });
     const toolCtx: ToolContext = {
       organizationId: orgId,

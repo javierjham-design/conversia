@@ -599,3 +599,36 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
     },
   );
 }
+
+/**
+ * Envuelve un SchedulingProvider para que las citas duren `durMin` minutos:
+ * subdivide cada bloque de disponibilidad en cupos de esa duración (bloque de
+ * 30 con duración 15 → 09:15 y 09:30) y fuerza end = start + durMin al
+ * reservar. Configurable por agente (config.scheduling.appointmentDurationMin);
+ * lo usan el worker y el probador.
+ */
+export function withAppointmentDuration(base: SchedulingProvider, durMin: number): SchedulingProvider {
+  const wrapped = Object.create(base) as SchedulingProvider;
+  wrapped.getAvailableSlots = async (q) => {
+    const slots = await base.getAvailableSlots(q);
+    const out: typeof slots = [];
+    for (const s of slots ?? []) {
+      const start = new Date(s.start).getTime();
+      const end = new Date(s.end ?? s.start).getTime();
+      const blockMin = Math.round((end - start) / 60000);
+      if (!Number.isFinite(blockMin) || blockMin <= durMin) {
+        out.push(s); // bloque igual o menor que la duración: se ofrece tal cual
+        continue;
+      }
+      for (let t0 = start; t0 + durMin * 60000 <= end; t0 += durMin * 60000) {
+        out.push({ ...s, start: new Date(t0).toISOString(), end: new Date(t0 + durMin * 60000).toISOString() });
+      }
+    }
+    return out;
+  };
+  wrapped.createAppointment = async (input) => {
+    const start = new Date(input.start).getTime();
+    return base.createAppointment({ ...input, end: new Date(start + durMin * 60000).toISOString() });
+  };
+  return wrapped;
+}
