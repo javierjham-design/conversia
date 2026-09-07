@@ -227,10 +227,14 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
         let slots = (await sched.getAvailableSlots({ ...query, from, to })).filter((s) => enFranja(s.start));
         // Si el rango pedido era angosto y no hay horas (en la franja pedida), se
-        // ensancha a 14 días — pero solo como respaldo.
+        // ensancha a 14 días — pero solo como respaldo (y se AVISA en la respuesta).
+        let ensanchado = false;
         if (!slots.length) {
           const wide = plus(14);
-          if (wide > to) slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+          if (wide > to) {
+            slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+            ensanchado = slots.length > 0;
+          }
         }
         if (!slots.length) {
           // Vacío EXPLÍCITO con el rango consultado: el modelo solo puede afirmar que no
@@ -246,7 +250,23 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // Ids AUTODESCRIPTIVOS (h0409-1015 = 04-09 a las 10:15) + `cuando` legible. Para
         // agendar, pasa el id EXACTO del horario que eligió el paciente (la hora del id
         // debe coincidir con la elegida). No se exponen fecha/profesional crudos.
-        return [...byId.entries()].map(([id, s]) => ({ id, cuando: slotWhen.format(new Date(s.start)) }));
+        const horas = [...byId.entries()].map(([id, s]) => ({ id, cuando: slotWhen.format(new Date(s.start)) }));
+        // Notas OBLIGATORIAS para el modelo: la franja la define la CLÍNICA (mañana llega
+        // hasta las 13:59 — el modelo descartaba un 13:15 "porque no le parecía mañana"),
+        // y si se ensanchó el rango, debe decir la fecha de cada hora y no presentarlas
+        // como si fueran del día pedido.
+        const notas: string[] = [];
+        if (input.franja) {
+          notas.push(
+            input.franja === "manana"
+              ? "TODOS estos horarios SON de la franja MAÑANA según la política de la clínica (09:00–13:59): ofrécelos como horarios de mañana aunque alguno te parezca tarde (ej. 13:15 ES mañana). NO digas que no hay cupos de mañana si esta lista tiene horas."
+              : "TODOS estos horarios SON de la franja TARDE según la política de la clínica (desde las 14:00): ofrécelos como horarios de tarde.",
+          );
+        }
+        if (ensanchado) {
+          notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una y aclara que en el día pedido no había.`);
+        }
+        return notas.length ? { nota: notas.join(" "), horas } : horas;
       },
     },
     {
