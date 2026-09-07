@@ -81,6 +81,9 @@ export interface AvailabilityQuery {
   serviceId?: string;
   from: string; // ISO date
   to: string; // ISO date
+  /** Duración deseada de la cita (min): el proveedor calcula la grilla con este paso
+   *  (los huecos de 15' entre citas aparecen; con paso 30 se perdían). Opcional. */
+  durationMin?: number;
 }
 
 export interface CreateAppointmentInput {

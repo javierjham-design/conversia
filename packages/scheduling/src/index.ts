@@ -361,6 +361,9 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
+      // Grilla con la duración de la cita: los huecos cortos entre citas (p.ej. 15')
+      // aparecen como cupos; con el paso por defecto (30') se perdían.
+      if (q.durationMin) params.set("durationMin", String(q.durationMin));
       params.set("from", from);
       params.set("to", to);
       const path = `/availability?${params.toString()}`;
@@ -497,6 +500,9 @@ export class CustomSchedulingProvider implements SchedulingProvider {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
+      // Grilla con la duración de la cita: los huecos cortos entre citas (p.ej. 15')
+      // aparecen como cupos; con el paso por defecto (30') se perdían.
+      if (q.durationMin) params.set("durationMin", String(q.durationMin));
       params.set("from", from);
       params.set("to", to);
       const path = `/availability?${params.toString()}`;
@@ -610,7 +616,10 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
 export function withAppointmentDuration(base: SchedulingProvider, durMin: number): SchedulingProvider {
   const wrapped = Object.create(base) as SchedulingProvider;
   wrapped.getAvailableSlots = async (q) => {
-    const slots = await base.getAvailableSlots(q);
+    // Se pide la grilla YA con la duración (proveedores que lo soportan, como Cláriva,
+    // exponen los huecos cortos entre citas); la subdivisión de abajo queda como
+    // respaldo para bloques más largos o proveedores que ignoran durationMin.
+    const slots = await base.getAvailableSlots({ ...q, durationMin: durMin });
     const out: typeof slots = [];
     for (const s of slots ?? []) {
       const start = new Date(s.start).getTime();
