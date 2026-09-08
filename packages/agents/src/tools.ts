@@ -148,7 +148,11 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
   const slotIdFmt = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
   const slotId = (startIso: string): string => {
     const p = new Map(slotIdFmt.formatToParts(new Date(startIso)).map((x) => [x.type, x.value]));
-    return `h${p.get("day")}${p.get("month")}-${p.get("hour")}${p.get("minute")}`;
+    // Padding MANUAL: Intl con "2-digit" a veces devuelve "9" sin cero (según ICU) →
+    // los ids no calzaban con el formato documentado (hDDMM-HHMM) y el modelo los
+    // "corregía" reconstruyéndolos mal (caso Juan Fuica: h99-1530 → mandó h0409-1530).
+    const pad = (v?: string) => String(v ?? "").padStart(2, "0");
+    return `h${pad(p.get("day"))}${pad(p.get("month"))}-${pad(p.get("hour"))}${pad(p.get("minute"))}`;
   };
   const putSlots = (convId: string, slots: CachedSlot[]): Map<string, CachedSlot> => {
     const byId = new Map(slots.map((s) => [slotId(s.start), s]));
@@ -163,7 +167,20 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     // Lista vencida: obliga a reconsultar getAvailability (evita agendar de una lista
     // vieja cuando el paciente ya cambió de día/semana — caso "viernes 10" de Julio).
     if (Date.now() - c.at > SLOTS_TTL_MS) return null;
-    return c.slots.get(String(id).trim().toLowerCase()) ?? null;
+    const key = String(id).trim().toLowerCase();
+    const direct = c.slots.get(key);
+    if (direct) return direct;
+    // TOLERANCIA: el modelo a veces RECONSTRUYE el id en vez de copiarlo (caso Juan
+    // Fuica: la lista traía h99-1530 y mandó h0409-1530 imitando el ejemplo). Si la
+    // HORA del id (tras el guión) identifica UN ÚNICO slot cacheado, se usa ese; si es
+    // ambigua (misma hora en dos días de la lista), null → el modelo debe reconsultar.
+    const m = key.match(/(\d{3,4})\s*$/);
+    if (m) {
+      const hhmm = m[1].padStart(4, "0");
+      const hits = [...c.slots.entries()].filter(([k]) => k.endsWith(`-${hhmm}`));
+      if (hits.length === 1) return hits[0][1];
+    }
+    return null;
   };
 
   // GUARDIA anti doble-agendamiento: el modelo a veces llama createAppointment varias
