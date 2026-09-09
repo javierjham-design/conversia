@@ -99,7 +99,12 @@ export function createDbBillingPort(): BillingPort {
       const plan = await admin.plan.findUnique({ where: { id: (await admin.subscription.findUnique({ where: { id: sub.id }, select: { planId: true } }))?.planId ?? "" }, select: { features: true, name: true } });
       await withTenant(sub.organizationId, async (tx) => {
         await tx.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", periodStart: new Date(), periodEnd, nextChargeAt: dueAt, pastDueSince: null, retriesDone: 0 } });
-        await tx.organization.update({ where: { id: sub.organizationId }, data: { status: "ACTIVE" } });
+        // Limpia la marca de deuda (settings.billing): sin esto el panel seguía
+        // mostrando "en deuda"/suspendido aunque el pago ya había entrado.
+        const orgRow = await tx.organization.findUnique({ where: { id: sub.organizationId }, select: { settings: true } });
+        const cleanSettings = { ...((orgRow?.settings as Record<string, unknown>) ?? {}) };
+        delete cleanSettings.billing;
+        await tx.organization.update({ where: { id: sub.organizationId }, data: { status: "ACTIVE", settings: cleanSettings as object } });
         // Acreditar la bolsa del mes (mismo cálculo que el pago único / recarga anual).
         const included = planIncludedQuota(plan?.features ?? {}, getEnv().WALLET_DEFAULT_QUOTA);
         const wallet = await tx.messageWallet.findUnique({ where: { organizationId: sub.organizationId } });
