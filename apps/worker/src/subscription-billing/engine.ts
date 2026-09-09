@@ -83,8 +83,14 @@ export async function applyOutcome(port: BillingPort, sub: EngineSub, commerceOr
     await port.applySuccess(sub, t.periodEnd!, t.dueAt!);
     await port.notify(sub.organizationId, sub.state === "SUSPENDED" ? "reactivated" : "payment_succeeded", { periodEnd: t.periodEnd });
   } else {
-    const t = onChargeFailed(snap);
     await port.markAttempt(commerceOrder, "failed", null, reason);
+    // PERÍODO YA PAGADO: si otro pago (p.ej. "registrar pago" del Super Admin) ya
+    // renovó el período (periodEnd a futuro), un intento VIEJO que se reconcilia
+    // como fallido NO puede volver a poner la cuenta morosa (caso TuBot: quedó
+    // PAST_DUE+suspendida con la renovación vigente al 07-10). El intento queda
+    // marcado failed y nada más.
+    if (sub.periodEnd && sub.periodEnd.getTime() > now.getTime()) return;
+    const t = onChargeFailed(snap);
     await port.applyFailure(sub, t.pastDueSince!, t.retriesDone);
     await port.notify(sub.organizationId, "payment_failed", { reason, suspendAt: t.pastDueSince ? new Date(t.pastDueSince.getTime() + 48 * 3_600_000) : null });
   }
