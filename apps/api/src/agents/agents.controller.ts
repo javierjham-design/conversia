@@ -375,9 +375,10 @@ export class AgentsController {
     // Fecha/hora reales (Chile) — igual que en producción, para que el probador
     // interprete "hoy/mañana/esta semana" y nombre los días correctamente.
     const nowChile = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-    const currentDateBlock =
-      `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). Interpreta "hoy", "mañana", "el lunes", "esta semana" con ESTA fecha real; al ofrecer/confirmar horarios nombra el día y la fecha correctos.` +
-      `\n\n## Reglas ESTRICTAS de agendamiento (OBLIGATORIAS)\n` +
+    // Igual que el worker: sin herramientas de agenda, PROHIBIDO hablar de disponibilidad.
+    const hasAgenda = (input.tools ?? []).includes("getAvailability");
+    const schedulingRules = hasAgenda
+      ? `\n\n## Reglas ESTRICTAS de agendamiento (OBLIGATORIAS)\n` +
       `- Solo puedes ofrecer horarios que getAvailability devolvió EXACTAMENTE (copia su campo "cuando" tal cual). PROHIBIDO mencionar cualquier otra hora, extrapolar ("también a las 18:15") o suponer horarios de atención.\n` +
       `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
       `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
@@ -387,7 +388,14 @@ export class AgentsController {
       `- El id de cada horario codifica día y hora (h0409-1015 = día 04-09 a las 10:15). Al agendar, usa el id cuya hora coincide EXACTAMENTE con la que eligió el paciente; jamás uses otro.\n` +
       `- Al ofrecer horarios, muestra las horas tal cual ("09:15", "10:15"), NUNCA numeres las opciones (1, 2, 3) — numerar causa confusiones al elegir.\n` +
       `- Agenda UNA sola cita por conversación: elige el horario con el paciente y llama a createAppointment UNA vez. Si responde alreadyBooked, la cita YA existe: confírmala, no crees otra.\n` +
-      `- Al confirmar la cita, usa EXACTAMENTE el campo "cuando" que devolvió createAppointment (esa es la fecha/hora real agendada). Si no coincide con lo que pidió el paciente, discúlpate y corrige; jamás anuncies otra fecha.`;
+      `- Al confirmar la cita, usa EXACTAMENTE el campo "cuando" que devolvió createAppointment (esa es la fecha/hora real agendada). Si no coincide con lo que pidió el paciente, discúlpate y corrige; jamás anuncies otra fecha.`
+      : `\n\n## SIN ACCESO A LA AGENDA (OBLIGATORIO)\n` +
+        `Este agente NO tiene herramientas de agenda: NO puedes saber qué horas hay disponibles, qué días se atiende, ni si un día es feriado. ` +
+        `PROHIBIDO afirmar O NEGAR disponibilidad ("no hay horas el 16", "el 18 atendemos/no atendemos", "te ofrezco el lunes 21") — todo eso sería inventado. ` +
+        `Si el paciente quiere agendar, reagendar o pregunta por horarios: deriva la conversación (assignConversation al agente/equipo que agenda) o dile que el equipo le confirmará el horario a la brevedad. Nada más.`;
+    const currentDateBlock =
+      `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). Interpreta "hoy", "mañana", "el lunes", "esta semana" con ESTA fecha real; al ofrecer/confirmar horarios nombra el día y la fecha correctos.` +
+      schedulingRules;
     const runtime: AgentRuntime = {
       agentId: agent.id,
       agentVersionId: "sandbox",
