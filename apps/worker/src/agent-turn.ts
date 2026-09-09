@@ -384,7 +384,8 @@ export async function runAgentTurn(opts: {
   // Los agentes SIN herramientas de agenda no pueden saber la disponibilidad: se les
   // PROHÍBE hablar de horas/feriados (caso Yarilda: RESP IMPLANTES inventó "no hay el
   // 16", "el 18 es feriado" sin poder consultar). Con tools, las reglas estrictas.
-  const hasAgenda = (version.tools ?? []).includes("getAvailability");
+  // version.tools es Json de Prisma (no string[]): normalizar antes de consultar.
+  const hasAgenda = Array.isArray(version.tools) && (version.tools as unknown[]).map(String).includes("getAvailability");
   const schedulingRules = hasAgenda
     ? `\n\n## Reglas ESTRICTAS de agendamiento (OBLIGATORIAS)\n` +
     `- Solo puedes ofrecer horarios que getAvailability devolvió EXACTAMENTE (copia su campo "cuando" tal cual). PROHIBIDO mencionar cualquier otra hora, extrapolar ("también a las 18:15") o suponer horarios de atención.\n` +
