@@ -70,7 +70,7 @@ export class AssistedSetupController {
         authorized: active,
         status: grant?.status ?? null,
         expiresAt: active ? grant!.expiresAt : null,
-        scopes: active ? (grant!.scopes as string[]) : [],
+        scopes: active && Array.isArray(grant!.scopes) ? (grant!.scopes as string[]) : [],
       };
     });
   }

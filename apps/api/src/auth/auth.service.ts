@@ -258,7 +258,7 @@ export class AuthService {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
     if (!user?.mfaEnabled || !user.mfaSecret) throw new UnauthorizedException("MFA no está activo");
     if (verifyTotp(decryptSecret(user.mfaSecret), code)) return this.issueForUser(userId);
-    const remaining = consumeRecoveryCode(code, (user.mfaRecoveryCodes as string[]) ?? []);
+    const remaining = consumeRecoveryCode(code, Array.isArray(user.mfaRecoveryCodes) ? (user.mfaRecoveryCodes as string[]) : []);
     if (remaining) {
       await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaRecoveryCodes: remaining } });
       return this.issueForUser(userId);
@@ -294,7 +294,7 @@ export class AuthService {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
     if (!user?.mfaEnabled) return { ok: true };
     const totpOk = user.mfaSecret ? verifyTotp(decryptSecret(user.mfaSecret), code) : false;
-    const recoveryOk = consumeRecoveryCode(code, (user.mfaRecoveryCodes as string[]) ?? []) !== null;
+    const recoveryOk = consumeRecoveryCode(code, Array.isArray(user.mfaRecoveryCodes) ? (user.mfaRecoveryCodes as string[]) : []) !== null;
     if (!totpOk && !recoveryOk) throw new BadRequestException("Código incorrecto.");
     await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaEnabled: false, mfaSecret: null, mfaRecoveryCodes: [], mfaEnrolledAt: null } });
     return { ok: true };
