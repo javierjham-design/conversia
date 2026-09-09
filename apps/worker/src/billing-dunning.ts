@@ -59,10 +59,7 @@ export function planDunningAction(input: DunningInput): { action: DunningAction;
 export function startBillingDunning(): () => void {
   const run = async () => {
     try {
-      // Si el cobro RECURRENTE (ventana de 48 h) está encendido, el dunning legacy de
-      // 7 días NO corre: evita dos lógicas de suspensión conviviendo.
       const { getEnv } = await import("@conversia/config");
-      if (getEnv().RECURRING_BILLING_ENABLED) return;
       const { getAdminPrisma, withTenant } = await import("@conversia/database");
       const prisma = getAdminPrisma();
       const now = new Date();
@@ -71,6 +68,35 @@ export function startBillingDunning(): () => void {
         where: { status: { in: ["ACTIVE", "PAST_DUE"] }, periodEnd: { not: null } },
         select: { id: true, organizationId: true, status: true, periodEnd: true },
       });
+
+      // AUTO-SANACIÓN (corre SIEMPRE, con cualquier motor de cobro): si la suscripción
+      // está ACTIVA y pagada (periodEnd a futuro) pero la organización quedó con marcas
+      // de deuda pegadas — org SUSPENDED y/o settings.billing en grace/past_due/suspended —
+      // se restaura sola. Origen del bug: los caminos de éxito (pago Flow, register_payment,
+      // reactivate) reactivaban org/sub pero NADIE limpiaba settings.billing → el panel
+      // seguía mostrando "en deuda"/suspendido aunque el cliente ya había pagado.
+      for (const sub of subs) {
+        if (sub.status !== "ACTIVE" || !sub.periodEnd || sub.periodEnd.getTime() <= now.getTime()) continue;
+        const org = await prisma.organization.findUnique({ where: { id: sub.organizationId }, select: { status: true, settings: true } });
+        if (!org) continue;
+        const settings = { ...((org.settings as Record<string, unknown>) ?? {}) };
+        const billingState = (settings.billing as Record<string, unknown> | undefined)?.state;
+        const stuck = org.status === "SUSPENDED" || (typeof billingState === "string" && ["grace", "past_due", "suspended"].includes(billingState));
+        if (!stuck) continue;
+        delete settings.billing;
+        await withTenant(sub.organizationId, async (tx) => {
+          await tx.organization.update({ where: { id: sub.organizationId }, data: { status: "ACTIVE", settings: settings as object } });
+          await tx.integrationEvent.create({
+            data: { organizationId: sub.organizationId, provider: "billing", type: "billing.reactivated", status: "ok", message: "¡Listo! Tu pago está al día y el servicio quedó reactivado." },
+          });
+          await tx.auditLog.create({ data: { organizationId: sub.organizationId, actorType: "system", actorId: "billing", action: "billing.self_heal", entityType: "subscription", entityId: sub.id, after: { periodEnd: sub.periodEnd } } });
+        });
+        console.log(`✔ billing self-heal: org ${sub.organizationId} reactivada (pago vigente, marca de deuda pegada)`);
+      }
+
+      // Si el cobro RECURRENTE (ventana de 48 h) está encendido, el dunning legacy de
+      // 7 días NO corre: evita dos lógicas de suspensión conviviendo.
+      if (getEnv().RECURRING_BILLING_ENABLED) return;
       for (const sub of subs) {
         const org = await prisma.organization.findUnique({ where: { id: sub.organizationId }, select: { status: true, settings: true } });
         if (!org) continue;

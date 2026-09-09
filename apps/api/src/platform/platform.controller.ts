@@ -1479,10 +1479,19 @@ export class PlatformController {
       return { ok: true, amount, currency };
     }
 
+    // Limpia la marca de deuda (settings.billing) al reactivar/registrar pago: la
+    // escriben la gracia/suspensión y sin limpiarla el panel seguía "en deuda".
+    const clearBillingFlag = async () => {
+      const orgRow = await admin.organization.findUnique({ where: { id }, select: { settings: true } });
+      const s = { ...((orgRow?.settings as Record<string, unknown>) ?? {}) };
+      delete s.billing;
+      return s as object;
+    };
+
     if (parsed.data.action === "reactivate") {
       // Reactivación manual (override del Super Admin): vuelve a ACTIVE sin cobrar.
       await admin.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0 } });
-      await admin.organization.update({ where: { id }, data: { status: "ACTIVE" } });
+      await admin.organization.update({ where: { id }, data: { status: "ACTIVE", settings: await clearBillingFlag() } });
     } else if (parsed.data.action === "extend_window") {
       // Extiende la ventana de 48 h: reinicia el reloj del impago desde ahora (+hours opcional).
       const base = new Date(Date.now() + (parsed.data.hours ?? 24) * 3_600_000 - 48 * 3_600_000);
@@ -1493,7 +1502,7 @@ export class PlatformController {
       const periodEnd = new Date();
       periodEnd.setMonth(periodEnd.getMonth() + (sub.interval === "yearly" || plan?.interval === "yearly" ? 12 : 1));
       await admin.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0, periodStart: new Date(), periodEnd, nextChargeAt: periodEnd } });
-      await admin.organization.update({ where: { id }, data: { status: "ACTIVE" } });
+      await admin.organization.update({ where: { id }, data: { status: "ACTIVE", settings: await clearBillingFlag() } });
       await admin.paymentAttempt.create({ data: { organizationId: id, subscriptionId: sub.id, commerceOrder: `ext-${sub.id}-${Date.now()}`, amount: 0, currency: "CLP", kind: "manual", status: "succeeded", provider: "external", reason: "Pago externo registrado por el Super Admin" } });
     }
     await this.audit(req, `platform.billing.${parsed.data.action}`, "subscription", sub.id, { hours: parsed.data.hours ?? null });
