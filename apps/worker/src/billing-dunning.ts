@@ -76,15 +76,22 @@ export function startBillingDunning(): () => void {
       // reactivate) reactivaban org/sub pero NADIE limpiaba settings.billing → el panel
       // seguía mostrando "en deuda"/suspendido aunque el cliente ya había pagado.
       for (const sub of subs) {
-        if (sub.status !== "ACTIVE" || !sub.periodEnd || sub.periodEnd.getTime() <= now.getTime()) continue;
+        // Pago vigente = periodEnd a futuro. Cubre también subs en PAST_DUE con el
+        // período YA PAGADO (un intento viejo reconciliado como fallido las re-marcaba
+        // morosas pese a la renovación — caso TuBot con renovación al 07-10).
+        if (!sub.periodEnd || sub.periodEnd.getTime() <= now.getTime()) continue;
         const org = await prisma.organization.findUnique({ where: { id: sub.organizationId }, select: { status: true, settings: true } });
         if (!org) continue;
         const settings = { ...((org.settings as Record<string, unknown>) ?? {}) };
         const billingState = (settings.billing as Record<string, unknown> | undefined)?.state;
-        const stuck = org.status === "SUSPENDED" || (typeof billingState === "string" && ["grace", "past_due", "suspended"].includes(billingState));
+        const stuck =
+          org.status === "SUSPENDED" ||
+          sub.status === "PAST_DUE" ||
+          (typeof billingState === "string" && ["grace", "past_due", "suspended"].includes(billingState));
         if (!stuck) continue;
         delete settings.billing;
         await withTenant(sub.organizationId, async (tx) => {
+          await tx.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0 } });
           await tx.organization.update({ where: { id: sub.organizationId }, data: { status: "ACTIVE", settings: settings as object } });
           await tx.integrationEvent.create({
             data: { organizationId: sub.organizationId, provider: "billing", type: "billing.reactivated", status: "ok", message: "¡Listo! Tu pago está al día y el servicio quedó reactivado." },
