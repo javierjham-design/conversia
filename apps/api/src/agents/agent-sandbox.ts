@@ -257,13 +257,19 @@ export async function buildSandboxServices(
       );
     },
 
-    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {
+    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
       const updated: string[] = [];
       if (fields.firstName) { state.contact.firstName = fields.firstName; updated.push("nombre"); }
       if (fields.lastName) { state.contact.lastName = fields.lastName; updated.push("apellido"); }
       if (fields.email) { state.contact.email = fields.email; updated.push("email"); }
+      let phoneNorm: string | undefined;
+      if (fields.phone && !state.contact.phone) {
+        const d = String(fields.phone).replace(/[^\d]/g, "");
+        phoneNorm = d.length === 9 && d.startsWith("9") ? `+56${d}` : d.startsWith("56") && d.length === 11 ? `+${d}` : d.length >= 8 ? `+${d}` : undefined;
+        if (phoneNorm) { state.contact.phone = phoneNorm; updated.push("teléfono"); }
+      }
       if (updated.length) track("Actualizar datos del contacto", updated.join(", "));
-      return { updated };
+      return { updated, ...(phoneNorm ? { phone: phoneNorm } : {}) };
     },
 
     async triggerWorkflow(workflowName: string) {
