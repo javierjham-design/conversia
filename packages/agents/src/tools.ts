@@ -54,7 +54,7 @@ export interface ToolServices {
     target: string,
     reason?: string,
   ): Promise<{ assignedTo: string } | { handoffToAgentSlug: string; message: string }>;
-  updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
+  updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }): Promise<{ updated: string[]; error?: string; phone?: string }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
   listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null; contactsMonthly: number | null; aiTokensDaily: number | null; trialDays: number; isTrial: boolean }>>;
@@ -293,6 +293,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       inputSchema: z.object({
         slotId: z.string().describe("El `id` del slot elegido tal como lo dio getAvailability (ej. h0409-1015; su hora DEBE coincidir con la que eligió el paciente)"),
         notes: z.string().optional(),
+        telefono: z.string().min(7).max(20).optional().describe("SOLO si el contacto no tiene teléfono registrado (canales como Instagram): el número que dio el paciente; se guarda y se usa para la cita"),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
@@ -309,7 +310,18 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           };
         }
         const contact = await s.contactInfo();
-        if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
+        let phone = contact.phone;
+        // Canales SIN número propio (Instagram/Messenger): si el modelo trae el teléfono
+        // que dio el paciente, se guarda en el contacto y se usa para la cita (caso
+        // Meibel: el número quedaba en el chat pero nadie podía persistirlo).
+        if (!phone && input.telefono) {
+          const saved = await s.updateContactFields({ phone: String(input.telefono) });
+          if (saved.phone) phone = saved.phone;
+          else if (saved.error) return { error: saved.error };
+        }
+        if (!phone) {
+          return { error: "El contacto no tiene teléfono registrado. Pídele su número al paciente y vuelve a llamar createAppointment pasándolo en el campo `telefono` (o guárdalo antes con updateContactFields.phone)." };
+        }
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
         const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
@@ -330,7 +342,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             patient: {
               firstName: contact.firstName ?? "Paciente",
               lastName: contact.lastName ?? undefined,
-              phone: contact.phone,
+              phone,
             },
             start: slot.start,
             end,
@@ -442,14 +454,16 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "updateContactFields",
       description:
-        "Actualiza datos del contacto (nombre, apellido, email) cuando el cliente los proporciona explícitamente. No inventes datos.",
+        "Actualiza datos del contacto (nombre, apellido, email, teléfono) cuando el cliente los proporciona explícitamente. No inventes datos. El teléfono importa en canales SIN número propio (Instagram/Messenger): guárdalo aquí apenas el paciente lo dé.",
       inputSchema: z.object({
         firstName: z.string().optional(),
         lastName: z.string().optional(),
-        email: z.string().email().optional(),
+        // El modelo a veces manda "" — se tolera y se ignora (antes reventaba con "Invalid email").
+        email: z.string().email().optional().or(z.literal("")),
+        phone: z.string().min(7).max(20).optional().describe("Teléfono del paciente tal como lo dio (se normaliza solo, ej. 976829853 → +56976829853)"),
       }),
-      async execute(ctx, input: { firstName?: string; lastName?: string; email?: string }) {
-        return services(ctx).updateContactFields(input);
+      async execute(ctx, input: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
+        return services(ctx).updateContactFields({ ...input, email: input.email || undefined });
       },
     },
     {

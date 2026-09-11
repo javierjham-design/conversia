@@ -391,7 +391,7 @@ export async function runAgentTurn(opts: {
     `- Solo puedes ofrecer horarios que getAvailability devolvió EXACTAMENTE (copia su campo "cuando" tal cual). PROHIBIDO mencionar cualquier otra hora, extrapolar ("también a las 18:15") o suponer horarios de atención.\n` +
     `- Si el paciente pide una hora que no está en la lista, di que esa hora no está disponible y ofrece las reales de getAvailability.\n` +
     `- NO afirmes feriados, cierres ni horarios de la clínica que no te consten: consulta getAvailability y responde según lo que devuelva.\n` +
-    `- NUNCA pidas el número de teléfono para agendar: ya se usa automáticamente el número de este chat.\n` +
+    `- TELÉFONO: en WhatsApp NUNCA lo pidas (ya se usa el número del chat). En Instagram/Messenger el contacto puede NO tener número: si createAppointment responde que falta, pídeselo UNA sola vez y vuelve a llamar createAppointment pasándolo en el campo telefono (se guarda solo).\n` +
     `- FRANJAS: para la clínica "mañana" = 09:00–13:59 (SÍ: 12:45 y 13:15 SON mañana) y "tarde" = desde las 14:00. Si el paciente pide mañana o tarde, pasa el parámetro franja a getAvailability. NUNCA contradigas la franja de la tool: si pediste franja=manana y devolvió horas, esas horas SON de mañana — ofrécelas como tal, aunque a ti te parezcan de otra franja. Si la tool responde sinCupos, eso aplica SOLO al rango consultado: ofrece la otra franja u otro rango; JAMÁS afirmes que no hay cupos "hasta" una fecha que no consultaste. Si la respuesta trae "nota", síguela al pie de la letra.\n` +
     `- Si el paciente pide un día o semana DISTINTOS a los de la última lista, vuelve a llamar getAvailability con fromDate/toDate de ESE día antes de ofrecer o agendar. Los ids solo sirven para la ÚLTIMA lista mostrada.\n` +
     `- El id de cada horario codifica día y hora (h0409-1015 = día 04-09 a las 10:15). Al agendar, usa el id cuya hora coincide EXACTAMENTE con la que eligió el paciente; jamás uses otro.\n` +
@@ -402,10 +402,15 @@ export async function runAgentTurn(opts: {
       `Este agente NO tiene herramientas de agenda: NO puedes saber qué horas hay disponibles, qué días se atiende, ni si un día es feriado. ` +
       `PROHIBIDO afirmar O NEGAR disponibilidad ("no hay horas el 16", "el 18 atendemos/no atendemos", "te ofrezco el lunes 21") — todo eso sería inventado. ` +
       `Si el paciente quiere agendar, reagendar o pregunta por horarios: deriva la conversación (assignConversation al agente/equipo que agenda) o dile que el equipo le confirmará el horario a la brevedad. Nada más.`;
+  // Calendario de los próximos 14 días: el modelo se equivocaba mapeando día de
+  // semana → fecha ("el martes" → consultó el sábado 12). Con la tabla no calcula nada.
+  const dayFmt = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long" });
+  const calendario14 = Array.from({ length: 14 }, (_, i) => dayFmt.format(new Date(Date.now() + i * 86_400_000))).join(" · ");
   const currentDateBlock =
     `\n\n## Fecha y hora actual (ÚSALA SIEMPRE)\nHoy es ${nowChile} (hora de Chile). ` +
     `Interpreta "hoy", "mañana", "pasado mañana", "el lunes", "esta semana" con ESTA fecha real. ` +
-    `Al ofrecer o confirmar horarios, nombra el día de la semana y la fecha correctos. Nunca asumas otra fecha.` +
+    `Al ofrecer o confirmar horarios, nombra el día de la semana y la fecha correctos. Nunca asumas otra fecha.\n` +
+    `CALENDARIO de los próximos 14 días — USA ESTA TABLA para convertir día de semana → fecha (JAMÁS lo calcules tú): ${calendario14}.` +
     schedulingRules;
 
   // Si hubo intervención humana, se le explica al modelo cómo tratar esos mensajes:

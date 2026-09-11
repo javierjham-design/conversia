@@ -732,18 +732,37 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       );
     },
 
-    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {
+    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
       const data: Record<string, string> = {};
       if (fields.firstName) data.firstName = fields.firstName;
       if (fields.lastName) data.lastName = fields.lastName;
       if (fields.email) data.email = fields.email;
+      // Teléfono (canales sin número propio, ej. Instagram): normaliza a E.164 chileno
+      // (976829853 → +56976829853) y NO pisa un número ya existente del contacto.
+      let phoneNorm: string | undefined;
+      if (fields.phone) {
+        const d = String(fields.phone).replace(/[^\d]/g, "");
+        phoneNorm = d.length === 9 && d.startsWith("9") ? `+56${d}` : d.startsWith("56") && d.length === 11 ? `+${d}` : d.length >= 8 ? `+${d}` : undefined;
+        if (!phoneNorm) return { updated: [], error: "Teléfono inválido: pide el número completo (ej. 9 7682 9853)." };
+        const current = await withTenant(orgId, (tx) => tx.contact.findUnique({ where: { id: t.contactId }, select: { phone: true } }));
+        if (current?.phone) phoneNorm = undefined; // ya tiene número (WhatsApp): no se toca
+        else data.phone = phoneNorm;
+      }
       const updated = Object.keys(data);
       if (updated.length) {
-        await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        try {
+          await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        } catch (e) {
+          // Choque de unicidad: ese número ya existe en otro contacto del tenant.
+          if (data.phone && /unique|P2002/i.test((e as Error).message)) {
+            return { updated: [], error: "Ese teléfono ya está registrado en otra ficha. Verifica el número con el paciente." };
+          }
+          throw e;
+        }
         const { enqueueHubspotContact } = await import("./hubspot.js");
         await enqueueHubspotContact(orgId, t.contactId);
       }
-      return { updated };
+      return { updated, ...(data.phone ? { phone: data.phone } : {}) };
     },
 
     async triggerWorkflow(workflowName: string) {
