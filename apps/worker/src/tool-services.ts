@@ -20,7 +20,7 @@ import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider, withAppointmentDuration } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
@@ -153,6 +153,10 @@ export interface ToolOptions {
   knowledgeSources?: string[] | null;
   /** Profesionales/recursos con los que ESTE agente puede agendar. Vacío/undefined = todos. */
   allowedProfessionalIds?: string[] | null;
+  /** Duración de la cita que agenda ESTE agente (min). Si es menor que el bloque del
+   *  proveedor, cada bloque se SUBDIVIDE (bloque de 30 con duración 15 → 2 cupos).
+   *  undefined/null = usar la duración del bloque tal cual. */
+  appointmentDurationMin?: number | null;
 }
 
 /**
@@ -328,6 +332,16 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       return rawScheduling.createAppointment(input);
     };
     scheduling = scoped;
+  }
+
+  // DURACIÓN DE CITA POR AGENTE: si el agente fija una duración menor que el bloque del
+  // proveedor, cada bloque se SUBDIVIDE en cupos de esa duración (30 min con duración 15
+  // → 09:15 y 09:30) y la cita se crea con end = start + duración (así en Cláriva caben
+  // 2 diagnósticos por bloque). Se envuelve DESPUÉS del filtro por profesional para que
+  // la subdivisión aplique sobre los slots ya permitidos.
+  const durMin = typeof opts.appointmentDurationMin === "number" && opts.appointmentDurationMin >= 5 && opts.appointmentDurationMin <= 240 ? Math.round(opts.appointmentDurationMin) : null;
+  if (durMin) {
+    scheduling = withAppointmentDuration(scheduling, durMin);
   }
 
   return {
@@ -718,18 +732,37 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       );
     },
 
-    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {
+    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
       const data: Record<string, string> = {};
       if (fields.firstName) data.firstName = fields.firstName;
       if (fields.lastName) data.lastName = fields.lastName;
       if (fields.email) data.email = fields.email;
+      // Teléfono (canales sin número propio, ej. Instagram): normaliza a E.164 chileno
+      // (976829853 → +56976829853) y NO pisa un número ya existente del contacto.
+      let phoneNorm: string | undefined;
+      if (fields.phone) {
+        const d = String(fields.phone).replace(/[^\d]/g, "");
+        phoneNorm = d.length === 9 && d.startsWith("9") ? `+56${d}` : d.startsWith("56") && d.length === 11 ? `+${d}` : d.length >= 8 ? `+${d}` : undefined;
+        if (!phoneNorm) return { updated: [], error: "Teléfono inválido: pide el número completo (ej. 9 7682 9853)." };
+        const current = await withTenant(orgId, (tx) => tx.contact.findUnique({ where: { id: t.contactId }, select: { phone: true } }));
+        if (current?.phone) phoneNorm = undefined; // ya tiene número (WhatsApp): no se toca
+        else data.phone = phoneNorm;
+      }
       const updated = Object.keys(data);
       if (updated.length) {
-        await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        try {
+          await withTenant(orgId, (tx) => tx.contact.update({ where: { id: t.contactId }, data }));
+        } catch (e) {
+          // Choque de unicidad: ese número ya existe en otro contacto del tenant.
+          if (data.phone && /unique|P2002/i.test((e as Error).message)) {
+            return { updated: [], error: "Ese teléfono ya está registrado en otra ficha. Verifica el número con el paciente." };
+          }
+          throw e;
+        }
         const { enqueueHubspotContact } = await import("./hubspot.js");
         await enqueueHubspotContact(orgId, t.contactId);
       }
-      return { updated };
+      return { updated, ...(data.phone ? { phone: data.phone } : {}) };
     },
 
     async triggerWorkflow(workflowName: string) {

@@ -1,15 +1,17 @@
 /**
  * EXCEDENTE DE CONTACTOS (post-pago, sin fuga de plata).
  *
- * Cada plan incluye un cupo de contactos/mes (plan.limits.contactsMonthly). Si un
- * tenant lo supera, NO se corta el servicio: se acumula el excedente como un
- * "billable" en org.settings.billables, que el motor de cobro ya suma a la próxima
- * factura (base + billables). Si no paga, el DUNNING existente suspende → cero fuga.
+ * Cada plan incluye un cupo de contactos ACTIVOS/mes (plan.limits.contactsMonthly):
+ * contactos con al menos un mensaje enviado o recibido en el ciclo mensual (NO los
+ * creados/importados — un backfill no consume cupo). Si un tenant lo supera, NO se
+ * corta el servicio: se acumula el excedente como un "billable" en
+ * org.settings.billables, que el motor de cobro ya suma a la próxima factura
+ * (base + billables). Si no paga, el DUNNING existente suspende → cero fuga.
  *
  * El medidor corre periódico y RECALCULA (idempotente): el billable de excedente se
  * sobreescribe con el valor del período actual, así nunca cobra de más ni se salta un
- * cobro aunque una corrida falle. Al renovar el período (nuevo periodStart), el conteo
- * vuelve a 0 y el billable se limpia solo en la siguiente corrida.
+ * cobro aunque una corrida falle. El ciclo rota solo cada mes (aniversario del
+ * periodStart) y el billable se limpia en la siguiente corrida.
  */
 import { getAdminPrisma } from "@conversia/database";
 
@@ -74,11 +76,22 @@ export async function meterContactOverage(): Promise<{ scanned: number; withOver
       const currency = org.currency ?? "CLP";
       const packPrice = Number(currency === "CLP" ? feat.contactPackPriceClp : feat.contactPackPriceUsd) || 0;
 
-      // Contactos creados en el período de facturación en curso (o el mes calendario).
-      const periodStart = s.periodStart ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-      const contactsInPeriod = await admin.contact.count({
-        where: { organizationId: s.organizationId, createdAt: { gte: periodStart }, deletedAt: null },
-      });
+      // Contactos ACTIVOS del mes: con al menos un mensaje (enviado o recibido) en el
+      // ciclo. Antes se contaban contactos CREADOS desde periodStart → un backfill de
+      // leads (Meta) inflaba el uso y FACTURABA excedente por contactos sin actividad.
+      // Corte mensual RODANTE anclado al día del ciclo (aniversario más reciente; los
+      // días >28 se anclan al 28 para meses cortos) — el cupo es por MES aunque el
+      // plan sea anual o el periodStart no haya rotado.
+      const nowD = new Date();
+      const anchor = s.periodStart ?? new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+      const anchorDay = Math.min(anchor.getDate(), 28);
+      const periodStart = new Date(nowD.getFullYear(), nowD.getMonth(), anchorDay);
+      if (periodStart > nowD) periodStart.setMonth(periodStart.getMonth() - 1);
+      const activeRows = await admin.$queryRaw<Array<{ n: bigint }>>`
+        SELECT COUNT(DISTINCT c.contact_id)::bigint AS n
+        FROM messages m JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.organization_id = ${s.organizationId} AND m.created_at >= ${periodStart}`;
+      const contactsInPeriod = Number(activeRows[0]?.n ?? 0);
 
       const overage = computeContactOverage({ contactsInPeriod, cupo, packSize, packPrice });
       const settings = (org.settings as Record<string, unknown> | null) ?? {};

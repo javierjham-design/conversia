@@ -122,6 +122,24 @@ function makeDeps(): EngineDeps {
 
     async runAgent(ctx, agentSlug) {
       if (!ctx.conversationId) return;
+      // El agente que ejecuta el flujo QUEDA A CARGO de la conversación (activeAgentId),
+      // igual que switch_agent. Sin esto, el flujo respondía el mensaje del trigger y la
+      // conversación quedaba "de nadie": los mensajes siguientes dependían del default del
+      // canal (o quedaban mudos — caso Salinas). Arquitectura: run_agent = ese agente
+      // conversa desde aquí en adelante, sin importar cómo esté armado el flujo.
+      if (agentSlug) {
+        await withTenant(ctx.organizationId, async (tx) => {
+          const agent = await tx.agent.findUnique({
+            where: { organizationId_slug: { organizationId: ctx.organizationId, slug: agentSlug } },
+          });
+          if (agent?.active) {
+            await tx.conversation.update({
+              where: { id: ctx.conversationId! },
+              data: { activeAgentId: agent.id, aiEnabled: true },
+            });
+          }
+        }).catch(() => undefined);
+      }
       await runAgentTurn({ organizationId: ctx.organizationId, conversationId: ctx.conversationId, agentSlug });
     },
 

@@ -54,7 +54,7 @@ export interface ToolServices {
     target: string,
     reason?: string,
   ): Promise<{ assignedTo: string } | { handoffToAgentSlug: string; message: string }>;
-  updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }): Promise<{ updated: string[] }>;
+  updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }): Promise<{ updated: string[]; error?: string; phone?: string }>;
   triggerWorkflow(workflowName: string): Promise<{ ok: boolean; error?: string }>;
   addInternalNote(note: string): Promise<void>;
   listPlans(): Promise<Array<{ code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; templateMessages: number | null; contactsMonthly: number | null; aiTokensDaily: number | null; trialDays: number; isTrial: boolean }>>;
@@ -148,7 +148,11 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
   const slotIdFmt = new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
   const slotId = (startIso: string): string => {
     const p = new Map(slotIdFmt.formatToParts(new Date(startIso)).map((x) => [x.type, x.value]));
-    return `h${p.get("day")}${p.get("month")}-${p.get("hour")}${p.get("minute")}`;
+    // Padding MANUAL: Intl con "2-digit" a veces devuelve "9" sin cero (según ICU) →
+    // los ids no calzaban con el formato documentado (hDDMM-HHMM) y el modelo los
+    // "corregía" reconstruyéndolos mal (caso Juan Fuica: h99-1530 → mandó h0409-1530).
+    const pad = (v?: string) => String(v ?? "").padStart(2, "0");
+    return `h${pad(p.get("day"))}${pad(p.get("month"))}-${pad(p.get("hour"))}${pad(p.get("minute"))}`;
   };
   const putSlots = (convId: string, slots: CachedSlot[]): Map<string, CachedSlot> => {
     const byId = new Map(slots.map((s) => [slotId(s.start), s]));
@@ -163,7 +167,20 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     // Lista vencida: obliga a reconsultar getAvailability (evita agendar de una lista
     // vieja cuando el paciente ya cambió de día/semana — caso "viernes 10" de Julio).
     if (Date.now() - c.at > SLOTS_TTL_MS) return null;
-    return c.slots.get(String(id).trim().toLowerCase()) ?? null;
+    const key = String(id).trim().toLowerCase();
+    const direct = c.slots.get(key);
+    if (direct) return direct;
+    // TOLERANCIA: el modelo a veces RECONSTRUYE el id en vez de copiarlo (caso Juan
+    // Fuica: la lista traía h99-1530 y mandó h0409-1530 imitando el ejemplo). Si la
+    // HORA del id (tras el guión) identifica UN ÚNICO slot cacheado, se usa ese; si es
+    // ambigua (misma hora en dos días de la lista), null → el modelo debe reconsultar.
+    const m = key.match(/(\d{3,4})\s*$/);
+    if (m) {
+      const hhmm = m[1].padStart(4, "0");
+      const hits = [...c.slots.entries()].filter(([k]) => k.endsWith(`-${hhmm}`));
+      if (hits.length === 1) return hits[0][1];
+    }
+    return null;
   };
 
   // GUARDIA anti doble-agendamiento: el modelo a veces llama createAppointment varias
@@ -203,14 +220,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getAvailability",
       description:
-        "Consulta disponibilidad REAL de horas. Úsala siempre antes de ofrecer horarios; nunca inventes. Cada opción trae `id` (úsalo tal cual en createAppointment) y `cuando` (día+fecha+hora reales para mostrar al paciente).",
+        "Consulta disponibilidad REAL de horas. Úsala siempre antes de ofrecer horarios; nunca inventes. Si el paciente pide 'en la mañana' o 'en la tarde', pasa `franja` (manana = 09:00–13:59, tarde = desde las 14:00) — sin eso solo verías las horas más tempranas. Cada opción trae `id` (úsalo tal cual en createAppointment) y `cuando` (día+fecha+hora reales para mostrar al paciente).",
       inputSchema: z.object({
         serviceCode: z.string().optional(),
         professionalId: z.string().optional(),
         fromDate: isoDate.optional(),
         toDate: isoDate.optional(),
+        franja: z.enum(["manana", "tarde"]).optional().describe("Filtro horario: manana = 09:00–13:59, tarde = desde las 14:00. Úsalo SIEMPRE que el paciente pida mañana/tarde."),
       }),
-      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string }) {
+      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; franja?: "manana" | "tarde" }) {
         // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…").
         // Se ancla el inicio desde HOY (Chile) y se RESPETA el rango que pidió el modelo
         // (si pide un día, se le dan las horas de ESE día, sin mezclar días lejanos).
@@ -220,19 +238,52 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const to = input.toDate && input.toDate >= from ? input.toDate : plus(14);
         const sched = services(ctx).scheduling;
         const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined };
-        let slots = await sched.getAvailableSlots({ ...query, from, to });
-        // Si el rango pedido era angosto y no hay horas, se ensancha a 14 días (para
-        // no responder "no hay" cuando sí hay más adelante) — pero solo como respaldo.
+        // FRANJA (hora de Chile): sin este filtro, el tope de 6 opciones dejaba solo las
+        // horas más tempranas (mañanas) y el modelo concluía "no hay tarde" aunque sí había.
+        const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
+        const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
+        let slots = (await sched.getAvailableSlots({ ...query, from, to })).filter((s) => enFranja(s.start));
+        // Si el rango pedido era angosto y no hay horas (en la franja pedida), se
+        // ensancha a 14 días — pero solo como respaldo (y se AVISA en la respuesta).
+        let ensanchado = false;
         if (!slots.length) {
           const wide = plus(14);
-          if (wide > to) slots = await sched.getAvailableSlots({ ...query, from, to: wide });
+          if (wide > to) {
+            slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+            ensanchado = slots.length > 0;
+          }
+        }
+        if (!slots.length) {
+          // Vacío EXPLÍCITO con el rango consultado: el modelo solo puede afirmar que no
+          // hay cupos EN ESTE rango/franja — jamás "hasta" una fecha que no consultó.
+          return {
+            sinCupos: true,
+            rangoConsultado: { desde: from, hasta: to, ...(input.franja ? { franja: input.franja } : {}) },
+            nota: `No hay horas${input.franja ? ` de ${input.franja === "manana" ? "mañana" : "tarde"}` : ""} SOLO entre ${from} y ${to}. Ofrece la otra franja u otro rango (vuelve a consultar); NUNCA digas que no hay cupos "hasta" una fecha que no consultaste.`,
+          };
         }
         const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
         const byId = putSlots(cacheKey(ctx), top);
         // Ids AUTODESCRIPTIVOS (h0409-1015 = 04-09 a las 10:15) + `cuando` legible. Para
         // agendar, pasa el id EXACTO del horario que eligió el paciente (la hora del id
         // debe coincidir con la elegida). No se exponen fecha/profesional crudos.
-        return [...byId.entries()].map(([id, s]) => ({ id, cuando: slotWhen.format(new Date(s.start)) }));
+        const horas = [...byId.entries()].map(([id, s]) => ({ id, cuando: slotWhen.format(new Date(s.start)) }));
+        // Notas OBLIGATORIAS para el modelo: la franja la define la CLÍNICA (mañana llega
+        // hasta las 13:59 — el modelo descartaba un 13:15 "porque no le parecía mañana"),
+        // y si se ensanchó el rango, debe decir la fecha de cada hora y no presentarlas
+        // como si fueran del día pedido.
+        const notas: string[] = [];
+        if (input.franja) {
+          notas.push(
+            input.franja === "manana"
+              ? "TODOS estos horarios SON de la franja MAÑANA según la política de la clínica (09:00–13:59): ofrécelos como horarios de mañana aunque alguno te parezca tarde (ej. 13:15 ES mañana). NO digas que no hay cupos de mañana si esta lista tiene horas."
+              : "TODOS estos horarios SON de la franja TARDE según la política de la clínica (desde las 14:00): ofrécelos como horarios de tarde.",
+          );
+        }
+        if (ensanchado) {
+          notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una y aclara que en el día pedido no había.`);
+        }
+        return notas.length ? { nota: notas.join(" "), horas } : horas;
       },
     },
     {
@@ -242,6 +293,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       inputSchema: z.object({
         slotId: z.string().describe("El `id` del slot elegido tal como lo dio getAvailability (ej. h0409-1015; su hora DEBE coincidir con la que eligió el paciente)"),
         notes: z.string().optional(),
+        telefono: z.string().min(7).max(20).optional().describe("SOLO si el contacto no tiene teléfono registrado (canales como Instagram): el número que dio el paciente; se guarda y se usa para la cita"),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
@@ -258,7 +310,18 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           };
         }
         const contact = await s.contactInfo();
-        if (!contact.phone) return { error: "El contacto no tiene teléfono registrado" };
+        let phone = contact.phone;
+        // Canales SIN número propio (Instagram/Messenger): si el modelo trae el teléfono
+        // que dio el paciente, se guarda en el contacto y se usa para la cita (caso
+        // Meibel: el número quedaba en el chat pero nadie podía persistirlo).
+        if (!phone && input.telefono) {
+          const saved = await s.updateContactFields({ phone: String(input.telefono) });
+          if (saved.phone) phone = saved.phone;
+          else if (saved.error) return { error: saved.error };
+        }
+        if (!phone) {
+          return { error: "El contacto no tiene teléfono registrado. Pídele su número al paciente y vuelve a llamar createAppointment pasándolo en el campo `telefono` (o guárdalo antes con updateContactFields.phone)." };
+        }
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
         const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
@@ -279,7 +342,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             patient: {
               firstName: contact.firstName ?? "Paciente",
               lastName: contact.lastName ?? undefined,
-              phone: contact.phone,
+              phone,
             },
             start: slot.start,
             end,
@@ -391,14 +454,16 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "updateContactFields",
       description:
-        "Actualiza datos del contacto (nombre, apellido, email) cuando el cliente los proporciona explícitamente. No inventes datos.",
+        "Actualiza datos del contacto (nombre, apellido, email, teléfono) cuando el cliente los proporciona explícitamente. No inventes datos. El teléfono importa en canales SIN número propio (Instagram/Messenger): guárdalo aquí apenas el paciente lo dé.",
       inputSchema: z.object({
         firstName: z.string().optional(),
         lastName: z.string().optional(),
-        email: z.string().email().optional(),
+        // El modelo a veces manda "" — se tolera y se ignora (antes reventaba con "Invalid email").
+        email: z.string().email().optional().or(z.literal("")),
+        phone: z.string().min(7).max(20).optional().describe("Teléfono del paciente tal como lo dio (se normaliza solo, ej. 976829853 → +56976829853)"),
       }),
-      async execute(ctx, input: { firstName?: string; lastName?: string; email?: string }) {
-        return services(ctx).updateContactFields(input);
+      async execute(ctx, input: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
+        return services(ctx).updateContactFields({ ...input, email: input.email || undefined });
       },
     },
     {

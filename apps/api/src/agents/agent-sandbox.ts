@@ -1,5 +1,5 @@
 import { resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
-import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider, withAppointmentDuration } from "@conversia/scheduling";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
 import type { CreateAppointmentInput, SchedAppointment, SchedulingProvider } from "@conversia/types";
 import { decryptSecret } from "../common/crypto";
@@ -49,7 +49,7 @@ function sandboxCatalogHit(c: any) {
 export async function buildSandboxServices(
   orgId: string,
   state: SandboxState,
-  opts: { knowledgeSources?: string[] | null; allowedProfessionalIds?: string[] | null } = {},
+  opts: { knowledgeSources?: string[] | null; allowedProfessionalIds?: string[] | null; appointmentDurationMin?: number | null } = {},
 ): Promise<ToolServices> {
   const knowledgeSources = opts.knowledgeSources;
   const track = (action: string, detail: string) => state.simulated.push({ action, detail });
@@ -97,6 +97,11 @@ export async function buildSandboxServices(
       utcOffset: "-04:00",
     }));
   }
+  // DURACIÓN DE CITA por agente (misma lógica que el worker): subdivide bloques y
+  // fuerza end = start + duración; el createAppointment del probador sigue simulado.
+  const durMin = typeof opts.appointmentDurationMin === "number" && opts.appointmentDurationMin >= 5 && opts.appointmentDurationMin <= 240 ? Math.round(opts.appointmentDurationMin) : null;
+  if (durMin) scheduling = withAppointmentDuration(scheduling, durMin);
+
   // Con proveedor externo, servicios/profesionales se leen del proveedor (la tabla nativa
   // suele estar vacía en tenants con Cláriva/Dentalink).
   const external = scheduling.kind === "clariva" || scheduling.kind === "dentalink";
@@ -252,13 +257,19 @@ export async function buildSandboxServices(
       );
     },
 
-    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string }) {
+    async updateContactFields(fields: { firstName?: string; lastName?: string; email?: string; phone?: string }) {
       const updated: string[] = [];
       if (fields.firstName) { state.contact.firstName = fields.firstName; updated.push("nombre"); }
       if (fields.lastName) { state.contact.lastName = fields.lastName; updated.push("apellido"); }
       if (fields.email) { state.contact.email = fields.email; updated.push("email"); }
+      let phoneNorm: string | undefined;
+      if (fields.phone && !state.contact.phone) {
+        const d = String(fields.phone).replace(/[^\d]/g, "");
+        phoneNorm = d.length === 9 && d.startsWith("9") ? `+56${d}` : d.startsWith("56") && d.length === 11 ? `+${d}` : d.length >= 8 ? `+${d}` : undefined;
+        if (phoneNorm) { state.contact.phone = phoneNorm; updated.push("teléfono"); }
+      }
       if (updated.length) track("Actualizar datos del contacto", updated.join(", "));
-      return { updated };
+      return { updated, ...(phoneNorm ? { phone: phoneNorm } : {}) };
     },
 
     async triggerWorkflow(workflowName: string) {

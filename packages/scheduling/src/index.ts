@@ -361,6 +361,9 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
+      // Grilla con la duración de la cita: los huecos cortos entre citas (p.ej. 15')
+      // aparecen como cupos; con el paso por defecto (30') se perdían.
+      if (q.durationMin) params.set("durationMin", String(q.durationMin));
       params.set("from", from);
       params.set("to", to);
       const path = `/availability?${params.toString()}`;
@@ -497,6 +500,9 @@ export class CustomSchedulingProvider implements SchedulingProvider {
       const params = new URLSearchParams();
       if (q.clinicId) params.set("clinicId", q.clinicId);
       if (professionalId) params.set("professionalId", professionalId);
+      // Grilla con la duración de la cita: los huecos cortos entre citas (p.ej. 15')
+      // aparecen como cupos; con el paso por defecto (30') se perdían.
+      if (q.durationMin) params.set("durationMin", String(q.durationMin));
       params.set("from", from);
       params.set("to", to);
       const path = `/availability?${params.toString()}`;
@@ -598,4 +604,40 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
       services: [{ id: "svc-1", name: "Consulta", durationMin: 30 }],
     },
   );
+}
+
+/**
+ * Envuelve un SchedulingProvider para que las citas duren `durMin` minutos:
+ * subdivide cada bloque de disponibilidad en cupos de esa duración (bloque de
+ * 30 con duración 15 → 09:15 y 09:30) y fuerza end = start + durMin al
+ * reservar. Configurable por agente (config.scheduling.appointmentDurationMin);
+ * lo usan el worker y el probador.
+ */
+export function withAppointmentDuration(base: SchedulingProvider, durMin: number): SchedulingProvider {
+  const wrapped = Object.create(base) as SchedulingProvider;
+  wrapped.getAvailableSlots = async (q) => {
+    // Se pide la grilla YA con la duración (proveedores que lo soportan, como Cláriva,
+    // exponen los huecos cortos entre citas); la subdivisión de abajo queda como
+    // respaldo para bloques más largos o proveedores que ignoran durationMin.
+    const slots = await base.getAvailableSlots({ ...q, durationMin: durMin });
+    const out: typeof slots = [];
+    for (const s of slots ?? []) {
+      const start = new Date(s.start).getTime();
+      const end = new Date(s.end ?? s.start).getTime();
+      const blockMin = Math.round((end - start) / 60000);
+      if (!Number.isFinite(blockMin) || blockMin <= durMin) {
+        out.push(s); // bloque igual o menor que la duración: se ofrece tal cual
+        continue;
+      }
+      for (let t0 = start; t0 + durMin * 60000 <= end; t0 += durMin * 60000) {
+        out.push({ ...s, start: new Date(t0).toISOString(), end: new Date(t0 + durMin * 60000).toISOString() });
+      }
+    }
+    return out;
+  };
+  wrapped.createAppointment = async (input) => {
+    const start = new Date(input.start).getTime();
+    return base.createAppointment({ ...input, end: new Date(start + durMin * 60000).toISOString() });
+  };
+  return wrapped;
 }

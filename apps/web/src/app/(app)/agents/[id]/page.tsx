@@ -296,6 +296,8 @@ export default function AgentEditorPage() {
   const [knowledgeSources, setKnowledgeSources] = useState<string[]>([]);
   const [resources, setResources] = useState<{ id: string; name: string; specialty: string | null }[]>([]);
   const [schedulingProfs, setSchedulingProfs] = useState<string[]>([]);
+  // Duración de la cita que agenda este agente (min). "" = usar la del bloque del proveedor.
+  const [apptDuration, setApptDuration] = useState<string>("");
 
   const [snapshot, setSnapshot] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -341,7 +343,9 @@ export default function AgentEditorPage() {
     const nextKnowledge: string[] = Array.isArray(cfg.knowledgeSources) ? cfg.knowledgeSources : kbs.map((k) => k.id);
     // Profesionales/recursos habilitados para agendar (vacío = todos).
     const nextScheduling: string[] = Array.isArray(cfg.scheduling?.professionalIds) ? cfg.scheduling.professionalIds : [];
+    const nextApptDuration: string = typeof cfg.scheduling?.appointmentDurationMin === "number" ? String(cfg.scheduling.appointmentDurationMin) : "";
     setSchedulingProfs(nextScheduling);
+    setApptDuration(nextApptDuration);
     setEmoji(nextEmoji);
     setSystemPrompt(nextPrompt);
     setModel(nextModel);
@@ -351,7 +355,7 @@ export default function AgentEditorPage() {
     setExtraTools(nextExtra);
     setKnowledgeSources(nextKnowledge);
     setSnapshot(
-      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions, knowledgeSources: nextKnowledge, schedulingProfs: nextScheduling }),
+      JSON.stringify({ emoji: nextEmoji, name: detail.name, kind: detail.kind, description: detail.description ?? "", systemPrompt: nextPrompt, model: nextModel, maxTokens: nextMaxTokens, maxToolRounds: nextRounds, actions: nextActions, knowledgeSources: nextKnowledge, schedulingProfs: nextScheduling, apptDuration: nextApptDuration }),
     );
   }, [id]);
 
@@ -360,7 +364,7 @@ export default function AgentEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
-  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions, knowledgeSources, schedulingProfs });
+  const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, actions, knowledgeSources, schedulingProfs, apptDuration });
   const dirty = snapshot !== "" && current !== snapshot;
 
   function toggleKnowledge(kbId: string, on: boolean) {
@@ -420,7 +424,7 @@ export default function AgentEditorPage() {
           kind,
           description: description || null,
           systemPrompt,
-          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions, knowledgeSources, scheduling: { professionalIds: schedulingProfs } },
+          config: { model, maxTokens, maxToolRounds, language: "es", emoji, actions, knowledgeSources, scheduling: { professionalIds: schedulingProfs, ...(apptDuration && Number(apptDuration) >= 5 ? { appointmentDurationMin: Number(apptDuration) } : {}) } },
           tools: derivedTools,
         }),
       });
@@ -666,6 +670,28 @@ export default function AgentEditorPage() {
                       </div>
                     );
                   })}
+                  <div className="rounded-lg border border-line p-3">
+                    <p className="text-sm font-medium text-ink">Duración de la cita</p>
+                    <p className="mb-2 text-xs text-ink-muted">
+                      Cuánto dura cada cita que agenda ESTE agente. Si es menor que el bloque de la agenda, cada bloque se divide (bloque de 30 min con citas de 15 → dos cupos: 09:15 y 09:30). Vacío = usar la duración del bloque tal cual.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={apptDuration}
+                        onChange={(e) => setApptDuration(e.target.value)}
+                        className="rounded-lg border border-line-strong bg-panel px-2.5 py-1.5 text-sm outline-none focus:border-brand-500"
+                        aria-label="Duración de la cita en minutos"
+                      >
+                        <option value="">Según el bloque de la agenda</option>
+                        <option value="15">15 minutos</option>
+                        <option value="20">20 minutos</option>
+                        <option value="30">30 minutos</option>
+                        <option value="45">45 minutos</option>
+                        <option value="60">60 minutos</option>
+                      </select>
+                      {apptDuration && <span className="text-xs text-ink-subtle">Las citas se crearán de {apptDuration} min.</span>}
+                    </div>
+                  </div>
                 </div>
               </Section>
             )}
@@ -723,6 +749,7 @@ export default function AgentEditorPage() {
           tools={derivedTools}
           knowledgeSources={knowledgeSources}
           schedulingProfs={schedulingProfs}
+          apptDurationMin={apptDuration && Number(apptDuration) >= 5 ? Number(apptDuration) : null}
         />
       </div>
 
@@ -795,7 +822,7 @@ type TestResponse = {
   humanHandoff?: boolean;
 };
 
-function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools, knowledgeSources, schedulingProfs }: {
+function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, actions, tools, knowledgeSources, schedulingProfs, apptDurationMin }: {
   id: string;
   systemPrompt: string;
   model: string;
@@ -805,6 +832,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
   tools: string[];
   knowledgeSources: string[];
   schedulingProfs: string[];
+  apptDurationMin: number | null;
 }) {
   const [tab, setTab] = useState<"chat" | "contact">("chat");
   const [messages, setMessages] = useState<TestMsg[]>([]);
@@ -827,7 +855,7 @@ function AgentTester({ id, systemPrompt, model, maxTokens, maxToolRounds, action
     try {
       const payload = {
         systemPrompt,
-        config: { model, maxTokens, maxToolRounds, scheduling: { professionalIds: schedulingProfs } },
+        config: { model, maxTokens, maxToolRounds, scheduling: { professionalIds: schedulingProfs, ...(apptDurationMin ? { appointmentDurationMin: apptDurationMin } : {}) } },
         tools,
         actions,
         knowledgeSources,

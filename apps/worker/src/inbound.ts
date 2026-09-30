@@ -469,7 +469,12 @@ export async function processInbound(job: InboundJob): Promise<void> {
             where: {
               nodeType: "run_agent",
               status: "COMPLETED",
-              startedAt: { gte: new Date(Date.now() - 60_000) },
+              // SOLO pasos de ESTE ciclo (este mensaje). Con la ventana fija de 60s
+              // que había antes, el run_agent que respondió el mensaje ANTERIOR
+              // suprimía el turno del mensaje SIGUIENTE si el contacto contestaba
+              // en <60s → la IA quedaba MUDA (caso Salinas: flujo del flyer
+              // responde el 1.er mensaje y el 2.º jamás obtenía respuesta).
+              startedAt: { gte: cycleStart },
               run: { conversationId: result.conversationId },
             },
           }),
