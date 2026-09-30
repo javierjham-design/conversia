@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   MoreHorizontal,
   SlidersHorizontal,
+  Settings2,
   Sparkles,
   Tag,
   Trash2,
@@ -71,9 +72,10 @@ interface Meta {
   campaigns: { id: string; name: string }[];
   origins: { value: string; count: number }[];
   segments: { id: string; name: string; isDefault: boolean }[];
+  groups: { id: string; name: string; color: string | null; description: string | null; count: number }[];
 }
 
-type Primary = { kind: "all" | "blocked" | "stage" | "agent" | "segment"; value?: string };
+type Primary = { kind: "all" | "blocked" | "stage" | "agent" | "segment" | "group"; value?: string };
 
 // --------------------------- Utilidades UI ---------------------------
 
@@ -225,6 +227,7 @@ function ContactsPageInner() {
   const [importOpen, setImportOpen] = useState(false);
   const [importMsgsOpen, setImportMsgsOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const agentName = useMemo(() => new Map(meta?.agents.map((a) => [a.id, a.name]) ?? []), [meta]);
@@ -285,6 +288,7 @@ function ContactsPageInner() {
     if (primary.kind === "stage" && primary.value) p.set("stage", primary.value);
     if (primary.kind === "agent" && primary.value) p.set("assignedAgent", primary.value);
     if (primary.kind === "segment" && primary.value) p.set("segmentId", primary.value);
+    if (primary.kind === "group" && primary.value) p.set("group", primary.value);
     if (sec.tag) p.set("tag", sec.tag);
     if (sec.channel) p.set("channel", sec.channel);
     if (sec.country) p.set("country", sec.country);
@@ -463,6 +467,22 @@ function ContactsPageInner() {
             ))}
           </SideGroup>
         )}
+
+        <SideGroup title="Grupos" action={<button onClick={() => setGroupsOpen(true)} className="text-ink-subtle hover:text-brand-600" title="Gestionar grupos"><Settings2 size={14} /></button>}>
+          {(meta?.groups ?? []).map((g) => (
+            <SideItem
+              key={g.id}
+              icon={<Users2 size={15} style={g.color ? { color: g.color } : undefined} />}
+              label={g.name}
+              count={g.count}
+              active={primary.kind === "group" && primary.value === g.id}
+              onClick={() => setPrimaryReset({ kind: "group", value: g.id })}
+            />
+          ))}
+          {(meta?.groups.length ?? 0) === 0 && (
+            <button onClick={() => setGroupsOpen(true)} className="w-full rounded-lg px-2 py-1.5 text-left text-xs text-ink-subtle hover:bg-app hover:text-brand-600">＋ Crear un grupo…</button>
+          )}
+        </SideGroup>
       </aside>
 
       {/* --------------------------- Contenido --------------------------- */}
@@ -614,6 +634,16 @@ function ContactsPageInner() {
           <div className="flex flex-wrap items-center gap-2 border-b border-brand-200 bg-brand-50 px-4 py-2 text-sm dark:bg-brand-500/10 dark:border-brand-500/30">
             <span className="font-medium text-brand-800 dark:text-brand-300">{selected.size} seleccionados</span>
             <BulkMenu icon={<Tag size={14} />} label="Etiquetar" options={meta.tags.map((t) => ({ label: t.name, onClick: () => runBulk("tag_add", { tagId: t.id }) }))} empty="Sin etiquetas" />
+            <BulkMenu
+              icon={<Users2 size={14} />}
+              label="Grupo"
+              options={[
+                ...meta.groups.map((g) => ({ label: `＋ ${g.name}`, onClick: () => runBulk("group_add", { groupId: g.id }) })),
+                ...meta.groups.map((g) => ({ label: `－ Quitar de ${g.name}`, onClick: () => runBulk("group_remove", { groupId: g.id }) })),
+                { label: "⚙ Gestionar grupos…", onClick: () => setGroupsOpen(true) },
+              ]}
+              empty="Sin grupos"
+            />
             <BulkMenu icon={<SlidersHorizontal size={14} />} label="Etapa" options={meta.lifecycle.map((s) => ({ label: s.name, onClick: () => runBulk("stage", { statusCode: s.code }) }))} />
             <BulkMenu
               icon={<UserCog size={14} />}
@@ -864,16 +894,103 @@ function ContactsPageInner() {
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} onDone={refresh} />
       <ImportMessagesModal open={importMsgsOpen} onClose={() => setImportMsgsOpen(false)} />
       <DuplicatesModal open={dupOpen} onClose={() => setDupOpen(false)} onDone={refresh} />
+      <GroupsModal open={groupsOpen} onClose={() => setGroupsOpen(false)} groups={meta?.groups ?? []} onChanged={loadMeta} />
     </div>
+  );
+}
+
+/** Gestión de grupos: crear, renombrar, cambiar color y eliminar. */
+function GroupsModal({ open, onClose, groups, onChanged }: { open: boolean; onClose: () => void; groups: Meta["groups"]; onChanged: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  async function create() {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try {
+      await api("/contacts/groups", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+      setName("");
+      onChanged();
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo crear el grupo", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function rename(id: string) {
+    if (!editName.trim()) { setEditId(null); return; }
+    try {
+      await api(`/contacts/groups/${id}`, { method: "PATCH", body: JSON.stringify({ name: editName.trim() }) });
+      setEditId(null);
+      onChanged();
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo renombrar", "error");
+    }
+  }
+  async function remove(id: string, gname: string) {
+    if (!confirm(`¿Eliminar el grupo «${gname}»? Los contactos NO se borran, solo dejan de pertenecer al grupo.`)) return;
+    try {
+      await api(`/contacts/groups/${id}`, { method: "DELETE" });
+      onChanged();
+    } catch (e: any) {
+      toast.push(e.message ?? "No se pudo eliminar", "error");
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Gestionar grupos">
+      <div className="space-y-4">
+        <div className="flex gap-2">
+          <input
+            className="w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm outline-none focus:border-brand-500"
+            placeholder="Nombre del grupo nuevo (ej: Clientes 2026, VIP…)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && create()}
+            maxLength={80}
+          />
+          <Button onClick={create} disabled={busy || !name.trim()}><Plus size={15} /> Crear</Button>
+        </div>
+        <div className="max-h-72 space-y-1 overflow-y-auto">
+          {groups.length === 0 && <p className="py-6 text-center text-sm text-ink-subtle">Aún no tienes grupos. Crea el primero arriba.</p>}
+          {groups.map((g) => (
+            <div key={g.id} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
+              {editId === g.id ? (
+                <>
+                  <input className="flex-1 rounded-md border border-line-strong bg-panel px-2 py-1 text-sm outline-none focus:border-brand-500" value={editName} onChange={(e) => setEditName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && rename(g.id)} autoFocus maxLength={80} />
+                  <button onClick={() => rename(g.id)} className="text-sm text-brand-600 hover:underline">Guardar</button>
+                  <button onClick={() => setEditId(null)} className="text-sm text-ink-subtle hover:underline">Cancelar</button>
+                </>
+              ) : (
+                <>
+                  <Users2 size={15} className="shrink-0 text-ink-subtle" style={g.color ? { color: g.color } : undefined} />
+                  <span className="flex-1 truncate text-sm font-medium text-ink">{g.name}</span>
+                  <span className="shrink-0 text-xs text-ink-subtle">{g.count} contacto(s)</span>
+                  <button onClick={() => { setEditId(g.id); setEditName(g.name); }} className="shrink-0 text-ink-subtle hover:text-brand-600" title="Renombrar"><UserCog size={15} /></button>
+                  <button onClick={() => remove(g.id, g.name)} className="shrink-0 text-ink-subtle hover:text-red-500" title="Eliminar"><Trash2 size={15} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-ink-subtle">Los grupos sirven para clasificar contactos y elegirlos como destino de una difusión (envío masivo por plantilla).</p>
+      </div>
+    </Modal>
   );
 }
 
 // --------------------------- Subcomponentes ---------------------------
 
-function SideGroup({ title, children }: { title: string; children: React.ReactNode }) {
+function SideGroup({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="border-t border-line px-3 py-2">
-      <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</p>
+      <div className="flex items-center justify-between px-2 pb-1 pt-1">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-subtle">{title}</p>
+        {action}
+      </div>
       {children}
     </div>
   );

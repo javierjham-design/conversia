@@ -5,6 +5,7 @@ import { getEnv } from "@conversia/config";
 import {
   QUEUE_NAMES,
   type AgentTurnJob,
+  type BroadcastJob,
   type CapiJob,
   type ContactImportJob,
   type EmailJob,
@@ -34,6 +35,7 @@ export class QueueService implements OnModuleDestroy {
   readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
   readonly agentTurn = new Queue<AgentTurnJob>(QUEUE_NAMES.agentTurn, { connection: this.connection });
   readonly workflowRetry = new Queue<WorkflowRetryJob>(QUEUE_NAMES.workflow, { connection: this.connection });
+  readonly broadcast = new Queue<BroadcastJob>(QUEUE_NAMES.broadcast, { connection: this.connection });
 
   /** Reintenta una ejecución de flujo fallida desde el paso que falló (efectos reales). */
   async enqueueWorkflowRetry(job: WorkflowRetryJob): Promise<void> {
@@ -85,6 +87,7 @@ export class QueueService implements OnModuleDestroy {
       this.notifications.close(),
       this.agentTurn.close(),
       this.workflowRetry.close(),
+      this.broadcast.close(),
     ]);
     this.connection.disconnect();
   }

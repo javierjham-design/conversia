@@ -838,6 +838,87 @@ model TagAssignment {
   @@map("tag_assignments")
 }
 
+// --------------------------- Grupos de contactos ---------------------------
+// Colección nombrada de contactos, pensada para SEGMENTAR (p. ej. destino de
+// difusiones). Distinta de las etiquetas (operativas/polimórficas): un grupo es
+// una entidad de primera clase con miembros explícitos y conteo.
+
+model ContactGroup {
+  id             String               @id @default(cuid())
+  organizationId String               @map("organization_id")
+  name           String
+  description    String?
+  color          String?
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  members        ContactGroupMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("contact_groups")
+}
+
+model ContactGroupMember {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  groupId        String       @map("group_id")
+  contactId      String       @map("contact_id")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  group          ContactGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, contactId])
+  @@index([organizationId, groupId])
+  @@index([organizationId, contactId])
+  @@map("contact_group_members")
+}
+
+// --------------------------- Difusiones (envíos masivos por plantilla) ---------------------------
+// Envío de una plantilla de WhatsApp aprobada por Meta a una audiencia. Cada
+// destinatario genera un Message TEMPLATE que pasa por la MISMA cadena de gating
+// del envío individual (plan + interruptor + bolsa + tope diario + fusible).
+
+model Broadcast {
+  id                  String               @id @default(cuid())
+  organizationId      String               @map("organization_id")
+  name                String
+  templateId          String               @map("template_id")
+  templateName        String               @map("template_name")
+  channelConnectionId String?              @map("channel_connection_id")
+  audienceType        String               @map("audience_type") // group | filter | list
+  audienceRef         Json                 @default("{}")
+  status              String               @default("DRAFT") // DRAFT | QUEUED | SENDING | COMPLETED | CANCELED | FAILED
+  total               Int                  @default(0)
+  sent                Int                  @default(0)
+  failed              Int                  @default(0)
+  createdById         String?              @map("created_by_id")
+  startedAt           DateTime?            @map("started_at")
+  completedAt         DateTime?            @map("completed_at")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  recipients          BroadcastRecipient[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, createdAt])
+  @@map("broadcasts")
+}
+
+model BroadcastRecipient {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  broadcastId    String    @map("broadcast_id")
+  contactId      String    @map("contact_id")
+  conversationId String?   @map("conversation_id")
+  messageId      String?   @map("message_id")
+  status         String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  broadcast      Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, broadcastId])
+  @@index([broadcastId, status])
+  @@map("broadcast_recipients")
+}
+
 // --------------------------- Canales ---------------------------
 
 model ChannelConnection {

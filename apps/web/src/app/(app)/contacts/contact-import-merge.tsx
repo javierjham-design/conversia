@@ -1,25 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileUp, GitMerge, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, FileUp, GitMerge, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button, Checkbox, Modal, Select, cn, useToast } from "@/components/ui";
-import { guessField, parseCSV } from "./contact-csv";
+import { buildTemplateCsv, guessField, parseCSV, parseSpreadsheetFile, TEMPLATE_BASE_HEADERS } from "./contact-csv";
 
 const inputCls = "w-full rounded-lg border border-line-strong bg-panel px-3 py-2 text-sm outline-none focus:border-brand-500";
 
-// Campos destino del import.
-const TARGET_FIELDS: { key: string; label: string }[] = [
+// Campos destino del import (etiqueta legible + descripción del formato esperado).
+const TARGET_FIELDS: { key: string; label: string; hint?: string }[] = [
   { key: "", label: "— Ignorar —" },
   { key: "firstName", label: "Nombre" },
   { key: "lastName", label: "Apellido" },
-  { key: "phone", label: "Teléfono" },
+  { key: "phone", label: "Teléfono", hint: "con código de país, ej: +56 9 1234 5678" },
   { key: "email", label: "Email" },
-  { key: "country", label: "País (ISO-2)" },
-  { key: "locale", label: "Idioma" },
-  { key: "tags", label: "Etiquetas (| o coma)" },
-  { key: "stage", label: "Etapa del ciclo de vida" },
+  { key: "country", label: "País (ISO-2)", hint: "ej: CL, AR, MX" },
+  { key: "locale", label: "Idioma", hint: "ej: es" },
+  { key: "tags", label: "Etiquetas", hint: "separadas por | o coma" },
+  { key: "group", label: "Grupos", hint: "separados por | o coma (se crean solos)" },
+  { key: "stage", label: "Etapa del ciclo de vida", hint: "code o nombre" },
 ];
+
+type Group = { id: string; name: string; count: number };
 
 export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
@@ -31,24 +34,30 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
   const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number; errors: { row: number; reason: string }[] } | null>(null);
   const [customFields, setCustomFields] = useState<{ key: string; label: string }[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupChoice, setGroupChoice] = useState(""); // "" = ninguno · id · "__new__"
+  const [newGroupName, setNewGroupName] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
     if (open) {
       void api<{ key: string; label: string }[]>("/contact-fields").then((r) => setCustomFields(r.map((f) => ({ key: f.key, label: f.label })))).catch(() => setCustomFields([]));
+      void api<Group[]>("/contacts/groups").then(setGroups).catch(() => setGroups([]));
       setParsed(null);
       setMapping({});
       setUpdateExisting(false);
       setProgress(null);
       setResult(null);
+      setGroupChoice("");
+      setNewGroupName("");
     }
   }, [open]);
 
-  function onFile(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const p = parseCSV(String(reader.result ?? ""));
+  async function onFile(file: File) {
+    try {
+      const p = await parseSpreadsheetFile(file);
       if (p.headers.length === 0) {
-        toast.push("El archivo no tiene cabeceras", "error");
+        toast.push("El archivo no tiene cabeceras (la primera fila debe ser los títulos de columna)", "error");
         return;
       }
       setParsed(p);
@@ -58,8 +67,20 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
         const custom = customFields.find((f) => f.key === h.trim().toLowerCase());
         return [i, custom ? `custom:${custom.key}` : ""];
       })));
-    };
-    reader.readAsText(file, "utf-8");
+    } catch (e: any) {
+      toast.push(e?.message ?? "No pudimos leer el archivo. Asegúrate de que sea CSV o Excel (.xlsx).", "error");
+    }
+  }
+
+  function downloadTemplate() {
+    const csv = buildTemplateCsv(customFields);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "plantilla-contactos.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const mappedFields = useMemo(() => new Set(Object.values(mapping).filter(Boolean)), [mapping]);
@@ -71,6 +92,14 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
     if (!parsed) return;
     setBusy(true);
     try {
+      // Grupo destino de TODAS las filas (opcional): crea el grupo nuevo si aplica.
+      let groupId: string | undefined;
+      if (groupChoice === "__new__" && newGroupName.trim()) {
+        const g = await api<{ id: string }>("/contacts/groups", { method: "POST", body: JSON.stringify({ name: newGroupName.trim() }) });
+        groupId = g.id;
+      } else if (groupChoice && groupChoice !== "__new__") {
+        groupId = groupChoice;
+      }
       const rows = parsed.rows.map((r) => {
         const obj: Record<string, unknown> = {};
         const custom: Record<string, string> = {};
@@ -83,7 +112,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
         if (Object.keys(custom).length) obj.custom = custom;
         return obj;
       });
-      const queued = await api<{ jobId: string; total: number }>("/contacts/import", { method: "POST", body: JSON.stringify({ rows, updateExisting }) });
+      const queued = await api<{ jobId: string; total: number }>("/contacts/import", { method: "POST", body: JSON.stringify({ rows, updateExisting, groupId }) });
       setProgress({ processed: 0, total: queued.total });
       for (;;) {
         await new Promise((r) => setTimeout(r, 1200));
@@ -108,7 +137,7 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Importar contactos (CSV)" wide>
+    <Modal open={open} onClose={onClose} title="Importar base de datos de contactos" wide>
       {result ? (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
@@ -129,16 +158,39 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
           </div>
         </div>
       ) : !parsed ? (
-        <div>
+        <div className="space-y-4">
+          {/* Formato esperado — siempre visible antes de subir */}
+          <div className="rounded-xl border border-line bg-app p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-ink">Formato del archivo</p>
+              <Button variant="secondary" onClick={downloadTemplate}><Download size={14} /> Descargar plantilla</Button>
+            </div>
+            <p className="text-xs text-ink-muted">
+              Acepta <b>Excel (.xlsx)</b> o <b>CSV</b>. La <b>primera fila</b> son los títulos de columna. Reconocemos automáticamente estas columnas (puedes ajustar el mapeo después):
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {TEMPLATE_BASE_HEADERS.map((h) => (
+                <span key={h} className="rounded-md border border-line-strong bg-panel px-2 py-0.5 font-mono text-[11px] text-ink-muted">{h}</span>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-ink-subtle">Lo único imprescindible es <b>teléfono</b> (con código de país, ej: +56 9 1234 5678). El resto es opcional. Puedes clasificar en <b>grupos</b> con la columna «grupos» (separados por | o coma).</p>
+          </div>
+
           <button
             onClick={() => fileRef.current?.click()}
-            className="flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed border-line-strong bg-app py-10 text-ink-muted hover:border-brand-400 hover:text-brand-600"
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) void onFile(f); }}
+            className={cn(
+              "flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed py-10 text-ink-muted transition",
+              dragOver ? "border-brand-500 bg-brand-50/40 text-brand-600 dark:bg-brand-500/10" : "border-line-strong bg-app hover:border-brand-400 hover:text-brand-600",
+            )}
           >
             <FileUp size={28} />
-            <span className="font-medium">Selecciona un archivo CSV</span>
-            <span className="text-xs">Primera fila = cabeceras. Separador , o ;</span>
+            <span className="font-medium">Arrastra tu archivo aquí o haz clic para seleccionar</span>
+            <span className="flex items-center gap-1 text-xs"><FileSpreadsheet size={13} /> Excel (.xlsx) o CSV</span>
           </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <input ref={fileRef} type="file" accept=".csv,text/csv,.xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </div>
       ) : (
         <div className="space-y-4">
@@ -150,9 +202,9 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
                   <p className="truncate text-sm font-medium text-ink">{h || `Columna ${i + 1}`}</p>
                   <p className="truncate text-xs text-ink-subtle">{parsed.rows[0]?.[i] ?? ""}</p>
                 </div>
-                <Select value={mapping[i] ?? ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })} className="w-48">
+                <Select value={mapping[i] ?? ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })} className="w-56">
                   {TARGET_FIELDS.map((f) => (
-                    <option key={f.key} value={f.key}>{f.label}</option>
+                    <option key={f.key} value={f.key}>{f.label}{f.hint ? ` — ${f.hint}` : ""}</option>
                   ))}
                   {customFields.map((f) => (
                     <option key={`custom:${f.key}`} value={`custom:${f.key}`}>Campo: {f.label}</option>
@@ -161,6 +213,25 @@ export function ImportModal({ open, onClose, onDone }: { open: boolean; onClose:
               </div>
             ))}
           </div>
+
+          {/* Clasificar todo el archivo en un grupo */}
+          <div className="rounded-lg border border-line bg-app p-3">
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-ink"><Users size={14} /> Clasificar estos contactos en un grupo (opcional)</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={groupChoice} onChange={(e) => setGroupChoice(e.target.value)} className="w-64">
+                <option value="">— Sin grupo —</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name} ({g.count})</option>
+                ))}
+                <option value="__new__">➕ Crear grupo nuevo…</option>
+              </Select>
+              {groupChoice === "__new__" && (
+                <input className={cn(inputCls, "w-56")} placeholder="Nombre del grupo nuevo" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} maxLength={80} />
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-ink-subtle">Todos los contactos importados se agregarán a este grupo (además de los grupos que traiga la columna «grupos»).</p>
+          </div>
+
           <label className="flex items-center gap-2 text-sm text-ink-muted">
             <Checkbox checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} />
             Actualizar contactos existentes (mismo teléfono) rellenando campos vacíos
