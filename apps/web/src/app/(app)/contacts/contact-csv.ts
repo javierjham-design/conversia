@@ -42,6 +42,49 @@ export function parseCSV(rawText: string): ParsedCsv {
   return { headers, rows: rows.filter((r) => r.some((c) => c.trim() !== "")) };
 }
 
+/** Normaliza el valor de una celda de Excel (texto, número, fecha, fórmula, rich text). */
+function cellToString(v: unknown): string {
+  if (v == null) return "";
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "object") {
+    const o = v as Record<string, any>;
+    if (Array.isArray(o.richText)) return o.richText.map((r) => r.text ?? "").join("");
+    if (o.text != null) return String(o.text);
+    if (o.result != null) return String(o.result);
+    if (o.hyperlink != null) return String(o.hyperlink);
+    return "";
+  }
+  return String(v);
+}
+
+/**
+ * Lee un archivo de base de datos (CSV o Excel .xlsx) a { headers, rows }.
+ * Excel se parsea con exceljs cargado bajo demanda (import dinámico → no engorda
+ * el bundle inicial). Lo que más envían los clientes es Excel.
+ */
+export async function parseSpreadsheetFile(file: File): Promise<ParsedCsv> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xlsm")) {
+    const mod = await import("exceljs");
+    const ExcelJS: any = (mod as any).default ?? mod;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets[0];
+    if (!ws) return { headers: [], rows: [] };
+    const colCount: number = ws.columnCount || 0;
+    const matrix: string[][] = [];
+    ws.eachRow((row: any) => {
+      const vals: string[] = [];
+      for (let i = 1; i <= colCount; i++) vals.push(cellToString(row.getCell(i).value));
+      matrix.push(vals);
+    });
+    const headers = (matrix.shift() ?? []).map((h) => h.trim());
+    return { headers, rows: matrix.filter((r) => r.some((c) => c.trim() !== "")) };
+  }
+  const text = await file.text();
+  return parseCSV(text);
+}
+
 /** Adivina el campo destino a partir del nombre de la cabecera. */
 export function guessField(header: string): string {
   const h = header.toLowerCase();
@@ -52,12 +95,13 @@ export function guessField(header: string): string {
   if (/(pa[ií]s|country)/.test(h)) return "country";
   if (/(idioma|locale|lang)/.test(h)) return "locale";
   if (/(etiqueta|tag)/.test(h)) return "tags";
+  if (/(grupo|group|segmento)/.test(h)) return "group";
   if (/(etapa|stage|estado)/.test(h)) return "stage";
   return "";
 }
 
 /** Cabeceras base de la plantilla de import (el orden importa para el round-trip). */
-export const TEMPLATE_BASE_HEADERS = ["telefono", "nombre", "apellido", "email", "etapa", "etiquetas"] as const;
+export const TEMPLATE_BASE_HEADERS = ["telefono", "nombre", "apellido", "email", "etapa", "etiquetas", "grupos"] as const;
 
 /**
  * Genera la plantilla CSV modelo: columnas base + campos personalizados del
@@ -65,8 +109,8 @@ export const TEMPLATE_BASE_HEADERS = ["telefono", "nombre", "apellido", "email",
  */
 export function buildTemplateCsv(customFields: { key: string; label: string }[]): string {
   const headers = [...TEMPLATE_BASE_HEADERS, ...customFields.map((f) => f.key)];
-  const example1 = ["+56 9 1234 5678", "María", "Pérez", "maria@ejemplo.cl", "Nuevo lead", "interesado|ortodoncia", ...customFields.map(() => "")];
-  const example2 = ["+56 9 8765 4321", "Pedro", "Soto", "", "Reserva", "limpieza", ...customFields.map(() => "")];
+  const example1 = ["+56 9 1234 5678", "María", "Pérez", "maria@ejemplo.cl", "Nuevo lead", "interesado|ortodoncia", "Clientes 2026", ...customFields.map(() => "")];
+  const example2 = ["+56 9 8765 4321", "Pedro", "Soto", "", "Reserva", "limpieza", "Clientes 2026|VIP", ...customFields.map(() => "")];
   const esc = (v: string) => (/[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
   return "﻿" + [headers, example1, example2].map((r) => r.map(esc).join(",")).join("\n");
 }

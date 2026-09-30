@@ -6,6 +6,7 @@ import {
   QUEUE_NAMES,
   TRIGGER_TYPES,
   type AgentTurnJob,
+  type BroadcastJob,
   type CapiJob,
   type ContactImportJob,
   type MessageImportJob,
@@ -20,6 +21,7 @@ import {
 import { processCapiJob } from "./capi";
 import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
 import { processContactImport } from "./contact-import";
+import { processBroadcast } from "./broadcast";
 import { processMessageImport } from "./respond-import";
 import { processInbound } from "./inbound";
 import { processEmailJob, startDailyDigests } from "./mailer";
@@ -88,6 +90,14 @@ async function main() {
   const importsWorker = new Worker<ContactImportJob>(
     QUEUE_NAMES.imports,
     async (job) => processContactImport(job),
+    { connection, concurrency: 1 },
+  );
+  // Difusiones (envío masivo por plantilla): resuelve destinatarios y encola en
+  // `outbound` (que aplica el gating por mensaje). Concurrencia 1: una difusión a
+  // la vez para no inundar la cola de salida.
+  const broadcastWorker = new Worker<BroadcastJob>(
+    QUEUE_NAMES.broadcast,
+    async (job) => processBroadcast(job),
     { connection, concurrency: 1 },
   );
   // Historial de mensajes (migración Respond.io): escritura pura, sin triggers.
@@ -177,7 +187,7 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, messageImportsWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
+  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, messageImportsWorker, broadcastWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -230,6 +240,7 @@ async function main() {
       capiWorker.close(),
       eventsWorker.close(),
       importsWorker.close(),
+      broadcastWorker.close(),
       emailsWorker.close(),
       syncWorker.close(),
       notificationsWorker.close(),

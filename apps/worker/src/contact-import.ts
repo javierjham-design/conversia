@@ -46,6 +46,7 @@ async function processBatch(
   offset: number,
   updateExisting: boolean,
   refs: ImportRefs,
+  fixedGroupId?: string,
 ): Promise<BatchCounters> {
   const out: BatchCounters = { created: 0, updated: 0, skipped: 0, errors: [] };
   const fieldByKey = new Map(refs.fieldDefs.map((d) => [d.key, d.id]));
@@ -107,6 +108,27 @@ async function processBatch(
         });
       }
     }
+    // Grupos (separados por coma o |) → upsert ContactGroup + membresía.
+    // Además del grupo fijo del job (fixedGroupId), si viene.
+    const groupIds = new Set<string>();
+    if (fixedGroupId) groupIds.add(fixedGroupId);
+    if (row.group) {
+      for (const raw of row.group.split(/[|,]/).map((g) => g.trim()).filter(Boolean)) {
+        const group = await tx.contactGroup.upsert({
+          where: { organizationId_name: { organizationId: orgId, name: raw } },
+          create: { organizationId: orgId, name: raw },
+          update: {},
+          select: { id: true },
+        });
+        groupIds.add(group.id);
+      }
+    }
+    if (groupIds.size) {
+      await tx.contactGroupMember.createMany({
+        data: [...groupIds].map((groupId) => ({ organizationId: orgId, groupId, contactId })),
+        skipDuplicates: true,
+      });
+    }
     // Etapa del ciclo de vida (acepta code o nombre, insensible a mayúsculas)
     if (row.stage?.trim()) {
       const wanted = row.stage.trim().toLowerCase();
@@ -136,7 +158,7 @@ async function processBatch(
 }
 
 export async function processContactImport(job: Job<ContactImportJob>): Promise<ContactImportResult> {
-  const { organizationId: orgId, userId, rows, updateExisting } = job.data;
+  const { organizationId: orgId, userId, rows, updateExisting, groupId } = job.data;
   let created = 0,
     updated = 0,
     skipped = 0;
@@ -151,7 +173,7 @@ export async function processContactImport(job: Job<ContactImportJob>): Promise<
   for (let i = 0; i < rows.length; i += CHUNK) {
     const chunk = rows.slice(i, i + CHUNK);
     try {
-      const r = await withTenant(orgId, (tx) => processBatch(tx, orgId, chunk, i, updateExisting, refs), undefined, BATCH_TX_OPTS);
+      const r = await withTenant(orgId, (tx) => processBatch(tx, orgId, chunk, i, updateExisting, refs, groupId), undefined, BATCH_TX_OPTS);
       created += r.created;
       updated += r.updated;
       skipped += r.skipped;

@@ -416,6 +416,7 @@ export const QUEUE_NAMES = {
   whatsappEscalation: "whatsapp-escalation",
   agentTurn: "agent-turn",
   messageImports: "message-imports",
+  broadcast: "broadcast-send",
 } as const;
 
 /** Fila del export de MENSAJES de Respond.io (histórico, ya parseada). */
@@ -619,6 +620,8 @@ export interface ContactImportRow {
   tags?: string;
   /** etapa del ciclo de vida (code o nombre) */
   stage?: string;
+  /** grupos separados por coma o | (se crean si no existen) */
+  group?: string;
   /** campos personalizados del tenant: key → valor */
   custom?: Record<string, string>;
 }
@@ -630,6 +633,8 @@ export interface ContactImportJob {
   userId: string;
   rows: ContactImportRow[];
   updateExisting: boolean;
+  /** grupo al que asignar TODAS las filas importadas (opcional) */
+  groupId?: string;
 }
 
 /** Progreso/resultado del import (job.progress / job.returnvalue). */
@@ -642,6 +647,13 @@ export interface ContactImportResult {
   updated: number;
   skipped: number;
   errors: { row: number; reason: string }[];
+}
+
+/** Difusión encolada: el worker resuelve los destinatarios pendientes y encola un
+ *  envío de plantilla por cada uno (que pasa por la cadena de gating habitual). */
+export interface BroadcastJob {
+  organizationId: string;
+  broadcastId: string;
 }
 
 // ============================================================

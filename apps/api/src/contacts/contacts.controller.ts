@@ -12,6 +12,7 @@ const listQuery = z.object({
   q: z.string().trim().max(120).optional(),
   stage: z.string().optional(), // código de LeadStatus
   tag: z.string().optional(), // tagId
+  group: z.string().optional(), // groupId (grupo de contactos)
   channel: z.string().optional(), // ChannelType
   assignedUser: z.string().optional(),
   assignedTeam: z.string().optional(),
@@ -71,8 +72,9 @@ const updateBody = z.object({
 
 const bulkBody = z.object({
   ids: z.array(z.string()).min(1).max(1000),
-  action: z.enum(["tag_add", "tag_remove", "stage", "assign", "block", "unblock", "delete"]),
+  action: z.enum(["tag_add", "tag_remove", "group_add", "group_remove", "stage", "assign", "block", "unblock", "delete"]),
   tagId: z.string().optional(),
+  groupId: z.string().optional(),
   statusCode: z.string().optional(),
   assignedUserId: z.string().nullable().optional(),
   assignedTeamId: z.string().nullable().optional(),
@@ -85,6 +87,7 @@ const segmentDefinition = z
     q: z.string().optional(),
     stage: z.string().optional(),
     tag: z.string().optional(),
+    group: z.string().optional(),
     channel: z.string().optional(),
     assignedUser: z.string().optional(),
     assignedTeam: z.string().optional(),
@@ -110,14 +113,22 @@ const importRow = z.object({
   locale: z.string().optional(),
   tags: z.string().optional(), // separadas por coma o |
   stage: z.string().optional(), // code o nombre de la etapa
+  group: z.string().optional(), // grupos separados por coma o | (se crean si no existen)
   custom: z.record(z.string().max(500)).optional(), // campos personalizados por key
 });
-const importBody = z.object({ rows: z.array(importRow).min(1).max(10000), updateExisting: z.boolean().default(false) });
+const importBody = z.object({
+  rows: z.array(importRow).min(1).max(10000),
+  updateExisting: z.boolean().default(false),
+  /** grupo al que asignar TODAS las filas importadas (además del de cada fila) */
+  groupId: z.string().optional(),
+});
 
 const mergeBody = z.object({ primaryId: z.string(), mergeIds: z.array(z.string()).min(1).max(20) });
 
-/** Traduce la definición de un segmento (o los query params) al `where` de Prisma. */
-function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
+/** Traduce la definición de un segmento (o los query params) al `where` de Prisma.
+ *  `restrictIds` acota a un conjunto de ids (intersección de filtros por etiqueta
+ *  y/o grupo, resueltos aparte). */
+function buildWhere(f: Record<string, any>, restrictIds?: string[]): any {
   const where: any = { deletedAt: null };
   if (f.q) {
     where.OR = [
@@ -151,7 +162,7 @@ function buildWhere(f: Record<string, any>, tagContactIds?: string[]): any {
   if (f.createdWithinDays && !f.dateFrom) {
     where.createdAt = { ...(where.createdAt ?? {}), gte: new Date(Date.now() - Number(f.createdWithinDays) * 86_400_000) };
   }
-  if (tagContactIds) where.id = { in: tagContactIds };
+  if (restrictIds) where.id = { in: restrictIds };
   return where;
 }
 
@@ -164,16 +175,25 @@ async function resolveWhere(tx: any, q: Record<string, any>): Promise<{ where: a
     const seg = await tx.contactSegment.findUnique({ where: { id: q.segmentId } });
     if (seg) filters = { ...(seg.definition as Record<string, any>) };
   }
-  for (const k of ["q", "stage", "tag", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "origin", "campaign", "blocked", "dateFrom", "dateTo"]) {
+  for (const k of ["q", "stage", "tag", "group", "channel", "assignedUser", "assignedTeam", "assignedAgent", "country", "source", "origin", "campaign", "blocked", "dateFrom", "dateTo"]) {
     if (q[k] !== undefined) filters[k] = q[k];
   }
-  let tagContactIds: string[] | undefined;
+  // Filtros que restringen por id de contacto (etiqueta y grupo) → intersección.
+  const restrictSets: string[][] = [];
   if (filters.tag) {
     const assigns = await tx.tagAssignment.findMany({ where: { tagId: filters.tag, entityType: "contact" }, select: { entityId: true } });
-    tagContactIds = assigns.map((a: { entityId: string }) => a.entityId);
-    if (tagContactIds!.length === 0) return { where: buildWhere(filters, tagContactIds), emptyTag: true };
+    restrictSets.push(assigns.map((a: { entityId: string }) => a.entityId));
   }
-  return { where: buildWhere(filters, tagContactIds), emptyTag: false };
+  if (filters.group) {
+    const members = await tx.contactGroupMember.findMany({ where: { groupId: filters.group }, select: { contactId: true } });
+    restrictSets.push(members.map((m: { contactId: string }) => m.contactId));
+  }
+  let restrictIds: string[] | undefined;
+  if (restrictSets.length) {
+    restrictIds = restrictSets.reduce((acc, set) => acc.filter((id) => set.includes(id)));
+    if (restrictIds.length === 0) return { where: buildWhere(filters, restrictIds), emptyTag: true };
+  }
+  return { where: buildWhere(filters, restrictIds), emptyTag: false };
 }
 
 const csvEscape = (v: unknown): string => {
@@ -305,7 +325,7 @@ export class ContactsController {
   meta() {
     const ctx = requirePermission("contacts:read");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [all, blocked, leadStatuses, agents, members, teams, tags, leadsByStatus, convsByAgent, countryRows, segments, campaignRows, originRows] = await Promise.all([
+      const [all, blocked, leadStatuses, agents, members, teams, tags, leadsByStatus, convsByAgent, countryRows, segments, campaignRows, originRows, groupRows, groupMemberCounts] = await Promise.all([
         tx.contact.count({ where: { deletedAt: null } }),
         tx.contact.count({ where: { deletedAt: null, blocked: true } }),
         tx.leadStatus.findMany({ orderBy: { order: "asc" }, select: { code: true, name: true, color: true, category: true } }),
@@ -320,7 +340,11 @@ export class ContactsController {
         tx.contact.findMany({ where: { deletedAt: null, campaignId: { not: null } }, select: { campaignId: true }, distinct: ["campaignId"] }),
         // Orígenes de captación presentes (con conteo) → filtro "Origen".
         tx.contact.groupBy({ by: ["source"], where: { deletedAt: null, source: { not: null } }, _count: { _all: true } }),
+        tx.contactGroup.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true, description: true } }),
+        tx.contactGroupMember.groupBy({ by: ["groupId"], _count: { _all: true } }),
       ]);
+      const countByGroup = new Map<string, number>();
+      for (const g of groupMemberCounts) countByGroup.set(g.groupId, g._count._all);
 
       // Nombres de las campañas de origen (desde el catálogo de anuncios).
       const campaignIds = campaignRows.map((r) => r.campaignId).filter(Boolean) as string[];
@@ -349,6 +373,7 @@ export class ContactsController {
           .map((r) => ({ value: r.source as string, count: r._count._all }))
           .sort((a, b) => b.count - a.count),
         segments: segments.map((s) => ({ id: s.id, name: s.name, isDefault: s.isDefault })),
+        groups: groupRows.map((g) => ({ id: g.id, name: g.name, color: g.color, description: g.description, count: countByGroup.get(g.id) ?? 0 })),
       };
     });
   }
@@ -401,6 +426,115 @@ export class ContactsController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.contactSegment.deleteMany({ where: { id } });
       return { ok: true };
+    });
+  }
+
+  // --------------------------- Grupos de contactos (declarados ANTES de :id) ---------------------------
+
+  /** Grupos del tenant con conteo de miembros. */
+  @Get("groups")
+  listGroups() {
+    const ctx = requirePermission("contacts:read");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [groups, counts] = await Promise.all([
+        tx.contactGroup.findMany({ orderBy: { name: "asc" } }),
+        tx.contactGroupMember.groupBy({ by: ["groupId"], _count: { _all: true } }),
+      ]);
+      const byGroup = new Map<string, number>(counts.map((c) => [c.groupId, c._count._all]));
+      return groups.map((g) => ({ id: g.id, name: g.name, description: g.description, color: g.color, count: byGroup.get(g.id) ?? 0 }));
+    });
+  }
+
+  @Post("groups")
+  createGroup(@Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).optional(), color: z.string().trim().max(20).optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const exists = await tx.contactGroup.findFirst({ where: { name: b.name }, select: { id: true } });
+      if (exists) throw new BadRequestException("Ya existe un grupo con ese nombre");
+      const g = await tx.contactGroup.create({
+        data: { organizationId: ctx.organizationId, name: b.name, description: b.description || null, color: b.color || null },
+        select: { id: true, name: true, description: true, color: true },
+      });
+      return { ...g, count: 0 };
+    });
+  }
+
+  @Patch("groups/:id")
+  updateGroup(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(z.object({ name: z.string().trim().min(1).max(80).optional(), description: z.string().trim().max(300).nullable().optional(), color: z.string().trim().max(20).nullable().optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const g = await tx.contactGroup.findFirst({ where: { id }, select: { id: true } });
+      if (!g) throw new NotFoundException("Grupo no encontrado");
+      if (b.name) {
+        const dup = await tx.contactGroup.findFirst({ where: { name: b.name, id: { not: id } }, select: { id: true } });
+        if (dup) throw new BadRequestException("Ya existe un grupo con ese nombre");
+      }
+      await tx.contactGroup.update({
+        where: { id },
+        data: { ...(b.name ? { name: b.name } : {}), ...(b.description !== undefined ? { description: b.description } : {}), ...(b.color !== undefined ? { color: b.color } : {}) },
+      });
+      return { ok: true };
+    });
+  }
+
+  @Delete("groups/:id")
+  deleteGroup(@Param("id") id: string) {
+    const ctx = requirePermission("contacts:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // La FK ON DELETE CASCADE limpia los miembros; borrar el grupo NO borra contactos.
+      await tx.contactGroup.deleteMany({ where: { id } });
+      return { ok: true };
+    });
+  }
+
+  /** Agrega miembros a un grupo, por selección explícita (contactIds) o por FILTRO
+   *  (aplica los mismos filtros que la lista y agrega TODOS los que coincidan,
+   *  hasta 20 000). Idempotente (skipDuplicates). */
+  @Post("groups/:id/members")
+  async addGroupMembers(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(z.object({ contactIds: z.array(z.string()).max(20000).optional(), filter: z.record(z.any()).optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const group = await tx.contactGroup.findFirst({ where: { id }, select: { id: true } });
+      if (!group) throw new NotFoundException("Grupo no encontrado");
+      let ids: string[] = [];
+      if (b.contactIds?.length) {
+        ids = (await tx.contact.findMany({ where: { id: { in: b.contactIds }, deletedAt: null }, select: { id: true } })).map((c) => c.id);
+      } else if (b.filter) {
+        const { where, emptyTag } = await resolveWhere(tx, b.filter);
+        if (!emptyTag) ids = (await tx.contact.findMany({ where, select: { id: true }, take: 20000 })).map((c) => c.id);
+      } else {
+        throw new BadRequestException("Indica contactIds o filter");
+      }
+      if (ids.length === 0) return { added: 0 };
+      const res = await tx.contactGroupMember.createMany({
+        data: ids.map((contactId) => ({ organizationId: ctx.organizationId, groupId: id, contactId })),
+        skipDuplicates: true,
+      });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "contact.group.add_members", entityType: "contact_group", entityId: id, after: { requested: ids.length, added: res.count } },
+      });
+      return { added: res.count };
+    });
+  }
+
+  /** Quita miembros del grupo por selección (contactIds) o vacía el grupo (all=true). */
+  @Post("groups/:id/members/remove")
+  async removeGroupMembers(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requirePermission("contacts:write");
+    const b = parse(z.object({ contactIds: z.array(z.string()).max(20000).optional(), all: z.boolean().optional() }), body);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const group = await tx.contactGroup.findFirst({ where: { id }, select: { id: true } });
+      if (!group) throw new NotFoundException("Grupo no encontrado");
+      const where: any = { groupId: id };
+      if (!b.all) {
+        if (!b.contactIds?.length) throw new BadRequestException("Indica contactIds o all=true");
+        where.contactId = { in: b.contactIds };
+      }
+      const res = await tx.contactGroupMember.deleteMany({ where });
+      return { removed: res.count };
     });
   }
 
@@ -514,6 +648,23 @@ export class ContactsController {
           affected = res.count;
           break;
         }
+        case "group_add": {
+          if (!b.groupId) throw new BadRequestException("Falta groupId");
+          const group = await tx.contactGroup.findFirst({ where: { id: b.groupId }, select: { id: true } });
+          if (!group) throw new BadRequestException("Grupo inválido");
+          const res = await tx.contactGroupMember.createMany({
+            data: valid.map((contactId) => ({ organizationId: orgId, groupId: b.groupId!, contactId })),
+            skipDuplicates: true,
+          });
+          affected = res.count;
+          break;
+        }
+        case "group_remove": {
+          if (!b.groupId) throw new BadRequestException("Falta groupId");
+          const res = await tx.contactGroupMember.deleteMany({ where: { groupId: b.groupId, contactId: { in: valid } } });
+          affected = res.count;
+          break;
+        }
         case "stage": {
           if (!b.statusCode) throw new BadRequestException("Falta statusCode");
           const status = await tx.leadStatus.findFirst({ where: { code: b.statusCode }, select: { id: true } });
@@ -588,7 +739,7 @@ export class ContactsController {
     const b = parse(importBody, body);
     const job = await this.queues.imports.add(
       "import",
-      { organizationId: ctx.organizationId, userId: ctx.userId, rows: b.rows, updateExisting: b.updateExisting },
+      { organizationId: ctx.organizationId, userId: ctx.userId, rows: b.rows, updateExisting: b.updateExisting, groupId: b.groupId },
       { removeOnComplete: { age: 3600 }, removeOnFail: { age: 3600 } },
     );
     return { queued: true, jobId: job.id, total: b.rows.length };

@@ -14,6 +14,7 @@ import { ContactFieldsController } from "./contacts/fields.controller";
 import { TagsController } from "./contacts/tags.controller";
 import { ConversationsController } from "./conversations/conversations.controller";
 import { InboxController } from "./conversations/inbox.controller";
+import { BroadcastsController } from "./broadcasts/broadcasts.controller";
 import { RealtimeService } from "./common/realtime.service";
 import { HealthController } from "./health.controller";
 import { DevelopersController } from "./integrations/developers.controller";
@@ -64,6 +65,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgentsController,
     ConversationsController,
     InboxController, // clasificador de la Bandeja: conteos, bandejas, snippets, asistente IA
+    BroadcastsController, // difusiones: envío masivo de plantillas Meta a grupos/listas
     ContactsController,
     CrmController, // tablero CRM de leads (pipeline por etapa)
     LifecycleController, // etapas del ciclo de vida editables por tenant

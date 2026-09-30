@@ -5,13 +5,14 @@
  * Tiempo real vía SSE (pub/sub Redis por tenant) con fallback automático a sondeo.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Search, SquarePen, User } from "lucide-react";
+import { Bot, Megaphone, Search, SquarePen, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { reportViewing } from "@/lib/push";
 import { Checkbox, EmptyState, Modal, Select, cn } from "@/components/ui";
 import { ContactDrawer } from "../contacts/contact-drawer";
 import { ContactPanel } from "./contact-panel";
 import { NewMessageModal } from "./new-message";
+import { BroadcastModal } from "./broadcast";
 import { InboxSidebar } from "./sidebar";
 import { Thread } from "./thread";
 import { avatarColor, displayName, formatListTime, initials, type ChannelInfo, type ConvContext, type ConvItem, type ConversationFull, type Counters, type InboxFilter, type Msg, type Stage } from "./types";
@@ -63,6 +64,7 @@ export default function InboxPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [live, setLive] = useState(false);
   const [showNewMessage, setShowNewMessage] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
   // Ficha COMPLETA del contacto (el mismo drawer de Clientes/Tablero) sin salir de la bandeja
   const [fullContactId, setFullContactId] = useState<string | null>(null);
 
@@ -380,6 +382,13 @@ export default function InboxPage() {
                   {live ? "en vivo" : "sondeo"}
                 </span>
                 <button
+                  onClick={() => setShowBroadcast(true)}
+                  className="rounded-control border border-line-strong p-1.5 text-ink-muted transition-colors hover:bg-app hover:text-brand-600"
+                  title="Difusión (envío masivo por plantilla a un grupo)"
+                >
+                  <Megaphone size={14} />
+                </button>
+                <button
                   onClick={() => setShowNewMessage(true)}
                   className="rounded-control border border-line-strong p-1.5 text-ink-muted transition-colors hover:bg-app hover:text-brand-600"
                   title="Nuevo mensaje (enviar plantilla a un contacto)"
@@ -572,6 +581,9 @@ export default function InboxPage() {
           void loadCounters();
         }}
       />
+
+      {/* Difusión: envío masivo de una plantilla aprobada a grupos / contactos nuevos */}
+      <BroadcastModal open={showBroadcast} onClose={() => setShowBroadcast(false)} />
 
       {/* Hoja de ayuda de atajos (tecla ?) */}
       <Modal open={showHelp} onClose={() => setShowHelp(false)} title="Atajos de teclado">
