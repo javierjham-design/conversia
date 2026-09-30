@@ -86,14 +86,26 @@ export class ReportsController {
       ]);
 
       // Uso de CONTACTOS del mes vs el cupo del plan (con override por-tenant).
-      // El período arranca en el periodStart de la suscripción, o el 1° del mes.
+      // DEFINICIÓN: contactos ACTIVOS del mes = con al menos un mensaje (enviado o
+      // recibido) en el ciclo. Antes se contaban contactos CREADOS desde periodStart
+      // → un import/backfill (p.ej. leads de Meta) inflaba el uso sin actividad real.
       const now = new Date();
       const [sub, orgRow] = await Promise.all([
         tx.subscription.findFirst({ select: { periodStart: true, planId: true } }),
         tx.organization.findFirst({ select: { settings: true } }),
       ]);
-      const periodStart = sub?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
-      const contactsUsed = await tx.contact.count({ where: { createdAt: { gte: periodStart }, deletedAt: null } });
+      // CORTE mensual RODANTE anclado al día del ciclo (sub.periodStart): el cupo es
+      // por MES aunque el plan sea anual o el periodStart no haya rotado — se usa el
+      // aniversario mensual más reciente (día >28 se ancla al 28 para meses cortos).
+      const anchor = sub?.periodStart ?? new Date(now.getFullYear(), now.getMonth(), 1);
+      const anchorDay = Math.min(anchor.getDate(), 28);
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), anchorDay);
+      if (periodStart > now) periodStart.setMonth(periodStart.getMonth() - 1);
+      const activeRows = await tx.$queryRaw<Array<{ n: bigint }>>`
+        SELECT COUNT(DISTINCT c.contact_id)::bigint AS n
+        FROM messages m JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.organization_id = ${ctx.organizationId} AND m.created_at >= ${periodStart}`;
+      const contactsUsed = Number(activeRows[0]?.n ?? 0);
       const plan = sub?.planId ? await tx.plan.findUnique({ where: { id: sub.planId }, select: { limits: true } }) : null;
       const override = (orgRow?.settings as { limits?: Record<string, unknown> } | null)?.limits?.contactsMonthly;
       const planLimit = (plan?.limits as Record<string, unknown> | null)?.contactsMonthly;
