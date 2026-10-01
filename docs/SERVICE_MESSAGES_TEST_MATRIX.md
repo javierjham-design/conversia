@@ -22,6 +22,32 @@ Casos verificados por etapa. Las etapas E3–E5 agregan sus filas.
 | 14 | N2 último intento | fallo transitorio en el último intento | FAILED + refund si era plantilla | ✅ código |
 | 15 | N3 escalación por el gate | plantilla HSM de escalación | pasa por `chargeTemplateSend` (bolsa/fusible); bloqueo → no envía + `template.blocked` | ✅ código |
 
+## E4 — Una sola respuesta por turno
+
+| # | Caso | Entrada | Esperado | Estado |
+|---|------|---------|----------|--------|
+| 16 | Regla no desactivable | cualquier agente de cualquier tenant | el CORE_SCOPE_PREAMBLE antepone la regla 6 "una sola respuesta por turno" | ✅ código |
+| 17 | Turno normal | el agente responde | 1 message TEXT del agente | ✅ invariante (orquestador → 1 reply; punto único de creación) |
+| 18 | Transferencia entre agentes | depth 0 → depth 1 | 2 messages (uno por agente): el tope aplica por invocación | ✅ por diseño (depth) |
+| 19 | Agente que produjera 4 textos en un turno | multi-texto (hipotético futuro) | sale UNO solo (fusión con `mergeAgentTextParts`); cinturón `console.warn` si se excede | ✅ test helper + guarda |
+| 20 | Adjunto / plantilla | IMAGE/DOCUMENT/TEMPLATE | exentos de fusión (message propio) | ✅ por diseño |
+
+### Métrica bloque 4 — mensajes salientes del bot por conversación
+
+Promedio de mensajes del bot por conversación (30 días). **ANTES**: medir el día del deploy; **DESPUÉS**: a los 7 días con la misma consulta.
+
+```sql
+SELECT ROUND(AVG(n), 2) FROM (
+  SELECT COUNT(*) n FROM messages
+  WHERE direction = 'OUTBOUND' AND author_type = 'AGENT'
+    AND type NOT IN ('TEMPLATE', 'SYSTEM', 'NOTE') AND visibility = 'PUBLIC'
+    AND created_at >= now() - interval '30 days'
+  GROUP BY conversation_id
+) x;
+```
+
+- **ANTES (valor):** _pendiente — requiere acceso de solo lectura a prod (OK-1)._ Se espera ≈ 1,0 (el invariante ya se cumplía; esta etapa lo consolida).
+
 **Prueba de humo local** (requiere worker + Postgres + Redis arriba):
 
 ```

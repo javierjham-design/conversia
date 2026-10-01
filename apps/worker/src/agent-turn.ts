@@ -13,6 +13,7 @@ import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/data
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { recordServiceSend } from "./service-metering";
+import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
@@ -521,7 +522,13 @@ export async function runAgentTurn(opts: {
     }
   }
 
-  // 4. Persistir trazabilidad + respuesta
+  // 4. Persistir trazabilidad + respuesta.
+  // Guarda E4 (una respuesta por turno): tope configurable por invocación de turno.
+  // La transferencia entre agentes es OTRA invocación (depth 1), así que no se ve
+  // afectada. Hoy el orquestador devuelve UN reply y aquí se crea UN message; el
+  // contador es el cinturón que delata cualquier 2.º message del agente en el futuro.
+  const maxAgentMessagesPerTurn = await readMaxAgentMessagesPerTurn();
+  let agentTextCreated = 0;
   const persisted = await withTenant(organizationId, async (tx) => {
     const aiRequest = await tx.aiRequest.create({
       data: {
@@ -550,6 +557,9 @@ export async function runAgentTurn(opts: {
     });
 
     if (!result.reply) return null;
+    // ÚNICO punto de creación del message de texto del agente (una respuesta por
+    // turno, E4). Un texto adicional del agente en el mismo turno debe FUSIONARSE al
+    // body con mergeAgentTextParts (ver agent-turn-guard.ts), nunca crear un 2.º message.
     const message = await tx.message.create({
       data: {
         organizationId,
@@ -565,6 +575,7 @@ export async function runAgentTurn(opts: {
         payload: { toolEvents: result.toolEvents as object[] },
       },
     });
+    agentTextCreated++;
     await tx.conversation.update({
       where: { id: conversationId },
       data: {
@@ -575,6 +586,14 @@ export async function runAgentTurn(opts: {
     });
     return message;
   });
+
+  // Cinturón E4: si alguna vez se creara más de un message de texto del agente en el
+  // turno (hoy imposible: punto único), delátalo en vez de gastar envíos en silencio.
+  if (agentTextCreated > maxAgentMessagesPerTurn) {
+    console.warn(
+      `⚠ agent-turn: ${agentTextCreated} mensajes del agente en un turno supera el tope ${maxAgentMessagesPerTurn} (${conversationId}) — deberían fusionarse en uno`,
+    );
+  }
 
   // Bandeja en vivo: la respuesta del agente aparece al instante en el panel.
   if (persisted) {
