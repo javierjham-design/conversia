@@ -2,7 +2,8 @@ import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
 import { computeWhatsappCostUsd } from "@conversia/agents";
 import { geoFromPhone } from "./phone-geo";
-import { getWhatsappRatesOverride } from "./cost-settings";
+import { getWhatsappRatesOverride, getWhatsappRateSchedule } from "./cost-settings";
+import { refundForMessage, normalizeCategory } from "./wallet";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
 import { transcribeWhatsappAudio } from "./audio";
@@ -177,11 +178,23 @@ export async function processInbound(job: InboundJob): Promise<void> {
       ).catch(() => undefined);
     }
 
-    // Costo que cobra Meta por el mensaje (modelo per-message). Meta manda el
-    // objeto `pricing` en el estado; registramos UN usage_event por mensaje
-    // facturable, con la categoría y el país para poder recalcular si cambian
-    // las tarifas. Dedupe por externalId.
-    if (status.pricing?.billable && status.pricing.category) {
+    // W-2 asíncrono: si el mensaje que REBOTÓ era una PLANTILLA, devuelve la bolsa.
+    // Es el caso que hoy se escapa: el fallo llega por webhook, no en el envío.
+    // refundForMessage es idempotente (un segundo webhook failed no devuelve dos veces).
+    if (failed) {
+      const msg = await withTenant(tenant.organizationId, (tx) =>
+        tx.message.findFirst({ where: { externalId: status.externalId }, select: { id: true, type: true } }),
+      ).catch(() => null);
+      if (msg?.type === "TEMPLATE") await refundForMessage(tenant.organizationId, msg.id).catch(() => undefined);
+    }
+
+    // Costo que cobra Meta por el mensaje (modelo per-message). Meta manda el objeto
+    // `pricing` en el estado; registramos UN usage_event SIEMPRE que venga la categoría
+    // (aunque billable sea false — así medimos el volumen real de servicio con costo 0
+    // antes del cobro), con el `billable` tal como llegó. Dedupe por externalId. El
+    // usage_event es la VERDAD de Meta; el asiento service_send del ledger es la
+    // ESTIMACIÓN al enviar: NUNCA se suman, se concilian por externalId (ver service-metering.ts).
+    if (status.pricing?.category) {
       await withTenant(tenant.organizationId, async (tx) => {
         const already = await tx.usageEvent.findFirst({
           where: { type: "whatsapp_message", meta: { path: ["externalId"], equals: status.externalId } },
@@ -190,7 +203,9 @@ export async function processInbound(job: InboundJob): Promise<void> {
         if (already) return;
         const country = geoFromPhone(String(status.recipientId ?? "")).country;
         const overrides = await getWhatsappRatesOverride();
-        const costUsd = computeWhatsappCostUsd(status.pricing!.category, country, overrides);
+        const schedule = await getWhatsappRateSchedule();
+        // Categoría CRUDA: computeWhatsappCostUsd mapea las desconocidas a 0 solo.
+        const costUsd = computeWhatsappCostUsd(status.pricing!.category, country, overrides, { at: new Date(), schedule });
         await tx.usageEvent.create({
           data: {
             organizationId: tenant.organizationId,
@@ -200,12 +215,30 @@ export async function processInbound(job: InboundJob): Promise<void> {
             meta: {
               externalId: status.externalId,
               category: status.pricing!.category,
+              billable: status.pricing!.billable ?? null,
               pricingModel: status.pricing!.pricingModel ?? null,
               country,
               conversationId: status.pricing!.conversationId ?? null,
             },
           },
         });
+        // Una etiqueta de categoría inesperada NO puede dejar el costo en 0 en silencio:
+        // avisa (consola + Salud del Super Admin) para revisar el mapeo contra Meta.
+        if (typeof normalizeCategory(status.pricing!.category) === "object") {
+          console.warn(
+            `⚠ webhook: categoría de costo no reconocida "${status.pricing!.category}" (org ${tenant.organizationId}, ext ${status.externalId}, billable ${status.pricing!.billable}) — costo quedó en 0`,
+          );
+          await tx.integrationEvent.create({
+            data: {
+              organizationId: tenant.organizationId,
+              provider: "whatsapp",
+              type: "pricing.unknown_category",
+              status: "warning",
+              message: `Categoría de costo no reconocida: "${status.pricing!.category}" (billable ${status.pricing!.billable})`,
+              payload: { externalId: status.externalId, category: status.pricing!.category, billable: status.pricing!.billable ?? null },
+            },
+          });
+        }
       });
     }
   }

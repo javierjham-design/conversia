@@ -12,6 +12,7 @@ import { getEnv } from "@conversia/config";
 import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
+import { recordServiceSend } from "./service-metering";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
@@ -625,6 +626,8 @@ export async function runAgentTurn(opts: {
         agentSlug: agent.slug,
         text: (persisted.body ?? "").slice(0, 200),
       });
+      // Medición del mensaje de servicio (E2): rastro + costo estimado. No frena nada.
+      await recordServiceSend(organizationId, persisted.id, conversationId, conversation.contact.phone, auth.phoneNumberId);
     } else {
       if (sendErr instanceof ChannelAuthError) {
         await markChannelAuthError(organizationId, auth.channelConnectionId, sendErr.message);

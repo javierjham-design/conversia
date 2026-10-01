@@ -70,7 +70,7 @@ async function main() {
   );
   const outboundWorker = new Worker<OutboundJob>(
     QUEUE_NAMES.outbound,
-    async (job) => processOutbound(job.data),
+    async (job) => processOutbound(job.data, { attemptsMade: job.attemptsMade, maxAttempts: job.opts.attempts ?? 1 }),
     {
       connection,
       concurrency: env.WORKER_CONCURRENCY,

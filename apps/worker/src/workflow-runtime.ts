@@ -22,6 +22,8 @@ import { ga4ClientId, getSyncQueue } from "./ga4";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend } from "./messaging-guard";
+import { refundForMessage } from "./wallet";
+import { recordServiceSend } from "./service-metering";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
 import { enqueueNotification } from "./notifications/queue";
 import { planAppointmentReminder, type BusinessHoursConfig } from "./appointment-reminders";
@@ -105,6 +107,8 @@ function makeDeps(): EngineDeps {
             data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() },
           }),
         );
+        // Medición del mensaje de servicio (E2): el nodo send_text es respuesta en ventana.
+        await recordServiceSend(ctx.organizationId, data.message.id, ctx.conversationId!, data.phone, auth.phoneNumberId);
       } catch (err) {
         await withTenant(ctx.organizationId, (tx) =>
           tx.message.update({
@@ -482,6 +486,10 @@ function makeDeps(): EngineDeps {
         await withTenant(ctx.organizationId, (tx) =>
           tx.message.update({ where: { id: message.id }, data: { status: "FAILED", error: failText } }),
         );
+        // W-2: el motor regenera el messageId en cada reintento (este message NO se
+        // reintenta), así que devolvemos la bolsa en TODAS las salidas del catch —
+        // los return de Auth/Config Y antes del throw. refundForMessage es idempotente.
+        await refundForMessage(ctx.organizationId, message.id).catch(() => undefined);
         if (err instanceof ChannelAuthError) {
           await markChannelAuthError(ctx.organizationId, auth.channelConnectionId, err.message);
           return;

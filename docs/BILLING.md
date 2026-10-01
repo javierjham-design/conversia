@@ -187,6 +187,34 @@ JSON de ejemplo (Chile, servicio USD 0,0200 desde el 1-oct-2026):
 > **La siembra en producción es un paso operativo del dueño** (no la hace el código).
 > E1 solo construye el cimiento; la medición/cobro real entra en E2+.
 
+### Fuentes de costo — nunca se suman (regla del §1 de COSTOS)
+
+El COGS/margen real de WhatsApp tiene **dos** registros con roles distintos, y **jamás
+se suman** — se concilian:
+
+| Fuente | Qué es | Cuándo se escribe | Rol |
+|---|---|---|---|
+| `wallet_ledger` reason `service_send` | ESTIMACIÓN al enviar (`costUsd`, `delta 0`) | al enviar el mensaje de servicio (E2) | control/estimación en vivo |
+| `usage_events` type `whatsapp_message` | VERDAD de Meta (`costUsd`, `meta.billable`, `meta.category`) | al llegar el webhook de status | COGS/margen real |
+
+- Las plantillas debitan la bolsa (`send_debit`, `delta<0`); el servicio NO toca la bolsa
+  (`delta 0`) — su control de volumen es por conversaciones (E3) y, para marcas Conversia,
+  por créditos (F5-B).
+- **Conciliación por mensaje:** `wallet_ledger.refId == message.id` y
+  `usage_events.meta.externalId == message.externalId`. Se unen por `message.id` ↔
+  `external_id`. Consulta de conciliación:
+
+```sql
+SELECT m.id, m.external_id,
+       wl.cost_usd  AS estimado,      -- wallet_ledger service_send (al enviar)
+       ue.cost_usd  AS real_meta,     -- usage_events whatsapp_message (webhook)
+       ue.meta->>'billable' AS billable
+FROM messages m
+LEFT JOIN wallet_ledger wl ON wl.ref_type = 'message' AND wl.ref_id = m.id AND wl.reason = 'service_send'
+LEFT JOIN usage_events ue ON ue.type = 'whatsapp_message' AND ue.meta->>'externalId' = m.external_id
+WHERE m.organization_id = $1 AND m.direction = 'OUTBOUND';
+```
+
 ### Checklist de verificación del rate card — HACER AHORA (no "cuando Meta publique")
 
 El cobro **ya rige** (2026-10-01). Verificar contra datos reales **de inmediato**, porque

@@ -19,6 +19,7 @@ import { getChannelProvider } from "./channel-providers";
 import { dispatchEvent } from "./workflow-runtime";
 import { getSchedulingProviderFor } from "./tool-services";
 import { enqueueEscalationEmail } from "./mailer";
+import { recordServiceSend } from "./service-metering";
 
 export type ApptResponse = "confirm" | "reschedule";
 
@@ -50,6 +51,8 @@ async function sendReplyText(orgId: string, conversationId: string, text: string
   try {
     const sent = await getChannelProvider().send(auth.phoneNumberId, { to: data.phone, type: "text", text }, { accessToken: auth.accessToken });
     await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() } }));
+    // Medición del mensaje de servicio (E2): el acuse de recordatorio es respuesta en ventana.
+    await recordServiceSend(orgId, data.msgId, conversationId, data.phone, auth.phoneNumberId);
   } catch (err) {
     await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "FAILED", error: (err as Error).message.slice(0, 500) } }));
     if (err instanceof ChannelAuthError) await markChannelAuthError(orgId, auth.channelConnectionId, err.message);
