@@ -1,3 +1,8 @@
+// @deprecated (F2): el origen de verdad de los paquetes por rubro es la tabla
+// `vertical_templates` (BD), instalada por el motor de paquetes verticales. Este
+// archivo queda para la página de personalización actual hasta migrarla; no agregar
+// rubros nuevos aquí.
+//
 // Plantillas de agente GENÉRICAS (multi-rubro). No contienen datos de ningún
 // tenant en particular: usan variables {{organization.name}}, {{agent.name}},
 // {{contact.firstName}} que se resuelven en runtime. Al aplicar una plantilla se

@@ -1,3 +1,7 @@
+// @deprecated (F2): el origen de verdad de los flujos por rubro es `vertical_templates`
+// (BD), instalado por el motor de paquetes verticales. Este archivo queda hasta migrar
+// la personalización actual; no agregar rubros nuevos aquí.
+//
 // Plantillas de workflow por RUBRO. Data estática, sin datos de ningún tenant.
 // Cada una es un WorkflowDefinition válido para el motor v0 (triggers cableados +
 // nodos soportados, con posiciones para el canvas). Se crean como BORRADOR listo

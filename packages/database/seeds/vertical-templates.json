@@ -1,0 +1,131 @@
+[
+  {
+    "key": "generico",
+    "version": 1,
+    "name": "General / otro — v1",
+    "definition": {
+      "industry": "generico",
+      "businessHours": { "mon": ["09:00-18:00"], "tue": ["09:00-18:00"], "wed": ["09:00-18:00"], "thu": ["09:00-18:00"], "fri": ["09:00-18:00"], "sat": [], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "ganado", "name": "Ganado", "category": "won", "order": 2 },
+        { "code": "perdido", "name": "Perdido", "category": "lost", "order": 3 }
+      ],
+      "services": [
+        { "code": "consulta", "name": "Consulta", "category": "general", "durationMin": 30, "price": 0 }
+      ],
+      "tags": [
+        { "name": "Primera vez", "color": "#2563eb" },
+        { "name": "Urgente", "color": "#dc2626" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción",
+          "description": "Da la bienvenida, responde dudas frecuentes y deriva o agenda.",
+          "kind": "recepcion",
+          "systemPrompt": "Atiendes por WhatsApp de forma cercana, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Responde SOLO con información de tus herramientas; si no la tienes, reconócelo y ofrece que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida",
+          "description": "Saluda al primer mensaje del contacto.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! Gracias por escribir 🙌 ¿En qué te puedo ayudar?" } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ]
+    }
+  },
+  {
+    "key": "dental",
+    "version": 1,
+    "name": "Dental / odontología — v1",
+    "definition": {
+      "industry": "dental",
+      "businessHours": { "mon": ["09:00-13:00", "15:00-19:00"], "tue": ["09:00-13:00", "15:00-19:00"], "wed": ["09:00-13:00", "15:00-19:00"], "thu": ["09:00-13:00", "15:00-19:00"], "fri": ["09:00-14:00"], "sat": [], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo paciente", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "agendado", "name": "Cita agendada", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
+      ],
+      "services": [
+        { "code": "consulta", "name": "Consulta / evaluación", "category": "diagnostico", "durationMin": 30, "price": 0 },
+        { "code": "limpieza", "name": "Limpieza dental", "category": "preventiva", "durationMin": 45, "price": 35000 },
+        { "code": "ortodoncia", "name": "Evaluación de ortodoncia", "category": "ortodoncia", "durationMin": 40, "price": 0 }
+      ],
+      "tags": [
+        { "name": "Primera vez", "color": "#2563eb" },
+        { "name": "Urgencia", "color": "#dc2626" },
+        { "name": "Ortodoncia", "color": "#7c3aed" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción dental",
+          "description": "Atiende pacientes, responde dudas y agenda citas.",
+          "kind": "recepcion",
+          "systemPrompt": "Eres la recepción de una clínica dental. Atiendes por WhatsApp de forma cálida, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas citas, respondes dudas de tratamientos y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como paciente.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida paciente",
+          "description": "Saluda y ofrece agendar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 😊 Gracias por escribir a la clínica. ¿Te gustaría agendar una evaluación o tienes alguna consulta?" } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ]
+    }
+  },
+  {
+    "key": "barberia",
+    "version": 1,
+    "name": "Barbería / peluquería — v1",
+    "definition": {
+      "industry": "barberia",
+      "businessHours": { "mon": ["10:00-20:00"], "tue": ["10:00-20:00"], "wed": ["10:00-20:00"], "thu": ["10:00-20:00"], "fri": ["10:00-21:00"], "sat": ["10:00-18:00"], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo", "category": "open", "order": 0 },
+        { "code": "agendado", "name": "Reserva agendada", "category": "open", "order": 1 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 2 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 3 }
+      ],
+      "services": [
+        { "code": "corte", "name": "Corte de pelo", "category": "corte", "durationMin": 30, "price": 10000 },
+        { "code": "barba", "name": "Perfilado de barba", "category": "barba", "durationMin": 20, "price": 7000 },
+        { "code": "corte-barba", "name": "Corte + barba", "category": "combo", "durationMin": 45, "price": 15000 }
+      ],
+      "tags": [
+        { "name": "Cliente frecuente", "color": "#16a34a" },
+        { "name": "Primera vez", "color": "#2563eb" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción barbería",
+          "description": "Agenda reservas y responde dudas de servicios y precios.",
+          "kind": "recepcion",
+          "systemPrompt": "Eres la recepción de una barbería. Atiendes por WhatsApp con onda, cercano y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas reservas, informas servicios y precios SOLO con la info de tus herramientas; si no la tienes, lo reconoces y ofreces que alguien del equipo siga. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como cliente.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida cliente",
+          "description": "Saluda y ofrece reservar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Buena! 💈 Gracias por escribir. ¿Quieres reservar una hora? Dime qué servicio y te paso los horarios." } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ]
+    }
+  }
+]

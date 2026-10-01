@@ -165,6 +165,20 @@ async function main() {
     check("INSERT de un tag con organization_id=B desde A → rechazado por RLS", true);
   }
 
+  // 4b. vertical_templates (catálogo global, F2): las filas globales (org_id NULL) son
+  // invisibles e inmutables para el rol de app; solo el cliente admin las lee/instala.
+  console.log("\n4b. vertical_templates (catálogo global) invisible/inmutable para el rol de app:");
+  const vtVisible = await asTenant(orgA, (tx) => tx.verticalTemplate.findMany().catch(() => []));
+  check("vertical_templates globales invisibles para el rol de app → 0 filas", vtVisible.length === 0, `— vio ${vtVisible.length}`);
+  try {
+    await asTenant(orgA, (tx) =>
+      tx.verticalTemplate.create({ data: { key: `x-iso-${Date.now()}`, version: 1, name: "x", definition: {} } }),
+    );
+    check("INSERT en vertical_templates (global) desde el rol de app → rechazado", false, "— ¡se permitió!");
+  } catch {
+    check("INSERT en vertical_templates (global) desde el rol de app → rechazado por RLS", true);
+  }
+
   // 5. Sin contexto de tenant no se ve nada -------------------------------
   console.log("\n5. Sin app.org_id (contexto vacío) no se lee ningún dato:");
   const orphanAgents = await withoutTenant((tx) => tx.agent.findMany());
