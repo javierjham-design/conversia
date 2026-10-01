@@ -30,7 +30,7 @@ export class AuthService {
    * estados de lead por defecto. Corre con la conexión admin (crear una
    * organización es una operación de plataforma, fuera del RLS del tenant).
    */
-  async register(input: { email: string; password: string; name: string; organizationName: string }) {
+  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string }) {
     const db = this.prisma.admin;
     const existing = await db.user.findUnique({ where: { email: input.email } });
     // Anti-enumeración (ASVS 2.2 / OWASP): mensaje genérico + rate limit en el
@@ -63,10 +63,17 @@ export class AuthService {
     const freePlan = await db.plan.findUnique({ where: { code: "free" } });
 
     const result = await db.$transaction(async (tx) => {
+      // Marca derivada server-side (nunca del body); país del registro → moneda (CL=CLP,
+      // resto=USD, misma estrategia que facturación). Default: tubot/CL/CLP = como hoy.
+      const country = (input.country ?? "CL").toUpperCase();
+      const currency = country === "CL" ? "CLP" : "USD";
       const org = await tx.organization.create({
         data: {
           name: input.organizationName,
           slug,
+          brand: input.brand ?? "tubot",
+          country,
+          currency,
           planId: freePlan?.id ?? null,
           settings: { trial, validUntil: endsAt } as object,
         },

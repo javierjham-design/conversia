@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -338,6 +338,7 @@ export class BillingController {
     // Lemon Squeezy: la variante anual es otra (el precio lo fija LS server-side).
     const feats = (plan.features as any) ?? {};
     const variantId = useYearly ? (feats.lsVariantIdYearly ?? feats.lsVariantId) : feats.lsVariantId;
+    const brand = brandOf(org);
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: plan.code,
@@ -346,8 +347,9 @@ export class BillingController {
       email: user?.email,
       interval,
       variantId: variantId ? String(variantId) : undefined,
-      successUrl: `${getEnv().WEB_URL}/billing`,
-      cancelUrl: `${getEnv().WEB_URL}/billing`,
+      brandSubjectPrefix: brand.paymentSubjectPrefix,
+      successUrl: `${brand.webUrl}/billing`,
+      cancelUrl: `${brand.webUrl}/billing`,
     });
     // Cuenta la redención sólo cuando el checkout se creó bien (no en validaciones fallidas).
     if (applied.coupon) {
@@ -376,6 +378,7 @@ export class BillingController {
     const settings = await this.paymentSettings.get();
     const preferred = (org?.settings as any)?.paymentProvider as string | undefined;
     const provider = createPaymentProvider(settings, currency, preferred);
+    const brand = brandOf(org);
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: `pkg:${pkg.code}`, // el webhook detecta el prefijo y acredita el paquete
@@ -383,8 +386,9 @@ export class BillingController {
       currency,
       email: user?.email,
       interval: "monthly",
-      successUrl: `${getEnv().WEB_URL}/settings/plan`,
-      cancelUrl: `${getEnv().WEB_URL}/settings/plan`,
+      brandSubjectPrefix: brand.paymentSubjectPrefix,
+      successUrl: `${brand.webUrl}/settings/plan`,
+      cancelUrl: `${brand.webUrl}/settings/plan`,
     });
     await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.buy_package", entityType: "package", entityId: pkg.code, after: { amount, provider: session.provider } } }),

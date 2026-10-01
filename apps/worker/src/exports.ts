@@ -1,4 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
+import { brandOf } from "@conversia/config";
 import { filterRecipientsByPref, getEmailQueue } from "./mailer.js";
 
 /**
@@ -113,12 +114,14 @@ export async function processExport(organizationId: string, payload: { exportId:
         if (member) {
           const to = await filterRecipientsByPref(organizationId, [member.user.email], "dataJobs");
           if (to.length) {
+            const orgRow = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+            const webUrl = brandOf(orgRow).webUrl;
             await getEmailQueue().add("export-done", {
               organizationId,
               kind: "alert",
               to,
               subject: "Tu export de datos está listo",
-              html: `<p>El export de <b>${job.type}</b> (${rows} filas) ya está disponible en <a href="https://www.tubot.cl/settings/export">Configuración → Exportar datos</a>. Expira en 7 días.</p>`,
+              html: `<p>El export de <b>${job.type}</b> (${rows} filas) ya está disponible en <a href="${webUrl}/settings/export">Configuración → Exportar datos</a>. Expira en 7 días.</p>`,
             });
           }
         }
