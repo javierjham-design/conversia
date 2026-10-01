@@ -42,6 +42,7 @@ export interface TrialInput {
   hasPaid: boolean; // ¿alguna vez pagó? (nunca se purga ni deshabilita a quien pagó)
   trialDays?: number;
   purgeGraceDays?: number;
+  brand?: string; // F5: las orgs de Conversia NO usan el trial 7+7 (nunca se purgan)
 }
 
 export interface TrialDecision {
@@ -69,6 +70,12 @@ export function planTrialAction(input: TrialInput): TrialDecision {
   const endsAt = input.trial?.endsAt ? new Date(input.trial.endsAt) : new Date(started.getTime() + trialDays * DAY_MS);
   const purgeAt = input.trial?.purgeAt ? new Date(input.trial.purgeAt) : new Date(endsAt.getTime() + graceDays * DAY_MS);
   const base = { endsAt, purgeAt };
+
+  // Conversia (F5/D5) NO usa el trial 7+7: su ciclo arranca al ENTREGAR (setup pagado →
+  // implementando → entregado). NUNCA se deshabilita ni purga por "prueba vencida".
+  if ((input.brand ?? "tubot").toLowerCase() === "conversia") {
+    return { action: "none", ...base };
+  }
 
   // Pagó, cancelada, o ya convertida → fuera del ciclo de prueba.
   if (input.hasPaid || input.orgStatus === "CANCELLED" || input.trial?.state === "converted") {
@@ -200,7 +207,7 @@ export function startTrialLifecycle(): () => void {
       // con settings.trial.state=disabled). No tocamos ACTIVE/CANCELLED.
       const orgs = await prisma.organization.findMany({
         where: { status: { in: ["TRIAL", "SUSPENDED"] }, deletedAt: null },
-        select: { id: true, name: true, status: true, settings: true, createdAt: true },
+        select: { id: true, name: true, status: true, settings: true, createdAt: true, brand: true },
       });
       // Plan Free (para auto-sanar cuentas sin plan/vigencia). Una vez por tick.
       const freePlan = await prisma.plan.findUnique({ where: { code: "free" }, select: { id: true } });
@@ -214,7 +221,7 @@ export function startTrialLifecycle(): () => void {
           settings = await ensureFreePlanAndVigencia(prisma, withTenant, freePlan?.id ?? null, org, settings, trial);
         }
         const hasPaid = await hasEverPaid(prisma, org.id);
-        const decision = planTrialAction({ now, createdAt: org.createdAt, orgStatus: org.status, trial, hasPaid });
+        const decision = planTrialAction({ now, createdAt: org.createdAt, orgStatus: org.status, trial, hasPaid, brand: org.brand });
 
         if (decision.action === "purge") {
           await executeTrialPurge(

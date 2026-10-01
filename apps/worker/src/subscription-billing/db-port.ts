@@ -19,15 +19,20 @@ function billablesTotal(settings: unknown): number {
 }
 
 /** Construye un EngineSub (monto = base de la cadencia + facturables) desde la BD. */
-async function buildEngineSub(admin: ReturnType<typeof getAdminPrisma>, s: { id: string; organizationId: string; status: string; interval: string; periodEnd: Date | null; nextChargeAt: Date | null; pastDueSince: Date | null; retriesDone: number; cancelAtPeriodEnd: boolean; providerCustomerRef: string | null; planId: string }): Promise<EngineSub | null> {
+async function buildEngineSub(admin: ReturnType<typeof getAdminPrisma>, s: { id: string; organizationId: string; status: string; interval: string; periodEnd: Date | null; nextChargeAt: Date | null; pastDueSince: Date | null; retriesDone: number; cancelAtPeriodEnd: boolean; providerCustomerRef: string | null; planId: string; lockedPriceClp: unknown; lockedPriceUsd: unknown }): Promise<EngineSub | null> {
   const plan = await admin.plan.findUnique({ where: { id: s.planId }, select: { name: true, priceClp: true, priceUsd: true, priceClpYearly: true, priceUsdYearly: true } });
   const org = await admin.organization.findUnique({ where: { id: s.organizationId }, select: { currency: true, settings: true } });
   if (!plan || !org) return null;
   const currency = org.currency ?? "CLP";
   const yearly = s.interval === "yearly";
+  // Grandfathering (F5/H12): si la suscripción tiene precio SELLADO, manda sobre el
+  // precio actual del plan para la cadencia mensual (subir el "precio de lanzamiento"
+  // no re-precia a los activos). El anual usa el precio vigente del plan (no se sella).
+  const lockedClp = s.lockedPriceClp != null ? Number(s.lockedPriceClp) : null;
+  const lockedUsd = s.lockedPriceUsd != null ? Number(s.lockedPriceUsd) : null;
   const base = currency === "CLP"
-    ? Number(yearly && plan.priceClpYearly != null ? plan.priceClpYearly : plan.priceClp)
-    : Number(yearly && plan.priceUsdYearly != null ? plan.priceUsdYearly : plan.priceUsd);
+    ? (yearly && plan.priceClpYearly != null ? Number(plan.priceClpYearly) : lockedClp ?? Number(plan.priceClp))
+    : (yearly && plan.priceUsdYearly != null ? Number(plan.priceUsdYearly) : lockedUsd ?? Number(plan.priceUsd));
   return {
     id: s.id,
     organizationId: s.organizationId,
@@ -45,7 +50,7 @@ async function buildEngineSub(admin: ReturnType<typeof getAdminPrisma>, s: { id:
   };
 }
 
-const SUB_SELECT = { id: true, organizationId: true, status: true, interval: true, periodEnd: true, nextChargeAt: true, pastDueSince: true, retriesDone: true, cancelAtPeriodEnd: true, providerCustomerRef: true, planId: true } as const;
+const SUB_SELECT = { id: true, organizationId: true, status: true, interval: true, periodEnd: true, nextChargeAt: true, pastDueSince: true, retriesDone: true, cancelAtPeriodEnd: true, providerCustomerRef: true, planId: true, lockedPriceClp: true, lockedPriceUsd: true } as const;
 
 export function createDbBillingPort(): BillingPort {
   const admin = getAdminPrisma();

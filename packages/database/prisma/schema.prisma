@@ -250,10 +250,14 @@ model Plan {
   interval  String   @default("monthly") // default de cadencia (legacy; la real se elige al suscribir)
   trialDays Int      @default(0) @map("trial_days")
   isPublic  Boolean  @default(true) @map("is_public")
+  // Marca comercial del plan (F5): "tubot" (actual) o "conversia". El catálogo se filtra
+  // por la marca del tenant que consulta (brandOf) — un comercial no cotiza planes de otra marca.
+  brand     String   @default("tubot")
   order     Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([brand])
   @@map("plans")
 }
 
@@ -482,6 +486,11 @@ model Subscription {
   pastDueSince            DateTime? @map("past_due_since") // inicio de la ventana de 48 h (primer fallo)
   retriesDone             Int       @default(0) @map("retries_done") // reintentos hechos tras el fallo inicial
   cancelAtPeriodEnd       Boolean   @default(false) @map("cancel_at_period_end") // cancelada: suspende al fin del período
+  // Precio SELLADO al contratar/cambiar de plan (grandfathering, F5): si existe, manda
+  // sobre plan.priceClp/Usd — subir el "precio de lanzamiento" del plan NO re-precia a
+  // las suscripciones activas. Lo usan buildEngineSub y el link de pago recurrente.
+  lockedPriceClp          Decimal?  @map("locked_price_clp") @db.Decimal(12, 0)
+  lockedPriceUsd          Decimal?  @map("locked_price_usd") @db.Decimal(10, 2)
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @updatedAt @map("updated_at")
 

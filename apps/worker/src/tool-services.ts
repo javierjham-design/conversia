@@ -770,10 +770,15 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async listPlans() {
-      // Catálogo GLOBAL de planes (tabla plans, sin organización) — precios vigentes
-      // que fija el Super Admin. Lectura admin: es catálogo público, no dato de tenant.
+      // Catálogo de planes POR MARCA del tenant (F5/H9). El bot cotiza SOLO su marca:
+      // una org conversia ve los planes conversia_* (que son isPublic:false en la web
+      // TuBot, pero son el catálogo de su bot comercial); una org tubot ve los públicos
+      // de tubot, exactamente como hoy. Lectura admin (catálogo, no dato de tenant).
       const admin = getAdminPrisma();
-      const plans = await admin.plan.findMany({ where: { isPublic: true, active: true }, orderBy: { order: "asc" } });
+      const org = await admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } });
+      const brand = (org?.brand ?? "tubot").toLowerCase();
+      const where = brand === "conversia" ? { brand: "conversia", active: true } : { brand: "tubot", isPublic: true, active: true };
+      const plans = await admin.plan.findMany({ where, orderBy: { order: "asc" } });
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
         const lim = (p.limits as Record<string, unknown> | null) ?? {};

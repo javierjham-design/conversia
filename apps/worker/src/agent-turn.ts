@@ -15,6 +15,7 @@ import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./ch
 import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { chargeServiceSend } from "./messaging-guard";
+import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
@@ -617,7 +618,7 @@ export async function runAgentTurn(opts: {
     // Gate de servicio (E3): cuenta la conversación en su período y aplica cupo/topes/
     // fusible ANTES de enviar. Si bloquea (tope duro o fusible), el mensaje queda FAILED
     // y NO se llama a Graph ni se mide service_send.
-    const svcGate = await chargeServiceSend(organizationId, conversationId);
+    const svcGate = await chargeServiceSend(organizationId, conversationId, { messageId: persisted.id, phoneNumberId: auth.phoneNumberId });
     if (svcGate.blocked) {
       await withTenant(organizationId, (tx) =>
         tx.message.update({ where: { id: persisted.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
@@ -669,6 +670,9 @@ export async function runAgentTurn(opts: {
         }),
       );
       console.error(`✖ Envío WhatsApp falló tras ${MAX_SEND_ATTEMPTS} intentos (${conversationId}):`, (sendErr as Error).message);
+      // W-2 (F5-B): si el plan debitó un crédito de servicio por este mensaje, devuélvelo
+      // (idempotente; no-op si no hubo débito, p. ej. TuBot).
+      await refundForMessage(organizationId, persisted.id).catch(() => undefined);
     }
     } // fin del envío (gate de servicio no bloqueó)
   }
