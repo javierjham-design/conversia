@@ -10,6 +10,10 @@ $17,66 CLP · marketing $78,49 CLP · autenticación $17,66 CLP · servicio (24 
 GRATIS**. Marketing cuesta **4,4×** una utilidad — es la variable que más mueve el
 margen.
 
+> **[Vigente hasta 2026-09-30: desde el 1-oct el servicio se cobra — ver BILLING.md]**
+> El servicio ya NO es gratis; se mide (E2) y se controla por cupo de conversaciones
+> (E3). El resto de este diseño (la bolsa es solo de plantillas) sigue vigente.
+
 ---
 
 ## PARTE 1 — Insumos para tu decisión de pricing
@@ -160,7 +164,7 @@ UPDATE message_wallets
 - **Idempotencia por `messageId`**: el job de outbound es idempotente; si BullMQ
   reintenta un mensaje ya debitado, **no vuelve a descontar** (el `send_debit`
   quedó ligado a ese `messageId` — se comprueba antes de debitar de nuevo).
-- **Servicio (24 h) = gratis**: no toca la bolsa.
+- **Servicio (24 h)**: no toca la bolsa. _[Vigente hasta 2026-09-30 era gratis; desde el 1-oct se cobra y se controla por cupo de conversaciones (E3) — ver BILLING.md.]_
 - Convive con el **fusible global** (se queda como red de última instancia) y
   **reemplaza** al tope-por-tenant puente (la bolsa pasa a ser el límite duro).
 

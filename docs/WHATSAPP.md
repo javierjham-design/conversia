@@ -17,7 +17,7 @@
 
 ## Reglas de plataforma a respetar (estado de conocimiento — validar contra docs de Meta al conectar)
 
-- **Ventana de 24 h**: mensajes libres solo dentro de la ventana de servicio; fuera de ella, solo plantillas aprobadas. *Por implementar: chequeo de ventana antes de enviar + fallback a plantilla.*
+- **Ventana de 24 h**: mensajes libres solo dentro de la ventana de servicio; fuera de ella, solo plantillas aprobadas. *Por implementar: chequeo de ventana antes de enviar + fallback a plantilla.* _[Vigente hasta 2026-09-30 esos mensajes de servicio eran gratis; desde el 1-oct Meta los cobra — se controlan por cupo de conversaciones (E3), ver BILLING.md.]_
 - **Precios**: Meta cobra por plantilla/mensaje según categoría y país (cambió en jul-2025; conversaciones de servicio gratuitas). **Por validar** tarifas exactas CL al facturar.
 - **Plantillas**: creación/aprobación por WABA; tabla `whatsapp_templates` lista para sincronización (pendiente job de sync).
 - Límites de envío por tier del número; opt-out (`do_not_contact`) se respeta en workflows.

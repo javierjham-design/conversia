@@ -49,7 +49,7 @@ export function WalletCard() {
         <h3 className="font-semibold text-ink">Bolsa de mensajes de plantilla</h3>
       </div>
       <p className="mb-3 text-xs text-ink-muted">
-        Los mensajes de plantilla (recordatorios, confirmaciones, campañas) descuentan de tu bolsa. Responder dentro de las 24 h no cuesta.
+        Los mensajes de plantilla (recordatorios, confirmaciones, campañas) descuentan de tu bolsa. Desde el 1 de octubre de 2026, WhatsApp también cobra las respuestas dentro de las 24 h: van contra tu cupo mensual de conversaciones, no contra esta bolsa.
       </p>
 
       <div className="mb-1 flex items-baseline justify-between text-sm">

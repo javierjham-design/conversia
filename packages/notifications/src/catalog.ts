@@ -187,13 +187,26 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
   {
     key: "wallet.empty",
     title: "Se agotó tu bolsa de mensajes",
-    body: "Tu bolsa de mensajes de plantilla llegó a 0. Compra un paquete o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h sin costo.",
+    body: "Tu bolsa de mensajes de plantilla llegó a 0. Compra un paquete o sube de plan para reanudar los envíos. Las respuestas dentro de las 24 h no usan esta bolsa: descuentan de tu cupo mensual de conversaciones.",
     audience: ["owner", "tenant_admins"],
     urgency: "critical",
     channels: ["in_app", "web_push", "email"],
     defaultChannels: ["in_app", "email"],
     lockedChannels: ["in_app"], // el aviso de bolsa vacía no se apaga
     link: "/settings/plan",
+  },
+  {
+    // Aviso único a clientes por el cambio de cobro de Meta (E5). hidden: no aparece en
+    // la matriz de preferencias. Se dispara UNA vez por org con scripts/send-oct2026-notice.mjs.
+    key: "announcement.oct2026",
+    title: "Cambio de WhatsApp desde el 1 de octubre",
+    body: "WhatsApp cobra las respuestas dentro de 24 h desde el 1 de octubre. Tu plan ya incluye un cupo mensual de conversaciones y avisos al 80 %. Revisa los detalles en Plan y facturación.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "email"],
+    defaultChannels: ["in_app", "email"],
+    hidden: true,
+    link: "/billing",
   },
   {
     key: "conversations.low",

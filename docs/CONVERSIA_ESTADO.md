@@ -23,7 +23,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | E2 | mergeado | #397 | 2026-10-01 | medición service_send + W-2 (3 fallos) + free tier por número + N2 reintentos + N3 escalación; SIN frenar envíos. OPERATIVO: sembrar whatsappRateSchedule el día del deploy |
 | E3 | en PR | | 2026-10-01 | OK migración DADO + D2=no facturar overage; migración 2 tablas+índice (aplicar prod = runbook del dueño), cupo + contador atómico + gate svc + fusibles svc separados; TAREA 5 (platform) por SQL (sin OK); verify:isolation lo valida CI (sin BD local) |
 | E4 | mergeado | #398 | 2026-10-01 | regla 6 neutra de canal + guarda tope/fusión + prompts TuBot (doc) + plantillas; seed SQL NO regenerado (stale por publicación vía API); métrica "antes" pendiente OK-1 |
-| E5 | pendiente | | | copy veraz + avisos (tras E3) |
+| E5 | en PR | | 2026-10-01 | copy veraz (8 ítems) + borradores de aviso (NO enviados) + evento announcement.oct2026 + script con --confirm; 4 textos admin pendientes OK; SQL bot NO regenerado (stale) |
 | F1 | pendiente | | | backend brand-aware (prereq de F5) |
 | F2 | pendiente | | | motor de paquetes verticales |
 | F4 | pendiente | | | agenda nativa completa |

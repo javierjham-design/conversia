@@ -20,7 +20,9 @@ async function firstTime(key: string): Promise<boolean> {
 /**
  * Bolsa de mensajes prepagada (docs/PREPAID_WALLET_DESIGN.md). Débito ATÓMICO y
  * PREVIO al envío de plantilla, idempotente por messageId. La exposición máxima
- * por cliente = su saldo (lo que ya pagó). Servicio (24 h) no toca la bolsa.
+ * por cliente = su saldo (lo que ya pagó). El servicio (24 h) no toca esta bolsa: se
+ * mide/controla por cupo de conversaciones (E3, ver conversation-quota.ts) — no es
+ * gratis desde el 2026-10-01.
  */
 
 export type WalletCategory = "utility" | "marketing" | "authentication" | "service";
