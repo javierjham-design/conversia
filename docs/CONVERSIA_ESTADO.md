@@ -4,7 +4,7 @@ Decisiones: D1: pendiente · D2: pendiente · D3: pendiente · D4: pendiente · 
 | Etapa | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|
 | PR-0 | en PR | #395 | 2026-10-01 | docs del plan + correcciones H1/H29 a COSTOS + .gitignore |
-| E1 | pendiente | | | |
+| E1 | en PR | | 2026-10-01 | schedule de tarifas por fecha (cimiento); sin tocar flujos de envío ni sembrar BD |
 | E2 | pendiente | | | sembrar schedule el día del deploy |
 | E3 | pendiente | | | requiere OK migración + D2 |
 | E4 | pendiente | | | paralelo a E3 |
