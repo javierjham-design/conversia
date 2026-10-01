@@ -14,7 +14,12 @@
 
 Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de servicio. En **Conversia las cuentas WABA son NUESTRAS** (registradas con el número del cliente), a diferencia de TuBot. Por cada cuenta WABA hay **1.000 mensajes de servicio gratis/mes**; sobre ese umbral **pagamos nosotros a Meta** y lo cobramos al cliente (créditos, D1a).
 
-**PENDIENTE OPERATIVO (con Meta, no es código):** confirmar **cómo cuenta Meta esos 1.000** y **cuál es la fecha de corte** (¿mes calendario? ¿aniversario de la WABA? ¿ciclo de facturación de la línea?). El contador de E2 usa hoy **mes calendario UTC** (`serviceFreeTierPerNumber`, key por `phone_number_id`); si Meta usa otra ventana, hay que **alinear la ventana del contador** a esa fecha de corte (ajuste técnico en F5-B o corrección a E2). De esto depende saber **exactamente cuándo empezamos a pagar** cada mes.
+**CONFIRMADO con Meta (2026-10-01, docs + fuentes técnicas) — cómo funcionan los 1.000:**
+- **Por número de teléfono de negocio** (`phone_number_id`), NO por cuenta WABA entera: 3 números = 3×1.000. → el contador de E2 (`serviceFreeTierPerNumber`, key por `phone_number_id`) **ya es correcto en esto**.
+- Tras el 1.001.º mensaje ENTREGADO: tarifa **utility/authentication del mercado del DESTINATARIO**, sin descuento por volumen. → `computeWhatsappCostUsd(..., geoFromPhone(toPhone).country)` **ya es correcto**.
+- **Reset mensual, SIN roll-over**, corte a las **00:00 en la zona horaria de la WABA** (NO UTC). Reacciones no cuentan; en grupos, 1 por destinatario; se cuenta por mensaje **ENTREGADO** (delivered), no enviado.
+
+**AJUSTE TÉCNICO PENDIENTE (de los hallazgos):** el contador de E2 usa **mes calendario UTC** y cuenta al ENVIAR. Meta usa la **zona horaria de la WABA** y cuenta ENTREGADOS. Para Chile (America/Santiago) el desfase del corte es ~3-4 h. Alinear la ventana del contador a la zona horaria de la WABA (y, si se quiere precisión fina, contar sobre `delivered` del webhook) → se implementa en **F5-B** (donde el débito de servicio por marca exige precisión del free tier). La VERDAD fiscal ya la da `usage_events` (webhook, con `billable`); el contador Redis es estimación.
 
 | Etapa | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|
@@ -24,7 +29,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | E3 | en PR | | 2026-10-01 | OK migración DADO + D2=no facturar overage; migración 2 tablas+índice (aplicar prod = runbook del dueño), cupo + contador atómico + gate svc + fusibles svc separados; TAREA 5 (platform) por SQL (sin OK); verify:isolation lo valida CI (sin BD local) |
 | E4 | mergeado | #398 | 2026-10-01 | regla 6 neutra de canal + guarda tope/fusión + prompts TuBot (doc) + plantillas; seed SQL NO regenerado (stale por publicación vía API); métrica "antes" pendiente OK-1 |
 | E5 | en PR | | 2026-10-01 | copy veraz (8 ítems) + borradores de aviso (NO enviados) + evento announcement.oct2026 + script con --confirm; 4 textos admin pendientes OK; SQL bot NO regenerado (stale) |
-| F1 | pendiente | | | backend brand-aware (prereq de F5) |
+| F1 | en curso (fundación) | | 2026-10-01 | HECHO: migración brand+User.settings, brands.ts (BrandConfig/BRANDS/brandOf), env WEB_URL_CONVERSIA. FALTA: barrido de call sites con brandOf (CORS, correos payment/mailer/exports, tools firma), PATCH /me/preferences (H44), registro brand-por-Origin + country (H20), tests |
 | F2 | pendiente | | | motor de paquetes verticales |
 | F4 | pendiente | | | agenda nativa completa |
 | F5 | pendiente | | | D1/D4/D5 resueltas; requiere F1 (ideal F2); lleva migración (locked price + serviceDebitsWallet) |
