@@ -54,6 +54,12 @@ describe("planTrialAction — ciclo de vida de la prueba (7+7)", () => {
     expect(d.action).toBe("purge");
   });
 
+  it("brand=conversia → none SIEMPRE (F5: no usa el trial 7+7, nunca se purga)", () => {
+    // Mismo escenario que dispararía purge en TuBot, pero para una org Conversia.
+    const d = planTrialAction({ now: at(14), createdAt: created, orgStatus: "SUSPENDED", trial: activeTrial({ state: "disabled" }), hasPaid: false, brand: "conversia" });
+    expect(d.action).toBe("none");
+  });
+
   it("PAGÓ → none SIEMPRE (nunca se deshabilita ni se purga a quien pagó)", () => {
     // aunque el reloj esté en el día 20 y la prueba figure disabled
     const d = planTrialAction({ now: at(20), createdAt: created, orgStatus: "SUSPENDED", trial: activeTrial({ state: "disabled" }), hasPaid: true });

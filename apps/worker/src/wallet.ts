@@ -28,27 +28,51 @@ async function firstTime(key: string): Promise<boolean> {
 export type WalletCategory = "utility" | "marketing" | "authentication" | "service";
 
 type Weights = Record<WalletCategory, number>;
-let weightCache: { at: number; w: Weights } | null = null;
+let weightCache: { at: number; byKey: Record<string, Weights> } | null = null;
+let brandCache: { at: number; byOrg: Record<string, string> } | null = null;
 
-/** Pesos por categoría (A: 1/1/1 = por cantidad · B: marketing 4 = ponderado). */
-async function readWeights(): Promise<Weights> {
-  if (weightCache && Date.now() - weightCache.at < 60_000) return weightCache.w;
+/** Marca de la organización (cache 60 s). Para resolver los pesos por marca (F5/H2). */
+export async function resolveOrgBrand(organizationId: string): Promise<string> {
+  if (brandCache && Date.now() - brandCache.at < 60_000 && brandCache.byOrg[organizationId]) return brandCache.byOrg[organizationId];
+  let brand = "tubot";
+  try {
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+    brand = (org?.brand ?? "tubot").toLowerCase();
+  } catch {
+    /* default tubot */
+  }
+  if (!brandCache || Date.now() - brandCache.at >= 60_000) brandCache = { at: Date.now(), byOrg: {} };
+  brandCache.byOrg[organizationId] = brand;
+  return brand;
+}
+
+/**
+ * Pesos por categoría POR MARCA (F5/H2). TuBot usa la key global `walletWeights`
+ * (1/1/1 — sin cambios). Conversia usa `walletWeights:conversia` (1/1/1 · marketing 4),
+ * con fallback a la global si no está sembrada. Sembrar 1/1/1/4 en la key GLOBAL
+ * cambiaría los débitos de TODOS los tenants TuBot — por eso la key es separada.
+ */
+async function readWeights(organizationId?: string): Promise<Weights> {
+  const brand = organizationId ? await resolveOrgBrand(organizationId) : "tubot";
+  const key = brand === "conversia" ? "walletWeights:conversia" : "walletWeights";
+  if (weightCache && Date.now() - weightCache.at < 60_000 && weightCache.byKey[key]) return weightCache.byKey[key];
   const def: Weights = { utility: 1, authentication: 1, marketing: 1, service: 1 };
   try {
-    const row = await getAdminPrisma().platformSetting.findUnique({ where: { key: "walletWeights" } });
+    const admin = getAdminPrisma();
+    let row = await admin.platformSetting.findUnique({ where: { key } });
+    if (!row && key !== "walletWeights") row = await admin.platformSetting.findUnique({ where: { key: "walletWeights" } });
     if (row) {
       const parsed = JSON.parse(row.value) as Partial<Weights>;
       def.utility = num(parsed.utility, 1);
       def.authentication = num(parsed.authentication, 1);
       def.marketing = num(parsed.marketing, 1);
-      // service no toca la bolsa (delta 0 en service_send); el peso queda por
-      // consistencia del tipo y para cuando una marca debite servicio (F5-B).
       def.service = num(parsed.service, 1);
     }
   } catch {
     /* defaults */
   }
-  weightCache = { at: Date.now(), w: def };
+  if (!weightCache || Date.now() - weightCache.at >= 60_000) weightCache = { at: Date.now(), byKey: {} };
+  weightCache.byKey[key] = def;
   return def;
 }
 
@@ -143,7 +167,7 @@ export async function debitForMessage(
     ledgerCategory = norm.unknown || "unknown";
     console.warn(`⚠ wallet: categoría de plantilla no reconocida "${norm.unknown}" (org ${organizationId}, msg ${messageId}) — cobrada peso 1 y registrada cruda`);
   } else {
-    weight = (await readWeights())[norm];
+    weight = (await readWeights(organizationId))[norm];
     ledgerCategory = norm;
   }
 

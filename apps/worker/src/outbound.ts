@@ -134,7 +134,7 @@ export async function processOutbound(
   // (las plantillas ya pasaron por chargeTemplateSend arriba). Solo PUBLIC. Si bloquea
   // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
   if (outbound.type !== "template" && data.message.visibility === "PUBLIC") {
-    const svcGate = await chargeServiceSend(organizationId, data.message.conversationId);
+    const svcGate = await chargeServiceSend(organizationId, data.message.conversationId, { messageId: data.message.id, phoneNumberId: auth.phoneNumberId });
     if (svcGate.blocked) {
       await withTenant(organizationId, (tx) =>
         tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
@@ -181,11 +181,10 @@ export async function processOutbound(
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
-    // W-2: si era PLANTILLA, devuelve a la bolsa el débito (idempotente; no devuelve
-    // dos veces si llega un segundo fallo). El servicio (delta 0) no tiene nada que devolver.
-    if (data.message.type === "TEMPLATE") {
-      await refundForMessage(organizationId, data.message.id).catch(() => undefined);
-    }
+    // W-2: devuelve a la bolsa el débito de este mensaje si lo hubo — plantilla, o
+    // servicio con débito de créditos (F5-B, planes conversia). Idempotente y no-op si
+    // no hubo débito (p. ej. servicio de TuBot, que no toca la bolsa).
+    await refundForMessage(organizationId, data.message.id).catch(() => undefined);
     // Diagnóstico del #133010: si el número tiene credencial propia pero NO
     // pudimos usar el token del canal (usamos el global), deja constancia clara del
     // motivo en Salud — el caso típico es CREDENTIALS_ENCRYPTION_KEY del worker ≠ API.

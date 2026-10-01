@@ -122,8 +122,12 @@ export class BillingController {
 
   @Get("plans")
   async plans() {
-    requireContext();
-    const rows = await this.prisma.admin.plan.findMany({ where: { active: true } });
+    const ctx = requireContext();
+    // Catálogo POR MARCA (F5/H9): un tenant solo ve los planes de su marca. Una org
+    // conversia ve conversia_*; una org tubot ve exactamente lo de hoy (brand default).
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+    const brand = brandOf(org).key;
+    const rows = await this.prisma.admin.plan.findMany({ where: { active: true, brand } });
     return (
       rows
         // FUSIBLE: el plan costo 0 (free/prueba) NO se muestra a los tenants —
@@ -140,6 +144,44 @@ export class BillingController {
         }))
         .sort((a, b) => a.priceClp - b.priceClp)
     );
+  }
+
+  /**
+   * Resumen de consumo de la bolsa para el contador (F5/H26; F3 lo consume): saldo,
+   * consumo del mes por categoría, proyección simple (promedio diario × días restantes)
+   * y si se cruzó el 80 %. Las alertas al 80 % las emite notifyWalletThresholds al debitar.
+   */
+  @Get("wallet/summary")
+  async walletSummary() {
+    const ctx = requireContext();
+    const admin = this.prisma.admin;
+    const wallet = await admin.messageWallet.findUnique({
+      where: { organizationId: ctx.organizationId },
+      select: { balance: true, includedPerPeriod: true },
+    });
+    const balance = wallet?.balance ?? 0;
+    const included = wallet?.includedPerPeriod ?? 0;
+    const now = new Date();
+    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const ledger = await admin.walletLedger.findMany({
+      where: { organizationId: ctx.organizationId, reason: "send_debit", createdAt: { gte: since } },
+      select: { delta: true, category: true },
+    });
+    const byCategory: Record<string, number> = {};
+    let consumed = 0;
+    for (const l of ledger) {
+      const amt = Math.abs(l.delta);
+      consumed += amt;
+      const cat = l.category ?? "otro";
+      byCategory[cat] = (byCategory[cat] ?? 0) + amt;
+    }
+    const dayOfMonth = now.getUTCDate();
+    const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const daysLeft = Math.max(0, daysInMonth - dayOfMonth);
+    const avgDaily = consumed / Math.max(1, dayOfMonth);
+    const projected = Math.round(consumed + avgDaily * daysLeft);
+    const pctUsed = included > 0 ? Math.round((consumed / included) * 100) : 0;
+    return { balance, included, consumed, byCategory, projected, pctUsed, over80: included > 0 && pctUsed >= 80 };
   }
 
   // ============================ SUSCRIPCIÓN RECURRENTE ============================
@@ -582,7 +624,28 @@ export class BillingController {
   /** Enruta el pago confirmado: `pkg:<code>` acredita un paquete; si no, activa plan. */
   private async activateOrCredit(organizationId: string, planCode: string, provider: string, providerRef?: string, interval: string = "monthly") {
     if (planCode.startsWith("pkg:")) return this.creditPackage(organizationId, planCode.slice(4), provider, providerRef);
+    // Setup de Conversia (F5/D5): el cobro único NO activa la suscripción — solo marca
+    // "setup pagado" y pasa el lifecycle a "implementing". El ciclo mensual (con créditos)
+    // lo activa F10 al marcar ENTREGADO (acción explícita; "setup pagado" es precondición).
+    if (planCode.startsWith("setup:")) return this.markSetupPaid(organizationId, planCode.slice(6), provider, providerRef);
     return this.activate(organizationId, planCode, provider, providerRef, interval);
+  }
+
+  /** Marca el setup de Conversia como pagado (NO activa suscripción). Idempotente. */
+  private async markSetupPaid(organizationId: string, vertical: string, provider: string, providerRef?: string) {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId } });
+    if (!org) return;
+    const prev = (org.settings as Record<string, unknown> | null) ?? {};
+    const prevConversia = (prev.conversia as Record<string, unknown> | undefined) ?? {};
+    const nextSettings = {
+      ...prev,
+      setupPaid: true,
+      conversia: { ...prevConversia, lifecycle: "implementing", setupVertical: vertical || null, setupPaidAt: new Date().toISOString() },
+    };
+    await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { settings: nextSettings as object } });
+    await this.prisma.admin.auditLog.create({
+      data: { organizationId, actorType: "system", action: "conversia.setup_paid", entityType: "organization", entityId: organizationId, after: { vertical: vertical || null, provider, providerRef: providerRef ?? null } },
+    });
   }
 
   /** Facturables a medida del tenant (settings.billables): se suman a la base del plan. */
@@ -662,10 +725,12 @@ export class BillingController {
       ...billables,
     ];
 
+    // Grandfathering (F5/H12): se SELLA el precio del plan al contratar/cambiar. Si luego
+    // sube el "precio de lanzamiento", esta suscripción conserva el precio sellado.
     if (existing) {
-      await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });
+      await this.prisma.admin.subscription.update({ where: { id: existing.id }, data: { planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd, lockedPriceClp: plan.priceClp, lockedPriceUsd: plan.priceUsd } });
     } else {
-      await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd } });
+      await this.prisma.admin.subscription.create({ data: { organizationId, planId: plan.id, status: "ACTIVE", interval: useYearly ? "yearly" : "monthly", periodStart: new Date(), periodEnd, lockedPriceClp: plan.priceClp, lockedPriceUsd: plan.priceUsd } });
     }
     // Al pagar, la VIGENCIA salta al fin del período pagado y la prueba queda
     // "convertida" (el ciclo de trial ya no la toca). Sin esto, un tenant que paga

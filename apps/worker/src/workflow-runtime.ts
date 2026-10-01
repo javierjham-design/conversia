@@ -97,7 +97,7 @@ function makeDeps(): EngineDeps {
       const auth = await resolveChannelAuth(ctx.organizationId, { channelConnectionId: data.channelConnectionId });
       // Gate de servicio (E3): el nodo send_text es respuesta en ventana. Si bloquea
       // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
-      const svcGate = await chargeServiceSend(ctx.organizationId, ctx.conversationId!);
+      const svcGate = await chargeServiceSend(ctx.organizationId, ctx.conversationId!, { messageId: data.message.id, phoneNumberId: auth.phoneNumberId });
       if (svcGate.blocked) {
         await withTenant(ctx.organizationId, (tx) =>
           tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
@@ -125,6 +125,8 @@ function makeDeps(): EngineDeps {
             data: { status: "FAILED", error: (err as Error).message.slice(0, 500) },
           }),
         );
+        // W-2 (F5-B): devuelve el crédito de servicio si se debitó (idempotente/no-op si no).
+        await refundForMessage(ctx.organizationId, data.message.id).catch(() => undefined);
         if (err instanceof ChannelAuthError) {
           await markChannelAuthError(ctx.organizationId, auth.channelConnectionId, err.message);
           return; // el flujo continúa; el mensaje quedó FAILED y el canal marcado

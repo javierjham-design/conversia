@@ -148,6 +148,45 @@ const PLANS = [
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = ilimitado
     features: { whiteLabel: true, api: true, sso: true, templateMessages: 4000, whatsappTemplates: true, conversationsPerPeriod: 0, conversationOverageClp: 0, conversationHardCap: false },
   },
+  // --- Planes CONVERSIA (segunda marca). isPublic:false en la web TuBot; se muestran
+  // por marca (brandOf). F5-B: serviceDebitsWallet = el servicio debita CRÉDITOS.
+  // templateMessages = CRÉDITOS totales/mes (H46: es la key que acredita el ciclo de
+  // suscripción; para brand=conversia esa bolsa son "créditos", no solo plantillas).
+  // conversationsPerPeriod:-1 = Conversia NO usa cupo de conversaciones (controla por
+  // créditos, H42). trialDays 0: el ciclo arranca al ENTREGAR, no con trial. ---
+  {
+    code: "conversia_funcionando",
+    name: "Funcionando",
+    brand: "conversia",
+    priceClp: 149_900,
+    priceUsd: 159,
+    order: 10,
+    isPublic: false,
+    limits: { users: 5, clinics: 2, channels: 2, agents: 5, workflows: 20, aiTokensDaily: 3_000_000 },
+    features: { managed: false, whiteLabel: false, api: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
+  },
+  {
+    code: "conversia_gestionado",
+    name: "Gestionado",
+    brand: "conversia",
+    priceClp: 299_900,
+    priceUsd: 319,
+    order: 11,
+    isPublic: false,
+    limits: { users: 15, clinics: 5, channels: 3, agents: 15, workflows: 50, aiTokensDaily: 8_000_000 },
+    features: { managed: true, whiteLabel: true, api: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 4000, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
+  },
+  {
+    code: "conversia_custom",
+    name: "Custom",
+    brand: "conversia",
+    priceClp: 0,
+    priceUsd: 0,
+    order: 12,
+    isPublic: false,
+    limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = a medida
+    features: { managed: true, whiteLabel: true, api: true, sso: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
+  },
 ];
 
 async function main() {
@@ -155,10 +194,26 @@ async function main() {
   for (const p of PLANS) {
     await prisma.plan.upsert({
       where: { code: p.code },
-      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic ?? true },
+      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic ?? true, brand: (p as any).brand ?? "tubot" },
       create: p as any,
     });
   }
+
+  // Sobre de créditos Conversia (comprable por API, patrón pkg:). F5 TAREA 3.
+  await prisma.messagePackage.upsert({
+    where: { code: "conversia-sobre-500" },
+    update: { name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10 },
+    create: { code: "conversia-sobre-500", name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10 },
+  });
+
+  // Pesos de bolsa POR MARCA para Conversia (H2): key SEPARADA para NO cambiar los
+  // débitos de TuBot. utilidad/servicio/auth = 1, marketing = 4 (COSTOS §0). En prod,
+  // el dueño la siembra con OK tras verificar el valor actual.
+  await prisma.platformSetting.upsert({
+    where: { key: "walletWeights:conversia" },
+    update: { value: JSON.stringify({ utility: 1, authentication: 1, marketing: 4, service: 1 }) },
+    create: { key: "walletWeights:conversia", value: JSON.stringify({ utility: 1, authentication: 1, marketing: 4, service: 1 }) },
+  });
 
   // Catálogo de PAQUETES VERTICALES (globales, organizationId NULL). Idempotente por
   // (key, version). Los instala el motor de F2 en cada tenant (borrador editable).

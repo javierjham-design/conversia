@@ -32,7 +32,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | F1 | en PR | | 2026-10-01 | migración brand+User.settings; brands.ts (brandOf); CORS multi-marca; registro brand-por-Origin + country→currency (H20); PATCH /me/preferences + brand en GET/me (H44); brandOf en correos de pago+retornos Flow, export, firma de agenda (ToolContext.brandName); tests. Barrido FINO pendiente (bajo impacto): asuntos de alerta mailer/channel-auth, descripción de getPlanes, links de platform.controller (zona protegida) |
 | F2 | en PR | | 2026-10-01 | motor de paquetes verticales: tabla vertical_templates (org_id nullable, RLS), loaders extraídos de seed.ts a packages/database (compartidos seed+instalador), installVerticalPackage transaccional, endpoints tenant+platform, registro con ?vertical=, rubros dental/barberia + seed v1, verify-isolation case |
 | F4 | pendiente | | | agenda nativa completa |
-| F5 | pendiente | | | D1/D4/D5 resueltas; requiere F1 (ideal F2); lleva migración (locked price + serviceDebitsWallet) |
+| F5 | en PR | | 2026-10-01 | planes conversia_* (créditos/serviceDebitsWallet/cupo -1) + migración brand en plans + locked_price (grandfathering) + catálogo por marca + pesos walletWeights:conversia + F5-B débito de servicio (exención free tier + refund W-2) + setup:/lifecycle + exclusión trial-lifecycle conversia + GET /billing/wallet/summary + sobre 500 créditos. DIFERIDO: Lemon W-3 (D4, cargar variantId=operativo), activación final=F10, estimador difusiones/textos finos por marca |
 | F3 | pendiente | | | D6=verificación correo SÍ; requiere F1,F2,F5; deploy Railway = dueño |
 | F6 | pendiente | | | requiere D7 |
 | F7 | pendiente | | | |

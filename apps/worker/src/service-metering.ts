@@ -68,6 +68,27 @@ async function bumpServiceCounter(phoneNumberId: string, at: Date): Promise<numb
 }
 
 /**
+ * ¿El número AÚN está dentro del free tier de servicio de este mes (sin consumir el
+ * cupo gratis)? Lee el contador SIN incrementarlo (el incremento lo hace
+ * recordServiceSend post-éxito). Lo usa F5-B para decidir si el débito de créditos
+ * aplica. Fail conservador: ante error, devuelve false (NO exime → se cobra).
+ *
+ * NOTA (hallazgo Meta): Meta resetea el free tier mensual en la ZONA HORARIA de la
+ * WABA; este contador usa mes calendario UTC. El desfase (~3-4 h en Chile en el borde
+ * del mes) se afina pasando la zona de la org — pendiente de F5-B parte 2.
+ */
+export async function isWithinServiceFreeTier(phoneNumberId: string): Promise<boolean> {
+  try {
+    const key = `svc:ft:${phoneNumberId}:${monthKey(new Date())}`;
+    const current = Number(await conn().get(key)) || 0;
+    const limit = await getServiceFreeTierLimit();
+    return current < limit;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Registra UN mensaje de servicio saliente ya enviado con éxito. Idempotente por
  * messageId (un reintento no escribe dos veces ni re-cuenta el free tier).
  * Best-effort: un fallo de registro NUNCA tumba el envío (ya ocurrió).

@@ -3,6 +3,7 @@ import { getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
 import { countConversationOnce } from "./conversation-quota";
+import { isWithinServiceFreeTier } from "./service-metering";
 import { enqueueNotification } from "./notifications/queue";
 
 /**
@@ -399,13 +400,34 @@ async function logServiceBlocked(
   }
 }
 
+/** ¿El plan vigente de la org debita el servicio de la bolsa (feature serviceDebitsWallet)? */
+async function planDebitsService(organizationId: string): Promise<boolean> {
+  try {
+    const prisma = getAdminPrisma();
+    const sub = await prisma.subscription.findFirst({
+      where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } },
+      orderBy: { createdAt: "desc" },
+      select: { planId: true },
+    });
+    const plan = sub?.planId ? await prisma.plan.findUnique({ where: { id: sub.planId }, select: { features: true } }) : null;
+    return ((plan?.features as any)?.serviceDebitsWallet) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Cobro de UN envío de SERVICIO (respuesta del bot en ventana 24 h): cuenta la
  * conversación en su período, avisa al 80/100 %, corta al 100 % SOLO con tope duro, y
- * aplica tope diario + fusible de servicio. Falla ABIERTO ante errores de infra (una
- * caída de Redis/BD no puede callar el bot), pero el corte por tope duro SÍ cierra.
+ * aplica tope diario + fusible de servicio. Para planes con serviceDebitsWallet (marca
+ * Conversia) además debita créditos (F5-B). Falla ABIERTO ante errores de infra (una
+ * caída de Redis/BD no puede callar el bot), pero el corte por tope duro/saldo SÍ cierra.
  */
-export async function chargeServiceSend(organizationId: string, conversationId: string): Promise<SendGate> {
+export async function chargeServiceSend(
+  organizationId: string,
+  conversationId: string,
+  svc?: { messageId?: string; phoneNumberId?: string },
+): Promise<SendGate> {
   try {
     const hardCap = await resolveServiceHardCap(organizationId);
     const quota = await countConversationOnce(organizationId, conversationId, new Date(), { hardCap });
@@ -415,6 +437,22 @@ export async function chargeServiceSend(organizationId: string, conversationId: 
         "⚠ Envío no realizado: tu cuenta alcanzó el cupo de conversaciones del período. El bot pausó las respuestas automáticas. Para reanudarlas hoy mismo: sube de plan o escríbenos por Soporte. Las conversaciones ya abiertas no se pierden.";
       await logServiceBlocked(organizationId, conversationId, quota);
       return block("conversation_cap", userMessage);
+    }
+
+    // F5-B: planes con serviceDebitsWallet (marca Conversia) cobran el servicio de la
+    // BOLSA (créditos) ANTES del envío, salvo dentro del free tier del número (1.000/mes
+    // de Meta). Idempotente por messageId; sin saldo → bloquea. TuBot (sin el feature)
+    // nunca entra aquí: su bolsa sigue siendo SOLO de plantillas.
+    if (svc?.messageId && (await planDebitsService(organizationId))) {
+      const exempt = svc.phoneNumberId ? await isWithinServiceFreeTier(svc.phoneNumberId) : false;
+      if (!exempt) {
+        const debit = await debitForMessage(organizationId, svc.messageId, "service");
+        if (!debit.ok) {
+          void notifyWalletThresholds(organizationId, 0);
+          return block("no_credits", "Se agotaron tus créditos de Conversia. Compra un sobre o sube de plan para reanudar las respuestas automáticas. Tus conversaciones abiertas no se pierden.");
+        }
+        if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
+      }
     }
 
     // Avisos de cupo (solo con cupo N>0 y si ESTA llamada contó la conversación).

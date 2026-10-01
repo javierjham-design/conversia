@@ -21,6 +21,7 @@ import { getSchedulingProviderFor } from "./tool-services";
 import { enqueueEscalationEmail } from "./mailer";
 import { recordServiceSend } from "./service-metering";
 import { chargeServiceSend } from "./messaging-guard";
+import { refundForMessage } from "./wallet";
 
 export type ApptResponse = "confirm" | "reschedule";
 
@@ -51,7 +52,7 @@ async function sendReplyText(orgId: string, conversationId: string, text: string
   const auth = await resolveChannelAuth(orgId, { channelConnectionId: data.channelConnectionId });
   // Gate de servicio (E3): el acuse de recordatorio es respuesta en ventana. Si bloquea
   // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
-  const svcGate = await chargeServiceSend(orgId, conversationId);
+  const svcGate = await chargeServiceSend(orgId, conversationId, { messageId: data.msgId, phoneNumberId: auth.phoneNumberId });
   if (svcGate.blocked) {
     await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "FAILED", error: svcGate.userMessage } }));
     return;
@@ -63,6 +64,8 @@ async function sendReplyText(orgId: string, conversationId: string, text: string
     await recordServiceSend(orgId, data.msgId, conversationId, data.phone, auth.phoneNumberId);
   } catch (err) {
     await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "FAILED", error: (err as Error).message.slice(0, 500) } }));
+    // W-2 (F5-B): devuelve el crédito de servicio si se debitó (idempotente/no-op si no).
+    await refundForMessage(orgId, data.msgId).catch(() => undefined);
     if (err instanceof ChannelAuthError) await markChannelAuthError(orgId, auth.channelConnectionId, err.message);
   }
 }
