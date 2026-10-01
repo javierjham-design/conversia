@@ -32,6 +32,23 @@ Casos verificados por etapa. Las etapas E3–E5 agregan sus filas.
 | 19 | Agente que produjera 4 textos en un turno | multi-texto (hipotético futuro) | sale UNO solo (fusión con `mergeAgentTextParts`); cinturón `console.warn` si se excede | ✅ test helper + guarda |
 | 20 | Adjunto / plantilla | IMAGE/DOCUMENT/TEMPLATE | exentos de fusión (message propio) | ✅ por diseño |
 
+## E3 — Cupo de conversaciones por período
+
+| # | Caso | Entrada | Esperado | Estado |
+|---|------|---------|----------|--------|
+| 21 | Período anclado | suscripción con periodStart / sin suscripción | día del periodStart / día 1 del mes UTC | ✅ test (resolvePeriodStart) |
+| 22 | Cuenta 1 vez | misma conversación, mismo período, 2 llamadas | se cuenta una sola vez (marca única) | ✅ test |
+| 23 | Período nuevo | misma conversación, período distinto | vuelve a contar | ✅ por diseño (marca incluye period_start) |
+| 24 | Concurrencia | INSERT choca con UNIQUE | no cuenta dos veces | ✅ test |
+| 25 | Cupo 0 (apagado) | `conversationsPerPeriod: 0` | solo mide, sin avisos ni topes | ✅ test |
+| 26 | Cupo -1 (ilimitado) | `conversationsPerPeriod: -1` | mide, nunca avisa/topa | ✅ por diseño (included<=0) |
+| 27 | 80% blando | cruza 80% | avisa `conversations.low` una vez, deja pasar | ✅ código (gate) |
+| 28 | 100% blando | llega a 100% | pasa, acumula `overage`, avisa `conversations.limit` una vez | ✅ código (gate) |
+| 29 | 100% duro | hard cap + cupo lleno + conversación nueva | corta con mensaje + SYSTEM + integrationEvent + audit_log | ✅ test (blockedByHardCap) + código |
+| 30 | Fusible svc separado | fusible de servicio activo | ningún servicio sale, las PLANTILLAS siguen (contadores separados) | ✅ por diseño (claves `msgcap:svc:*`) |
+| 31 | Redis caído | infra caída | fail open (el bot responde) | ✅ por diseño (try/catch) |
+| 32 | agent-turn bloqueado | gate svc bloquea | message FAILED, sin llamada a Graph, sin service_send | ✅ código (call site) |
+
 ### Métrica bloque 4 — mensajes salientes del bot por conversación
 
 Promedio de mensajes del bot por conversación (30 días). **ANTES**: medir el día del deploy; **DESPUÉS**: a los 7 días con la misma consulta.

@@ -20,6 +20,7 @@ import { dispatchEvent } from "./workflow-runtime";
 import { getSchedulingProviderFor } from "./tool-services";
 import { enqueueEscalationEmail } from "./mailer";
 import { recordServiceSend } from "./service-metering";
+import { chargeServiceSend } from "./messaging-guard";
 
 export type ApptResponse = "confirm" | "reschedule";
 
@@ -48,6 +49,13 @@ async function sendReplyText(orgId: string, conversationId: string, text: string
   });
   if (!data) return;
   const auth = await resolveChannelAuth(orgId, { channelConnectionId: data.channelConnectionId });
+  // Gate de servicio (E3): el acuse de recordatorio es respuesta en ventana. Si bloquea
+  // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
+  const svcGate = await chargeServiceSend(orgId, conversationId);
+  if (svcGate.blocked) {
+    await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "FAILED", error: svcGate.userMessage } }));
+    return;
+  }
   try {
     const sent = await getChannelProvider().send(auth.phoneNumberId, { to: data.phone, type: "text", text }, { accessToken: auth.accessToken });
     await withTenant(orgId, (tx) => tx.message.update({ where: { id: data.msgId }, data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() } }));

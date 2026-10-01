@@ -2017,6 +2017,33 @@ model WalletLedger {
   @@map("wallet_ledger")
 }
 
+// Cupo de conversaciones por período (plan servicio-octubre-2026, E3). Cada
+// conversación cuenta UNA sola vez por período de facturación: la marca única
+// garantiza idempotencia entre workers; el counter lleva el agregado atómico.
+model ConversationQuotaMark {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  conversationId String   @map("conversation_id")
+  periodStart    DateTime @map("period_start") @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, conversationId, periodStart])
+  @@index([organizationId, periodStart])
+  @@map("conversation_quota_marks")
+}
+
+model ConversationQuotaCounter {
+  organizationId String   @map("organization_id")
+  periodStart    DateTime @map("period_start") @db.Date
+  used           Int      @default(0)
+  overage        Int      @default(0)
+  included       Int      @default(0) // snapshot del cupo del plan al abrir el período
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@id([organizationId, periodStart])
+  @@map("conversation_quota_counters")
+}
+
 // Catálogo de paquetes adicionales — editable desde el Super Admin, sin redeploy.
 model MessagePackage {
   id       String  @id @default(cuid())

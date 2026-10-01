@@ -14,6 +14,7 @@ import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
+import { chargeServiceSend } from "./messaging-guard";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
@@ -612,6 +613,15 @@ export async function runAgentTurn(opts: {
   // (token por-WABA del tenant; fallback al global)
   if (persisted && conversation.contact.phone) {
     const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
+    // Gate de servicio (E3): cuenta la conversación en su período y aplica cupo/topes/
+    // fusible ANTES de enviar. Si bloquea (tope duro o fusible), el mensaje queda FAILED
+    // y NO se llama a Graph ni se mide service_send.
+    const svcGate = await chargeServiceSend(organizationId, conversationId);
+    if (svcGate.blocked) {
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: persisted.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
+      );
+    } else {
     // Envío con REINTENTO ante fallos transitorios de Meta (red/5xx/429): un blip no
     // puede perder la respuesta ya generada. Los errores de config (auth) NO se
     // reintentan (no se arreglan solos). Antes: 1 intento → mensaje perdido.
@@ -659,6 +669,7 @@ export async function runAgentTurn(opts: {
       );
       console.error(`✖ Envío WhatsApp falló tras ${MAX_SEND_ATTEMPTS} intentos (${conversationId}):`, (sendErr as Error).message);
     }
+    } // fin del envío (gate de servicio no bloqueó)
   }
 
   // 6. Transferencia entre agentes (conserva contexto, registra evento).

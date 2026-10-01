@@ -77,9 +77,13 @@ const envSchema = z.object({
   // Fusible de mensajería: URL de alerta inmediata (BetterStack incoming webhook,
   // Slack, etc.) que se llama al cortar el fusible. Vacío = solo /health/fuse + log.
   OPS_ALERT_WEBHOOK_URL: z.string().optional().default(""),
-  // Topes puente de mensajería (defaults; ajustables en platform_settings).
+  // Topes puente de mensajería de PLANTILLA (defaults; ajustables en platform_settings).
   MSG_CAP_PER_TENANT_DAY: z.coerce.number().default(500),
   MSG_CAP_GLOBAL_DAY: z.coerce.number().default(1500),
+  // Topes de mensajería de SERVICIO (E3). SEPARADOS de los de plantilla: el volumen
+  // de servicio es 10-100x y compartir el contador dispararía el fusible de plantillas.
+  MSG_CAP_SVC_PER_TENANT_DAY: z.coerce.number().default(3000),
+  MSG_CAP_SVC_GLOBAL_DAY: z.coerce.number().default(20000),
   // Cupo de bolsa por defecto si el plan no define messageQuota (mínimo seguro).
   WALLET_DEFAULT_QUOTA: z.coerce.number().default(100),
   // Web Push (VAPID). Generar una vez con `npx web-push generate-vapid-keys`.

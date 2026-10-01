@@ -3,7 +3,7 @@ import type { OutboundJob } from "@conversia/types";
 import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
-import { chargeTemplateSend } from "./messaging-guard";
+import { chargeTemplateSend, chargeServiceSend } from "./messaging-guard";
 import { refundForMessage } from "./wallet";
 import { recordServiceSend } from "./service-metering";
 
@@ -127,6 +127,20 @@ export async function processOutbound(
       });
       await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
       return; // no se envía ni se reintenta
+    }
+  }
+
+  // Gate de servicio (E3): texto/adjunto del panel por WhatsApp cuenta como servicio
+  // (las plantillas ya pasaron por chargeTemplateSend arriba). Solo PUBLIC. Si bloquea
+  // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
+  if (outbound.type !== "template" && data.message.visibility === "PUBLIC") {
+    const svcGate = await chargeServiceSend(organizationId, data.message.conversationId);
+    if (svcGate.blocked) {
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
+      );
+      await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
+      return;
     }
   }
 
