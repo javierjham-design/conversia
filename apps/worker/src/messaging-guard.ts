@@ -8,8 +8,10 @@ import { enqueueNotification } from "./notifications/queue";
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
  * Único guard por el que DEBE pasar todo envío de PLANTILLA (los que cuestan).
- * Corta SOLO plantillas; las respuestas dentro de la ventana de 24 h (servicio,
- * gratis) NO se tocan nunca. Reglas:
+ * chargeTemplateSend corta SOLO plantillas. Las respuestas dentro de la ventana de
+ * 24 h (servicio) desde el 2026-10-01 TAMBIÉN cuestan: las controla chargeServiceSend
+ * (más abajo) por cupo de conversaciones (E3), con sus propios topes/fusible. Reglas
+ * de chargeTemplateSend:
  *   1. Demo (TRIAL): bloqueo total de plantillas.
  *   2. Gracia por impago (suscripción PAST_DUE) o suspensión: sin plantillas.
  *   3. Tope duro diario por tenant.
@@ -76,7 +78,7 @@ async function templatesCapabilityBlock(organizationId: string): Promise<SendGat
     : await prisma.plan.findUnique({ where: { code: "free" }, select: { features: true } });
   const planAllows = ((plan?.features as any)?.whatsappTemplates) === true;
   if (!planAllows) {
-    return block("plan_no_templates", "Tu plan no incluye mensajes de plantilla de WhatsApp. Sube de plan para habilitarlos. Puedes seguir respondiendo dentro de las 24 h sin costo.");
+    return block("plan_no_templates", "Tu plan no incluye mensajes de plantilla de WhatsApp. Sube de plan para habilitarlos. Puedes seguir respondiendo dentro de las 24 h con tu cupo de conversaciones.");
   }
   if (!switchOn) {
     return block("templates_switch_off", "Los mensajes de plantilla de WhatsApp no están activados para tu cuenta. Escríbenos por Soporte para habilitarlos.");
@@ -89,7 +91,7 @@ async function businessBlock(organizationId: string): Promise<SendGate | null> {
   const prisma = getAdminPrisma();
   const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
   if (org?.status === "TRIAL") {
-    return block("demo", "En modo demo no se envían plantillas de WhatsApp. Activa un plan para habilitarlas. Puedes seguir probando agentes, flujos y responder dentro de las 24 h.");
+    return block("demo", "En modo demo no se envían plantillas de WhatsApp. Activa un plan para habilitarlas. Puedes seguir probando agentes, flujos y responder dentro de las 24 h (con el cupo de conversaciones del modo demo).");
   }
   if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
     return block("suspended", "Cuenta suspendida por falta de pago: los envíos de plantilla están en pausa. Regulariza tu plan para reactivarlos.");
@@ -168,7 +170,7 @@ export async function chargeTemplateSend(
     const debit = await debitForMessage(organizationId, messageId, category, costUsd);
     if (!debit.ok) {
       void notifyWalletThresholds(organizationId, 0);
-      return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h sin costo.");
+      return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h con tu cupo de conversaciones.");
     }
     if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
 

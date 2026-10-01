@@ -323,7 +323,7 @@ export default function WorkflowRunsPage() {
             </p>
             <div className="rounded-lg border border-line bg-app p-3">
               {retryPreview.templateSends === 0 ? (
-                <p className="text-ink-muted">No hay envíos de plantilla en el camino restante: <b>no descuenta bolsa</b>.</p>
+                <p className="text-ink-muted">No hay envíos de plantilla en el camino restante: <b>no descuenta bolsa</b>. Las respuestas dentro de 24 h usan tu cupo de conversaciones.</p>
               ) : (
                 <>
                   <p className="text-ink">
