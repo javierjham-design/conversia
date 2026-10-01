@@ -21,7 +21,7 @@ import { resolveApiPreset } from "./api-presets";
 import { ga4ClientId, getSyncQueue } from "./ga4";
 import { enqueueEscalationEmail, getEmailQueue } from "./mailer";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
-import { chargeTemplateSend } from "./messaging-guard";
+import { chargeTemplateSend, chargeServiceSend } from "./messaging-guard";
 import { refundForMessage } from "./wallet";
 import { recordServiceSend } from "./service-metering";
 import { emitPlatformEvent, enqueueCapiEvent } from "./platform-events";
@@ -95,6 +95,15 @@ function makeDeps(): EngineDeps {
       // Número + token reales del canal de la conversación (antes se enviaba
       // con un id sintético "wf:<org>" que solo funcionaba en mock).
       const auth = await resolveChannelAuth(ctx.organizationId, { channelConnectionId: data.channelConnectionId });
+      // Gate de servicio (E3): el nodo send_text es respuesta en ventana. Si bloquea
+      // (tope duro/fusible), el mensaje queda FAILED y no se llama a Graph.
+      const svcGate = await chargeServiceSend(ctx.organizationId, ctx.conversationId!);
+      if (svcGate.blocked) {
+        await withTenant(ctx.organizationId, (tx) =>
+          tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
+        );
+        return;
+      }
       try {
         const sent = await getChannelProvider().send(auth.phoneNumberId, {
           to: data.phone,

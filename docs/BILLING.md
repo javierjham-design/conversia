@@ -232,6 +232,39 @@ cada día sin schedule sembrado es costo invisible:
 4. **`usdToClp`:** revisar el tipo de cambio de referencia (`CLP_PER_USD_REF`) usado para
    el round-trip CLP↔USD.
 
+## Cupo de conversaciones por período (E3)
+
+El servicio (respuestas del bot en la ventana de 24 h) se controla por **conversaciones**
+(no por mensaje). Cada conversación cuenta **una sola vez** por período de facturación.
+
+- **Feature del plan `features.conversationsPerPeriod`** (convención PROPIA de E3, distinta
+  de `templateMessages`): `0` = sin cupo → **solo medición** (cuenta, sin avisos ni topes);
+  `-1` = ilimitado; `N>0` = cupo mensual. Los 4 planes salen con `0` (enforcement apagado):
+  **sembrar los números reales es paso operativo del dueño** con la cifra del bloque 1.
+- `features.conversationOverageClp`: CLP por conversación extra (`0` = **no facturar overage**,
+  decisión D2 al lanzamiento). `features.conversationHardCap`: `true` corta al 100%.
+- **Tope blando (default):** al 100% no corta; el excedente queda contado como `overage` y se
+  avisa una vez (`conversations.limit`, texto veraz sin prometer cobro). **Tope duro:** corta
+  las respuestas automáticas de conversaciones nuevas (deja traza SYSTEM + `service.blocked` +
+  `audit_log`).
+- **Período:** `subscription.periodStart` de la suscripción activa, o el día 1 del mes UTC.
+- **Contadores Redis de servicio SEPARADOS** de los de plantilla (`msgcap:svc:*`), techos en
+  `platform_settings` `messagingCapSvcPerTenantDay` / `messagingCapSvcGlobalDay` (defaults env
+  `MSG_CAP_SVC_PER_TENANT_DAY=3000`, `MSG_CAP_SVC_GLOBAL_DAY=20000`).
+
+### Interruptor de tope duro por tenant (sin UI aún)
+
+El dato es `organizations.settings.messaging.conversationHardCap` (boolean). El endpoint de
+Super Admin para encenderlo **no se tocó en E3** (requiere OK del dueño para modificar
+`apps/api/src/platform`). Mientras tanto se enciende por SQL:
+
+```sql
+UPDATE organizations
+SET settings = jsonb_set(
+  coalesce(settings, '{}'::jsonb), '{messaging,conversationHardCap}', 'true'::jsonb, true)
+WHERE id = '<org_id>';
+```
+
 ## Decisión de pasarela (pendiente de confirmar)
 
 Alineado con la estrategia de Cláriva: **CLP para Chile, USD para el resto**. Para USD, Stripe es el más directo (requiere entidad/LLC o Merchant of Record como Paddle/Lemon Squeezy para evitarla). Para CLP local: Flow/Transbank Webpay. La abstracción `PaymentProvider` permite conectar cualquiera sin tocar el resto del sistema.

@@ -1,7 +1,9 @@
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
-import { getAdminPrisma } from "@conversia/database";
+import { getAdminPrisma, withTenant } from "@conversia/database";
 import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
+import { countConversationOnce } from "./conversation-quota";
+import { enqueueNotification } from "./notifications/queue";
 
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
@@ -218,4 +220,223 @@ export async function isFuseTripped(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// SERVICIO (E3): compuerta SEPARADA de chargeTemplateSend. Controla las respuestas
+// del bot en la ventana de 24 h por CUPO DE CONVERSACIONES + topes/fusible propios.
+// Los contadores Redis son PARALELOS a los de plantilla: el volumen de servicio es
+// 10-100x y compartirlos dispararía el fusible de plantillas.
+// ───────────────────────────────────────────────────────────────────────────
+
+let svcCapCache: { at: number; global: number; perTenantDefault: number } | null = null;
+
+async function readGlobalSvcCaps(): Promise<{ global: number; perTenantDefault: number }> {
+  if (svcCapCache && Date.now() - svcCapCache.at < 60_000) return svcCapCache;
+  const env = getEnv();
+  let global = env.MSG_CAP_SVC_GLOBAL_DAY;
+  let perTenantDefault = env.MSG_CAP_SVC_PER_TENANT_DAY;
+  try {
+    const rows = await getAdminPrisma().platformSetting.findMany({
+      where: { key: { in: ["messagingCapSvcGlobalDay", "messagingCapSvcPerTenantDay"] } },
+    });
+    for (const r of rows) {
+      const n = Number(r.value);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      if (r.key === "messagingCapSvcGlobalDay") global = n;
+      if (r.key === "messagingCapSvcPerTenantDay") perTenantDefault = n;
+    }
+  } catch {
+    /* fail open a defaults */
+  }
+  svcCapCache = { at: Date.now(), global, perTenantDefault };
+  return svcCapCache;
+}
+
+/** SETNX por período para avisos de cupo (una sola vez). */
+async function firstTimeSvc(key: string): Promise<boolean> {
+  try {
+    return (await conn().set(key, "1", "EX", 40 * 24 * 3600, "NX")) === "OK";
+  } catch {
+    return false;
+  }
+}
+
+/** ¿El cupo se endurece a tope DURO? Plan, override por tenant, TRIAL o impago. */
+async function resolveServiceHardCap(organizationId: string): Promise<boolean> {
+  const prisma = getAdminPrisma();
+  const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true, settings: true } });
+  if (org?.status === "TRIAL" || org?.status === "SUSPENDED") return true;
+  if (((org?.settings as any)?.messaging?.conversationHardCap) === true) return true;
+  const anySub = await prisma.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" }, select: { status: true } });
+  if (anySub?.status === "PAST_DUE") return true;
+  const sub = await prisma.subscription.findFirst({
+    where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } },
+    orderBy: { createdAt: "desc" },
+    select: { planId: true },
+  });
+  const plan = sub?.planId
+    ? await prisma.plan.findUnique({ where: { id: sub.planId }, select: { features: true } })
+    : await prisma.plan.findUnique({ where: { code: "free" }, select: { features: true } });
+  return ((plan?.features as any)?.conversationHardCap) === true;
+}
+
+/** Tope diario de servicio por tenant (contador Redis separado del de plantillas). */
+async function perTenantSvcCapBlock(organizationId: string): Promise<SendGate | null> {
+  try {
+    const { perTenantDefault } = await readGlobalSvcCaps();
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const override = Number((org?.settings as any)?.messaging?.dailySvcCap);
+    const cap = Number.isFinite(override) && override > 0 ? override : perTenantDefault;
+    const key = `msgcap:svc:t:${organizationId}:${today()}`;
+    const n = await conn().incr(key);
+    if (n === 1) await conn().expire(key, 172_800);
+    if (n > cap) {
+      return block("svc_tenant_cap", "Tu cuenta alcanzó el límite diario de respuestas automáticas. Se reanuda mañana; si necesitas más, escríbenos por Soporte.");
+    }
+  } catch {
+    /* Redis caído → no bloqueamos por el contador. */
+  }
+  return null;
+}
+
+/** Fusible global de servicio (separado del de plantillas). */
+async function globalSvcFuseBlock(): Promise<SendGate | null> {
+  try {
+    const d = today();
+    const { global } = await readGlobalSvcCaps();
+    const gKey = `msgcap:svc:g:${d}`;
+    const gN = await conn().incr(gKey);
+    if (gN === 1) await conn().expire(gKey, 172_800);
+    if (gN > global) {
+      await tripSvcFuse(d, gN, global);
+      return block("svc_global_fuse", "Las respuestas automáticas están en pausa temporal por una medida de seguridad de la plataforma. Ya estamos revisándolo; tu conversación no se pierde.");
+    }
+  } catch {
+    /* Redis caído → no bloqueamos por el contador. */
+  }
+  return null;
+}
+
+async function tripSvcFuse(date: string, count: number, cap: number): Promise<void> {
+  try {
+    await conn().set(`msgcap:svc-fuse:${date}`, "1", "EX", 172_800);
+    const firstTrip = await conn().set(`msgcap:svc-fuse-alerted:${date}`, "1", "EX", 172_800, "NX");
+    console.error(`🚨 FUSIBLE DE SERVICIO CORTADO — ${count} respuestas de servicio hoy supera el techo global ${cap}. Respuestas automáticas en pausa para todos los tenants.`);
+    if (firstTrip) {
+      const url = getEnv().OPS_ALERT_WEBHOOK_URL;
+      if (url) {
+        await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            summary: "TuBot: fusible de mensajes de servicio cortado",
+            description: `Se superó el techo global diario de servicio (${count} > ${cap}). Respuestas automáticas en pausa para todos los tenants hasta revisión.`,
+            severity: "critical",
+          }),
+        }).catch(() => undefined);
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** ¿El fusible de servicio está cortado hoy? Lo expone /health/fuse. */
+export async function isServiceFuseTripped(): Promise<boolean> {
+  try {
+    return (await conn().get(`msgcap:svc-fuse:${today()}`)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Deja traza del bloqueo por cupo: SYSTEM en la bandeja + integrationEvent + audit_log. */
+async function logServiceBlocked(
+  organizationId: string,
+  conversationId: string,
+  quota: { used: number; included: number; periodStart: string },
+): Promise<void> {
+  try {
+    await withTenant(organizationId, async (tx) => {
+      await tx.message.create({
+        data: {
+          organizationId,
+          conversationId,
+          direction: "OUTBOUND",
+          type: "SYSTEM",
+          body: "⚠ Cupo de conversaciones alcanzado: el bot pausó las respuestas automáticas de esta conversación. Sube de plan o contáctanos para reanudarlas.",
+          authorType: "SYSTEM",
+          status: "SENT",
+          visibility: "PUBLIC",
+        },
+      });
+      await tx.integrationEvent.create({
+        data: {
+          organizationId,
+          provider: "messaging",
+          type: "service.blocked",
+          status: "warning",
+          message: `Cupo de conversaciones alcanzado (${quota.used}/${quota.included})`,
+          payload: { conversationId, used: quota.used, included: quota.included, periodStart: quota.periodStart },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId,
+          actorType: "system",
+          action: "service.blocked",
+          entityType: "conversation",
+          entityId: conversationId,
+          after: { used: quota.used, included: quota.included, periodStart: quota.periodStart },
+        },
+      });
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Cobro de UN envío de SERVICIO (respuesta del bot en ventana 24 h): cuenta la
+ * conversación en su período, avisa al 80/100 %, corta al 100 % SOLO con tope duro, y
+ * aplica tope diario + fusible de servicio. Falla ABIERTO ante errores de infra (una
+ * caída de Redis/BD no puede callar el bot), pero el corte por tope duro SÍ cierra.
+ */
+export async function chargeServiceSend(organizationId: string, conversationId: string): Promise<SendGate> {
+  try {
+    const hardCap = await resolveServiceHardCap(organizationId);
+    const quota = await countConversationOnce(organizationId, conversationId, new Date(), { hardCap });
+
+    if (quota.blockedByHardCap) {
+      const userMessage =
+        "⚠ Envío no realizado: tu cuenta alcanzó el cupo de conversaciones del período. El bot pausó las respuestas automáticas. Para reanudarlas hoy mismo: sube de plan o escríbenos por Soporte. Las conversaciones ya abiertas no se pierden.";
+      await logServiceBlocked(organizationId, conversationId, quota);
+      return block("conversation_cap", userMessage);
+    }
+
+    // Avisos de cupo (solo con cupo N>0 y si ESTA llamada contó la conversación).
+    if (quota.included > 0 && quota.counted) {
+      if (quota.used >= quota.included) {
+        // Solo en tope BLANDO: "sigues atendiendo sin cortes". En tope duro el aviso es
+        // el bloqueo de la siguiente conversación (logServiceBlocked), no este texto.
+        if (!hardCap && (await firstTimeSvc(`conv:alerted:limit:${organizationId}:${quota.periodStart}`))) {
+          await enqueueNotification({ eventKey: "conversations.limit", organizationId, data: { included: quota.included, used: quota.used } }).catch(() => undefined);
+        }
+      } else if (quota.overagePct >= 80) {
+        if (await firstTimeSvc(`conv:alerted:low:${organizationId}:${quota.periodStart}`)) {
+          await enqueueNotification({ eventKey: "conversations.low", organizationId, data: { pct: quota.overagePct, used: quota.used, included: quota.included } }).catch(() => undefined);
+        }
+      }
+    }
+
+    // Tope diario de servicio por tenant → fusible global de servicio.
+    const tCap = await perTenantSvcCapBlock(organizationId);
+    if (tCap) return tCap;
+    const gFuse = await globalSvcFuseBlock();
+    if (gFuse) return gFuse;
+  } catch {
+    /* fail open: una caída de infraestructura no puede callar el bot. */
+  }
+  return { blocked: false };
 }

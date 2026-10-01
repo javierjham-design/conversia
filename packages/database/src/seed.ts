@@ -316,7 +316,12 @@ const PLANS = [
     // excedente se compra por paquetes prepago (no hay cobro post-pago).
     // whatsappTemplates = capacidad de mensajes de plantilla: los planes básicos
     // (Free) NO la incluyen, independiente del switch por-tenant.
-    features: { whiteLabel: false, api: false, templateMessages: 0, whatsappTemplates: false },
+    // conversationsPerPeriod: cupo mensual de conversaciones (0 = solo medición, sin
+    // avisos ni topes; -1 = ilimitado; N>0 = cupo). Convención PROPIA (E3), distinta
+    // de templateMessages (donde 0 bloquea). Números reales los siembra el dueño con
+    // la cifra del bloque 1. conversationOverageClp: CLP por conversación extra (0 =
+    // no facturar overage). conversationHardCap: corta al 100% (true) vs. tope blando.
+    features: { whiteLabel: false, api: false, templateMessages: 0, whatsappTemplates: false, conversationsPerPeriod: 0, conversationOverageClp: 0, conversationHardCap: true },
   },
   {
     code: "starter",
@@ -325,7 +330,7 @@ const PLANS = [
     priceUsd: 75,
     order: 1,
     limits: { users: 5, clinics: 2, channels: 1, agents: 5, workflows: 10, aiTokensDaily: 1_000_000 },
-    features: { whiteLabel: false, api: true, templateMessages: 1000, whatsappTemplates: true },
+    features: { whiteLabel: false, api: true, templateMessages: 1000, whatsappTemplates: true, conversationsPerPeriod: 0, conversationOverageClp: 0, conversationHardCap: false },
   },
   {
     code: "pro",
@@ -334,7 +339,7 @@ const PLANS = [
     priceUsd: 129,
     order: 2,
     limits: { users: 20, clinics: 5, channels: 3, agents: 20, workflows: 50, aiTokensDaily: 5_000_000 },
-    features: { whiteLabel: true, api: true, templateMessages: 1500, whatsappTemplates: true },
+    features: { whiteLabel: true, api: true, templateMessages: 1500, whatsappTemplates: true, conversationsPerPeriod: 0, conversationOverageClp: 0, conversationHardCap: false },
   },
   {
     code: "enterprise",
@@ -344,7 +349,7 @@ const PLANS = [
     order: 3,
     isPublic: false,
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = ilimitado
-    features: { whiteLabel: true, api: true, sso: true, templateMessages: 4000, whatsappTemplates: true },
+    features: { whiteLabel: true, api: true, sso: true, templateMessages: 4000, whatsappTemplates: true, conversationsPerPeriod: 0, conversationOverageClp: 0, conversationHardCap: false },
   },
 ];
 
