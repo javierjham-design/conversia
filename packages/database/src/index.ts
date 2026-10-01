@@ -133,3 +133,6 @@ export async function resolveAgentByNameOrSlug(
   });
   return agents.find((a) => normalizeAgentKey(a.slug) === key || normalizeAgentKey(a.name) === key) ?? null;
 }
+
+// Loaders de datos de rubro (F2): compartidos por el seed y el instalador de paquetes.
+export * from "./vertical-loaders.js";

@@ -30,7 +30,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | E4 | mergeado | #398 | 2026-10-01 | regla 6 neutra de canal + guarda tope/fusión + prompts TuBot (doc) + plantillas; seed SQL NO regenerado (stale por publicación vía API); métrica "antes" pendiente OK-1 |
 | E5 | en PR | | 2026-10-01 | copy veraz (8 ítems) + borradores de aviso (NO enviados) + evento announcement.oct2026 + script con --confirm; 4 textos admin pendientes OK; SQL bot NO regenerado (stale) |
 | F1 | en PR | | 2026-10-01 | migración brand+User.settings; brands.ts (brandOf); CORS multi-marca; registro brand-por-Origin + country→currency (H20); PATCH /me/preferences + brand en GET/me (H44); brandOf en correos de pago+retornos Flow, export, firma de agenda (ToolContext.brandName); tests. Barrido FINO pendiente (bajo impacto): asuntos de alerta mailer/channel-auth, descripción de getPlanes, links de platform.controller (zona protegida) |
-| F2 | pendiente | | | motor de paquetes verticales |
+| F2 | en PR | | 2026-10-01 | motor de paquetes verticales: tabla vertical_templates (org_id nullable, RLS), loaders extraídos de seed.ts a packages/database (compartidos seed+instalador), installVerticalPackage transaccional, endpoints tenant+platform, registro con ?vertical=, rubros dental/barberia + seed v1, verify-isolation case |
 | F4 | pendiente | | | agenda nativa completa |
 | F5 | pendiente | | | D1/D4/D5 resueltas; requiere F1 (ideal F2); lleva migración (locked price + serviceDebitsWallet) |
 | F3 | pendiente | | | D6=verificación correo SÍ; requiere F1,F2,F5; deploy Railway = dueño |

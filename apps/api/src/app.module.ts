@@ -28,6 +28,7 @@ import { OAuthController } from "./integrations/oauth.controller";
 import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { OnboardingController } from "./organizations/onboarding.controller";
+import { VerticalService } from "./organizations/vertical.service";
 import { SupportController } from "./organizations/support.controller";
 import { NotificationsController } from "./notifications/notifications.controller";
 import { SettingsController } from "./organizations/settings.controller";
@@ -98,7 +99,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

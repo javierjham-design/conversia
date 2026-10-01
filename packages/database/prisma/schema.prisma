@@ -1132,6 +1132,25 @@ model AgentTemplate {
   @@map("agent_templates")
 }
 
+// Paquete vertical versionado (F2): instala un rubro completo (etapas, servicios,
+// agentes/flujos borrador, conocimiento, vocabulario, módulos) en una transacción.
+// organizationId NULL = catálogo global gestionado por Super Admin; el loop de RLS de
+// setup.sql lo oculta e inmuta para el rol de app (se lee/instala con el cliente admin).
+model VerticalTemplate {
+  id             String   @id @default(cuid())
+  organizationId String?  @map("organization_id")
+  key            String // dental | barberia | generico
+  version        Int
+  name           String
+  definition     Json
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([key, version])
+  @@index([key, active])
+  @@map("vertical_templates")
+}
+
 model Agent {
   id               String         @id @default(cuid())
   organizationId   String         @map("organization_id")

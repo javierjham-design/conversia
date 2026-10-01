@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as bcryptMod from "bcryptjs";
 import { getPrisma } from "./index.js";
+import { loadVerticalData } from "./vertical-loaders.js";
 
 const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 const prisma = getPrisma();
@@ -86,220 +87,16 @@ async function seedTenant(fileName: string, adminEmail: string) {
   });
   console.log(`✔ Usuario admin ${adminEmail} (password: valor de SEED_ADMIN_PASSWORD o 'conversia-dev')`);
 
-  // Sedes
-  const clinicsBySlug: Record<string, string> = {};
-  for (const c of seed.clinics ?? []) {
-    const clinic = await prisma.clinic.upsert({
-      where: { organizationId_slug: { organizationId: org.id, slug: c.slug } },
-      update: { name: c.name, address: c.address, city: c.city },
-      create: {
-        organizationId: org.id,
-        name: c.name,
-        slug: c.slug,
-        address: c.address,
-        city: c.city,
-        timezone: c.timezone ?? org.timezone,
-      },
-    });
-    clinicsBySlug[c.slug] = clinic.id;
-  }
-
-  // Equipos
-  for (const t of seed.teams ?? []) {
-    const existing = await prisma.team.findFirst({ where: { organizationId: org.id, name: t.name } });
-    if (!existing) {
-      await prisma.team.create({
-        data: { organizationId: org.id, name: t.name, description: t.description },
-      });
-    }
-  }
-
-  // Estados de lead
-  for (const s of seed.leadStatuses ?? []) {
-    await prisma.leadStatus.upsert({
-      where: { organizationId_code: { organizationId: org.id, code: s.code } },
-      update: { name: s.name, category: s.category, order: s.order },
-      create: {
-        organizationId: org.id,
-        code: s.code,
-        name: s.name,
-        category: s.category,
-        order: s.order,
-        system: true,
-      },
-    });
-  }
-
-  // Servicios
-  const servicesByCode: Record<string, string> = {};
-  for (const s of seed.services ?? []) {
-    const svc = await prisma.service.upsert({
-      where: { organizationId_code: { organizationId: org.id, code: s.code } },
-      update: { name: s.name, price: s.price, durationMin: s.durationMin, category: s.category },
-      create: {
-        organizationId: org.id,
-        code: s.code,
-        name: s.name,
-        category: s.category,
-        durationMin: s.durationMin ?? 30,
-        price: s.price,
-        currency: org.currency,
-      },
-    });
-    servicesByCode[s.code] = svc.id;
-  }
-
-  // Profesionales + servicios que atienden
-  for (const p of seed.professionals ?? []) {
-    let prof = await prisma.professional.findFirst({ where: { organizationId: org.id, name: p.name } });
-    if (!prof) {
-      prof = await prisma.professional.create({
-        data: {
-          organizationId: org.id,
-          clinicId: Object.values(clinicsBySlug)[0] ?? null,
-          name: p.name,
-          specialty: p.specialty,
-        },
-      });
-    }
-    for (const code of p.services ?? []) {
-      const serviceId = servicesByCode[code];
-      if (!serviceId) continue;
-      await prisma.professionalService.upsert({
-        where: {
-          organizationId_professionalId_serviceId: {
-            organizationId: org.id,
-            professionalId: prof.id,
-            serviceId,
-          },
-        },
-        update: {},
-        create: { organizationId: org.id, professionalId: prof.id, serviceId },
-      });
-    }
-  }
-
-  // Etiquetas
-  for (const t of seed.tags ?? []) {
-    await prisma.tag.upsert({
-      where: { organizationId_name: { organizationId: org.id, name: t.name } },
-      update: { color: t.color },
-      create: { organizationId: org.id, name: t.name, color: t.color },
-    });
-  }
-
-  // Agentes con versión 1 publicada
-  const agentsBySlug: Record<string, string> = {};
-  for (const a of seed.agents ?? []) {
-    const agent = await prisma.agent.upsert({
-      where: { organizationId_slug: { organizationId: org.id, slug: a.slug } },
-      update: { name: a.name, description: a.description, kind: a.kind },
-      create: {
-        organizationId: org.id,
-        slug: a.slug,
-        name: a.name,
-        description: a.description,
-        kind: a.kind ?? "custom",
-      },
-    });
-    agentsBySlug[a.slug] = agent.id;
-    let version = await prisma.agentVersion.findFirst({
-      where: { agentId: agent.id, status: "PUBLISHED" },
-      orderBy: { version: "desc" },
-    });
-    if (!version) {
-      version = await prisma.agentVersion.create({
-        data: {
-          organizationId: org.id,
-          agentId: agent.id,
-          version: 1,
-          status: "PUBLISHED",
-          systemPrompt: a.systemPrompt,
-          config: a.config ?? {},
-          tools: a.tools ?? [],
-          publishedAt: new Date(),
-          changelog: "Versión inicial (seed)",
-        },
-      });
-    }
-    await prisma.agent.update({ where: { id: agent.id }, data: { currentVersionId: version.id } });
-  }
-
-  // Workflows con versión 1 publicada
-  for (const w of seed.workflows ?? []) {
-    let wf = await prisma.workflow.findFirst({ where: { organizationId: org.id, templateKey: w.templateKey } });
-    if (!wf) {
-      wf = await prisma.workflow.create({
-        data: {
-          organizationId: org.id,
-          name: w.name,
-          description: w.description,
-          templateKey: w.templateKey,
-          active: true,
-        },
-      });
-    }
-    let version = await prisma.workflowVersion.findFirst({
-      where: { workflowId: wf.id, status: "PUBLISHED" },
-      orderBy: { version: "desc" },
-    });
-    if (!version) {
-      version = await prisma.workflowVersion.create({
-        data: {
-          organizationId: org.id,
-          workflowId: wf.id,
-          version: 1,
-          status: "PUBLISHED",
-          definition: w.definition,
-          publishedAt: new Date(),
-          changelog: "Versión inicial (seed)",
-        },
-      });
-    }
-    await prisma.workflow.update({ where: { id: wf.id }, data: { currentVersionId: version.id, active: true } });
-  }
-
-  // Base de conocimiento (documentos sin embeddings; se indexan aparte)
-  for (const kb of seed.knowledge ?? []) {
-    let base = await prisma.knowledgeBase.findFirst({ where: { organizationId: org.id, name: kb.baseName } });
-    if (!base) {
-      base = await prisma.knowledgeBase.create({
-        data: { organizationId: org.id, name: kb.baseName },
-      });
-    }
-    for (const d of kb.documents ?? []) {
-      const doc = await prisma.knowledgeDocument.findFirst({ where: { baseId: base.id, title: d.title } });
-      if (!doc) {
-        await prisma.knowledgeDocument.create({
-          data: {
-            organizationId: org.id,
-            baseId: base.id,
-            title: d.title,
-            sourceType: d.sourceType ?? "text",
-            status: "PUBLISHED",
-            content: d.content,
-          },
-        });
-      }
-    }
-  }
-
-  // Canal (MOCK en dev; WHATSAPP_CLOUD al conectar Meta)
-  if (seed.channel) {
-    const existing = await prisma.channelConnection.findFirst({
-      where: { organizationId: org.id, name: seed.channel.name },
-    });
-    if (!existing) {
-      await prisma.channelConnection.create({
-        data: {
-          organizationId: org.id,
-          type: seed.channel.type,
-          name: seed.channel.name,
-          defaultAgentId: agentsBySlug[seed.channel.defaultAgentSlug] ?? null,
-        },
-      });
-    }
-  }
+  // Datos del tenant (sedes, equipos, estados, servicios, profesionales, etiquetas,
+  // agentes, flujos, conocimiento, canal). Loaders compartidos con el instalador de
+  // paquetes verticales (F2); en el seed se publican (publish:true).
+  await loadVerticalData(
+    prisma as unknown as import("./vertical-loaders.js").DbClient,
+    org.id,
+    { timezone: org.timezone, currency: org.currency },
+    seed,
+    { publish: true },
+  );
 
   return org;
 }
@@ -362,6 +159,19 @@ async function main() {
       create: p as any,
     });
   }
+
+  // Catálogo de PAQUETES VERTICALES (globales, organizationId NULL). Idempotente por
+  // (key, version). Los instala el motor de F2 en cada tenant (borrador editable).
+  const verticalsRaw = readFileSync(join(__dirname, "..", "seeds", "vertical-templates.json"), "utf-8");
+  const verticals = JSON.parse(verticalsRaw) as Array<{ key: string; version: number; name: string; definition: any }>;
+  for (const v of verticals) {
+    await prisma.verticalTemplate.upsert({
+      where: { key_version: { key: v.key, version: v.version } },
+      update: { name: v.name, definition: v.definition, active: true },
+      create: { key: v.key, version: v.version, name: v.name, definition: v.definition, active: true },
+    });
+  }
+  console.log(`✔ ${verticals.length} paquetes verticales (dental, barberia, generico).`);
 
   // Administrador de PLATAFORMA (super-admin). Identidad separada de los tenants.
   const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "conversia-platform-dev";

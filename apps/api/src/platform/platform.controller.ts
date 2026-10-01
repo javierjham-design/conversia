@@ -19,6 +19,7 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
 import { AuthService } from "../auth/auth.service";
+import { VerticalService } from "../organizations/vertical.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
 import { flowCollect, flowCustomerGet, flowPaymentStatus } from "../billing/flow-subscriptions";
 import { createPaymentProvider } from "../billing/payment-provider";
@@ -98,6 +99,7 @@ export class PlatformController {
     private auth: AuthService,
     private paymentSettings: PaymentSettingsService,
     private queues: QueueService,
+    private vertical: VerticalService,
   ) {}
 
   private audit(req: PlatformRequest, action: string, entityType: string, entityId: string, after?: object) {
@@ -527,6 +529,16 @@ export class PlatformController {
     const res = await this.auth.setOrgAdminEmail(id, parsed.data.email);
     await this.audit(req, "platform.admin.change_email", "user", res.userId, { email: res.email });
     return { ok: true, email: res.email };
+  }
+
+  /** Instala un paquete vertical (rubro) en una organización desde el Super Admin (F2). */
+  @Post("organizations/:id/vertical")
+  async installVertical(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ key: z.string().trim().min(2).max(40), version: z.number().int().positive().optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("key requerido (version opcional)");
+    const result = await this.vertical.install(id, parsed.data.key, parsed.data.version);
+    await this.audit(req, "platform.org.vertical_install", "organization", id, result);
+    return { ok: true, ...result };
   }
 
   @Post("organizations/:id/status")

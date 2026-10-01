@@ -1,3 +1,7 @@
+// @deprecated (F2): el origen de verdad de los paquetes por rubro es `vertical_templates`
+// (BD), instalado por el motor de paquetes verticales. Este archivo queda hasta migrar
+// la personalización actual; no agregar rubros nuevos aquí.
+//
 // Recomendaciones de plantillas por rubro. Reutiliza las plantillas GENÉRICAS y
 // parametrizables (agentes y flujos) — sin datos de ningún tenant — y sugiere el
 // subconjunto que mejor encaja en cada industria. Al instalar un flujo se crea

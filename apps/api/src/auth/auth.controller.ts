@@ -30,6 +30,8 @@ const registerSchema = z.object({
   // País ISO-3166 alpha-2 (default CL) → deriva la moneda. NO se acepta `brand` del
   // body: la marca se deriva server-side del Origin (ver register()).
   country: z.string().trim().toUpperCase().pipe(z.string().regex(/^[A-Z]{2}$/, "País inválido (ISO-3166 alpha-2)")).default("CL"),
+  // Rubro opcional (F2): si viene y hay paquete vertical activo, se instala al registrar.
+  vertical: z.string().trim().min(2).max(40).optional(),
 });
 
 /**

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
+import { VerticalService } from "../organizations/vertical.service";
 import { signAppToken, signMfaToken } from "./jwt";
 import { encryptSecret, decryptSecret } from "../common/crypto";
 import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
@@ -23,14 +24,17 @@ function slugify(name: string): string {
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private vertical: VerticalService,
+  ) {}
 
   /**
    * Registro self-service: crea usuario + organización + roles del sistema +
    * estados de lead por defecto. Corre con la conexión admin (crear una
    * organización es una operación de plataforma, fuera del RLS del tenant).
    */
-  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string }) {
+  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string }) {
     const db = this.prisma.admin;
     const existing = await db.user.findUnique({ where: { email: input.email } });
     // Anti-enumeración (ASVS 2.2 / OWASP): mensaje genérico + rate limit en el
@@ -140,6 +144,17 @@ export class AuthService {
       });
       return { org, user, role: ownerRole };
     });
+
+    // Paquete vertical (F2): si el registro trae rubro y hay plantilla activa, se
+    // instala tras crear la org (post-commit; tiene su propia transacción con RLS).
+    // Best-effort: si falla, el usuario queda creado y puede instalarlo desde onboarding.
+    if (input.vertical) {
+      try {
+        await this.vertical.install(result.org.id, input.vertical);
+      } catch (e) {
+        console.error(`✖ No se pudo instalar el paquete vertical "${input.vertical}" en ${result.org.id}:`, (e as Error).message);
+      }
+    }
 
     return this.issueTokens(result.user.id, result.org.id, result.role.code, ["*"]);
   }

@@ -1,7 +1,9 @@
-import { Controller, Get } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
+import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { templateGuideFor } from "./template-guide";
+import { VerticalService } from "./vertical.service";
 
 /** Un paso del checklist de puesta en marcha, con su estado y su llamada a la acción. */
 export interface OnboardingStep {
@@ -20,7 +22,10 @@ export interface OnboardingStep {
  */
 @Controller("onboarding")
 export class OnboardingController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private vertical: VerticalService,
+  ) {}
 
   @Get()
   status() {
@@ -38,6 +43,7 @@ export class OnboardingController {
 
       const settings = (org?.settings ?? {}) as Record<string, any>;
       const industry = String(settings.general?.industry ?? "");
+      const hasVertical = !!settings.vertical?.key;
 
       const steps: OnboardingStep[] = [
         {
@@ -53,6 +59,13 @@ export class OnboardingController {
           description: "Define tu rubro y crea en Meta las plantillas que tu negocio necesita para iniciar conversaciones.",
           done: !!industry && templates > 0,
           cta: { label: "Ver plantillas de mi rubro", href: "/onboarding/plantillas" },
+        },
+        {
+          key: "vertical",
+          title: "Instalar el paquete de tu rubro",
+          description: "Instala el paquete vertical (etapas, servicios, agentes y flujos base) para arrancar con todo listo para personalizar.",
+          done: hasVertical,
+          cta: { label: "Instalar paquete de rubro", href: "/onboarding" },
         },
         {
           key: "agent",
@@ -110,5 +123,15 @@ export class OnboardingController {
       }));
       return { suggestions, whatsappConnected: hasWaba > 0 };
     });
+  }
+
+  /** Instala el paquete vertical del rubro indicado en el tenant actual (idempotente). */
+  @Post("vertical")
+  async installVertical(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ key: z.string().trim().min(2).max(40) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Falta el rubro (key) del paquete a instalar.");
+    const result = await this.vertical.install(ctx.organizationId, parsed.data.key);
+    return { ok: true, ...result };
   }
 }

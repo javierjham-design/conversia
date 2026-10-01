@@ -24,6 +24,8 @@ function RegistroForm() {
   const params = useSearchParams();
   const planParam = (params.get("plan") ?? "").toLowerCase();
   const plan = planParam in PLAN_LABELS ? planParam : null;
+  // Rubro opcional por querystring (F2): si viene, se instala el paquete vertical al registrar.
+  const vertical = (params.get("vertical") ?? "").trim().toLowerCase() || null;
 
   const [name, setName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -39,7 +41,7 @@ function RegistroForm() {
     try {
       const res = await api<{ token: string }>("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ name, organizationName, email, password }),
+        body: JSON.stringify({ name, organizationName, email, password, ...(vertical ? { vertical } : {}) }),
       });
       setToken(res.token);
       // Con plan pagado se va directo al checkout; si no, al checklist inicial.
