@@ -1,0 +1,154 @@
+@import "tailwindcss";
+
+/*
+ * DESIGN SYSTEM CONVERSIA ("Nocturna") — F3. El MODO (claro/oscuro) y el ACENTO son
+ * solo sets de tokens: jamás dos layouts. Modo oscuro = grafito azulado profundo con
+ * tarjetas de vidrio esmerilado; modo claro = el MISMO layout con piel de porcelana.
+ * Acento configurable por el usuario desde una paleta CURADA de 6 (nunca color libre):
+ * tiñe navegación, botones, anillos, luz y marca. El indicador de CRÉDITOS es SEMÁNTICO
+ * (verde→ámbar→rojo), nunca del acento. Cero Tailwind config compartida con apps/web.
+ */
+
+:root {
+  /* Modo CLARO (porcelana luminosa) — default. */
+  --bg: #eef1f5;
+  --bg-tint: #e6ebf2;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-solid: #ffffff;
+  --ink: #171a21;
+  --ink-dim: #5a6474;
+  --line: rgba(23, 26, 33, 0.1);
+  --hairline: rgba(23, 26, 33, 0.08);
+  --shadow: 0 10px 34px rgba(23, 26, 33, 0.08);
+  /* Semánticos de créditos (independientes del acento). */
+  --ok: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+}
+
+[data-theme="dark"] {
+  /* Modo OSCURO (grafito azulado profundo con luz ambiental sutil). */
+  --bg: #0b0f16;
+  --bg-tint: #0e1420;
+  --surface: rgba(28, 35, 48, 0.55);
+  --surface-solid: #141a24;
+  --ink: #e9edf4;
+  --ink-dim: #99a3b4;
+  --line: rgba(255, 255, 255, 0.08);
+  --hairline: rgba(255, 255, 255, 0.12);
+  --shadow: 0 12px 44px rgba(0, 0, 0, 0.45);
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+}
+
+/* ---- Acentos de la paleta curada (aplican en ambos modos). Default: Menta. ---- */
+:root,
+[data-accent="menta"] {
+  --acc: #2dd4bf;
+  --acc-deep: #0f9e8e;
+  --acc-ink: #04221e;
+  --acc-dim: rgba(45, 212, 191, 0.16);
+  --acc-glow: rgba(45, 212, 191, 0.38);
+}
+[data-accent="artico"] {
+  --acc: #38bdf8;
+  --acc-deep: #0284c7;
+  --acc-ink: #04212e;
+  --acc-dim: rgba(56, 189, 248, 0.16);
+  --acc-glow: rgba(56, 189, 248, 0.38);
+}
+[data-accent="indigo"] {
+  --acc: #818cf8;
+  --acc-deep: #4f46e5;
+  --acc-ink: #10112e;
+  --acc-dim: rgba(129, 140, 248, 0.16);
+  --acc-glow: rgba(129, 140, 248, 0.38);
+}
+[data-accent="lima"] {
+  --acc: #a3e635;
+  --acc-deep: #65a30d;
+  --acc-ink: #15230a;
+  --acc-dim: rgba(163, 230, 53, 0.16);
+  --acc-glow: rgba(163, 230, 53, 0.36);
+}
+[data-accent="oro"] {
+  --acc: #fbbf24;
+  --acc-deep: #d97706;
+  --acc-ink: #2a1c02;
+  --acc-dim: rgba(251, 191, 36, 0.16);
+  --acc-glow: rgba(251, 191, 36, 0.36);
+}
+[data-accent="coral"] {
+  --acc: #fb7185;
+  --acc-deep: #e11d48;
+  --acc-ink: #2e070e;
+  --acc-dim: rgba(251, 113, 133, 0.16);
+  --acc-glow: rgba(251, 113, 133, 0.36);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  background:
+    radial-gradient(1200px 600px at 100% -10%, var(--acc-dim), transparent 60%),
+    var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100dvh;
+}
+@media (prefers-reduced-motion: reduce) {
+  body {
+    background: var(--bg);
+  }
+}
+
+/* Serif de display para marca, saludos y titulares (Fraunces; fallback serif). */
+.display {
+  font-family: Fraunces, Georgia, "Times New Roman", serif;
+  letter-spacing: -0.01em;
+}
+.display-italic {
+  font-family: Fraunces, Georgia, serif;
+  font-style: italic;
+}
+
+/* Tarjeta de vidrio esmerilado (borde hairline + highlight superior). */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.btn-accent {
+  background: var(--acc);
+  color: var(--acc-ink);
+  border: none;
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-accent:hover {
+  background: var(--acc-deep);
+  color: #fff;
+}
+.ring-accent {
+  box-shadow: 0 0 0 3px var(--acc-dim);
+}
+.text-accent {
+  color: var(--acc-deep);
+}
+.text-dim {
+  color: var(--ink-dim);
+}

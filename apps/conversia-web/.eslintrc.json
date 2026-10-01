@@ -1,0 +1,17 @@
+{
+  "root": true,
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["**/apps/web/**", "@conversia/web", "@conversia/web/**"],
+            "message": "conversia-web NO importa de apps/web (design system y UI propios). Usa packages/* (p. ej. @conversia/types)."
+          }
+        ]
+      }
+    ]
+  }
+}
