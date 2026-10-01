@@ -14,6 +14,7 @@
 | api | Dockerfile `apps/api/Dockerfile` (upload CLI) | https://api-production-cf8e.up.railway.app |
 | worker | Dockerfile `apps/worker/Dockerfile` | — (sin dominio) |
 | web | Dockerfile `apps/web/Dockerfile` | https://web-production-d50dd.up.railway.app |
+| conversia-web | Dockerfile `apps/conversia-web/Dockerfile` (F3) | app.conversia.cl (a configurar) |
 
 Claves de la configuración:
 - Cada servicio usa `RAILWAY_DOCKERFILE_PATH` y se despliega con `railway up --service <n> --ci` desde la raíz (el contexto respeta .gitignore).
@@ -24,6 +25,28 @@ Claves de la configuración:
 - Conexión a BD de los servicios: usuario `postgres` (admin) por ahora — el cambio a rol `conversia_app` + cliente admin separado es el ticket de hardening #3 del ROADMAP. El rol ya existe con contraseña fuerte y RLS aplicado.
 
 Release de cambios: `railway up --service <n> --ci` por servicio tocado. Migraciones: desde local contra `DATABASE_PUBLIC_URL` → `prisma migrate deploy` + `pnpm db:setup` (idempotente) — automatizar como pre-deploy es mejora pendiente.
+
+### Alta del servicio `conversia-web` (F3 — frontend Conversia)
+
+**Un backend, dos frontends.** Conversia NO tiene api/worker/BD propios: comparte los de
+TuBot. Lo único nuevo es UN servicio de frontend en el MISMO proyecto Railway `conversia`.
+**Prohibido** crear un segundo Postgres/Redis/api/worker (ver `CONVERSIA_MONTAJE.md §1`).
+
+Pasos (dashboard o CLI; el dueño los ejecuta):
+
+1. **Nuevo servicio** en el proyecto `conversia`, mismo repo/monorepo. Nombre: `conversia-web`.
+2. **Build:** `RAILWAY_DOCKERFILE_PATH=apps/conversia-web/Dockerfile` (build filtrado por turbo a `@conversia/conversia-web`). Autodeploy desde `main` como los demás.
+3. **Variables del servicio** (solo frontend — NO duplicar otras):
+   - `NEXT_PUBLIC_API_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (build arg: se inlinea en el bundle; apunta a la api EXISTENTE).
+   - `PORT=8080` (dominio con `--port 8080`, igual que web).
+4. **Dominio:** `app.conversia.cl` (CNAME al dominio del servicio).
+5. **En la api EXISTENTE** (servicio `api`), agregar para CORS y links de marca (F1):
+   - `WEB_URL_CONVERSIA=https://app.conversia.cl`.
+   (No se toca ninguna otra env de la api.)
+6. CLI equivalente: `railway up --service conversia-web --ci` desde la raíz.
+
+Primer release recomendado DESPUÉS de aplicar las migraciones E3/F1/F2/F5 + `db:setup` +
+`db:seed` (planes/paquetes/pesos conversia), para que el frontend tenga datos reales.
 
 ## Runbook de migración a producción (obligatorio)
 

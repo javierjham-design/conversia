@@ -33,7 +33,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | F2 | en PR | | 2026-10-01 | motor de paquetes verticales: tabla vertical_templates (org_id nullable, RLS), loaders extraídos de seed.ts a packages/database (compartidos seed+instalador), installVerticalPackage transaccional, endpoints tenant+platform, registro con ?vertical=, rubros dental/barberia + seed v1, verify-isolation case |
 | F4 | pendiente | | | agenda nativa completa |
 | F5 | en PR | | 2026-10-01 | planes conversia_* (créditos/serviceDebitsWallet/cupo -1) + migración brand en plans + locked_price (grandfathering) + catálogo por marca + pesos walletWeights:conversia + F5-B débito de servicio (exención free tier + refund W-2) + setup:/lifecycle + exclusión trial-lifecycle conversia + GET /billing/wallet/summary + sobre 500 créditos. DIFERIDO: Lemon W-3 (D4, cargar variantId=operativo), activación final=F10, estimador difusiones/textos finos por marca |
-| F3 | pendiente | | | D6=verificación correo SÍ; requiere F1,F2,F5; deploy Railway = dueño |
+| F3 | en PR (Tramo 1) | | 2026-10-01 | apps/conversia-web NUEVA: scaffold Next.js (puerto 3002) + design system Nocturna (tokens oscuro/claro + 6 acentos curados, globals.css) + acento por país (config) + auth login + home "Hoy" (saludo + créditos semánticos de /billing/wallet/summary) + Dockerfile + runbook Railway (DEPLOYMENT.md) + regla ESLint no importar apps/web. PENDIENTE (tramos sig.): bandeja WhatsApp, agenda, clientes, facturación, ajustes, nav unificada, registro visual por vertical, persistir acento vía PATCH /me/preferences, D6 verificación correo |
 | F6 | pendiente | | | requiere D7 |
 | F7 | pendiente | | | |
 | F8 | pendiente | | | |

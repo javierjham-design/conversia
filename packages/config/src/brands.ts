@@ -61,3 +61,29 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
     mfaIssuer: env.SUPER_ADMIN_MFA_ISSUER, // respeta override actual del env
   };
 }
+
+/**
+ * ACENTO DE UI CONVERSIA (F3). Paleta CURADA de 6 acentos seguros (nunca color libre:
+ * garantiza contraste y elegancia). El default por país se resuelve al crear la cuenta
+ * con Organization.country (el usuario puede cambiarlo luego vía PATCH /me/preferences).
+ * Los tokens de color de cada acento (ambos modos) viven en el design system del
+ * frontend (apps/conversia-web/app/globals.css); aquí solo el mapa país → acento.
+ */
+export type AccentKey = "menta" | "artico" | "indigo" | "lima" | "oro" | "coral";
+
+export const ACCENTS: AccentKey[] = ["menta", "artico", "indigo", "lima", "oro", "coral"];
+
+const ACCENT_BY_COUNTRY: Record<string, AccentKey> = {
+  CL: "menta",
+  AR: "artico",
+  CO: "oro",
+  MX: "lima",
+  PE: "coral",
+};
+
+/** Acento por defecto según país (editable sin deploy). Resto LATAM/otros → índigo; sin país → menta. */
+export function accentForCountry(country: string | null | undefined): AccentKey {
+  const c = (country ?? "").toUpperCase();
+  if (!c) return "menta";
+  return ACCENT_BY_COUNTRY[c] ?? "indigo";
+}
