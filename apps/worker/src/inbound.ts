@@ -482,8 +482,17 @@ export async function processInbound(job: InboundJob): Promise<void> {
       ) ||
       Boolean(
         await withTenant(organizationId, (tx) =>
-          tx.workflowRun.findFirst({
-            where: { conversationId: result.conversationId, status: "WAITING", startedAt: { gte: cycleStart } },
+          // Un flujo WAITING arrancado por este mensaje solo "toma" la conversación si ya
+          // le HABLÓ al cliente (o corrió un agente) antes de quedarse esperando. Un flujo
+          // PASIVO cuyo primer nodo es una espera (p.ej. seguimiento de no-respuesta) NO
+          // debe silenciar la respuesta/derivación inicial del bot (caso GIGI/Marcelo:
+          // los leads nuevos quedaban sin apertura y 2 h después recibían el nudge).
+          tx.workflowRunStep.findFirst({
+            where: {
+              status: "COMPLETED",
+              nodeType: { in: ["send_text", "send_template", "run_agent", "ai_objective"] },
+              run: { conversationId: result.conversationId, status: "WAITING", startedAt: { gte: cycleStart } },
+            },
             select: { id: true },
           }),
         ),
