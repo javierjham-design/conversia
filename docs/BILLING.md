@@ -141,6 +141,69 @@ Se respeta la existente: por tenant (`organization.settings.paymentProvider`) y 
 moneda (CLP → Flow, USD → Lemon Squeezy/Stripe). La máquina de estados es la misma para
 todas.
 
+## Tarifa de mensajes de servicio (octubre 2026)
+
+Desde el **2026-10-01** Meta cobra los mensajes de **servicio** de WhatsApp (respuestas
+libres dentro de la ventana de 24 h), que antes eran gratis. Hay **1.000 gratis/mes por
+número**; sobre ese umbral se cobra (~USD 0,0200 por mensaje en Chile). La tarifa NO se
+hardcodea: vive en un **calendario con fecha de vigencia** editable sin deploy.
+
+### Dónde vive y formato
+
+- Key de `platform_settings`: **`whatsappRateSchedule`** (SEPARADA de `whatsappRates`
+  a propósito: el zod del `PATCH /platform/cost-settings` hace strip de campos
+  desconocidos y el merge de la calculadora del admin pisaría los tramos si vivieran
+  dentro de `whatsappRates`).
+- La lee `getWhatsappRateSchedule()` (`apps/worker/src/cost-settings.ts`, cache 60 s;
+  JSON inválido o ausente → `{}` = "sin schedule").
+- La consume `computeWhatsappCostUsd(category, countryIso, overrides?, { at, schedule })`
+  (`packages/agents/src/pricing.ts`). Precedencia: (1) tramo vigente del schedule;
+  (2) override plano `whatsappRates`; (3) tabla base. Sin `at`/`schedule` el
+  comportamiento es idéntico al histórico.
+- **Vigencia por fecha:** rige el tramo cuyo `effectiveFrom` (UTC, límite **INCLUSIVE**)
+  sea el mayor que no supere la fecha evaluada. A las `2026-10-01T00:00:00Z` exactas ya
+  rige el tramo de octubre.
+
+JSON de ejemplo (Chile, servicio USD 0,0200 desde el 1-oct-2026):
+
+```json
+{
+  "CL": {
+    "service": [
+      { "effectiveFrom": "2026-10-01T00:00:00Z", "rateUsd": 0.0200 }
+    ]
+  }
+}
+```
+
+### Cómo se cambia sin deploy
+
+- **SQL:** `INSERT INTO platform_settings (key, value) VALUES ('whatsappRateSchedule',
+  '<json>') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;`
+- **API:** key propia en `platform_settings` (NO mezclar con `whatsappRates`).
+- Para subir la tarifa en el futuro: agregar un tramo nuevo con `effectiveFrom` mayor;
+  el histórico se conserva y la vigencia la resuelve la fecha del mensaje.
+
+> **La siembra en producción es un paso operativo del dueño** (no la hace el código).
+> E1 solo construye el cimiento; la medición/cobro real entra en E2+.
+
+### Checklist de verificación del rate card — HACER AHORA (no "cuando Meta publique")
+
+El cobro **ya rige** (2026-10-01). Verificar contra datos reales **de inmediato**, porque
+cada día sin schedule sembrado es costo invisible:
+
+1. **Precio CL definitivo:** confirmar el valor exacto de servicio en Chile contra el
+   rate card vigente de Meta (el ejemplo usa USD 0,0200).
+2. **Etiqueta de la categoría en el webhook de status real:** capturar un webhook de
+   status (ya llegan con `pricing.billable=true`) y confirmar **con qué string llega la
+   categoría de servicio** — ¿`"service"`? ¿`"utility"`? — para que
+   `normalizeRateCategory` la mapee bien. Una etiqueta inesperada NO debe dejar el costo
+   en 0 en silencio (la alerta por categoría no reconocida se agrega en E2).
+3. **Tramos de volumen:** revisar si Meta publicó tramos por volumen para servicio (hoy
+   el modelo usa list rate / tramo 0).
+4. **`usdToClp`:** revisar el tipo de cambio de referencia (`CLP_PER_USD_REF`) usado para
+   el round-trip CLP↔USD.
+
 ## Decisión de pasarela (pendiente de confirmar)
 
 Alineado con la estrategia de Cláriva: **CLP para Chile, USD para el resto**. Para USD, Stripe es el más directo (requiere entidad/LLC o Merchant of Record como Paddle/Lemon Squeezy para evitarla). Para CLP local: Flow/Transbank Webpay. La abstracción `PaymentProvider` permite conectar cualquiera sin tocar el resto del sistema.

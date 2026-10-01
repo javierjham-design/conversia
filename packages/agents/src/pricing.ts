@@ -52,7 +52,10 @@ export function computeCostUsdCached(
 /**
  * Precio que Meta cobra por mensaje de WhatsApp (per-message, vigente 2025+), por
  * categoría de plantilla y país del destinatario. Los mensajes de SERVICIO
- * (respuestas dentro de la ventana de 24 h) son GRATIS.
+ * (respuestas dentro de la ventana de 24 h) fueron gratis hasta el 2026-09-30;
+ * desde el 2026-10-01 se cobran. Esa tarifa NO se hardcodea en la tabla base:
+ * entra por fecha de vigencia vía `schedule` de computeWhatsappCostUsd (ver
+ * WhatsappRateSchedule) o por override plano. La tabla base deja service en 0.
  *
  * FUENTE: rate card OFICIAL de Meta "Cost per message in CLP, effective July 1,
  * 2026" (list rate; developers.facebook.com/docs/whatsapp/pricing). Los valores
@@ -71,7 +74,11 @@ export interface WhatsappRates {
 
 /** Tipo de cambio de referencia para convertir el rate card CLP de Meta → USD. */
 export const CLP_PER_USD_REF = 950;
-/** Convierte una fila del rate card (CLP) a USD; servicio siempre gratis. */
+/**
+ * Convierte una fila del rate card (CLP) a USD. `service` = 0 en la tabla base:
+ * la tarifa de servicio de octubre 2026 NO se hardcodea aquí, entra por fecha de
+ * vigencia vía `schedule` o por override (ver computeWhatsappCostUsd).
+ */
 const clp = (marketing: number, utility: number, authentication: number): WhatsappRates => ({
   marketing: Number((marketing / CLP_PER_USD_REF).toFixed(5)),
   utility: Number((utility / CLP_PER_USD_REF).toFixed(5)),
@@ -131,26 +138,87 @@ export const WHATSAPP_PRICING: Record<string, WhatsappRates> = {
   default: clp(53.3285, 6.7985, 6.7985),
 };
 
-/** Costo de un mensaje según categoría + país (ISO). `overrides` desde platform_settings. */
+/** Categorías de tarifa normalizadas (claves de WhatsappRates y del schedule). */
+type RateCategory = keyof WhatsappRates;
+
+/**
+ * Calendario de tarifas de WhatsApp con fecha de vigencia, por país y categoría.
+ * Clave externa = país ISO (igual que WHATSAPP_PRICING). Cada categoría lleva una
+ * lista de tramos `{ effectiveFrom, rateUsd }`; rige el tramo cuyo `effectiveFrom`
+ * (UTC, límite INCLUSIVE) sea el MAYOR que no supere la fecha evaluada. Se guarda en
+ * platform_settings key "whatsappRateSchedule" y lo construye el dueño (sin deploy).
+ */
+export type WhatsappRateSchedule = Record<
+  string,
+  Partial<Record<RateCategory, { effectiveFrom: string; rateUsd: number }[]>>
+>;
+
+/** Normaliza la categoría cruda de Meta a la clave de tarifa, o null si no se reconoce. */
+function normalizeRateCategory(category: string | null | undefined): RateCategory | null {
+  switch (String(category ?? "").toLowerCase()) {
+    case "marketing":
+    case "marketing_lite":
+      return "marketing";
+    case "utility":
+      return "utility";
+    case "authentication":
+    case "authentication_international":
+      return "authentication";
+    case "service":
+      return "service";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Resuelve la tarifa vigente del schedule para un país + categoría a una fecha dada.
+ * Devuelve null si no hay schedule, no hay `at`, el país no tiene entrada, o ningún
+ * tramo está vigente aún (effectiveFrom futuro) — en esos casos el caller cae a la
+ * lógica de override/tabla base. Comparación en UTC (epoch), límite INCLUSIVE.
+ */
+function resolveScheduledRateUsd(
+  category: RateCategory,
+  countryIso: string | null | undefined,
+  opts: { at?: Date; schedule?: WhatsappRateSchedule } | undefined,
+): number | null {
+  const schedule = opts?.schedule;
+  const at = opts?.at;
+  if (!schedule || !at) return null;
+  const tiers = schedule[(countryIso ?? "").toUpperCase()]?.[category];
+  if (!tiers || tiers.length === 0) return null;
+  const atMs = at.getTime();
+  let bestFromMs = Number.NEGATIVE_INFINITY;
+  let bestRate: number | null = null;
+  for (const tier of tiers) {
+    const fromMs = Date.parse(tier.effectiveFrom);
+    if (Number.isNaN(fromMs)) continue;
+    if (fromMs <= atMs && fromMs > bestFromMs) {
+      bestFromMs = fromMs;
+      bestRate = tier.rateUsd;
+    }
+  }
+  return bestRate;
+}
+
+/**
+ * Costo de un mensaje según categoría + país (ISO). Precedencia:
+ * (1) tramo vigente del `schedule` (si se pasa `opts.at` + `opts.schedule`);
+ * (2) override plano de `overrides` (desde platform_settings);
+ * (3) tabla base WHATSAPP_PRICING; país sin entrada → fila "default".
+ * Sin `opts` (o sin `at`/`schedule`) el comportamiento es idéntico al histórico.
+ */
 export function computeWhatsappCostUsd(
   category: string | null | undefined,
   countryIso: string | null | undefined,
   overrides?: Record<string, WhatsappRates>,
+  opts?: { at?: Date; schedule?: WhatsappRateSchedule },
 ): number {
+  const key = normalizeRateCategory(category);
+  if (key === null) return 0; // categoría desconocida → no se cobra (no inventar costo)
+  const scheduled = resolveScheduledRateUsd(key, countryIso, opts);
+  if (scheduled !== null) return scheduled;
   const table = { ...WHATSAPP_PRICING, ...(overrides ?? {}) };
   const rates = table[(countryIso ?? "").toUpperCase()] ?? table.default;
-  switch (String(category ?? "").toLowerCase()) {
-    case "marketing":
-    case "marketing_lite":
-      return rates.marketing;
-    case "utility":
-      return rates.utility;
-    case "authentication":
-    case "authentication_international":
-      return rates.authentication;
-    case "service":
-      return rates.service;
-    default:
-      return 0; // categoría desconocida → no se cobra (no inventar costo)
-  }
+  return rates[key];
 }
