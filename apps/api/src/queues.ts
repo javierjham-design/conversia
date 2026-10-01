@@ -24,7 +24,14 @@ export class QueueService implements OnModuleDestroy {
   // Expuesta para health checks (ping + lectura del latido del worker).
   readonly connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
   readonly inbound = new Queue<InboundJob>(QUEUE_NAMES.inbound, { connection: this.connection });
-  readonly outbound = new Queue<OutboundJob>(QUEUE_NAMES.outbound, { connection: this.connection });
+  // Reintentos reales de la cola de salida: 3 intentos con backoff exponencial. El
+  // comentario viejo "BullMQ reintenta según la política del worker" era falso sin
+  // esto (BullMQ usa 1 intento por defecto). Seguro: el débito de bolsa es idempotente
+  // por messageId y el gate corta con return (sin throw). Cubre panel y difusiones.
+  readonly outbound = new Queue<OutboundJob>(QUEUE_NAMES.outbound, {
+    connection: this.connection,
+    defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
+  });
   readonly events = new Queue<EventJob>(QUEUE_NAMES.events, { connection: this.connection });
   readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection });
   readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });

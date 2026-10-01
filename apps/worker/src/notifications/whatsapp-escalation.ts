@@ -5,6 +5,7 @@ import { getAdminPrisma } from "@conversia/database";
 import { QUEUE_NAMES } from "@conversia/types";
 import { resolveChannelAuth } from "../channel-auth";
 import { getChannelProvider } from "../channel-providers";
+import { chargeTemplateSend } from "../messaging-guard";
 
 /**
  * ESCALERA DE WHATSAPP: no es un canal paralelo. Cuando un evento CRÍTICO se
@@ -88,6 +89,30 @@ export async function processWhatsappEscalation(job: WaEscalationJob): Promise<v
     if (!auth.phoneNumberId) {
       await record("skipped", "sin canal de WhatsApp");
       return;
+    }
+    // N3: esta plantilla HSM debe pasar por el guard (bolsa + fusible + topes) como
+    // todo envío de plantilla — antes se escapaba (fuga de bolsa/fusible). No hay un
+    // message natural (el aviso va al staff, no al contacto), así que la idempotencia
+    // del débito usa un messageId estable y determinista por hora: un reintento de la
+    // misma hora no re-cobra. El aviso de escalación es de categoría utility.
+    const hourBucket = Math.floor(Date.now() / 3_600_000);
+    const chargeMessageId = `wa-esc:${job.conversationId}:${job.userId}:${hourBucket}`;
+    const gate = await chargeTemplateSend(job.organizationId, chargeMessageId, "utility");
+    if (gate.blocked) {
+      await record("skipped", `bloqueado: ${gate.userMessage}`);
+      await prisma.integrationEvent
+        .create({
+          data: {
+            organizationId: job.organizationId,
+            provider: "messaging",
+            type: "template.blocked",
+            status: "warning",
+            message: gate.userMessage,
+            payload: { reason: gate.reason, context: "whatsapp_escalation", conversationId: job.conversationId, userId: job.userId },
+          },
+        })
+        .catch(() => undefined);
+      return; // no se envía
     }
     const sent = await getChannelProvider().send(
       auth.phoneNumberId,

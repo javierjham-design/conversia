@@ -4,9 +4,18 @@ import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannel
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend } from "./messaging-guard";
+import { refundForMessage } from "./wallet";
+import { recordServiceSend } from "./service-metering";
 
-/** Envía mensajes salientes creados desde el panel (autor humano). */
-export async function processOutbound(job: OutboundJob): Promise<void> {
+/**
+ * Envía mensajes salientes creados desde el panel (autor humano). `retry` trae el
+ * estado de reintentos de BullMQ (attemptsMade/maxAttempts): sin él se trata como
+ * intento único y terminal (p. ej. tests o llamadas directas).
+ */
+export async function processOutbound(
+  job: OutboundJob,
+  retry?: { attemptsMade: number; maxAttempts: number },
+): Promise<void> {
   const { organizationId, messageId } = job;
 
   const data = await withTenant(organizationId, async (tx) => {
@@ -130,12 +139,39 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       }),
     );
     await publishRealtime(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
+    // Medición (E2): texto/adjunto del panel por WhatsApp = mensaje de servicio (las
+    // plantillas NO son servicio: se miden por su categoría). Solo PUBLIC dirigido a
+    // WhatsApp (la rama sin teléfono ya salió por Messenger/IG arriba y no se registra).
+    if (outbound.type !== "template" && data.message.visibility === "PUBLIC") {
+      await recordServiceSend(organizationId, data.message.id, data.message.conversationId, data.phone, auth.phoneNumberId);
+    }
   } catch (err) {
+    // ¿Es un fallo terminal o habrá reintento de BullMQ? Auth/Config NO se reintentan
+    // (no se arreglan solos). Los demás se reintentan hasta agotar maxAttempts.
+    const isConfigErr = err instanceof ChannelAuthError || err instanceof ChannelConfigError;
+    const attemptsMade = retry?.attemptsMade ?? 0;
+    const maxAttempts = retry?.maxAttempts ?? 1;
+    const isLastAttempt = attemptsMade + 1 >= maxAttempts;
+    const willRetry = !isConfigErr && !isLastAttempt;
+
+    if (willRetry) {
+      // Deja el mensaje en PENDING (processOutbound es re-entrante: el check de status
+      // PENDING de arriba evita doble envío) y relanza para que BullMQ reintente. NO
+      // refundees: el débito es idempotente por messageId y el reintento puede triunfar.
+      throw err;
+    }
+
+    // Fallo terminal (config que no se arregla sola, o se agotaron los reintentos).
     // En errores de config del canal, guarda el mensaje CLARO (no el 400 crudo).
     const failText = err instanceof ChannelConfigError ? err.userMessage : (err as Error).message.slice(0, 500);
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
+    // W-2: si era PLANTILLA, devuelve a la bolsa el débito (idempotente; no devuelve
+    // dos veces si llega un segundo fallo). El servicio (delta 0) no tiene nada que devolver.
+    if (data.message.type === "TEMPLATE") {
+      await refundForMessage(organizationId, data.message.id).catch(() => undefined);
+    }
     // Diagnóstico del #133010: si el número tiene credencial propia pero NO
     // pudimos usar el token del canal (usamos el global), deja constancia clara del
     // motivo en Salud — el caso típico es CREDENTIALS_ENCRYPTION_KEY del worker ≠ API.
@@ -170,6 +206,6 @@ export async function processOutbound(job: OutboundJob): Promise<void> {
       await markChannelConfigError(organizationId, auth.channelConnectionId, err.userMessage);
       return;
     }
-    throw err; // BullMQ reintenta según la política del worker
+    throw err; // último intento agotado: rethrow para que BullMQ lo marque failed
   }
 }

@@ -24,7 +24,12 @@ let outboundQueue: Queue<OutboundJob> | undefined;
 function getOutboundQueue(): Queue<OutboundJob> {
   if (!outboundQueue) {
     connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
-    outboundQueue = new Queue(QUEUE_NAMES.outbound, { connection });
+    // Mismos reintentos que la cola de salida del API (3 + backoff): las difusiones
+    // también pasan por `outbound` y deben reintentar fallos transitorios de Meta.
+    outboundQueue = new Queue(QUEUE_NAMES.outbound, {
+      connection,
+      defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
+    });
   }
   return outboundQueue;
 }

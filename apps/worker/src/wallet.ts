@@ -23,7 +23,7 @@ async function firstTime(key: string): Promise<boolean> {
  * por cliente = su saldo (lo que ya pagó). Servicio (24 h) no toca la bolsa.
  */
 
-export type WalletCategory = "utility" | "marketing" | "authentication";
+export type WalletCategory = "utility" | "marketing" | "authentication" | "service";
 
 type Weights = Record<WalletCategory, number>;
 let weightCache: { at: number; w: Weights } | null = null;
@@ -31,7 +31,7 @@ let weightCache: { at: number; w: Weights } | null = null;
 /** Pesos por categoría (A: 1/1/1 = por cantidad · B: marketing 4 = ponderado). */
 async function readWeights(): Promise<Weights> {
   if (weightCache && Date.now() - weightCache.at < 60_000) return weightCache.w;
-  const def: Weights = { utility: 1, authentication: 1, marketing: 1 };
+  const def: Weights = { utility: 1, authentication: 1, marketing: 1, service: 1 };
   try {
     const row = await getAdminPrisma().platformSetting.findUnique({ where: { key: "walletWeights" } });
     if (row) {
@@ -39,6 +39,9 @@ async function readWeights(): Promise<Weights> {
       def.utility = num(parsed.utility, 1);
       def.authentication = num(parsed.authentication, 1);
       def.marketing = num(parsed.marketing, 1);
+      // service no toca la bolsa (delta 0 en service_send); el peso queda por
+      // consistencia del tipo y para cuando una marca debite servicio (F5-B).
+      def.service = num(parsed.service, 1);
     }
   } catch {
     /* defaults */
@@ -52,11 +55,19 @@ function num(v: unknown, d: number): number {
   return Number.isFinite(n) && n >= 1 ? Math.round(n) : d;
 }
 
-function normalizeCategory(category: string | null | undefined): WalletCategory {
-  const c = (category ?? "").toUpperCase();
+/**
+ * Mapea la categoría cruda de Meta a WalletCategory. Contrato EXPLÍCITO: cualquier
+ * valor no reconocido devuelve { unknown: raw } — PROHIBIDO el default a "utility".
+ * Antes "service" se disfrazaba de utility en silencio; ese es el bug que matamos.
+ */
+export function normalizeCategory(category: string | null | undefined): WalletCategory | { unknown: string } {
+  const raw = (category ?? "").trim();
+  const c = raw.toUpperCase();
+  if (c === "UTILITY") return "utility";
   if (c.startsWith("MARKET")) return "marketing";
   if (c.startsWith("AUTH")) return "authentication";
-  return "utility";
+  if (c === "SERVICE") return "service";
+  return { unknown: raw };
 }
 
 /** Cupo prepago que da un valor de "Incluidos / mes" del plan (−1 = ilimitado). */
@@ -120,8 +131,19 @@ export async function debitForMessage(
   });
   if (prev) return { ok: true, balance: prev.balanceAfter, already: true };
 
-  const cat = normalizeCategory(category);
-  const weight = (await readWeights())[cat];
+  const norm = normalizeCategory(category);
+  let weight: number;
+  let ledgerCategory: string;
+  if (typeof norm === "object") {
+    // Categoría no reconocida: cobra peso 1, se registra CRUDA (nunca disfrazada)
+    // y deja aviso visible — una etiqueta inesperada no puede pasar en silencio.
+    weight = 1;
+    ledgerCategory = norm.unknown || "unknown";
+    console.warn(`⚠ wallet: categoría de plantilla no reconocida "${norm.unknown}" (org ${organizationId}, msg ${messageId}) — cobrada peso 1 y registrada cruda`);
+  } else {
+    weight = (await readWeights())[norm];
+    ledgerCategory = norm;
+  }
 
   // Débito atómico: la fila se bloquea; sin saldo suficiente → 0 filas.
   const rows = await prisma.$queryRaw<{ balance: number }[]>`
@@ -135,7 +157,7 @@ export async function debitForMessage(
   const balance = rows[0].balance;
   await prisma.walletLedger
     .create({
-      data: { organizationId, delta: -weight, reason: "send_debit", balanceAfter: balance, category: cat, costUsd: costUsd ?? null, refType: "message", refId: messageId },
+      data: { organizationId, delta: -weight, reason: "send_debit", balanceAfter: balance, category: ledgerCategory, costUsd: costUsd ?? null, refType: "message", refId: messageId },
     })
     .catch(() => undefined);
   return { ok: true, balance };

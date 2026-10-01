@@ -5,7 +5,7 @@ Decisiones: D1: pendiente · D2: pendiente · D3: pendiente · D4: pendiente · 
 |---|---|---|---|---|
 | PR-0 | en PR | #395 | 2026-10-01 | docs del plan + correcciones H1/H29 a COSTOS + .gitignore |
 | E1 | en PR | | 2026-10-01 | schedule de tarifas por fecha (cimiento); sin tocar flujos de envío ni sembrar BD |
-| E2 | pendiente | | | sembrar schedule el día del deploy |
+| E2 | en PR | | 2026-10-01 | medición service_send + W-2 (3 fallos) + free tier por número + N2 reintentos + N3 escalación; SIN frenar envíos. OPERATIVO: sembrar whatsappRateSchedule el día del deploy |
 | E3 | pendiente | | | requiere OK migración + D2 |
 | E4 | pendiente | | | paralelo a E3 |
 | E5 | pendiente | | | |
