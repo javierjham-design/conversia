@@ -32,6 +32,9 @@ const envSchema = z.object({
 
   API_PORT: z.coerce.number().default(4000),
   WEB_URL: z.string().default("http://localhost:3000"),
+  // URL del panel de la segunda marca Conversia. Opcional: si falta, la marca
+  // conversia cae a WEB_URL (así dev/staging no se rompen).
+  WEB_URL_CONVERSIA: z.string().optional(),
   API_URL: z.string().default("http://localhost:4000"),
   JWT_SECRET: z.string().default("dev-secret-change-me"),
   JWT_EXPIRES_IN: z.string().default("12h"),
@@ -252,3 +255,6 @@ export async function fetchGraphWithProof(rawUrl: string, accessToken: string, i
   }
   return last!;
 }
+
+// Mapa de marcas (F1): brandOf(org) resuelve textos/links/remitentes por marca.
+export * from "./brands.js";

@@ -268,6 +268,8 @@ export interface ToolContext extends TenantContext {
   agentId?: string;
   /** Nombre visible del agente (para firmar notas: "Agendado por TuBot · Agente X"). */
   agentName?: string;
+  /** Nombre de la marca del tenant (brandOf), para firmas/textos visibles. Default TuBot. */
+  brandName?: string;
   agentVersionId?: string;
   workflowRunId?: string;
   /** Dependencias inyectadas por el runtime (BD, agenda, canal, colas). */

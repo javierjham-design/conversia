@@ -36,7 +36,8 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new AllExceptionsFilter());
-  app.enableCors({ origin: [env.WEB_URL], credentials: true });
+  // CORS multi-marca: el panel de cada marca (TuBot y Conversia) debe poder llamar la API.
+  app.enableCors({ origin: [env.WEB_URL, env.WEB_URL_CONVERSIA].filter((u): u is string => !!u), credentials: true });
 
   // Railway/PaaS inyectan PORT; en local se usa API_PORT
   const port = Number(process.env.PORT ?? env.API_PORT);

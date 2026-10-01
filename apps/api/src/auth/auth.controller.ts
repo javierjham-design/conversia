@@ -27,7 +27,24 @@ const registerSchema = z.object({
   password: z.string().min(10, "La contraseña debe tener al menos 10 caracteres").max(200),
   name: z.string().min(2).max(80),
   organizationName: z.string().min(2).max(120),
+  // País ISO-3166 alpha-2 (default CL) → deriva la moneda. NO se acepta `brand` del
+  // body: la marca se deriva server-side del Origin (ver register()).
+  country: z.string().trim().toUpperCase().pipe(z.string().regex(/^[A-Z]{2}$/, "País inválido (ISO-3166 alpha-2)")).default("CL"),
 });
+
+/**
+ * Marca derivada del Origin por allow-list (nunca del body): el panel de Conversia
+ * (WEB_URL_CONVERSIA) → conversia; todo lo demás (incluido TuBot) → tubot. Así un
+ * registro desde conversia.cl nace con brand=conversia sin confiar en el cliente.
+ */
+export function brandFromOrigin(origin: string | undefined): string {
+  const env = getEnv();
+  if (origin && env.WEB_URL_CONVERSIA && origin === env.WEB_URL_CONVERSIA) return "conversia";
+  return "tubot";
+}
+
+/** Paleta curada de acentos de UI (F3 la consume; el registro valida contra ella). */
+const ACCENT_PALETTE = ["indigo", "violet", "blue", "teal", "emerald", "amber", "rose", "slate"] as const;
 
 const loginSchema = z.object({
   email: z.string().email().max(200),
@@ -61,7 +78,9 @@ export class AuthController {
     if (!rl.allowed) {
       throw new HttpException("Demasiados registros desde este origen. Intenta más tarde.", HttpStatus.TOO_MANY_REQUESTS);
     }
-    return this.auth.register(input);
+    // La marca la fija el servidor por el Origin, no el body (no se puede forzar).
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    return this.auth.register({ ...input, brand });
   }
 
   @Post("login")
@@ -278,12 +297,12 @@ export class AuthController {
     const [user, org] = await Promise.all([
       this.prisma.admin.user.findUnique({
         where: { id: ctx.userId },
-        select: { id: true, email: true, name: true, mfaEnabled: true },
+        select: { id: true, email: true, name: true, mfaEnabled: true, settings: true },
       }),
       this.prisma.withTenant(ctx.organizationId, (tx) =>
         tx.organization.findUnique({
           where: { id: ctx.organizationId },
-          select: { id: true, name: true, slug: true, timezone: true, currency: true, settings: true },
+          select: { id: true, name: true, slug: true, timezone: true, currency: true, brand: true, country: true, settings: true },
         }),
       ),
     ]);
@@ -305,6 +324,24 @@ export class AuthController {
       }),
     );
     return { ok: true };
+  }
+
+  /**
+   * Preferencias de UI del usuario (F1). De partida el acento de la paleta curada de
+   * F3. Merge con las settings existentes (no pisa otras claves). F3 lo consume.
+   */
+  @Patch("me/preferences")
+  async updatePreferences(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z
+      .object({ accent: z.enum(ACCENT_PALETTE).optional() })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Preferencias inválidas");
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { settings: true } });
+    const current = (user?.settings as Record<string, unknown>) ?? {};
+    const next = { ...current, ...(parsed.data.accent ? { accent: parsed.data.accent } : {}) };
+    await this.prisma.admin.user.update({ where: { id: ctx.userId }, data: { settings: next as object } });
+    return { ok: true, preferences: next };
   }
 
   /**

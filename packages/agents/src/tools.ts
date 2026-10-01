@@ -331,7 +331,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // Firma de origen en el comentario de la cita: siempre se sabe qué agente agendó.
         // Sin duplicar "Agente" si el nombre del agente ya lo incluye.
         const nombreAgente = ctx.agentName ?? "IA";
-        const firma = `Agendado por TuBot · ${/^agente\b/i.test(nombreAgente) ? nombreAgente : `Agente ${nombreAgente}`}`;
+        const firma = `Agendado por ${ctx.brandName ?? "TuBot"} · ${/^agente\b/i.test(nombreAgente) ? nombreAgente : `Agente ${nombreAgente}`}`;
         const notes = input.notes ? `${firma}. ${input.notes}` : firma;
         let appt: SchedAppointment;
         try {

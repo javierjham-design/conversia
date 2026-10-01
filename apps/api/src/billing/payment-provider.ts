@@ -23,6 +23,7 @@ export interface CheckoutInput {
   email?: string;
   interval?: string; // monthly | yearly
   variantId?: string; // Lemon Squeezy: id de variante del plan
+  brandSubjectPrefix?: string; // marca del tenant para el asunto (default "TuBot")
 }
 
 export interface PaymentProvider {
@@ -70,7 +71,7 @@ export class StripePaymentProvider implements PaymentProvider {
     p.set("line_items[0][price_data][currency]", cur);
     p.set("line_items[0][price_data][unit_amount]", String(minor));
     p.set("line_items[0][price_data][recurring][interval]", interval);
-    p.set("line_items[0][price_data][product_data][name]", `TuBot — Plan ${input.planCode}`);
+    p.set("line_items[0][price_data][product_data][name]", `${input.brandSubjectPrefix ?? "TuBot"} — Plan ${input.planCode}`);
 
     const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
@@ -164,7 +165,7 @@ export class FlowPaymentProvider implements PaymentProvider {
     const params: Record<string, string> = {
       apiKey: this.apiKey,
       commerceOrder: `tubot-${input.organizationId.slice(0, 8)}-${Date.now()}`,
-      subject: `TuBot — Plan ${input.planCode}`,
+      subject: `${input.brandSubjectPrefix ?? "TuBot"} — Plan ${input.planCode}`,
       currency: input.currency,
       amount: String(Math.round(input.amount)),
       email: input.email || "facturacion@tubot.cl",

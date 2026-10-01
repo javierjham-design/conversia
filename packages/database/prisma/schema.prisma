@@ -350,6 +350,9 @@ model User {
   mfaSecret        String?   @map("mfa_secret")
   mfaRecoveryCodes Json      @default("[]") @map("mfa_recovery_codes")
   mfaEnrolledAt    DateTime? @map("mfa_enrolled_at")
+  // Preferencias del usuario (p. ej. acento de UI de la paleta curada de F3). JSON
+  // libre; lo escribe PATCH /me/preferences con validación zod.
+  settings     Json               @default("{}")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")
   memberships  OrganizationUser[]
@@ -368,6 +371,9 @@ model Organization {
   timezone  String    @default("America/Santiago")
   locale    String    @default("es")
   currency  String    @default("CLP")
+  // Marca comercial (segunda marca "Conversia" sobre la misma plataforma). Ausente o
+  // "tubot" = comportamiento idéntico al actual. La config de marca es un mapa (brands.ts).
+  brand     String    @default("tubot")
   // Branding/white-label: logo, colores, dominio, mensajes institucionales…
   settings  Json      @default("{}")
   planId    String?   @map("plan_id")
@@ -375,6 +381,7 @@ model Organization {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
+  @@index([brand])
   @@map("organizations")
 }
 

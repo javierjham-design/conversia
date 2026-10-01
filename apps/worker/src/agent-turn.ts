@@ -8,7 +8,7 @@ import {
   type AgentRuntime,
   type OrchestrateResult,
 } from "@conversia/agents";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
@@ -476,6 +476,7 @@ export async function runAgentTurn(opts: {
     contactId: conversation.contactId,
     agentId: agent.id,
     agentName: agent.name,
+    brandName: brandOf(org).name,
     agentVersionId: version.id,
     services: services as unknown as Record<string, unknown>,
   };
