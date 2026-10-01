@@ -152,3 +152,107 @@ body {
 .text-dim {
   color: var(--ink-dim);
 }
+
+/* ---- Navegación unificada (F3 Tramo 2): riel ≥620px · tabs <620px ---- */
+.shell {
+  min-height: 100dvh;
+}
+.shell-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  background: var(--surface);
+  border-right: 1px solid var(--hairline);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 20;
+}
+.shell-brand {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-weight: 700;
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+.shell-rail ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nav-item {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--ink-dim);
+  text-decoration: none;
+}
+.nav-item:hover {
+  background: var(--acc-dim);
+  color: var(--acc-deep);
+}
+.nav-item.active {
+  background: var(--acc-dim);
+  color: var(--acc-deep);
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+.shell-body {
+  margin-left: 68px;
+}
+.shell-tabs {
+  display: none;
+}
+
+@media (max-width: 619px) {
+  .shell-rail {
+    display: none;
+  }
+  .shell-body {
+    margin-left: 0;
+    padding-bottom: 68px;
+  }
+  .shell-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 62px;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    z-index: 20;
+  }
+  .tab-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    padding: 4px 8px;
+  }
+  .tab-item.active {
+    color: var(--acc-deep);
+  }
+}
