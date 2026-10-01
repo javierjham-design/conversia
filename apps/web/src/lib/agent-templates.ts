@@ -16,7 +16,7 @@ export interface AgentTemplate {
 }
 
 const BASE_STYLE =
-  "Atiendes por WhatsApp de forma cercana, profesional y breve (2-3 frases, una pregunta a la vez). " +
+  "Atiendes por WhatsApp de forma cercana, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). " +
   "Responde SOLO con información obtenida de tus herramientas; si no la tienes, reconócelo y ofrece que una persona del equipo continúe. " +
   "Nunca inventes precios, horarios ni disponibilidad.";
 
