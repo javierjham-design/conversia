@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Building2, LogOut, ShieldCheck } from "lucide-react";
+import { BarChart3, Building2, LifeBuoy, LogOut, ShieldCheck } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 
 /**
@@ -13,6 +13,7 @@ import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api
 const NAV = [
   { href: "/admin", label: "Panel", Icon: BarChart3 },
   { href: "/admin/organizations", label: "Tenants", Icon: Building2 },
+  { href: "/admin/soporte", label: "Soporte", Icon: LifeBuoy },
   { href: "/admin/security", label: "Seguridad", Icon: ShieldCheck },
 ];
 

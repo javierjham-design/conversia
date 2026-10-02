@@ -13,6 +13,13 @@ const ticketSchema = z.object({
   url: z.string().trim().max(300).optional(),
 });
 
+type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string };
+/** Código legible del ticket (CV-XXXX), mismo estilo que los códigos de montaje. */
+function newTicketCode(): string {
+  const n = Math.floor(1000 + Math.random() * 9000);
+  return `CV-${n}`;
+}
+
 /**
  * Soporte in-app: el cliente reporta un problema desde el panel y queda visible
  * para el Super Admin (bandeja + correo), sin depender de que escriba por WhatsApp.
@@ -38,6 +45,7 @@ export class SupportController {
       ? await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true, name: true } })
       : null;
 
+    const firstMsg: ThreadMsg = { author: "user", body: parsed.data.message, at: new Date().toISOString() };
     const ticket = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.supportTicket.create({
         data: {
@@ -47,12 +55,61 @@ export class SupportController {
           subject: parsed.data.subject || null,
           message: parsed.data.message,
           url: parsed.data.url || null,
+          code: newTicketCode(),
+          thread: [firstMsg] as object,
         },
       }),
     );
 
     void this.notify(ctx.organizationId, user, parsed.data).catch(() => undefined);
-    return { ok: true, id: ticket.id };
+    return { ok: true, id: ticket.id, code: ticket.code };
+  }
+
+  /** Ticket ABIERTO del usuario (con su hilo) para el widget — retoma donde quedó. */
+  @Get("active")
+  async active() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const t = await tx.supportTicket.findFirst({
+        where: { status: "open", ...(ctx.userId ? { userId: ctx.userId } : {}) },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, code: true, subject: true, status: true, thread: true, createdAt: true },
+      });
+      return t ?? null;
+    });
+  }
+
+  /** Crea o continúa el ticket abierto del usuario con un mensaje (persistencia server-side). */
+  @Post("messages")
+  async addMessage(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ body: z.string().trim().min(1).max(4000) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Mensaje requerido");
+    const rl = await this.rateLimit.custom(`rl:supportmsg:${ctx.userId ?? "anon"}`, 30, 600);
+    if (!rl.allowed) throw new HttpException("Demasiados mensajes seguidos. Espera un momento.", HttpStatus.TOO_MANY_REQUESTS);
+    const user = ctx.userId ? await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true, name: true } }) : null;
+    const now = new Date().toISOString();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const open = await tx.supportTicket.findFirst({ where: { status: "open", ...(ctx.userId ? { userId: ctx.userId } : {}) }, orderBy: { createdAt: "desc" } });
+      if (open) {
+        const thread = [...((open.thread as unknown as ThreadMsg[]) ?? []), { author: "user", body: parsed.data.body, at: now }];
+        const t = await tx.supportTicket.update({ where: { id: open.id }, data: { thread: thread as object }, select: { id: true, code: true, status: true, thread: true } });
+        return t;
+      }
+      const t = await tx.supportTicket.create({
+        data: {
+          organizationId: ctx.organizationId,
+          userId: ctx.userId ?? null,
+          email: user?.email ?? null,
+          message: parsed.data.body,
+          code: newTicketCode(),
+          thread: [{ author: "user", body: parsed.data.body, at: now }] as object,
+        },
+        select: { id: true, code: true, status: true, thread: true },
+      });
+      void this.notify(ctx.organizationId, user, { message: parsed.data.body }).catch(() => undefined);
+      return t;
+    });
   }
 
   /** Tickets propios del tenant (para mostrar historial en el widget). */
@@ -63,7 +120,7 @@ export class SupportController {
       tx.supportTicket.findMany({
         orderBy: { createdAt: "desc" },
         take: 10,
-        select: { id: true, subject: true, message: true, status: true, createdAt: true },
+        select: { id: true, code: true, subject: true, message: true, status: true, createdAt: true },
       }),
     );
   }
