@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { padmin } from "@/lib/platform-api";
 
 /**
@@ -92,10 +93,17 @@ export default function AdminSecurity() {
         </div>
       ) : secret ? (
         <form onSubmit={verify} className="card" style={{ padding: 20 }}>
-          <p style={{ margin: "0 0 6px", fontWeight: 600 }}>1 · Agrega la cuenta a tu app de autenticación</p>
-          <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Usa Google Authenticator, Authy, 1Password… Ingresa esta <b>clave manual</b>:</p>
-          <code style={{ display: "block", background: "var(--acc-dim)", padding: "10px 12px", borderRadius: 10, margin: "10px 0", fontFamily: "monospace", wordBreak: "break-all", fontSize: 15 }}>{secret}</code>
-          {otpauth ? <p className="text-dim" style={{ fontSize: 11, wordBreak: "break-all", margin: "0 0 12px" }}>URI: {otpauth}</p> : null}
+          <p style={{ margin: "0 0 6px", fontWeight: 600 }}>1 · Escanea el código con tu app de autenticación</p>
+          <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Usa Google Authenticator, Authy, 1Password… Escanea este QR:</p>
+          {otpauth ? (
+            <div style={{ display: "flex", justifyContent: "center", margin: "14px 0" }}>
+              <div style={{ background: "#fff", padding: 14, borderRadius: 14, lineHeight: 0 }}>
+                <QRCodeSVG value={otpauth} size={184} level="M" />
+              </div>
+            </div>
+          ) : null}
+          <p className="text-dim" style={{ fontSize: 12, margin: "0 0 4px" }}>¿No puedes escanear? Ingresa esta <b>clave manual</b>:</p>
+          <code style={{ display: "block", background: "var(--acc-dim)", padding: "10px 12px", borderRadius: 10, margin: "4px 0 12px", fontFamily: "monospace", wordBreak: "break-all", fontSize: 15 }}>{secret}</code>
           <p style={{ margin: "6px 0", fontWeight: 600 }}>2 · Ingresa el código de 6 dígitos</p>
           <input style={field} inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required placeholder="123456" autoFocus />
           <button className="btn-accent" type="submit" disabled={busy} style={{ marginTop: 16, width: "100%", opacity: busy ? 0.6 : 1 }}>
