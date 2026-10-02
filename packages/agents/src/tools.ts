@@ -76,6 +76,12 @@ export interface ToolServices {
   // Marca el PASO del viaje de implementación (1-10) — persistido, para no perder dónde va el cliente.
   setSetupStep(step: number, label: string): Promise<{ ok: boolean; step?: number; error?: string }>;
   assistedUpsertAgent(input: { slug: string; name: string; systemPrompt: string; kind?: string }): Promise<{ ok: boolean; agentId?: string; error?: string }>;
+  // Administración de agenda (F8) — SOLO modo dueño (tools ownerOnly).
+  adminUpsertProfessional(input: { id?: string; name: string; specialty?: string; type?: "persona" | "servicio"; durationMin?: number; active?: boolean }): Promise<{ ok?: boolean; id?: string; error?: string }>;
+  adminUpdateProfessionalSchedule(input: { professionalId: string; workingHours: Array<{ day: number; start: string; end: string }> }): Promise<{ ok?: boolean; error?: string }>;
+  adminAddProfessionalTimeOff(input: { professionalId: string; from: string; to: string; reason?: string }): Promise<{ ok?: boolean; affected?: number; error?: string }>;
+  adminUpdateBusinessHours(input: { businessHours: Record<string, string[]> }): Promise<{ ok?: boolean; error?: string }>;
+  adminUpdateServiceConfig(input: { serviceId?: string; code?: string; name?: string; durationMin?: number; price?: number }): Promise<{ ok?: boolean; error?: string }>;
 }
 
 function services(ctx: ToolContext): ToolServices {
@@ -93,12 +99,15 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  /** Especificaciones para el modelo, filtradas por las tools habilitadas en la versión del agente. */
-  specsFor(enabled: string[]): AIToolSpec[] {
+  /** Especificaciones para el modelo, filtradas por las tools habilitadas en la versión del
+   *  agente. Las tools `ownerOnly` (F8) solo se exponen si opts.ownerContext es true: así el
+   *  cliente final JAMÁS las ve (no-op para agentes que no las tengan en su lista). */
+  specsFor(enabled: string[], opts?: { ownerContext?: boolean }): AIToolSpec[] {
     const specs: AIToolSpec[] = [];
     for (const name of enabled) {
       const def = this.tools.get(name);
       if (!def) continue;
+      if (def.ownerOnly && !opts?.ownerContext) continue;
       const schema = zodToJsonSchema(def.inputSchema as z.ZodType, { target: "jsonSchema7" }) as Record<string, unknown>;
       delete schema["$schema"];
       specs.push({ name: def.name, description: def.description, inputJsonSchema: schema });
@@ -114,6 +123,9 @@ export class ToolRegistry {
   async execute(name: string, rawInput: unknown, ctx: ToolContext): Promise<{ content: string; isError: boolean }> {
     const def = this.tools.get(name);
     if (!def) return { content: `Herramienta desconocida: ${name}`, isError: true };
+    // Cerrojo de runtime (F8): una tool de dueño nunca se ejecuta sin ownerContext, aunque
+    // el modelo la invoque igual.
+    if (def.ownerOnly && !ctx.ownerContext) return { content: "Esta acción solo la puede hacer el dueño del negocio desde su número verificado.", isError: true };
     const parsed = (def.inputSchema as z.ZodType).safeParse(rawInput ?? {});
     if (!parsed.success) {
       return { content: `Entrada inválida: ${parsed.error.issues.map((i) => i.message).join("; ")}`, isError: true };
@@ -614,6 +626,56 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       }),
       async execute(ctx, input: { slug: string; name: string; systemPrompt: string; kind?: string }) {
         return services(ctx).assistedUpsertAgent(input);
+      },
+    },
+
+    // ===== Administración de agenda (F8) — SOLO modo dueño (ownerOnly). Doble cerrojo:
+    // no se exponen ni ejecutan si el contacto no es el dueño del negocio. Toda escritura
+    // reusa la lógica del agenda.controller (la IA no escribe directo). Para cambios que
+    // afectan citas, PRIMERO resume y pide confirmación al dueño (ver prompt). =====
+    {
+      name: "upsertProfessional",
+      description: "DUEÑO: da de alta o edita a quien atiende (persona o recurso). Para alta: name (y opcional specialty, durationMin). Para editar: id + los campos a cambiar (active:false lo da de baja).",
+      ownerOnly: true,
+      inputSchema: z.object({ id: z.string().optional(), name: z.string().min(1), specialty: z.string().optional(), type: z.enum(["persona", "servicio"]).optional(), durationMin: z.number().int().min(5).max(1440).optional(), active: z.boolean().optional() }),
+      async execute(ctx, input: { id?: string; name: string; specialty?: string; type?: "persona" | "servicio"; durationMin?: number; active?: boolean }) {
+        return services(ctx).adminUpsertProfessional(input);
+      },
+    },
+    {
+      name: "updateProfessionalSchedule",
+      description: "DUEÑO: fija el horario semanal de una persona. workingHours = bloques [{day:0-6 (0=domingo), start:'HH:MM', end:'HH:MM'}]. Reemplaza el horario actual de esa persona.",
+      ownerOnly: true,
+      inputSchema: z.object({ professionalId: z.string(), workingHours: z.array(z.object({ day: z.number().int().min(0).max(6), start: z.string().regex(/^\d{2}:\d{2}$/), end: z.string().regex(/^\d{2}:\d{2}$/) })).max(60) }),
+      async execute(ctx, input: { professionalId: string; workingHours: Array<{ day: number; start: string; end: string }> }) {
+        return services(ctx).adminUpdateProfessionalSchedule(input);
+      },
+    },
+    {
+      name: "addProfessionalTimeOff",
+      description: "DUEÑO: bloquea un rango (vacaciones/feriado/ausencia) de una persona. from/to en ISO. Devuelve cuántas citas quedan afectadas en el rango para que ofrezcas reagendar o cancelar avisando.",
+      ownerOnly: true,
+      inputSchema: z.object({ professionalId: z.string(), from: z.string(), to: z.string(), reason: z.string().max(200).optional() }),
+      async execute(ctx, input: { professionalId: string; from: string; to: string; reason?: string }) {
+        return services(ctx).adminAddProfessionalTimeOff(input);
+      },
+    },
+    {
+      name: "updateBusinessHours",
+      description: "DUEÑO: fija el horario de atención del local. businessHours = { mon:['09:00-13:00','15:00-19:00'], tue:[...], ... , sun:[] }.",
+      ownerOnly: true,
+      inputSchema: z.object({ businessHours: z.record(z.array(z.string())) }),
+      async execute(ctx, input: { businessHours: Record<string, string[]> }) {
+        return services(ctx).adminUpdateBusinessHours(input);
+      },
+    },
+    {
+      name: "updateServiceConfig",
+      description: "DUEÑO: cambia la duración o el precio de un servicio (por id o por code). name opcional para renombrar.",
+      ownerOnly: true,
+      inputSchema: z.object({ serviceId: z.string().optional(), code: z.string().optional(), name: z.string().optional(), durationMin: z.number().int().min(5).max(1440).optional(), price: z.number().int().min(0).optional() }),
+      async execute(ctx, input: { serviceId?: string; code?: string; name?: string; durationMin?: number; price?: number }) {
+        return services(ctx).adminUpdateServiceConfig(input);
       },
     },
   ];

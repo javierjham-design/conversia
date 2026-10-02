@@ -470,6 +470,24 @@ export async function runAgentTurn(opts: {
       appointmentDurationMin: typeof cfg.scheduling?.appointmentDurationMin === "number" ? (cfg.scheduling.appointmentDurationMin as number) : null,
     },
   );
+  // MODO DUEÑO (F8): el contacto es dueño si su teléfono coincide con el de un usuario
+  // admin/owner del tenant. Habilita las tools de administración de agenda (ownerOnly).
+  // Si no se puede resolver, queda en false (cliente final) — nunca abre por defecto.
+  let ownerContext = false;
+  try {
+    const phone = conversation.contact.phone;
+    if (phone) {
+      ownerContext = await withTenant(organizationId, async (tx) => {
+        const roles = await tx.role.findMany({ where: { code: { in: ["owner", "admin"] } }, select: { id: true } });
+        if (!roles.length) return false;
+        const m = await tx.organizationUser.findFirst({ where: { active: true, roleId: { in: roles.map((r) => r.id) }, user: { phone } }, select: { id: true } });
+        return !!m;
+      });
+    }
+  } catch {
+    ownerContext = false;
+  }
+
   const toolCtx: ToolContext = {
     organizationId,
     clinicId: conversation.clinicId,
@@ -479,6 +497,7 @@ export async function runAgentTurn(opts: {
     agentName: agent.name,
     brandName: brandOf(org).name,
     agentVersionId: version.id,
+    ownerContext,
     services: services as unknown as Record<string, unknown>,
   };
 
