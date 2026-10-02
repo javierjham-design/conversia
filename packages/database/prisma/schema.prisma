@@ -1161,9 +1161,18 @@ model AgentTemplate {
 model VerticalTemplate {
   id             String   @id @default(cuid())
   organizationId String?  @map("organization_id")
-  key            String // dental | barberia | generico
+  key            String // dental | barberia | medspa | veterinaria | … (catálogo docs/CONVERSIA_RUBROS.md)
   version        Int
   name           String
+  // Ola del catálogo (1=desarrollo, 2=construidas, 3=beta por demanda).
+  wave           Int      @default(1)
+  // active = instalable; beta = solo el equipo desde la consola (no en registro público).
+  status         String   @default("active")
+  // Variante de producto: citas (default) | leads | mesas | intake | estadias | pedidos.
+  variant        String   @default("citas")
+  // Features que la plantilla EXIGE para instalarse (p. ej. ["groupClasses"]); si una no
+  // está disponible aún, el instalador bloquea (gimnasio hasta post-F4).
+  requiresFeature Json    @default("[]") @map("requires_feature")
   definition     Json
   active         Boolean  @default(true)
   createdAt      DateTime @default(now()) @map("created_at")

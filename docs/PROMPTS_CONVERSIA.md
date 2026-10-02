@@ -1148,6 +1148,76 @@ el cliente queda operando en conversia-web.
 
 ---
 
+## PROMPT F2/F6-COMPLEMENTO — Catálogo completo de rubros (agregado 2026-10-02)
+
+```text
+Contexto: COMPLEMENTO para las etapas F2 y F6 (aplícalo en la etapa que esté en
+curso; si F2 ya mergeó, va como PR propio). El 2026-10-02 quedó cerrado el catálogo
+maestro de rubros en docs/CONVERSIA_RUBROS.md (investigación Chile/LATAM + mundial):
+el alcance ya NO es solo dental+barbería — son 5 rubros de ola 1, 7 de ola 2 y 11 de
+ola 3, cada uno con sus BASES (vocabulario, módulos, embudo, flujos, HSM, campos
+custom, KPIs). Ese documento es la FUENTE DE VERDAD de rubros. Si está untracked,
+commitéalo en este PR. Rigen como siempre el prompt maestro y los ajustes de
+auditoría (AUDITORIA_PROMPTS_CONVERSIA.md) por sobre este texto si chocan.
+
+Lee antes: docs/CONVERSIA_RUBROS.md (completo), docs/PROMPTS_CONVERSIA.md (F2 y F6),
+apps/api/src/common/industries.ts, el modelo vertical_templates ya creado (o por
+crear) en F2.
+
+TAREAS SOBRE F2 (motor/seeds)
+1. industries.ts: sembrar TODAS las claves de olas 1–3 + "generico" con el
+   vocabulario del catálogo §2 (cliente·servicio·profesional·cita·local por rubro).
+2. El modelo vertical_templates debe soportar (agrega lo que falte): version,
+   wave (1|2|3), status (active|beta), variant ("citas"|"leads"|"mesas"|"intake"|
+   "estadias"|"pedidos", default "citas"), requiresFeature (string[] opcional), y
+   los bloques de las bases: etapas de embudo, tags, campos custom, servicios de
+   ejemplo, agentes, flujos, knowledge, guía HSM, horarios típicos, KPIs del Hoy.
+3. Seeds: plantillas COMPLETAS para ola 1 (barberia, peluqueria, estetica,
+   centro_medico, dental) + ola 2 (medspa, veterinaria, kinesiologia, gimnasio,
+   taller, servicios_domicilio, psicologia) + generico, construidas desde las bases
+   §2 del catálogo. Ola 3 como status "beta": instalables SOLO por el equipo
+   (gate por rol de plataforma; desde F10 vía consola), nunca desde el registro
+   público. Upsert idempotente por (key, version).
+4. Registro público: expone únicamente wave 1 con status active (lo demás lo
+   activa el Super Admin por dato, sin deploy).
+5. Variants: el instalador lee variant y, cuando no es "citas", instala solo lo
+   aplicable (embudo/agentes/flujos/knowledge) sin forzar agenda de citas; la UI
+   del paquete muestra qué módulos aplican. Prohibido if (rubro === ...) en lógica:
+   todo sale de la plantilla.
+6. Brecha "multi-entidad por contacto" (catálogo §3): mascotas (veterinaria) y
+   vehículos/patente (taller) — resuélvelo con el mecanismo MÍNIMO que el modelo
+   actual permita (campos custom repetibles o colección en meta del contacto con
+   esquema declarado por la plantilla); documenta la decisión. Nada de tablas
+   nuevas salvo que sea realmente necesario.
+7. Gimnasio: la plantilla lleva requiresFeature: ["groupClasses"] y el instalador
+   BLOQUEA su instalación pública mientras la agenda no soporte clases grupales
+   con cupos (post-F4). Queda sembrada, no activable.
+
+TAREAS SOBRE F6 (contenido)
+8. Contenido fino (prompt del agente con tono y reglas del rubro, flujos, FAQ,
+   guía HSM) con esta prioridad: ola 1 completa → medspa, veterinaria,
+   kinesiologia (top-3 de ola 2) → resto de ola 2 con contenido base.
+   Reglas de prompt por rubro que NO se negocian: psicologia = tono sobrio, CERO
+   contenido clínico por chat (solo logística), derivación a línea de crisis;
+   centro_medico/dental = triage de urgencia → humano; taller = pedir patente
+   primero (llave de la ficha); medspa = calificación de lead (zona, presupuesto)
+   antes de agendar evaluación; veterinaria = la ficha gira en torno a la(s)
+   mascota(s); servicios_domicilio = validar comuna/cobertura antes de agendar.
+9. Agente comercial del tenant Conversia: incorpora el pitch por rubro del
+   catálogo §1 ("recepcionista IA + cobros" contra el costo del lead/cita
+   perdidos, con el dolor específico del rubro); jamás inventa precios (getPlanes).
+10. KPIs del Hoy por vertical: incluir en cada plantilla la config de KPIs que
+    consume conversia-web (p.ej. taller: autos por estado/retiros de hoy;
+    veterinaria: vacunas por vencer; kinesiologia: pacientes en riesgo de
+    abandono; gimnasio: ocupación de clases/membresías por vencer).
+
+ENTREGA: tabla de claves sembradas (key | wave | status | variant | requiresFeature),
+diff de industries.ts, confirmación de los gates (beta no instalable públicamente;
+gimnasio bloqueado por groupClasses), decisión tomada para multi-entidad, y
+typecheck + tests en verde (incluido: instalar un vertical de cada variant en una
+org de prueba).
+```
+
 ## PROMPT F7 — Soporte in-app con IA + continuidad por WhatsApp
 
 ```text

@@ -131,7 +131,7 @@ export class OnboardingController {
     const ctx = requireContext();
     const parsed = z.object({ key: z.string().trim().min(2).max(40) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Falta el rubro (key) del paquete a instalar.");
-    const result = await this.vertical.install(ctx.organizationId, parsed.data.key);
+    const result = await this.vertical.install(ctx.organizationId, parsed.data.key, { source: "tenant" });
     return { ok: true, ...result };
   }
 }
