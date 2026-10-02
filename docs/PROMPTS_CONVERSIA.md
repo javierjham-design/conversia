@@ -830,11 +830,17 @@ TAREA 3 — Registro con rubro
   la UI nueva llega en F3 — no rediseñar el registro actual).
 
 TAREA 4 — Rubros nuevos y migración de plantillas
-· industries.ts: agregar "dental" y "barberia" (vocabulario fino: paciente/cliente,
-  tratamiento/servicio, box/sillón...).
-· Sembrar vertical_templates v1 para: dental y barberia (contenido inicial: portar
-  las plantillas Dental de apps/web/src/lib/workflow-templates.ts + agentes genéricos
-  adaptados; el contenido fino se mejora en F6) y "generico".
+· FUENTE DE VERDAD DE RUBROS: docs/CONVERSIA_RUBROS.md (catálogo maestro del
+  2026-10-02 con ranking, olas y las BASES de cada rubro: vocabulario, módulos,
+  embudo, flujos, HSM, campos custom y KPIs). Sembrar en industries.ts las claves
+  de TODAS las olas (1–3) con su vocabulario; respetar las notas de "variant"
+  (leads/mesas/intake/estadias/pedidos) y las brechas técnicas listadas en su §3.
+· Sembrar vertical_templates v1 completas para ola 1 (barberia, peluqueria,
+  estetica, centro_medico, dental) + ola 2 (medspa, veterinaria, kinesiologia,
+  gimnasio, taller, servicios_domicilio, psicologia), y como "beta" (instalables
+  solo desde la consola del equipo) las de ola 3. Contenido inicial: portar las
+  plantillas Dental de apps/web/src/lib/workflow-templates.ts + bases del catálogo;
+  el contenido fino se mejora en F6. Incluir "generico".
 · Marcar los archivos *-templates.ts del frontend como deprecados (comentario), sin
   romper la página de personalización actual.
 
