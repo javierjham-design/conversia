@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MessageCircle, Settings, Users } from "lucide-react";
-import { getToken } from "@/lib/api";
+import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, Settings, Users } from "lucide-react";
+import { api, getToken } from "@/lib/api";
 
 /**
  * NAVEGACIÓN UNIFICADA de Conversia (misma en TODAS las pantallas):
@@ -22,6 +22,47 @@ const NAV = [
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}
+
+/** Aviso de verificación de correo (D6): solo si el usuario aún no confirmó su correo. */
+function VerifyBanner() {
+  const [show, setShow] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api<{ user?: { emailVerified?: boolean } }>("/auth/me")
+      .then((me) => setShow(me.user?.emailVerified === false))
+      .catch(() => {});
+  }, []);
+
+  if (!show) return null;
+
+  async function resend() {
+    setBusy(true);
+    try {
+      await api("/auth/resend-verification", { method: "POST" });
+      setSent(true);
+    } catch {
+      /* noop */
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", margin: "12px 16px 0", borderRadius: 12, background: "var(--acc-dim)", color: "var(--acc-deep)", fontSize: 13 }}>
+      <MailWarning size={16} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1 }}>
+        {sent ? "Te reenviamos el correo de verificación. Revisa tu bandeja." : "Confirma tu correo para asegurar tu cuenta. Te enviamos un enlace al registrarte."}
+      </span>
+      {!sent ? (
+        <button onClick={resend} disabled={busy} style={{ border: "none", background: "var(--acc)", color: "var(--acc-ink)", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Enviando…" : "Reenviar"}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -48,7 +89,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </ul>
       </nav>
 
-      <div className="shell-body">{children}</div>
+      <div className="shell-body">
+        <VerifyBanner />
+        {children}
+      </div>
 
       <nav className="shell-tabs" aria-label="Navegación">
         {NAV.map(({ href, label, Icon }) => (

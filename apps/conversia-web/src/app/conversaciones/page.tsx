@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, BotOff, CheckCircle2, Paperclip, RotateCcw, Send, StickyNote } from "lucide-react";
+import { ArrowLeft, Bot, BotOff, CheckCircle2, Paperclip, Plus, RotateCcw, Send, StickyNote, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
@@ -61,6 +61,7 @@ export default function Conversaciones() {
   const [sending, setSending] = useState(false);
   const [internal, setInternal] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  const [showNew, setShowNew] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -216,7 +217,12 @@ export default function Conversaciones() {
         {showList ? (
           <div style={{ width: narrow ? "100%" : 340, borderRight: narrow ? "none" : "1px solid var(--hairline)", display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ padding: "18px 18px 10px" }}>
-              <h1 className="display" style={{ fontSize: 24, margin: "0 0 12px" }}>Conversaciones</h1>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px" }}>
+                <h1 className="display" style={{ fontSize: 24, margin: 0 }}>Conversaciones</h1>
+                <button className="btn-accent" onClick={() => setShowNew(true)} title="Nueva conversación" style={{ marginLeft: "auto", borderRadius: "50%", width: 36, height: 36, display: "grid", placeItems: "center", padding: 0 }} aria-label="Nueva conversación">
+                  <Plus size={18} />
+                </button>
+              </div>
               <div style={{ display: "flex", gap: 6 }}>
                 {STATUSES.map((s) => (
                   <button
@@ -402,7 +408,100 @@ export default function Conversaciones() {
           </div>
         ) : null}
       </div>
+      {showNew ? (
+        <NewConversation
+          onClose={() => setShowNew(false)}
+          onCreated={(convId) => {
+            setShowNew(false);
+            setStatus("all");
+            loadList();
+            openConv(convId);
+          }}
+        />
+      ) : null}
       {error ? <p style={{ color: "var(--danger)", fontSize: 12, position: "fixed", bottom: 8, left: 80 }}>{error}</p> : null}
     </AppShell>
+  );
+}
+
+type Template = { id: string; name: string; language: string; category: string; bodyText: string; variableFields: string[] };
+
+function NewConversation({ onClose, onCreated }: { onClose: () => void; onCreated: (convId: string) => void }) {
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ templates: Template[] }>("/channels/templates/approved")
+      .then((r) => setTemplates(r.templates))
+      .catch((e) => setErr((e as Error).message));
+  }, []);
+
+  const picked = templates.find((t) => t.id === templateId);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!phone.trim() || !templateId) {
+      setErr("Ingresa el teléfono y elige una plantilla.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await api<{ conversationId: string }>("/conversations/start", {
+        method: "POST",
+        body: JSON.stringify({ phone: phone.trim(), name: name.trim() || undefined, templateId }),
+      });
+      onCreated(r.conversationId);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field: React.CSSProperties = { width: "100%", padding: "10px 12px", marginTop: 5, borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 };
+  const lbl: React.CSSProperties = { fontSize: 12, color: "var(--ink-dim)", display: "block", marginTop: 12 };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+      <form onClick={(e) => e.stopPropagation()} onSubmit={submit} className="card" style={{ width: "100%", maxWidth: 440, padding: 24, maxHeight: "90dvh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
+          <h2 className="display" style={{ fontSize: 20, margin: 0 }}>Nueva conversación</h2>
+          <button type="button" onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }} aria-label="Cerrar"><X size={20} /></button>
+        </div>
+        <p className="text-dim" style={{ fontSize: 12, margin: "4px 0 0" }}>Para escribirle a alguien nuevo (o fuera de 24 h) se usa una plantilla aprobada.</p>
+
+        <label style={lbl}>Teléfono (con código de país)
+          <input style={field} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="56912345678" inputMode="tel" />
+        </label>
+        <label style={lbl}>Nombre (opcional)
+          <input style={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre del cliente" />
+        </label>
+        <label style={lbl}>Plantilla
+          <select style={field} value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            <option value="">— elegir —</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.language})</option>)}
+          </select>
+        </label>
+        {picked ? (
+          <div className="card" style={{ padding: "10px 12px", marginTop: 8, fontSize: 13 }}>
+            <p className="text-dim" style={{ margin: 0, fontSize: 11 }}>Vista previa</p>
+            <p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{picked.bodyText || "(sin cuerpo)"}</p>
+            {picked.variableFields.length ? <p className="text-dim" style={{ margin: "6px 0 0", fontSize: 11 }}>⚠ Esta plantilla tiene variables; el asistente las completará al enviarla.</p> : null}
+          </div>
+        ) : templates.length === 0 && !err ? (
+          <p className="text-dim" style={{ fontSize: 12, marginTop: 8 }}>No hay plantillas aprobadas aún.</p>
+        ) : null}
+
+        {err ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{err}</p> : null}
+        <button className="btn-accent" type="submit" disabled={saving} style={{ width: "100%", marginTop: 18, opacity: saving ? 0.6 : 1 }}>
+          {saving ? "Enviando…" : "Iniciar conversación"}
+        </button>
+      </form>
+    </div>
   );
 }

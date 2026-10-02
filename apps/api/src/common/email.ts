@@ -5,7 +5,7 @@ import { getEnv } from "@conversia/config";
  * envió. Sin RESEND_API_KEY configurada → false (el llamador cae a un flujo
  * manual, p. ej. mostrar la contraseña temporal en pantalla).
  */
-export async function sendEmail(opts: { to: string; subject: string; html: string; replyTo?: string }): Promise<boolean> {
+export async function sendEmail(opts: { to: string; subject: string; html: string; replyTo?: string; from?: string }): Promise<boolean> {
   const env = getEnv();
   if (!env.RESEND_API_KEY) return false;
   try {
@@ -13,7 +13,8 @@ export async function sendEmail(opts: { to: string; subject: string; html: strin
       method: "POST",
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
       body: JSON.stringify({
-        from: env.RESEND_FROM,
+        // `from` configurable (remitente por marca); por defecto el verificado en Resend.
+        from: opts.from ?? env.RESEND_FROM,
         to: [opts.to],
         subject: opts.subject,
         html: opts.html,
