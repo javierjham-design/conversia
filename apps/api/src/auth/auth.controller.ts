@@ -79,6 +79,21 @@ export class AuthController {
     return this.auth.register({ ...input, brand });
   }
 
+  /** Verificación de correo (D6): confirma el correo con el token del link (público). */
+  @Post("verify-email")
+  async verifyEmail(@Body() body: unknown) {
+    const parsed = z.object({ token: z.string().min(10) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Token requerido");
+    return this.auth.verifyEmail(parsed.data.token);
+  }
+
+  /** Reenvía el correo de verificación al usuario autenticado. */
+  @Post("resend-verification")
+  async resendVerification() {
+    const ctx = requireContext();
+    return this.auth.resendVerification(ctx.userId!);
+  }
+
   @Post("login")
   async login(@Body() body: unknown, @Req() req: Request) {
     const input = parse(loginSchema, body);
@@ -297,7 +312,7 @@ export class AuthController {
     const [user, org] = await Promise.all([
       this.prisma.admin.user.findUnique({
         where: { id: ctx.userId },
-        select: { id: true, email: true, name: true, mfaEnabled: true, settings: true },
+        select: { id: true, email: true, name: true, mfaEnabled: true, emailVerifiedAt: true, settings: true },
       }),
       this.prisma.withTenant(ctx.organizationId, (tx) =>
         tx.organization.findUnique({
@@ -308,7 +323,10 @@ export class AuthController {
     ]);
     const { settings, ...organization } = (org ?? {}) as Record<string, any>;
     const personalization = resolvePersonalization(settings);
-    return { user, organization, role: ctx.roleCode, permissions: ctx.permissions, personalization };
+    // emailVerified (D6) como booleano para el frontend; no exponemos la fecha cruda.
+    const { emailVerifiedAt, ...userRest } = (user ?? {}) as Record<string, any>;
+    const userOut = user ? { ...userRest, emailVerified: !!emailVerifiedAt } : user;
+    return { user: userOut, organization, role: ctx.roleCode, permissions: ctx.permissions, personalization };
   }
 
   /** Mi perfil: actualizar el nombre propio (cualquier rol). */

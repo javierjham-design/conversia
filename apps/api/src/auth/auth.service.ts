@@ -2,9 +2,11 @@ import { BadRequestException, ConflictException, Injectable, UnauthorizedExcepti
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
+import { brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { VerticalService } from "../organizations/vertical.service";
-import { signAppToken, signMfaToken } from "./jwt";
+import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken } from "./jwt";
+import { sendEmail } from "../common/email";
 import { encryptSecret, decryptSecret } from "../common/crypto";
 import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
 
@@ -160,7 +162,52 @@ export class AuthService {
       }
     }
 
+    // Verificación de correo (D6): solo marca conversia envía el link al registrarse.
+    // Best-effort: si el correo no sale, la cuenta igual queda creada (verificación blanda).
+    if (brand === "conversia") {
+      await this.sendVerificationEmail(result.user.id, input.email, result.org).catch(() => {});
+    }
+
     return this.issueTokens(result.user.id, result.org.id, result.role.code, ["*"]);
+  }
+
+  /** Envía (o reenvía) el correo de verificación con un link de 2 días. Best-effort. */
+  async sendVerificationEmail(userId: string, email: string, org: { brand?: string | null } | null): Promise<boolean> {
+    const token = signEmailVerifyToken(userId);
+    const brand = brandOf(org);
+    const link = `${brand.webUrl}/verify?token=${encodeURIComponent(token)}`;
+    const html = `<div style="font-family:Inter,system-ui,sans-serif;max-width:520px">
+<h2 style="margin:0 0 12px">Confirma tu correo</h2>
+<p>¡Bienvenido a ${brand.name}! Confirma tu correo para asegurar tu cuenta.</p>
+<p style="margin:22px 0"><a href="${link}" style="background:#0f9e8e;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">Confirmar mi correo</a></p>
+<p style="color:#64748b;font-size:13px">O copia este enlace: <br/>${link}</p>
+<p style="color:#64748b;font-size:13px">El enlace vence en 2 días. Si no creaste esta cuenta, ignora este mensaje.</p>
+</div>`;
+    return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html });
+  }
+
+  /** Marca el correo del usuario como verificado a partir del token del link. */
+  async verifyEmail(token: string): Promise<{ ok: true }> {
+    let sub: string;
+    try {
+      ({ sub } = verifyEmailVerifyToken(token));
+    } catch {
+      throw new BadRequestException("El enlace no es válido o venció. Pide uno nuevo.");
+    }
+    await this.prisma.admin.user.update({ where: { id: sub }, data: { emailVerifiedAt: new Date() } });
+    return { ok: true };
+  }
+
+  /** Reenvía el correo de verificación al usuario actual (si aún no está verificado). */
+  async resendVerification(userId: string): Promise<{ sent: boolean; alreadyVerified: boolean }> {
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, select: { email: true, emailVerifiedAt: true } });
+    if (!user) throw new BadRequestException("Usuario no encontrado");
+    if (user.emailVerifiedAt) return { sent: false, alreadyVerified: true };
+    // La marca sale de alguna org del usuario (por el Origin ya se resolvió su cuenta).
+    const membership = await this.prisma.admin.organizationUser.findFirst({ where: { userId }, select: { organizationId: true } });
+    const org = membership ? await this.prisma.admin.organization.findUnique({ where: { id: membership.organizationId }, select: { brand: true } }) : null;
+    const sent = await this.sendVerificationEmail(userId, user.email, org);
+    return { sent, alreadyVerified: false };
   }
 
   /**

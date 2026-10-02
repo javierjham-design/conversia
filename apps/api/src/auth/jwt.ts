@@ -87,6 +87,32 @@ export function verifyInviteToken(token: string): { sub: string; fresh: boolean 
   return { sub: String(decoded.sub), fresh: decoded.fresh === true };
 }
 
+/**
+ * Token de VERIFICACIÓN DE CORREO (D6): audiencia propia (`${AUD}:email`) → no sirve
+ * para entrar a la app, solo para confirmar el correo vía link. Vida 2 días.
+ */
+export function signEmailVerifyToken(userId: string): string {
+  const env = getEnv();
+  return jwt.sign({ sub: userId, purpose: "email_verify", jti: randomUUID() }, env.JWT_SECRET, {
+    algorithm: ALGO,
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:email`,
+    expiresIn: "2d",
+  } as jwt.SignOptions);
+}
+
+export function verifyEmailVerifyToken(token: string): { sub: string } {
+  const env = getEnv();
+  const decoded = jwt.verify(token, env.JWT_SECRET, {
+    algorithms: [ALGO],
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:email`,
+    clockTolerance: 5,
+  }) as jwt.JwtPayload;
+  if (!decoded.sub || decoded.purpose !== "email_verify") throw new Error("Token de verificación inválido");
+  return { sub: String(decoded.sub) };
+}
+
 export function verifyAppToken(token: string): AppTokenClaims {
   const env = getEnv();
   const decoded = jwt.verify(token, env.JWT_SECRET, {
