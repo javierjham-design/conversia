@@ -608,6 +608,116 @@ export class PlatformController {
     return out;
   }
 
+  // ===================== SA-2: ver conversaciones del tenant (solo lectura) =====================
+
+  /** Lista de conversaciones del tenant (cross-tenant, solo lectura, para soporte/ajustes). */
+  @Get("organizations/:id/conversations")
+  async orgConversations(@Param("id") id: string, @Req() req: PlatformRequest, @Query("status") status?: string) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const where: Record<string, unknown> = { organizationId: id };
+    if (status === "open") where.status = "OPEN";
+    else if (status === "pending") where.status = "PENDING";
+    else if (status === "closed") where.status = "CLOSED";
+    const rows = await db.conversation.findMany({
+      where,
+      orderBy: { lastMessageAt: "desc" },
+      take: 50,
+      include: { contact: { select: { firstName: true, lastName: true, profileName: true, phone: true } } },
+    });
+    return rows.map((c) => ({
+      id: c.id,
+      status: c.status,
+      aiEnabled: c.aiEnabled,
+      unreadCount: c.unreadCount,
+      lastMessagePreview: c.lastMessagePreview,
+      lastMessageAt: c.lastMessageAt,
+      contact: { name: [c.contact?.firstName, c.contact?.lastName].filter(Boolean).join(" ") || c.contact?.profileName || c.contact?.phone || "Sin nombre", phone: c.contact?.phone ?? null },
+    }));
+  }
+
+  /** Hilo de una conversación del tenant (solo lectura). */
+  @Get("organizations/:id/conversations/:cid/messages")
+  async orgConversationMessages(@Param("id") id: string, @Param("cid") cid: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const conv = await db.conversation.findFirst({ where: { id: cid, organizationId: id }, include: { contact: { select: { firstName: true, lastName: true, profileName: true, phone: true } } } });
+    if (!conv) throw new NotFoundException("Conversación no encontrada");
+    const messages = await db.message.findMany({ where: { conversationId: cid }, orderBy: { createdAt: "asc" }, take: 300, select: { id: true, direction: true, type: true, visibility: true, body: true, authorType: true, status: true, createdAt: true } });
+    return {
+      conversation: { id: conv.id, status: conv.status, aiEnabled: conv.aiEnabled, contact: { name: [conv.contact?.firstName, conv.contact?.lastName].filter(Boolean).join(" ") || conv.contact?.profileName || conv.contact?.phone || "Sin nombre", phone: conv.contact?.phone ?? null } },
+      messages,
+    };
+  }
+
+  // ===================== SA-4: ficha de implementación / onboarding =====================
+
+  /** Checklist y notas de montaje del tenant (en settings.onboarding). */
+  @Get("organizations/:id/onboarding")
+  async getOnboarding(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const ob = (((org?.settings as Record<string, any>) ?? {}).onboarding ?? {}) as { steps?: Record<string, boolean>; notes?: string };
+    return { steps: ob.steps ?? {}, notes: ob.notes ?? "" };
+  }
+
+  @Patch("organizations/:id/onboarding")
+  async setOnboarding(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = z.object({ steps: z.record(z.boolean()).optional(), notes: z.string().max(5000).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const settings = { ...((org?.settings ?? {}) as Record<string, any>) };
+    const prev = (settings.onboarding ?? {}) as { steps?: Record<string, boolean>; notes?: string };
+    settings.onboarding = { steps: parsed.data.steps ?? prev.steps ?? {}, notes: parsed.data.notes ?? prev.notes ?? "" };
+    await this.prisma.admin.organization.update({ where: { id }, data: { settings: settings as object } });
+    await this.audit(req, "platform.org.onboarding", "organization", id);
+    return { ok: true };
+  }
+
+  // ========== SA-5: canales (cableado por tenant; conexión real a Meta/TikTok al final) ==========
+
+  /** Canales del tenant: conexiones reales (si existen) + intents configurados (pendientes). */
+  @Get("organizations/:id/channels")
+  async orgChannels(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const [org, connections] = await Promise.all([
+      db.organization.findUnique({ where: { id }, select: { settings: true } }),
+      db.channelConnection.findMany({ where: { organizationId: id }, select: { id: true, type: true, name: true, status: true } }),
+    ]);
+    const intents = (((org?.settings as Record<string, any>) ?? {}).channels ?? []) as { type: string; status: string }[];
+    return { connections, intents };
+  }
+
+  /** Agrega un canal a configurar (intent) para el tenant. La conexión real se hace al final. */
+  @Post("organizations/:id/channels")
+  async addOrgChannel(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = z.object({ type: z.enum(["whatsapp", "instagram", "messenger", "tiktok"]) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Tipo de canal inválido");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const settings = { ...((org?.settings ?? {}) as Record<string, any>) };
+    const intents = (settings.channels ?? []) as { type: string; status: string }[];
+    if (!intents.some((c) => c.type === parsed.data.type)) intents.push({ type: parsed.data.type, status: "pending" });
+    settings.channels = intents;
+    await this.prisma.admin.organization.update({ where: { id }, data: { settings: settings as object } });
+    await this.audit(req, "platform.org.channel_add", "organization", id, { type: parsed.data.type });
+    return { ok: true, intents };
+  }
+
+  /** Quita un canal configurado (intent) del tenant. */
+  @Delete("organizations/:id/channels/:type")
+  async removeOrgChannel(@Param("id") id: string, @Param("type") type: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const settings = { ...((org?.settings ?? {}) as Record<string, any>) };
+    settings.channels = ((settings.channels ?? []) as { type: string; status: string }[]).filter((c) => c.type !== type);
+    await this.prisma.admin.organization.update({ where: { id }, data: { settings: settings as object } });
+    await this.audit(req, "platform.org.channel_remove", "organization", id, { type });
+    return { ok: true };
+  }
+
   // ------------------- Cuenta del administrador del tenant -------------------
 
   /** Restablece la contraseña del admin y devuelve la temporal (mostrada una vez). */

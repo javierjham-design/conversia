@@ -21,6 +21,22 @@ type Detail = {
 type Wallet = { balance: number; included: number; ledger: { delta: number; reason: string; balanceAfter: number; createdAt: string }[] };
 type VerticalCat = { key: string; name: string; wave: number; status: string; variant: string; requiresFeature: string[] };
 
+const ONBOARDING_STEPS: { key: string; label: string }[] = [
+  { key: "cuenta", label: "Cuenta creada" },
+  { key: "rubro", label: "Rubro instalado" },
+  { key: "agentes", label: "Agentes configurados (prompts)" },
+  { key: "agenda", label: "Agenda: horarios y servicios" },
+  { key: "canal", label: "Canal conectado" },
+  { key: "prueba", label: "Primera conversación de prueba" },
+  { key: "entregado", label: "Entregado al cliente" },
+];
+const CHANNEL_TYPES: { type: string; label: string; emoji: string }[] = [
+  { type: "whatsapp", label: "WhatsApp", emoji: "🟢" },
+  { type: "instagram", label: "Instagram", emoji: "📸" },
+  { type: "messenger", label: "Messenger", emoji: "💬" },
+  { type: "tiktok", label: "TikTok", emoji: "🎵" },
+];
+
 const NAPSE: React.CSSProperties = { width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 };
 const LABEL: React.CSSProperties = { fontSize: 12, color: "var(--ink-dim)", display: "block", marginBottom: 4 };
 
@@ -53,6 +69,9 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
   const [catalog, setCatalog] = useState<VerticalCat[]>([]);
   const [adjust, setAdjust] = useState("");
   const [editAgent, setEditAgent] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Record<string, boolean>>({});
+  const [obNotes, setObNotes] = useState("");
+  const [channels, setChannels] = useState<{ connections: { id: string; type: string; name: string; status: string }[]; intents: { type: string; status: string }[] }>({ connections: [], intents: [] });
 
   const load = () =>
     padmin<Detail>(`/platform/organizations/${id}`).then((x) => {
@@ -67,10 +86,14 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
       setPlanCode(x.subscription?.planCode ?? x.plan?.code ?? "");
     });
 
+  const loadChannels = () => padmin<typeof channels>(`/platform/organizations/${id}/channels`).then(setChannels).catch(() => {});
+
   useEffect(() => {
     load().catch((e) => setError((e as Error).message));
     padmin<Wallet>(`/platform/organizations/${id}/wallet`).then(setWallet).catch(() => {});
     padmin<VerticalCat[]>("/platform/verticals").then(setCatalog).catch(() => {});
+    padmin<{ steps: Record<string, boolean>; notes: string }>(`/platform/organizations/${id}/onboarding`).then((o) => { setSteps(o.steps); setObNotes(o.notes); }).catch(() => {});
+    loadChannels();
   }, [id]);
 
   async function run(fn: () => Promise<unknown>, okMsg: string) {
@@ -121,7 +144,21 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
       setWallet(await padmin<Wallet>(`/platform/organizations/${id}/wallet`));
     }, "Créditos ajustados.");
 
-  async function impersonate() {
+  const saveOnboarding = (nextSteps: Record<string, boolean>, notes: string) =>
+    run(() => padmin(`/platform/organizations/${id}/onboarding`, { method: "PATCH", body: JSON.stringify({ steps: nextSteps, notes }) }), "Ficha de implementación guardada.");
+
+  function toggleStep(key: string) {
+    const next = { ...steps, [key]: !steps[key] };
+    setSteps(next);
+    saveOnboarding(next, obNotes);
+  }
+
+  const addChannel = (type: string) =>
+    run(async () => { await padmin(`/platform/organizations/${id}/channels`, { method: "POST", body: JSON.stringify({ type }) }); await loadChannels(); }, `Canal ${type} agregado (pendiente de conexión).`);
+  const removeChannel = (type: string) =>
+    run(async () => { await padmin(`/platform/organizations/${id}/channels/${type}`, { method: "DELETE" }); await loadChannels(); }, `Canal ${type} quitado.`);
+
+  async function impersonate(path = "/") {
     setError(null);
     if (!confirm("Entrarás al panel de este cliente como soporte (reemplaza tu sesión de cliente en este navegador). ¿Continuar?")) return;
     try {
@@ -129,7 +166,7 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
       // El token de impersonación es un JWT de TENANT → se guarda bajo la clave de cliente;
       // el token de super admin vive en otra clave, así tu sesión de consola se mantiene.
       setToken(r.token);
-      window.open("/", "_blank");
+      window.open(path, "_blank");
       setMsg("Sesión de soporte abierta en otra pestaña (30 min).");
     } catch (e) {
       setError((e as Error).message);
@@ -145,7 +182,8 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", margin: "8px 0 20px" }}>
         <h1 className="display" style={{ fontSize: 26, margin: 0 }}>{d.organization.name}</h1>
         <span className="text-dim" style={{ fontSize: 13 }}>{d.organization.slug} · {d.currency} · {d.organization.status}</span>
-        <button className="btn-accent" onClick={impersonate} style={{ marginLeft: "auto" }}>Entrar como soporte</button>
+        <a href={`/admin/organizations/${id}/conversaciones`} className="nav-item" style={{ marginLeft: "auto", width: "auto", height: 38, padding: "0 12px", gap: 6, border: "1px solid var(--line)", fontSize: 13, textDecoration: "none" }}>Ver conversaciones</a>
+        <button className="btn-accent" onClick={() => impersonate("/")}>Entrar como soporte</button>
       </div>
       {msg ? <p style={{ color: "var(--ok)", fontSize: 13 }}>{msg}</p> : null}
       {error ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p> : null}
@@ -262,6 +300,43 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
             ))}
           </Card>
         ) : null}
+
+        <Card title="Canales (conexión por tenant)">
+          {channels.connections.length ? channels.connections.map((c) => (
+            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--hairline)", fontSize: 13 }}>
+              <span>{c.name} <span className="text-dim">· {c.type}</span></span>
+              <span style={{ color: c.status === "active" ? "var(--ok)" : "var(--warn)", fontSize: 12 }}>● {c.status}</span>
+            </div>
+          )) : null}
+          {channels.intents.map((c) => (
+            <div key={c.type} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--hairline)", fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{CHANNEL_TYPES.find((t) => t.type === c.type)?.emoji} {CHANNEL_TYPES.find((t) => t.type === c.type)?.label ?? c.type} <span style={{ color: "var(--warn)", fontSize: 11 }}>· pendiente de conexión</span></span>
+              <button onClick={() => removeChannel(c.type)} className="text-dim" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 12 }}>Quitar</button>
+            </div>
+          ))}
+          <label style={{ ...LABEL, marginTop: 12 }}>Agregar canal (se conecta a Meta/TikTok al final)</label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {CHANNEL_TYPES.filter((t) => !channels.intents.some((i) => i.type === t.type) && !channels.connections.some((c) => c.type.toLowerCase().includes(t.type))).map((t) => (
+              <button key={t.type} onClick={() => addChannel(t.type)} className="nav-item" style={{ width: "auto", height: 34, padding: "0 10px", border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 12 }}>+ {t.emoji} {t.label}</button>
+            ))}
+          </div>
+          <p className="text-dim" style={{ fontSize: 11, marginTop: 8 }}>Cableado listo; la conexión real con Meta (WhatsApp/IG/Messenger) y TikTok se activa al final. Los canales le figuran al cliente en su panel.</p>
+        </Card>
+
+        <Card title="Implementación / onboarding">
+          {ONBOARDING_STEPS.map((s) => (
+            <label key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13, cursor: "pointer" }}>
+              <input type="checkbox" checked={!!steps[s.key]} onChange={() => toggleStep(s.key)} /> {s.label}
+            </label>
+          ))}
+          <label style={{ ...LABEL, marginTop: 10 }}>Notas de montaje</label>
+          <textarea value={obNotes} onChange={(e) => setObNotes(e.target.value)} onBlur={() => saveOnboarding(steps, obNotes)} rows={3} style={{ ...NAPSE, resize: "vertical" }} placeholder="Notas internas del montaje…" />
+        </Card>
+
+        <Card title="Agenda y servicios">
+          <p className="text-dim" style={{ fontSize: 13, margin: "0 0 12px" }}>Configura horarios, equipo y servicios del tenant (se abre su panel como soporte).</p>
+          <button className="btn-accent" onClick={() => impersonate("/agenda/configurar")} style={{ width: "100%" }}>Configurar agenda</button>
+        </Card>
       </div>
 
       <button className="btn-accent" onClick={saveConfig} style={{ marginTop: 20, padding: "12px 28px", fontSize: 15 }}>Guardar configuración</button>
