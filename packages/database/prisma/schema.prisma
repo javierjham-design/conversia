@@ -188,9 +188,13 @@ enum AlertSeverity {
 
 model PlatformAdmin {
   id           String    @id @default(cuid())
-  email        String    @unique
+  email        String
   passwordHash String    @map("password_hash")
   name         String
+  // D8 — Super admin SEPARADO por marca: el mismo correo puede tener un super admin
+  // de TuBot y otro de Conversia como cuentas independientes. Cada super admin solo
+  // ve y opera los tenants de su propia marca. Los existentes quedan en 'tubot'.
+  brand        String    @default("tubot")
   // RBAC de plataforma: owner (todo) | admin | support | billing | readonly
   role         String    @default("owner")
   // MFA TOTP (RFC 6238). El secreto es durable; las sesiones viven en Redis.
@@ -200,6 +204,7 @@ model PlatformAdmin {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
+  @@unique([email, brand])
   @@map("platform_admins")
 }
 
@@ -340,10 +345,14 @@ model PaymentMethod {
   @@map("payment_methods")
 }
 
-// Identidad global de usuario (puede pertenecer a varias organizaciones)
+// Identidad de usuario POR MARCA (D8): el mismo correo puede tener una cuenta en TuBot
+// y otra, independiente, en Conversia (contraseñas/Google propios). Por eso el email ya
+// NO es único global, sino único por (email, brand). La marca la fija el dominio de
+// origen al registrarse. Un usuario pertenece a orgs de SU marca.
 model User {
   id           String             @id @default(cuid())
-  email        String             @unique
+  email        String
+  brand        String             @default("tubot")
   passwordHash String             @map("password_hash")
   name         String
   phone        String?
@@ -361,6 +370,7 @@ model User {
   updatedAt    DateTime           @updatedAt @map("updated_at")
   memberships  OrganizationUser[]
 
+  @@unique([email, brand])
   @@map("users")
 }
 

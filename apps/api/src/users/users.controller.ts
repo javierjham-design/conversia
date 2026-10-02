@@ -203,13 +203,16 @@ export class UsersController {
       });
       if (!role) throw new BadRequestException("Rol desconocido");
 
-      // Usuario global: puede existir por pertenecer a otra organización
-      let user = await this.prisma.admin.user.findUnique({ where: { email: input.email } });
+      // Usuario de la MARCA de esta organización (D8): el invitado se resuelve/crea en la
+      // misma marca (puede existir ya por pertenecer a otra org de la misma marca).
+      const inviteOrg = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+      const inviteBrand = inviteOrg?.brand ?? "tubot";
+      let user = await this.prisma.admin.user.findUnique({ where: { email_brand: { email: input.email, brand: inviteBrand } } });
       let tempPassword: string | null = null;
       if (!user) {
         tempPassword = randomBytes(6).toString("base64url");
         user = await this.prisma.admin.user.create({
-          data: { email: input.email, name: input.name, passwordHash: bcrypt.hashSync(tempPassword, 10) },
+          data: { email: input.email, brand: inviteBrand, name: input.name, passwordHash: bcrypt.hashSync(tempPassword, 10) },
         });
       }
 
@@ -294,7 +297,11 @@ export class UsersController {
       await this.assertCanManage(tx, ctx, member.roleId);
 
       if (input.email) {
-        const existing = await this.prisma.admin.user.findUnique({ where: { email: input.email } });
+        // La unicidad del email es POR MARCA (D8): comprobamos dentro de la marca del propio usuario.
+        const self = await this.prisma.admin.user.findUnique({ where: { id: member.userId }, select: { brand: true } });
+        const existing = await this.prisma.admin.user.findUnique({
+          where: { email_brand: { email: input.email, brand: self?.brand ?? "tubot" } },
+        });
         if (existing && existing.id !== member.userId) throw new BadRequestException("Ese email ya está en uso por otro usuario");
       }
       const data: Record<string, unknown> = {};

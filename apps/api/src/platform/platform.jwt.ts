@@ -14,6 +14,7 @@ export interface PlatformClaims {
   sub: string; // platform_admin id
   email: string;
   role: string; // owner | admin | support | billing | readonly
+  brand: string; // D8 — marca del super admin (tubot | conversia); aísla la vista por marca
   jti: string; // enlaza a la sesión revocable en Redis
 }
 
@@ -26,7 +27,7 @@ function platformSecret(): string {
 export function signPlatformToken(claims: PlatformClaims): string {
   const env = getEnv();
   const { jti, ...rest } = claims;
-  return jwt.sign({ ...rest, platform: true }, platformSecret(), {
+  return jwt.sign({ ...rest, brand: claims.brand, platform: true }, platformSecret(), {
     algorithm: ALGO,
     issuer: env.JWT_ISSUER,
     audience: PLATFORM_AUDIENCE,
@@ -48,6 +49,7 @@ export function verifyPlatformToken(token: string): PlatformClaims {
     sub: String(decoded.sub),
     email: String(decoded.email ?? ""),
     role: String(decoded.role ?? "owner"),
+    brand: String(decoded.brand ?? "tubot"),
     jti: String(decoded.jti ?? ""),
   };
 }

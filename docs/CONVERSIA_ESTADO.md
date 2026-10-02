@@ -9,6 +9,7 @@
 - **D5 — máquina de estados de alta: APROBADA** (setup pagado con prefijo `setup:` que NO activa suscripción → `implementing` → activación solo al marcar ENTREGADO; exclusión del trial-lifecycle para brand=conversia).
 - **D6 — verificación de correo en el registro: SÍ** (se construye en F3).
 - **D7 — camino de alta del cliente vendido por el bot:** pendiente (antes de F6).
+- **D8 — identidad SEPARADA por marca: APROBADA** (cuentas 100% separadas + super admin separado). El email deja de ser único global y pasa a `@@unique([email, brand])` tanto en `users` como en `platform_admins`. El mismo correo es una cuenta independiente en TuBot y en Conversia; login/registro/Google y el login del super admin resuelven la cuenta por la **marca derivada del Origin** (`brandFromOrigin`, nunca del body). El super admin solo ve/opera los tenants de SU marca (listas, métricas, auditoría y cada acción por-org filtradas por `brand`). Existentes → `tubot` (byte-for-byte).
 
 ## Nota crítica — modelo WABA de Conversia (base de todo el cobro de servicio)
 
@@ -34,6 +35,7 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | F4 | pendiente | | | agenda nativa completa |
 | F5 | en PR | | 2026-10-01 | planes conversia_* (créditos/serviceDebitsWallet/cupo -1) + migración brand en plans + locked_price (grandfathering) + catálogo por marca + pesos walletWeights:conversia + F5-B débito de servicio (exención free tier + refund W-2) + setup:/lifecycle + exclusión trial-lifecycle conversia + GET /billing/wallet/summary + sobre 500 créditos. DIFERIDO: Lemon W-3 (D4, cargar variantId=operativo), activación final=F10, estimador difusiones/textos finos por marca |
 | F3 | EN PROD (Tramos 1-2) | #404 | 2026-10-01 | apps/conversia-web LIVE en Railway (app.conversia.cl, wildcard). T1: scaffold Next + design system Nocturna (oscuro/claro + 6 acentos) + acento por país + login + home "Hoy" (créditos de /billing/wallet/summary). T2: navegación unificada (riel ≥620px / tabs <620px) + 5 secciones (Hoy/Conversaciones/Agenda/Clientes/Cobros, placeholders). Backend desplegado: migraciones E3/F1/F2/F5 + catálogo conversia en prod. PENDIENTE (tramos sig.): bandeja WhatsApp con SSE, agenda, clientes, facturación completa, ajustes, registro visual por vertical, persistir acento vía PATCH /me/preferences, D6 verificación correo |
+| Auth por marca (D8) | en PR | | 2026-10-01 | identidad separada por marca: `users` y `platform_admins` pasan a `@@unique([email, brand])` (2 migraciones, backfill a tubot); `brandFromOrigin` movido a @conversia/config y compartido; login/registro/Google (tenant) + login del super admin resuelven por (email, brand del Origin); token de plataforma lleva `brand`; super admin AISLADO por marca (listas/métricas/auditoría/billing + 21 rutas por-org con `assertOrgBrand`); tests jwt-brand. OPERATIVO deploy: aplicar las 2 migraciones + crear cuenta y super admin Conversia del dueño |
 | F6 | pendiente | | | requiere D7 |
 | F7 | pendiente | | | |
 | F8 | pendiente | | | |

@@ -63,6 +63,18 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
 }
 
 /**
+ * Marca derivada del Origin por allow-list (NUNCA del body): una petición desde el panel
+ * de Conversia (WEB_URL_CONVERSIA) → "conversia"; todo lo demás (incluido TuBot) → "tubot".
+ * Así el login/registro/super admin nace con la marca correcta sin confiar en el cliente.
+ * Compartido por el auth de tenant y el del super admin (D8).
+ */
+export function brandFromOrigin(origin: string | undefined): string {
+  const env = getEnv();
+  if (origin && env.WEB_URL_CONVERSIA && origin === env.WEB_URL_CONVERSIA) return "conversia";
+  return "tubot";
+}
+
+/**
  * ACENTO DE UI CONVERSIA (F3). Paleta CURADA de 6 acentos seguros (nunca color libre:
  * garantiza contraste y elegancia). El default por país se resuelve al crear la cuenta
  * con Organization.country (el usuario puede cambiarlo luego vía PATCH /me/preferences).
