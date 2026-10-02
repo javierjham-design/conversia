@@ -59,6 +59,16 @@ describe("ToolRegistry.specsFor", () => {
   it("sin tools habilitadas no expone ninguna", () => {
     expect(registry.specsFor([])).toEqual([]);
   });
+
+  it("tools de dueño (F8) NO se exponen al cliente (sin ownerContext)", () => {
+    const names = registry.specsFor(["updateBusinessHours", "getServices"]).map((s) => s.name);
+    expect(names).toEqual(["getServices"]); // updateBusinessHours (ownerOnly) queda fuera
+  });
+
+  it("tools de dueño SÍ se exponen en modo dueño (ownerContext)", () => {
+    const names = registry.specsFor(["updateBusinessHours", "getServices"], { ownerContext: true }).map((s) => s.name).sort();
+    expect(names).toEqual(["getServices", "updateBusinessHours"]);
+  });
 });
 
 // Validación zod server-side: entradas inválidas nunca rompen el turno.

@@ -419,6 +419,65 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       });
     },
 
+    // ===== Administración de agenda (F8) — solo modo dueño (tools ownerOnly). La IA no
+    // escribe directo en BD: estos métodos reusan las mismas operaciones del agenda.controller. =====
+    async adminUpsertProfessional(input: { id?: string; name: string; specialty?: string; type?: "persona" | "servicio"; durationMin?: number; active?: boolean }) {
+      return withTenant(orgId, async (tx) => {
+        if (input.id) {
+          const cur = await tx.professional.findFirst({ where: { id: input.id } });
+          if (!cur) return { error: "No encontré ese recurso." };
+          const meta: Record<string, unknown> = { ...((cur.meta as object) ?? {}) };
+          if (input.type) meta.type = input.type;
+          if (input.durationMin != null) meta.durationMin = input.durationMin;
+          await tx.professional.update({ where: { id: input.id }, data: { ...(input.name ? { name: input.name } : {}), ...(input.specialty !== undefined ? { specialty: input.specialty } : {}), ...(input.active !== undefined ? { active: input.active } : {}), meta: meta as object } });
+          return { ok: true, id: input.id };
+        }
+        const p = await tx.professional.create({ data: { organizationId: orgId, name: input.name, specialty: input.specialty ?? null, active: true, meta: { type: input.type ?? "persona", ...(input.durationMin != null ? { durationMin: input.durationMin } : {}), workingHours: [] } as object } });
+        return { ok: true, id: p.id };
+      });
+    },
+    async adminUpdateProfessionalSchedule(input: { professionalId: string; workingHours: Array<{ day: number; start: string; end: string }> }) {
+      return withTenant(orgId, async (tx) => {
+        const cur = await tx.professional.findFirst({ where: { id: input.professionalId } });
+        if (!cur) return { error: "No encontré a esa persona." };
+        const meta = { ...((cur.meta as object) ?? {}), workingHours: input.workingHours };
+        await tx.professional.update({ where: { id: input.professionalId }, data: { meta: meta as object } });
+        return { ok: true };
+      });
+    },
+    async adminAddProfessionalTimeOff(input: { professionalId: string; from: string; to: string; reason?: string }) {
+      return withTenant(orgId, async (tx) => {
+        const cur = await tx.professional.findFirst({ where: { id: input.professionalId } });
+        if (!cur) return { error: "No encontré a esa persona." };
+        const meta = (cur.meta as Record<string, unknown>) ?? {};
+        const timeOff = Array.isArray(meta.timeOff) ? (meta.timeOff as unknown[]) : [];
+        timeOff.push({ from: input.from, to: input.to, reason: input.reason ?? null });
+        await tx.professional.update({ where: { id: input.professionalId }, data: { meta: { ...meta, timeOff } as object } });
+        // Citas afectadas en el rango (para que el bot avise/ofrezca reagendar).
+        const affected = await tx.appointment.count({ where: { professionalId: input.professionalId, status: { in: ["PENDING", "CONFIRMED"] }, startsAt: { gte: new Date(input.from), lte: new Date(input.to) } } });
+        return { ok: true, affected };
+      });
+    },
+    async adminUpdateBusinessHours(input: { businessHours: Record<string, string[]> }) {
+      const admin = getAdminPrisma();
+      const org = await admin.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+      const settings = { ...((org?.settings as object) ?? {}), businessHours: input.businessHours };
+      await admin.organization.update({ where: { id: orgId }, data: { settings: settings as object } });
+      return { ok: true };
+    },
+    async adminUpdateServiceConfig(input: { serviceId?: string; code?: string; name?: string; durationMin?: number; price?: number }) {
+      return withTenant(orgId, async (tx) => {
+        const svc = input.serviceId
+          ? await tx.service.findFirst({ where: { id: input.serviceId } })
+          : input.code
+            ? await tx.service.findUnique({ where: { organizationId_code: { organizationId: orgId, code: input.code } } })
+            : null;
+        if (!svc) return { error: "No encontré ese servicio." };
+        await tx.service.update({ where: { id: svc.id }, data: { ...(input.name ? { name: input.name } : {}), ...(input.durationMin != null ? { durationMin: input.durationMin } : {}), ...(input.price != null ? { price: input.price } : {}) } });
+        return { ok: true };
+      });
+    },
+
     async recordAppointment(appt: SchedAppointment) {
       const created = await withTenant(orgId, async (tx) => {
         const row = await tx.appointment.create({

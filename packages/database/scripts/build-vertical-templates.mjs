@@ -289,9 +289,19 @@ const R = [
     faq: [{ title: "Retiro y entrega", content: "Coordinamos el retiro de tu ropa, te avisamos cuando está lista y la entregamos." }] },
 ];
 
+// Nota de MODO DUEÑO (F8): solo aplica cuando quien escribe es el dueño (ownerContext);
+// el cliente final nunca ve estas tools. Confirmación en dos pasos para cambios que afectan citas.
+const OWNER_NOTE =
+  "\n\nMODO DUEÑO (solo si quien escribe es el dueño/administrador del negocio): puedes administrar la agenda con tus herramientas (horarios de cada persona, ausencias/vacaciones, alta/baja de quien atiende, horario del local, duración/precio de servicios). ANTES de un cambio que afecte citas ya tomadas, RESUME el impacto (cuántas citas y de quién) y pide confirmación explícita; recién entonces ejecútalo y ofrece reagendar o avisar a los afectados. Nunca ejecutes cambios destructivos sin el OK. Si quien escribe es un cliente, ignora todo esto: tú no tienes estas funciones para él.";
+// Tools de administración de agenda (ownerOnly): se exponen SOLO en modo dueño.
+const OWNER_TOOLS = ["upsertProfessional", "updateProfessionalSchedule", "addProfessionalTimeOff", "updateBusinessHours", "updateServiceConfig"];
+
 function agentFor(r) {
   const slug = "recepcion";
-  return [{ slug, name: "Recepción", description: "Atiende, agenda y responde dudas.", kind: "recepcion", systemPrompt: r.prompt, config: {}, tools: [] }];
+  // El agente de recepción incluye las tools de dueño (gated por ownerContext): el cliente
+  // final no las ve; el dueño sí. (Las tools de atención al cliente se afinan en el
+  // refinamiento de contenido por rubro.)
+  return [{ slug, name: "Recepción", description: "Atiende, agenda y responde dudas.", kind: "recepcion", systemPrompt: r.prompt + OWNER_NOTE, config: {}, tools: [...OWNER_TOOLS] }];
 }
 
 function buildDefinition(r) {
