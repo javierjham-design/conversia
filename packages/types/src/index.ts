@@ -691,14 +691,14 @@ export const DEFAULT_ROLES = [
   {
     code: "supervisor",
     name: "Supervisor",
-    permissions: ["inbox:*", "contacts:*", "leads:*", "reports:read", "agents:read", "workflows:read"],
+    permissions: ["inbox:*", "contacts:*", "leads:*", "reports:read", "agents:read", "workflows:read", "cash:manage"],
   },
   {
     code: "operator",
     name: "Operador",
-    permissions: ["inbox:read", "inbox:write", "contacts:read", "contacts:write", "leads:read", "leads:write"],
+    permissions: ["inbox:read", "inbox:write", "contacts:read", "contacts:write", "leads:read", "leads:write", "cash:manage"],
   },
-  { code: "viewer", name: "Solo lectura", permissions: ["inbox:read", "contacts:read", "leads:read", "reports:read"] },
+  { code: "viewer", name: "Solo lectura", permissions: ["inbox:read", "contacts:read", "leads:read", "reports:read", "cash:report"] },
 ] as const;
 
 // ============================================================

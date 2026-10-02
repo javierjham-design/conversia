@@ -7,6 +7,7 @@ import { requireContext } from "../tenancy/context";
 import { encryptSecret, decryptSecret, maskSecret } from "../common/crypto";
 import { flowTestCredentials, type FlowConfig } from "../billing/flow-subscriptions";
 import { flowSign } from "../billing/payment-provider";
+import { recordPaymentCashEntry } from "./cash.controller";
 
 const FLOW_PROVIDER = "flow_charge"; // credencial Flow del TENANT para cobrar a SUS clientes
 const GETNET_PROVIDER = "getnet_charge"; // credencial Getnet del TENANT
@@ -177,6 +178,8 @@ export class ChargingWebhookController {
     if (paidAmount && paidAmount < payment.amount) return { ok: false };
 
     await this.prisma.admin.customerPayment.update({ where: { id: payment.id }, data: { status: "paid", paidAt: new Date() } });
+    // F9: asiento conciliado en la caja (idempotente por paymentId). Best-effort.
+    await recordPaymentCashEntry(this.prisma.admin, payment, "link_flow").catch(() => undefined);
 
     // Avisar al equipo (nota interna en la conversación) si está activado.
     const org = await this.prisma.admin.organization.findUnique({ where: { id: payment.organizationId }, select: { settings: true } });
@@ -240,6 +243,7 @@ export class ChargingWebhookController {
     if (st.amount && st.amount < payment.amount) return { ok: false }; // anti-fraude
 
     await this.prisma.admin.customerPayment.update({ where: { id: payment.id }, data: { status: "paid", paidAt: new Date() } });
+    await recordPaymentCashEntry(this.prisma.admin, payment, "link_getnet").catch(() => undefined);
     if (charging.notifyTeam !== false && payment.conversationId) {
       await this.prisma.admin.message.create({
         data: {

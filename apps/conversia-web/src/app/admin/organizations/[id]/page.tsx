@@ -72,6 +72,7 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
   const [steps, setSteps] = useState<Record<string, boolean>>({});
   const [obNotes, setObNotes] = useState("");
   const [channels, setChannels] = useState<{ connections: { id: string; type: string; name: string; status: string }[]; intents: { type: string; status: string }[] }>({ connections: [], intents: [] });
+  const [cash, setCash] = useState<{ net: number; conciliado: number; declarado: number; byMethod: Record<string, number>; count: number } | null>(null);
 
   const load = () =>
     padmin<Detail>(`/platform/organizations/${id}`).then((x) => {
@@ -92,6 +93,7 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
     load().catch((e) => setError((e as Error).message));
     padmin<Wallet>(`/platform/organizations/${id}/wallet`).then(setWallet).catch(() => {});
     padmin<VerticalCat[]>("/platform/verticals").then(setCatalog).catch(() => {});
+    padmin<typeof cash>(`/platform/organizations/${id}/cash-summary`).then(setCash).catch(() => {});
     padmin<{ steps: Record<string, boolean>; notes: string }>(`/platform/organizations/${id}/onboarding`).then((o) => { setSteps(o.steps); setObNotes(o.notes); }).catch(() => {});
     loadChannels();
   }, [id]);
@@ -336,6 +338,19 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
         <Card title="Agenda y servicios">
           <p className="text-dim" style={{ fontSize: 13, margin: "0 0 12px" }}>Configura horarios, equipo y servicios del tenant (se abre su panel como soporte).</p>
           <button className="btn-accent" onClick={() => impersonate("/agenda/configurar")} style={{ width: "100%" }}>Configurar agenda</button>
+        </Card>
+
+        <Card title="Caja (resumen · solo lectura)">
+          {cash ? (
+            <>
+              <p className="display" style={{ margin: 0, fontSize: 22 }}>${Math.round(cash.net).toLocaleString("es-CL")}</p>
+              <p className="text-dim" style={{ fontSize: 12, margin: "2px 0 10px" }}>neto 30 días · {cash.count} asientos</p>
+              <p className="text-dim" style={{ fontSize: 12 }}>Conciliado: ${Math.round(cash.conciliado).toLocaleString("es-CL")} · Declarado: ${Math.round(cash.declarado).toLocaleString("es-CL")}</p>
+              <p className="text-dim" style={{ fontSize: 11, marginTop: 10 }}>El super admin solo ve; el tenant registra y cierra su caja.</p>
+            </>
+          ) : (
+            <p className="text-dim" style={{ fontSize: 13 }}>Sin movimientos de caja.</p>
+          )}
         </Card>
       </div>
 
