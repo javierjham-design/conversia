@@ -38,8 +38,9 @@ const registerSchema = z.object({
 // admin, D8). Se re-exporta aquí por compatibilidad con los imports/tests existentes.
 export { brandFromOrigin };
 
-/** Paleta curada de acentos de UI (F3 la consume; el registro valida contra ella). */
-const ACCENT_PALETTE = ["indigo", "violet", "blue", "teal", "emerald", "amber", "rose", "slate"] as const;
+/** Paleta curada de acentos de UI. Incluye los genéricos (TuBot) + los 6 curados de
+ *  Conversia (Nocturna): el acento del usuario se persiste por marca sin romper TuBot. */
+const ACCENT_PALETTE = ["indigo", "violet", "blue", "teal", "emerald", "amber", "rose", "slate", "menta", "artico", "lima", "oro", "coral"] as const;
 
 const loginSchema = z.object({
   email: z.string().email().max(200),

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MessageCircle, Users } from "lucide-react";
+import { CalendarDays, CreditCard, Home, MessageCircle, Settings, Users } from "lucide-react";
 import { getToken } from "@/lib/api";
 
 /**
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/agenda", label: "Agenda", Icon: CalendarDays },
   { href: "/clientes", label: "Clientes", Icon: Users },
   { href: "/cobros", label: "Cobros", Icon: CreditCard },
+  { href: "/ajustes", label: "Ajustes", Icon: Settings },
 ];
 
 function isActive(pathname: string, href: string): boolean {
