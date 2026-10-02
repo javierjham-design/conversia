@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, Radio, Settings, Users } from "lucide-react";
 import { api, getToken } from "@/lib/api";
+import { SupportWidget } from "@/components/SupportWidget";
 
 /**
  * NAVEGACIÓN UNIFICADA de Conversia (misma en TODAS las pantallas):
@@ -94,6 +95,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <VerifyBanner />
         {children}
       </div>
+
+      <SupportWidget />
+
 
       <nav className="shell-tabs" aria-label="Navegación">
         {NAV.map(({ href, label, Icon }) => (

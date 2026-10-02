@@ -70,7 +70,8 @@ export async function orchestrate(
 ): Promise<OrchestrateResult> {
   const { agent, ctx } = input;
   const system = renderTemplate(agent.systemPrompt, input.vars);
-  const specs = registry.specsFor(agent.tools);
+  // Las tools de dueño (F8) solo se exponen al modelo si el contacto es dueño del tenant.
+  const specs = registry.specsFor(agent.tools, { ownerContext: ctx.ownerContext });
 
   const usage: AIUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   const toolEvents: ToolEvent[] = [];

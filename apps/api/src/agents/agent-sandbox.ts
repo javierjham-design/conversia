@@ -358,5 +358,26 @@ export async function buildSandboxServices(
       track("Agente del cliente configurado", `${input.name} (${input.systemPrompt.length} chars) — simulado`);
       return { ok: true, agentId: "sandbox" };
     },
+    // Administración de agenda (F8) — simuladas en el probador (no escriben nada).
+    async adminUpsertProfessional(input: { name: string }) {
+      track("Recurso/persona (dueño)", `${input.name} — simulado`);
+      return { ok: true, id: "sandbox" };
+    },
+    async adminUpdateProfessionalSchedule() {
+      track("Horario de persona (dueño)", "simulado");
+      return { ok: true };
+    },
+    async adminAddProfessionalTimeOff() {
+      track("Ausencia/bloqueo (dueño)", "simulado");
+      return { ok: true, affected: 0 };
+    },
+    async adminUpdateBusinessHours() {
+      track("Horario del local (dueño)", "simulado");
+      return { ok: true };
+    },
+    async adminUpdateServiceConfig() {
+      track("Config de servicio (dueño)", "simulado");
+      return { ok: true };
+    },
   };
 }

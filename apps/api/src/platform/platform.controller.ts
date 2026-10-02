@@ -983,6 +983,30 @@ export class PlatformController {
     return { ok: true, status: t.status };
   }
 
+  /** Detalle de un ticket de soporte (con hilo), para responderlo desde la consola (F7). */
+  @Get("support/:id")
+  async supportDetail(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const t = await this.prisma.admin.supportTicket.findUnique({ where: { id }, select: { id: true, organizationId: true, code: true, subject: true, message: true, status: true, email: true, thread: true, createdAt: true } });
+    if (!t) throw new NotFoundException("Ticket no encontrado");
+    await this.assertOrgBrand(req, t.organizationId); // aislamiento por marca
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: t.organizationId }, select: { name: true } });
+    return { ...t, organizationName: org?.name ?? t.organizationId };
+  }
+
+  /** El equipo responde el ticket: agrega su mensaje al hilo (lo ve el cliente en el widget). */
+  @Post("support/:id/reply")
+  async supportReply(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ body: z.string().trim().min(1).max(4000) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Mensaje requerido");
+    const t = await this.prisma.admin.supportTicket.findUnique({ where: { id }, select: { organizationId: true, thread: true } });
+    if (!t) throw new NotFoundException("Ticket no encontrado");
+    await this.assertOrgBrand(req, t.organizationId);
+    const thread = [...((t.thread as unknown as { author: string; body: string; at: string }[]) ?? []), { author: "team", body: parsed.data.body, at: new Date().toISOString() }];
+    await this.prisma.admin.supportTicket.update({ where: { id }, data: { thread: thread as object, status: "open" } });
+    await this.audit(req, "platform.support.reply", "support_ticket", id);
+    return { ok: true };
+  }
+
   // --------------------------- Demos / CRM ---------------------------
 
   /** CRM de prospectos/demos, con días en la plataforma y estado de IA si ya se provisionó. */

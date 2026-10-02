@@ -272,6 +272,12 @@ export interface ToolContext extends TenantContext {
   brandName?: string;
   agentVersionId?: string;
   workflowRunId?: string;
+  /**
+   * MODO DUEÑO (F8): true cuando el CONTACTO de la conversación es un usuario del tenant
+   * con rol admin/owner (teléfono verificado). Habilita las tools de administración de
+   * agenda (ownerOnly). Default/undefined = cliente final (jamás ve esas tools).
+   */
+  ownerContext?: boolean;
   /** Dependencias inyectadas por el runtime (BD, agenda, canal, colas). */
   services: Record<string, unknown>;
 }
@@ -282,6 +288,9 @@ export interface ToolDefinition<I = unknown, O = unknown> {
   inputSchema: z.ZodType<I>;
   /** Permiso requerido, verificado contra la config del agente/tenant. */
   scope?: string;
+  /** Tool de ADMINISTRACIÓN solo para el dueño (F8): no se expone ni ejecuta si el
+   *  contexto no es ownerContext. Doble cerrojo (specs + runtime). */
+  ownerOnly?: boolean;
   /** Si la acción requiere aprobación humana según configuración. */
   requiresApproval?: (ctx: ToolContext, input: I) => boolean;
   execute(ctx: ToolContext, input: I): Promise<O>;
