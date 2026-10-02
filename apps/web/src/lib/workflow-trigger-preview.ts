@@ -90,6 +90,8 @@ export function triggerPreview(type: string, config: Cfg = {}, look: PreviewLook
       return "se cancela una cita.";
     case "no_show":
       return "un paciente no asiste a su cita (no-show).";
+    case "treatment_pending":
+      return "un paciente asistió a la evaluación pero no inició su tratamiento (Cláriva).";
     case "link_scan": {
       const code = typeof cfg.code === "string" ? cfg.code.trim() : "";
       return code
