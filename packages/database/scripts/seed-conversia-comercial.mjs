@@ -10,10 +10,27 @@
  *     DATABASE_URL="$DATABASE_PUBLIC_URL" node scripts/seed-conversia-comercial.mjs'
  */
 import { PrismaClient } from "@prisma/client";
-import types from "@conversia/types";
 
-const { DEFAULT_ROLES, DEFAULT_LEAD_STATUSES } = types;
 const prisma = new PrismaClient();
+
+// Roles y estados de lead por defecto (inline, copia fiel de @conversia/types: el script
+// corre con `node` directo en prod y no resuelve el paquete de workspace). Si cambian en
+// @conversia/types, actualizar aquí también.
+const DEFAULT_ROLES = [
+  { code: "owner", name: "Propietario", permissions: ["*"] },
+  { code: "admin", name: "Administrador", permissions: ["*"] },
+  { code: "supervisor", name: "Supervisor", permissions: ["inbox:*", "contacts:*", "leads:*", "reports:read", "agents:read", "workflows:read"] },
+  { code: "operator", name: "Operador", permissions: ["inbox:read", "inbox:write", "contacts:read", "contacts:write", "leads:read", "leads:write"] },
+  { code: "viewer", name: "Solo lectura", permissions: ["inbox:read", "contacts:read", "leads:read", "reports:read"] },
+];
+const DEFAULT_LEAD_STATUSES = [
+  { code: "new_lead", name: "Nuevo lead", emoji: "🆕", category: "OPEN", order: 0 },
+  { code: "hot_lead", name: "Lead caliente", emoji: "🔥", category: "OPEN", order: 1 },
+  { code: "schedule", name: "Reserva", emoji: "📅", category: "OPEN", order: 2 },
+  { code: "customer", name: "Cliente", emoji: "🤩", category: "WON", order: 3 },
+  { code: "cold_lead", name: "Lead frío", emoji: "🧊", category: "LOST", order: 4 },
+  { code: "no_contactar", name: "No contactar", emoji: "🚫", category: "FROZEN", order: 5 },
+];
 
 const SLUG = process.env.CONVERSIA_COMMERCIAL_SLUG ?? "conversia";
 const NAME = process.env.CONVERSIA_COMMERCIAL_NAME ?? "Conversia";
