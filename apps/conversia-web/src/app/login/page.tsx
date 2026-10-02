@@ -59,6 +59,9 @@ export default function Login() {
         <button className="btn-accent" type="submit" disabled={loading} style={{ width: "100%", marginTop: 20, opacity: loading ? 0.6 : 1 }}>
           {loading ? "Entrando…" : "Entrar"}
         </button>
+        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 16 }}>
+          ¿No tienes cuenta? <a href="/register" className="text-accent" style={{ textDecoration: "none" }}>Crear cuenta</a>
+        </p>
       </form>
     </main>
   );

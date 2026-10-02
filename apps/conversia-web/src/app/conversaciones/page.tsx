@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, Send } from "lucide-react";
+import { ArrowLeft, Bot, BotOff, CheckCircle2, Paperclip, RotateCcw, Send, StickyNote } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
@@ -26,7 +26,7 @@ type Msg = {
   status: string;
   createdAt: string;
 };
-type Thread = { conversation: { id: string; aiEnabled: boolean; contact: Contact }; messages: Msg[] };
+type Thread = { conversation: { id: string; status: "OPEN" | "PENDING" | "CLOSED"; aiEnabled: boolean; contact: Contact }; messages: Msg[] };
 
 const STATUSES = [
   { key: "open", label: "Abiertas" },
@@ -59,8 +59,11 @@ export default function Conversaciones() {
   const [thread, setThread] = useState<Thread | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [internal, setInternal] = useState(false);
+  const [busyAction, setBusyAction] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const selRef = useRef<string | null>(null);
   selRef.current = sel;
@@ -131,7 +134,7 @@ export default function Conversaciones() {
     setSending(true);
     setError(null);
     try {
-      await api(`/conversations/${sel}/messages`, { method: "POST", body: JSON.stringify({ text: body }) });
+      await api(`/conversations/${sel}/messages`, { method: "POST", body: JSON.stringify({ text: body, internal }) });
       setText("");
       await loadThread(sel);
       loadList();
@@ -142,8 +145,69 @@ export default function Conversaciones() {
     }
   }
 
+  // Adjuntar imagen o documento (se lee como base64 y se envía por la API).
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !sel) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setError("El archivo supera 5 MB.");
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.onerror = () => reject(new Error("No se pudo leer el archivo"));
+        r.readAsDataURL(file);
+      });
+      const kind = file.type.startsWith("image/") ? "image" : "document";
+      await api(`/conversations/${sel}/attachments`, {
+        method: "POST",
+        body: JSON.stringify({ kind, filename: file.name, mime: file.type, dataBase64, caption: text.trim() || undefined }),
+      });
+      setText("");
+      await loadThread(sel);
+      loadList();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function action(path: string) {
+    if (!sel) return;
+    setBusyAction(true);
+    setError(null);
+    try {
+      await api(`/conversations/${sel}/${path}`, { method: "POST" });
+      await loadThread(sel);
+      loadList();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyAction(false);
+    }
+  }
+
   const showList = !narrow || !sel;
   const showThread = !narrow || !!sel;
+  const closed = thread?.conversation.status === "CLOSED";
+  const aiOn = thread?.conversation.aiEnabled;
+  const headerBtn: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: "1px solid var(--line)",
+    background: "transparent",
+    color: "var(--ink)",
+    cursor: "pointer",
+  };
 
   return (
     <AppShell>
@@ -237,8 +301,32 @@ export default function Conversaciones() {
                     </button>
                   ) : null}
                   <b style={{ fontSize: 15 }}>{thread ? displayName(thread.conversation.contact) : "…"}</b>
-                  {thread?.conversation.aiEnabled ? (
+                  {aiOn ? (
                     <span className="text-accent" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}><Bot size={13} /> IA activa</span>
+                  ) : thread ? (
+                    <span className="text-dim" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}><BotOff size={13} /> Manual</span>
+                  ) : null}
+                  {thread ? (
+                    <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                      <button
+                        onClick={() => action(aiOn ? "takeover" : "release")}
+                        disabled={busyAction}
+                        title={aiOn ? "Tomar el control (pausa la IA)" : "Devolver a la IA"}
+                        style={headerBtn}
+                      >
+                        {aiOn ? <BotOff size={16} /> : <Bot size={16} />}
+                        <span style={{ fontSize: 12 }}>{aiOn ? "Tomar control" : "Devolver a IA"}</span>
+                      </button>
+                      <button
+                        onClick={() => action(closed ? "reopen" : "close")}
+                        disabled={busyAction}
+                        title={closed ? "Reabrir" : "Cerrar conversación"}
+                        style={headerBtn}
+                      >
+                        {closed ? <RotateCcw size={16} /> : <CheckCircle2 size={16} />}
+                        <span style={{ fontSize: 12 }}>{closed ? "Reabrir" : "Cerrar"}</span>
+                      </button>
+                    </span>
                   ) : null}
                 </div>
 
@@ -281,17 +369,34 @@ export default function Conversaciones() {
                   <div ref={bottomRef} />
                 </div>
 
-                <form onSubmit={send} style={{ display: "flex", gap: 8, padding: "12px 16px", borderTop: "1px solid var(--hairline)" }}>
-                  <input
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Escribe un mensaje…"
-                    style={{ flex: 1, padding: "11px 14px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }}
-                  />
-                  <button className="btn-accent" type="submit" disabled={sending || !text.trim()} style={{ borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", opacity: sending || !text.trim() ? 0.5 : 1 }} aria-label="Enviar">
-                    <Send size={18} />
-                  </button>
-                </form>
+                <div style={{ borderTop: "1px solid var(--hairline)" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 16px 0" }}>
+                    <button
+                      type="button"
+                      onClick={() => setInternal((v) => !v)}
+                      title="Nota interna (no se envía al cliente)"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "5px 10px", borderRadius: 999, cursor: "pointer", border: internal ? "none" : "1px solid var(--line)", background: internal ? "var(--warn)" : "transparent", color: internal ? "#2a1c02" : "var(--ink-dim)" }}
+                    >
+                      <StickyNote size={14} /> Nota interna
+                    </button>
+                    {internal ? <span className="text-dim" style={{ fontSize: 11 }}>Solo tu equipo la verá.</span> : null}
+                  </div>
+                  <form onSubmit={send} style={{ display: "flex", gap: 8, padding: "10px 16px 12px", alignItems: "center" }}>
+                    <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={onPickFile} style={{ display: "none" }} />
+                    <button type="button" onClick={() => fileRef.current?.click()} disabled={sending || internal} title="Adjuntar imagen o PDF" style={{ border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", borderRadius: "50%", width: 40, height: 40, display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0, opacity: internal ? 0.4 : 1 }} aria-label="Adjuntar">
+                      <Paperclip size={18} />
+                    </button>
+                    <input
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      placeholder={internal ? "Escribe una nota interna…" : "Escribe un mensaje…"}
+                      style={{ flex: 1, padding: "11px 14px", borderRadius: 999, border: internal ? "1px solid var(--warn)" : "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }}
+                    />
+                    <button className="btn-accent" type="submit" disabled={sending || !text.trim()} style={{ borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", opacity: sending || !text.trim() ? 0.5 : 1, flexShrink: 0 }} aria-label="Enviar">
+                      <Send size={18} />
+                    </button>
+                  </form>
+                </div>
               </>
             )}
           </div>
