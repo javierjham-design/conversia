@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setToken } from "@/lib/api";
 
@@ -31,6 +31,23 @@ export default function Register() {
   const [vertical, setVertical] = useState("dental");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Autoservicio (D7): el bot comercial manda /registro?vertical=barberia → preselecciona
+  // el rubro. También acepta ?country= para el acento/moneda.
+  useEffect(() => {
+    const qs = new URLSearchParams(window.location.search);
+    const v = qs.get("vertical");
+    if (v && VERTICALS.some((x) => x.key === v)) setVertical(v);
+    const c = qs.get("country")?.toUpperCase();
+    if (c && COUNTRIES.some((x) => x.code === c)) {
+      setCountry(c);
+      const acc = ACCENT_BY_COUNTRY[c] ?? "indigo";
+      document.documentElement.setAttribute("data-accent", acc);
+      try {
+        localStorage.setItem("conversia_accent", acc);
+      } catch {}
+    }
+  }, []);
 
   function chooseCountry(code: string) {
     setCountry(code);
