@@ -1,21 +1,25 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Building2, LifeBuoy, LogOut, ShieldCheck } from "lucide-react";
+import { BarChart3, Building2, LifeBuoy, LogOut, Rocket, ShieldCheck, UserCog } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
 
 /**
- * Layout del SUPER ADMIN de Conversia. Guard de sesión + puerta de MFA (igual que TuBot):
- * sin token → login; con token pero sin MFA activo (si el backend lo exige) → a Seguridad
- * para enrolarlo. El login y Seguridad quedan accesibles sin la puerta para poder entrar
- * y enrolar. Navegación propia de consola (no la del panel de cliente).
+ * Layout de la CONSOLA de Conversia (super admin + F10 operador). Guard de sesión + puerta
+ * de MFA (igual que TuBot): sin token → login; con token pero sin MFA activo → a Seguridad
+ * para enrolarlo (el operador TAMBIÉN debe enrolar MFA). El nav es consciente del rol: el
+ * operador opera la ficha de clientes y el alta guiada, pero "Operadores" (gestionar al
+ * equipo) es solo del super admin. El backend bloquea además cualquier ruta global (denylist).
  */
-const NAV = [
+const BASE_NAV = [
   { href: "/admin", label: "Panel", Icon: BarChart3 },
   { href: "/admin/organizations", label: "Tenants", Icon: Building2 },
+  { href: "/admin/alta", label: "Alta guiada", Icon: Rocket },
   { href: "/admin/soporte", label: "Soporte", Icon: LifeBuoy },
   { href: "/admin/security", label: "Seguridad", Icon: ShieldCheck },
 ];
+const SUPER_ADMIN_NAV = [{ href: "/admin/operadores", label: "Operadores", Icon: UserCog }];
+const FULL_ROLES = new Set(["owner", "admin"]);
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
@@ -26,6 +30,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const isLogin = pathname === "/admin/login";
   const [ready, setReady] = useState(isLogin);
+  const [role, setRole] = useState<string>("owner");
 
   useEffect(() => {
     if (isLogin) {
@@ -37,9 +42,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       return;
     }
     let alive = true;
-    padmin<{ mfaEnabled: boolean }>("/platform/auth/me")
+    padmin<{ mfaEnabled: boolean; admin?: { role?: string } }>("/platform/auth/me")
       .then((me) => {
         if (!alive) return;
+        setRole(me.admin?.role ?? "owner");
         // Puerta de MFA: si no está activo, el backend bloquea el resto del panel → a Seguridad.
         if (!me.mfaEnabled && pathname !== "/admin/security") {
           router.replace("/admin/security");
@@ -93,10 +99,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <div className="shell-brand" style={{ width: 34, height: 34, fontSize: 17, marginBottom: 0 }}>C</div>
           <div>
             <p className="display" style={{ margin: 0, fontSize: 16, lineHeight: 1 }}>Conversia</p>
-            <p className="text-dim" style={{ margin: 0, fontSize: 11 }}>Consola</p>
+            <p className="text-dim" style={{ margin: 0, fontSize: 11 }}>{FULL_ROLES.has(role) ? "Consola · super admin" : "Consola · operador"}</p>
           </div>
         </div>
-        {NAV.map(({ href, label, Icon }) => (
+        {[...BASE_NAV, ...(FULL_ROLES.has(role) ? SUPER_ADMIN_NAV : [])].map(({ href, label, Icon }) => (
           <a
             key={href}
             href={href}

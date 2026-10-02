@@ -4,7 +4,8 @@ import { padmin } from "@/lib/platform-api";
 
 type Ticket = { id: string; org: string; user: string | null; email: string | null; subject: string | null; message: string; status: string; createdAt: string };
 type ThreadMsg = { author: string; body: string; at: string };
-type Detail = { id: string; organizationName: string; code: string | null; subject: string | null; message: string; status: string; email: string | null; thread: ThreadMsg[]; createdAt: string };
+type ClientContext = { text: string; credits?: { over80?: boolean }; lifecycle?: { stage: string | null } };
+type Detail = { id: string; organizationName: string; code: string | null; subject: string | null; message: string; status: string; email: string | null; thread: ThreadMsg[]; createdAt: string; clientContext?: ClientContext | null };
 
 function hhmm(iso: string): string {
   return new Date(iso).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -102,6 +103,14 @@ export default function Soporte() {
                   {detail.status === "open" ? "Marcar resuelto" : "Reabrir"}
                 </button>
               </div>
+              {detail.clientContext?.text ? (
+                <details style={{ borderBottom: "1px solid var(--hairline)", padding: "8px 0" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--ink-dim)", fontWeight: 600 }}>
+                    📋 Contexto del cliente {detail.clientContext.credits?.over80 ? "· ⚠️ créditos sobre 80%" : ""}{detail.clientContext.lifecycle?.stage ? ` · ${detail.clientContext.lifecycle.stage}` : ""}
+                  </summary>
+                  <pre style={{ margin: "8px 0 0", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--ink-dim)", fontFamily: "inherit" }}>{detail.clientContext.text.trim()}</pre>
+                </details>
+              ) : null}
               <div style={{ flex: 1, overflowY: "auto", padding: "12px 0", display: "flex", flexDirection: "column", gap: 8, maxHeight: "56dvh" }}>
                 {(detail.thread.length ? detail.thread : [{ author: "user", body: detail.message, at: detail.createdAt }]).map((m, i) => {
                   const team = m.author === "team";
