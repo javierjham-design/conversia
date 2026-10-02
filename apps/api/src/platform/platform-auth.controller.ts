@@ -11,9 +11,10 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import type { Request } from "express";
 import * as bcryptMod from "bcryptjs";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandFromOrigin } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
@@ -46,14 +47,19 @@ export class PlatformAuthController {
   ) {}
 
   @Post("login")
-  async login(@Body() body: unknown) {
+  async login(@Body() body: unknown, @Req() req: Request) {
     const parsed = loginSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException("Credenciales inválidas");
-    const rl = await this.rateLimit.custom(`rl:platform-login:${parsed.data.email.toLowerCase()}`, 15, 900);
+    // D8 — el super admin se resuelve DENTRO de la marca del Origin (TuBot vs Conversia):
+    // el mismo correo es una cuenta de super admin independiente en cada marca.
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    const rl = await this.rateLimit.custom(`rl:platform-login:${brand}:${parsed.data.email.toLowerCase()}`, 15, 900);
     if (!rl.allowed) {
       throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
     }
-    const admin = await this.prisma.admin.platformAdmin.findUnique({ where: { email: parsed.data.email } });
+    const admin = await this.prisma.admin.platformAdmin.findUnique({
+      where: { email_brand: { email: parsed.data.email, brand } },
+    });
     if (!admin || !bcrypt.compareSync(parsed.data.password, admin.passwordHash)) {
       throw new UnauthorizedException("Credenciales inválidas");
     }
@@ -77,9 +83,10 @@ export class PlatformAuthController {
     });
     const jti = await this.sessions.create(admin.id);
     return {
-      token: signPlatformToken({ sub: admin.id, email: admin.email, role: admin.role, jti }),
+      token: signPlatformToken({ sub: admin.id, email: admin.email, role: admin.role, brand: admin.brand, jti }),
       name: admin.name,
       role: admin.role,
+      brand: admin.brand,
       mfaEnabled: !!admin.mfaEnabledAt,
     };
   }

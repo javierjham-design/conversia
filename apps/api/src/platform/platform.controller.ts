@@ -115,23 +115,51 @@ export class PlatformController {
     });
   }
 
+  // ----------------- Aislamiento por marca del Super Admin (D8) -----------------
+  // Cada super admin solo ve y opera los tenants de SU marca (brand del token). Un
+  // super admin de TuBot ve exactamente lo de hoy (conversia es nuevo); uno de
+  // Conversia nunca ve ni toca TuBot. Las listas/métricas filtran por marca y cada
+  // acción por-org valida que la org pertenezca a la marca (404 si no).
+
+  /** Marca del super admin que hace la petición. Default tubot (comportamiento actual). */
+  private reqBrand(req: PlatformRequest): string {
+    return req.platformAdmin?.brand ?? "tubot";
+  }
+
+  /** Ids de las organizaciones de la marca del super admin (para acotar agregados por org). */
+  private async brandOrgIds(req: PlatformRequest): Promise<string[]> {
+    const rows = await this.prisma.admin.organization.findMany({ where: { brand: this.reqBrand(req) }, select: { id: true } });
+    return rows.map((o) => o.id);
+  }
+
+  /** Asegura que la org pertenece a la marca del super admin; 404 si no (aísla marcas). */
+  private async assertOrgBrand(req: PlatformRequest, id: string): Promise<void> {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { brand: true } });
+    if (!org || (org.brand ?? "tubot") !== this.reqBrand(req)) {
+      throw new NotFoundException("Organización no encontrada");
+    }
+  }
+
   // ------------------------------ Métricas ------------------------------
 
   @Get("metrics")
-  async metrics() {
+  async metrics(@Req() req: PlatformRequest) {
     const db = this.prisma.admin;
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    // D8 — todo el dashboard se acota a la marca del super admin.
+    const brand = this.reqBrand(req);
+    const orgIds = await this.brandOrgIds(req);
     const [orgs, active, trialing, suspended, plans, subs, ai, invoicesPaid, whatsapp] = await Promise.all([
-      db.organization.count({ where: { deletedAt: null } }),
-      db.organization.count({ where: { status: "ACTIVE", deletedAt: null } }),
-      db.organization.count({ where: { status: "TRIAL", deletedAt: null } }),
-      db.organization.count({ where: { status: "SUSPENDED" } }),
+      db.organization.count({ where: { brand, deletedAt: null } }),
+      db.organization.count({ where: { brand, status: "ACTIVE", deletedAt: null } }),
+      db.organization.count({ where: { brand, status: "TRIAL", deletedAt: null } }),
+      db.organization.count({ where: { brand, status: "SUSPENDED" } }),
       db.plan.findMany(),
-      db.subscription.findMany({ where: { status: { in: ["ACTIVE", "TRIALING"] } } }),
-      db.aiRequest.aggregate({ where: { createdAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
-      db.invoice.aggregate({ where: { status: "PAID" }, _sum: { amountDue: true } }),
+      db.subscription.findMany({ where: { organizationId: { in: orgIds }, status: { in: ["ACTIVE", "TRIALING"] } } }),
+      db.aiRequest.aggregate({ where: { organizationId: { in: orgIds }, createdAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
+      db.invoice.aggregate({ where: { organizationId: { in: orgIds }, status: "PAID" }, _sum: { amountDue: true } }),
       // Costo que cobra Meta por mensajes de WhatsApp (últimos 30 días).
-      db.usageEvent.aggregate({ where: { type: "whatsapp_message", occurredAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
+      db.usageEvent.aggregate({ where: { organizationId: { in: orgIds }, type: "whatsapp_message", occurredAt: { gte: since } }, _sum: { costUsd: true }, _count: { _all: true } }),
     ]);
     // MRR aproximado: suma del precio del plan de cada suscripción activa
     const planById = new Map(plans.map((p) => [p.id, p]));
@@ -157,19 +185,21 @@ export class PlatformController {
 
   /** Métricas de CALIDAD del bot (últimas 24 h): responde / a tiempo / sin fallar. */
   @Get("quality")
-  async quality() {
+  async quality(@Req() req: PlatformRequest) {
     const db = this.prisma.admin;
     const since = new Date(Date.now() - 24 * 3600 * 1000);
+    // D8 — calidad acotada a la marca del super admin.
+    const orgIds = await this.brandOrgIds(req);
     const [reqAgg, errCount, refusalCount, inbound, botReplies, failedOut, failedByOrg] = await Promise.all([
-      db.aiRequest.aggregate({ where: { createdAt: { gte: since } }, _avg: { latencyMs: true }, _count: { _all: true } }),
-      db.aiRequest.count({ where: { createdAt: { gte: since }, status: "error" } }),
-      db.aiRequest.count({ where: { createdAt: { gte: since }, status: "refusal" } }),
-      db.message.count({ where: { createdAt: { gte: since }, direction: "INBOUND" } }),
-      db.message.count({ where: { createdAt: { gte: since }, direction: "OUTBOUND", authorType: "AGENT" } }),
-      db.message.count({ where: { createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" } }),
+      db.aiRequest.aggregate({ where: { organizationId: { in: orgIds }, createdAt: { gte: since } }, _avg: { latencyMs: true }, _count: { _all: true } }),
+      db.aiRequest.count({ where: { organizationId: { in: orgIds }, createdAt: { gte: since }, status: "error" } }),
+      db.aiRequest.count({ where: { organizationId: { in: orgIds }, createdAt: { gte: since }, status: "refusal" } }),
+      db.message.count({ where: { organizationId: { in: orgIds }, createdAt: { gte: since }, direction: "INBOUND" } }),
+      db.message.count({ where: { organizationId: { in: orgIds }, createdAt: { gte: since }, direction: "OUTBOUND", authorType: "AGENT" } }),
+      db.message.count({ where: { organizationId: { in: orgIds }, createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" } }),
       db.message.groupBy({
         by: ["organizationId"],
-        where: { createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" },
+        where: { organizationId: { in: orgIds }, createdAt: { gte: since }, direction: "OUTBOUND", status: "FAILED" },
         _count: { _all: true },
         orderBy: { _count: { organizationId: "desc" } },
         take: 5,
@@ -200,10 +230,12 @@ export class PlatformController {
   // ---------------------------- Organizaciones ----------------------------
 
   @Get("organizations")
-  async organizations() {
+  async organizations(@Req() req: PlatformRequest) {
     const db = this.prisma.admin;
+    // D8 — el super admin solo lista los tenants de su marca.
+    const brand = this.reqBrand(req);
     const [orgs, subs, plans] = await Promise.all([
-      db.organization.findMany({ orderBy: { createdAt: "desc" } }),
+      db.organization.findMany({ where: { brand }, orderBy: { createdAt: "desc" } }),
       db.subscription.findMany(),
       db.plan.findMany(),
     ]);
@@ -279,8 +311,9 @@ export class PlatformController {
   }
 
   @Get("organizations/:id")
-  async organizationDetail(@Param("id") id: string) {
+  async organizationDetail(@Param("id") id: string, @Req() req: PlatformRequest) {
     const db = this.prisma.admin;
+    await this.assertOrgBrand(req, id);
     const org = await db.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException("Organización no encontrada");
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
@@ -398,6 +431,7 @@ export class PlatformController {
    *  kill switch de IA, datos básicos. Punto único para operar cada cliente. */
   @Post("organizations/:id/config")
   async setConfig(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z
       .object({
         name: z.string().min(2).max(120).optional(),
@@ -476,6 +510,7 @@ export class PlatformController {
     @Body() body: unknown,
     @Req() req: PlatformRequest,
   ) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ model: z.string().min(1).max(60).nullable() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("model requerido (o null para heredar del tenant)");
     if (parsed.data.model && !MODEL_PRICING[parsed.data.model]) {
@@ -500,6 +535,7 @@ export class PlatformController {
   /** Restablece la contraseña del admin y devuelve la temporal (mostrada una vez). */
   @Post("organizations/:id/admin/reset-password")
   async resetAdminPassword(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const res = await this.auth.resetOrgAdminPassword(id);
     if (!res) throw new BadRequestException("La organización no tiene usuarios activos");
     await this.audit(req, "platform.admin.reset_password", "user", res.userId, { email: res.email });
@@ -510,6 +546,7 @@ export class PlatformController {
    *  configurado, cae a devolver la temporal para entrega manual. */
   @Post("organizations/:id/admin/send-reset")
   async sendAdminReset(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const res = await this.auth.resetOrgAdminPassword(id);
     if (!res) throw new BadRequestException("La organización no tiene usuarios activos");
     const html = `<p>Hola,</p>
@@ -524,6 +561,7 @@ export class PlatformController {
   /** Cambia el correo del admin del tenant. */
   @Post("organizations/:id/admin/email")
   async updateAdminEmail(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ email: z.string().email().max(200) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Correo inválido");
     const res = await this.auth.setOrgAdminEmail(id, parsed.data.email);
@@ -534,6 +572,7 @@ export class PlatformController {
   /** Instala un paquete vertical (rubro) en una organización desde el Super Admin (F2). */
   @Post("organizations/:id/vertical")
   async installVertical(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ key: z.string().trim().min(2).max(40), version: z.number().int().positive().optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("key requerido (version opcional)");
     const result = await this.vertical.install(id, parsed.data.key, parsed.data.version);
@@ -543,6 +582,7 @@ export class PlatformController {
 
   @Post("organizations/:id/status")
   async setStatus(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ status: z.enum(["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"]) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("status inválido");
     const org = await this.prisma.admin.organization.update({ where: { id }, data: { status: parsed.data.status } });
@@ -559,6 +599,7 @@ export class PlatformController {
   @Post("organizations/:id/impersonate")
   async impersonate(@Param("id") id: string, @Req() req: PlatformRequest) {
     const db = this.prisma.admin;
+    await this.assertOrgBrand(req, id);
     const org = await db.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException("Organización no encontrada");
     const [memberships, roles] = await Promise.all([
@@ -591,12 +632,16 @@ export class PlatformController {
 
   /** Registro de acciones del super-admin (login, MFA, impersonación, suspensiones, planes). */
   @Get("audit")
-  async auditList(@Query("limit") limit?: string) {
+  async auditList(@Req() req: PlatformRequest, @Query("limit") limit?: string) {
     const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
-    const [rows, admins] = await Promise.all([
-      this.prisma.admin.auditLog.findMany({ where: { actorType: "platform_admin" }, orderBy: { createdAt: "desc" }, take }),
-      this.prisma.admin.platformAdmin.findMany({ select: { id: true, email: true } }),
-    ]);
+    // D8 — cada super admin solo ve la auditoría de los admins de SU marca.
+    const admins = await this.prisma.admin.platformAdmin.findMany({ where: { brand: this.reqBrand(req) }, select: { id: true, email: true } });
+    const actorIds = admins.map((a) => a.id);
+    const rows = await this.prisma.admin.auditLog.findMany({
+      where: { actorType: "platform_admin", actorId: { in: actorIds } },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
     const emailById = new Map(admins.map((a) => [a.id, a.email]));
     return rows.map((r) => ({
       id: r.id,
@@ -672,10 +717,12 @@ export class PlatformController {
 
   /** Alertas críticas cross-tenant: eventos de integración con status warning/error. */
   @Get("alerts")
-  async alerts(@Query("limit") limit?: string) {
+  async alerts(@Req() req: PlatformRequest, @Query("limit") limit?: string) {
     const take = Math.min(Math.max(Number(limit) || 100, 1), 200);
+    // D8 — alertas acotadas a las orgs de la marca del super admin.
+    const brandIds = await this.brandOrgIds(req);
     const rows = await this.prisma.admin.integrationEvent.findMany({
-      where: { status: { in: ["warning", "error"] } },
+      where: { organizationId: { in: brandIds }, status: { in: ["warning", "error"] } },
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -697,11 +744,19 @@ export class PlatformController {
 
   /** Bandeja de soporte: tickets que reportan los tenants (cross-tenant). */
   @Get("support")
-  async support(@Query("status") status?: string) {
-    const where = status === "resolved" ? { status: "resolved" } : status === "all" ? {} : { status: "open" };
+  async support(@Req() req: PlatformRequest, @Query("status") status?: string) {
+    // D8 — tickets acotados a las orgs de la marca del super admin.
+    const brandIds = await this.brandOrgIds(req);
+    const brandWhere = { organizationId: { in: brandIds } };
+    const where =
+      status === "resolved"
+        ? { ...brandWhere, status: "resolved" }
+        : status === "all"
+          ? brandWhere
+          : { ...brandWhere, status: "open" };
     const [tickets, openCount] = await Promise.all([
       this.prisma.admin.supportTicket.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 }),
-      this.prisma.admin.supportTicket.count({ where: { status: "open" } }),
+      this.prisma.admin.supportTicket.count({ where: { ...brandWhere, status: "open" } }),
     ]);
     const orgIds = [...new Set(tickets.map((t) => t.organizationId))];
     const userIds = tickets.map((t) => t.userId).filter(Boolean) as string[];
@@ -744,8 +799,13 @@ export class PlatformController {
 
   /** CRM de prospectos/demos, con días en la plataforma y estado de IA si ya se provisionó. */
   @Get("demo-leads")
-  async demoLeads() {
-    const leads = await this.prisma.admin.demoLead.findMany({ orderBy: { createdAt: "desc" }, take: 300 });
+  async demoLeads(@Req() req: PlatformRequest) {
+    // D8 — el CRM de prospectos público es de TuBot (byte-for-byte: ve todo como hoy,
+    // incluidos leads sin org provisionada). Un super admin de Conversia solo ve los
+    // prospectos ya vinculados a una org de su marca.
+    const brand = this.reqBrand(req);
+    const where = brand === "tubot" ? {} : { organizationId: { in: await this.brandOrgIds(req) } };
+    const leads = await this.prisma.admin.demoLead.findMany({ where, orderBy: { createdAt: "desc" }, take: 300 });
     const orgIds = leads.map((l) => l.organizationId).filter(Boolean) as string[];
     const orgs = orgIds.length
       ? await this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, createdAt: true, status: true, settings: true } })
@@ -826,18 +886,20 @@ export class PlatformController {
 
   /** Vista global del cobro recurrente: MRR, fallos, suspendidas, canceladas y próximos cobros. */
   @Get("billing/recurring")
-  async recurringOverview() {
+  async recurringOverview(@Req() req: PlatformRequest) {
     const admin = this.prisma.admin;
     const now = new Date();
     const in7 = new Date(now.getTime() + 7 * 86_400_000);
     const from30 = new Date(now.getTime() - 30 * 86_400_000);
+    // D8 — el panel de cobro recurrente se acota a las orgs de la marca.
+    const brandIds = await this.brandOrgIds(req);
     const [activeSubs, pastDue, suspended, canceling, failed30, upcoming, plans] = await Promise.all([
-      admin.subscription.findMany({ where: { status: "ACTIVE" }, select: { organizationId: true, planId: true, interval: true } }),
-      admin.subscription.count({ where: { status: "PAST_DUE" } }),
-      admin.subscription.count({ where: { status: "SUSPENDED" } }),
-      admin.subscription.count({ where: { status: "ACTIVE", cancelAtPeriodEnd: true } }),
-      admin.paymentAttempt.count({ where: { status: "failed", createdAt: { gte: from30 } } }),
-      admin.subscription.findMany({ where: { status: "ACTIVE", nextChargeAt: { gte: now, lte: in7 } }, select: { organizationId: true, nextChargeAt: true, interval: true }, orderBy: { nextChargeAt: "asc" }, take: 30 }),
+      admin.subscription.findMany({ where: { organizationId: { in: brandIds }, status: "ACTIVE" }, select: { organizationId: true, planId: true, interval: true } }),
+      admin.subscription.count({ where: { organizationId: { in: brandIds }, status: "PAST_DUE" } }),
+      admin.subscription.count({ where: { organizationId: { in: brandIds }, status: "SUSPENDED" } }),
+      admin.subscription.count({ where: { organizationId: { in: brandIds }, status: "ACTIVE", cancelAtPeriodEnd: true } }),
+      admin.paymentAttempt.count({ where: { organizationId: { in: brandIds }, status: "failed", createdAt: { gte: from30 } } }),
+      admin.subscription.findMany({ where: { organizationId: { in: brandIds }, status: "ACTIVE", nextChargeAt: { gte: now, lte: in7 } }, select: { organizationId: true, nextChargeAt: true, interval: true }, orderBy: { nextChargeAt: "asc" }, take: 30 }),
       admin.plan.findMany({ select: { id: true, priceClp: true, priceClpYearly: true } }),
     ]);
     const priceById = new Map(plans.map((p) => [p.id, { m: Number(p.priceClp), y: p.priceClpYearly != null ? Number(p.priceClpYearly) : null }]));
@@ -993,7 +1055,8 @@ export class PlatformController {
 
   /** Tope propio de un tenant (override del default) + consumo del día. */
   @Get("organizations/:id/messaging")
-  async orgMessaging(@Param("id") id: string) {
+  async orgMessaging(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true, country: true } });
     const override = Number((org?.settings as any)?.messaging?.dailyCap);
     const hasOverride = Number.isFinite(override) && override > 0;
@@ -1018,6 +1081,7 @@ export class PlatformController {
   /** Fija/limpia el tope propio de un tenant (null = usar el default). Auditado. */
   @Patch("organizations/:id/messaging-cap")
   async setOrgMessagingCap(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ dailyCap: z.number().int().min(1).max(10_000_000).nullable() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Valor inválido");
     const org = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
@@ -1051,7 +1115,8 @@ export class PlatformController {
 
   /** Saldo y últimos movimientos de la bolsa de un tenant. */
   @Get("organizations/:id/wallet")
-  async orgWallet(@Param("id") id: string) {
+  async orgWallet(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const [wallet, ledger] = await Promise.all([
       this.prisma.admin.messageWallet.findUnique({ where: { organizationId: id } }),
       this.prisma.admin.walletLedger.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 15 }),
@@ -1067,6 +1132,7 @@ export class PlatformController {
   /** Ajuste manual de saldo (regalar/quitar créditos), auditado. */
   @Post("organizations/:id/wallet-adjust")
   async adjustWallet(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ delta: z.number().int().refine((n) => n !== 0, "delta ≠ 0"), reason: z.string().max(200).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Ajuste inválido");
     const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId: id } });
@@ -1132,7 +1198,8 @@ export class PlatformController {
 
   /** Panel único: las seis condiciones con semáforo + datos para editar en línea. */
   @Get("organizations/:id/messaging-panel")
-  async messagingPanel(@Param("id") id: string) {
+  async messagingPanel(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const s = await this.messagingSnapshot(id);
     const gate = evalMessagingGate(s.inputs);
     const cond = (key: string) => gate.conditions.find((c) => c.key === key)!;
@@ -1158,7 +1225,8 @@ export class PlatformController {
 
   /** "¿Puede enviar ahora?": corre las seis validaciones y responde en una línea. */
   @Get("organizations/:id/can-send")
-  async canSend(@Param("id") id: string) {
+  async canSend(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const s = await this.messagingSnapshot(id);
     const gate = evalMessagingGate(s.inputs);
     return { canSend: gate.canSend, blockedBy: gate.blockedBy, reason: gate.reason, line: gate.canSend ? "Sí puede enviar" : `Bloqueado por: ${gate.reason}` };
@@ -1166,7 +1234,8 @@ export class PlatformController {
 
   /** Últimos envíos de plantilla rechazados por el gate (con condición y conversación). */
   @Get("organizations/:id/rejected-sends")
-  async rejectedSends(@Param("id") id: string) {
+  async rejectedSends(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const rows = await this.prisma.admin.integrationEvent.findMany({
       where: { organizationId: id, provider: "messaging", type: "template.blocked" },
       orderBy: { createdAt: "desc" },
@@ -1189,13 +1258,13 @@ export class PlatformController {
 
   /** Margen real por tenant del mes: ingreso cobrado − costo Meta − costo IA (en CLP). */
   @Get("margins")
-  async margins() {
+  async margins(@Req() req: PlatformRequest) {
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
     const { usdToClp } = await this.readCostSettings();
     const [orgs, invoices, usage] = await Promise.all([
-      this.prisma.admin.organization.findMany({ where: { deletedAt: null }, select: { id: true, name: true, currency: true } }),
+      this.prisma.admin.organization.findMany({ where: { brand: this.reqBrand(req), deletedAt: null }, select: { id: true, name: true, currency: true } }),
       this.prisma.admin.invoice.groupBy({ by: ["organizationId"], where: { status: "PAID", paidAt: { gte: monthStart } }, _sum: { amountDue: true } }),
       this.prisma.admin.usageEvent.groupBy({ by: ["organizationId", "type"], where: { occurredAt: { gte: monthStart } }, _sum: { costUsd: true } }),
     ]);
@@ -1424,6 +1493,7 @@ export class PlatformController {
 
   @Post("organizations/:id/subscription")
   async assignSubscription(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ planCode: z.string(), status: z.enum(["TRIALING", "ACTIVE", "PAST_DUE", "CANCELLED"]).default("ACTIVE") }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
     const plan = await this.prisma.admin.plan.findUnique({ where: { code: parsed.data.planCode } });
@@ -1445,6 +1515,7 @@ export class PlatformController {
   /** Acciones del Super Admin sobre el cobro recurrente de un tenant. */
   @Post("organizations/:id/billing-action")
   async billingAction(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ action: z.enum(["reactivate", "extend_window", "register_payment", "charge_now"]), hours: z.coerce.number().int().min(1).max(240).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Acción inválida");
     const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
@@ -1527,7 +1598,8 @@ export class PlatformController {
    * débito que no admite cargo automático, o el motivo de rechazo). Solo lectura.
    */
   @Get("organizations/:id/billing-diagnose")
-  async billingDiagnose(@Param("id") id: string) {
+  async billingDiagnose(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
     if (!sub) return { ok: false, error: "El tenant no tiene suscripción." };
     const s = await this.paymentSettings.get();
@@ -1576,6 +1648,7 @@ export class PlatformController {
    */
   @Post("organizations/:id/payment-link")
   async paymentLink(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z.object({ planCode: z.string().optional(), interval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
     const org = await this.prisma.admin.organization.findUnique({ where: { id } });
@@ -1622,8 +1695,10 @@ export class PlatformController {
   // ------------------------------ Facturas ------------------------------
 
   @Get("invoices")
-  async invoices() {
-    const rows = await this.prisma.admin.invoice.findMany({ orderBy: { createdAt: "desc" }, take: 100 });
+  async invoices(@Req() req: PlatformRequest) {
+    // D8 — facturas acotadas a las orgs de la marca del super admin.
+    const brandIds = await this.brandOrgIds(req);
+    const rows = await this.prisma.admin.invoice.findMany({ where: { organizationId: { in: brandIds } }, orderBy: { createdAt: "desc" }, take: 100 });
     const orgIds = [...new Set(rows.map((r) => r.organizationId))];
     const orgs = await this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } });
     const nameById = new Map(orgs.map((o) => [o.id, o.name]));
@@ -1633,6 +1708,7 @@ export class PlatformController {
   /** Emite una factura para una organización (cobro manual/mock del período). */
   @Post("organizations/:id/invoices")
   async createInvoice(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
     const parsed = z
       .object({ amount: z.coerce.number().min(0), currency: z.string().default("CLP"), concept: z.string().default("Suscripción Conversia") })
       .safeParse(body);

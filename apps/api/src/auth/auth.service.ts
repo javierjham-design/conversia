@@ -36,7 +36,10 @@ export class AuthService {
    */
   async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string }) {
     const db = this.prisma.admin;
-    const existing = await db.user.findUnique({ where: { email: input.email } });
+    const brand = input.brand ?? "tubot";
+    // Cuentas POR MARCA (D8): el mismo correo puede existir en otra marca; se valida la
+    // unicidad SOLO dentro de esta marca.
+    const existing = await db.user.findUnique({ where: { email_brand: { email: input.email, brand } } });
     // Anti-enumeración (ASVS 2.2 / OWASP): mensaje genérico + rate limit en el
     // controlador. No confirmamos si el correo ya existe.
     if (existing) throw new ConflictException("No se pudo completar el registro con esos datos");
@@ -114,6 +117,7 @@ export class AuthService {
       const user = await tx.user.create({
         data: {
           email: input.email,
+          brand, // cuenta de ESTA marca (D8)
           passwordHash: bcrypt.hashSync(input.password, BCRYPT_COST),
           name: input.name,
         },
@@ -188,11 +192,12 @@ export class AuthService {
         ),
       );
       const ownerRole = roles.find((r) => r.code === "owner")!;
-      let user = await tx.user.findUnique({ where: { email: input.email } });
+      // Demo del Super Admin TuBot: la cuenta demo es de marca tubot (D8).
+      let user = await tx.user.findUnique({ where: { email_brand: { email: input.email, brand: "tubot" } } });
       let revealPassword: string | null = tempPassword;
       if (!user) {
         user = await tx.user.create({
-          data: { email: input.email, passwordHash: bcrypt.hashSync(tempPassword, BCRYPT_COST), name: input.name },
+          data: { email: input.email, brand: "tubot", passwordHash: bcrypt.hashSync(tempPassword, BCRYPT_COST), name: input.name },
         });
       } else {
         revealPassword = null; // ya tenía cuenta: usa su contraseña existente
@@ -231,15 +236,19 @@ export class AuthService {
   async setOrgAdminEmail(orgId: string, email: string): Promise<{ userId: string; email: string }> {
     const user = await this.orgAdminUser(orgId);
     if (!user) throw new BadRequestException("La organización no tiene usuarios activos");
-    const existing = await this.prisma.admin.user.findUnique({ where: { email } });
+    // Unicidad DENTRO de la marca del usuario (D8): el mismo correo puede existir en otra marca.
+    const existing = await this.prisma.admin.user.findFirst({ where: { email, brand: user.brand } });
     if (existing && existing.id !== user.id) throw new ConflictException("Ese correo ya está en uso");
     await this.prisma.admin.user.update({ where: { id: user.id }, data: { email } });
     return { userId: user.id, email };
   }
 
-  async login(input: { email: string; password: string }) {
+  async login(input: { email: string; password: string; brand?: string }) {
+    // Cuentas POR MARCA (D8): el correo se resuelve dentro de su marca (la del dominio
+    // de origen). El mismo email en TuBot y Conversia son cuentas distintas.
+    const brand = input.brand ?? "tubot";
     const user = await this.prisma.admin.user.findUnique({
-      where: { email: input.email },
+      where: { email_brand: { email: input.email, brand } },
       include: { memberships: { where: { active: true } } },
     });
     if (!user || !bcrypt.compareSync(input.password, user.passwordHash)) {
@@ -327,9 +336,9 @@ export class AuthService {
    * en el controlador). Solo permitimos cuentas que YA existen como miembros —
    * no es auto-registro. Mensaje genérico para no filtrar qué correos existen.
    */
-  async loginWithGoogle(email: string) {
+  async loginWithGoogle(email: string, brand = "tubot") {
     const user = await this.prisma.admin.user.findUnique({
-      where: { email },
+      where: { email_brand: { email, brand } },
       include: { memberships: { where: { active: true } } },
     });
     const membership = user?.memberships[0];

@@ -72,10 +72,12 @@ async function seedTenant(fileName: string, adminEmail: string) {
   // Usuario administrador del tenant
   const password = process.env.SEED_ADMIN_PASSWORD ?? "conversia-dev";
   const user = await prisma.user.upsert({
-    where: { email: adminEmail },
+    // Identidad por marca (D8): el seed base crea tenants de la marca tubot.
+    where: { email_brand: { email: adminEmail, brand: "tubot" } },
     update: {},
     create: {
       email: adminEmail,
+      brand: "tubot",
       passwordHash: bcrypt.hashSync(password, 10),
       name: `Admin ${org.name}`,
     },
@@ -232,9 +234,10 @@ async function main() {
   const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "conversia-platform-dev";
   const platformEmail = process.env.PLATFORM_ADMIN_EMAIL ?? "superadmin@conversia.local";
   await prisma.platformAdmin.upsert({
-    where: { email: platformEmail },
+    // Super admin por marca (D8): el seed base crea el super admin de tubot.
+    where: { email_brand: { email: platformEmail, brand: "tubot" } },
     update: {},
-    create: { email: platformEmail, name: "Super Admin", passwordHash: bcrypt.hashSync(platformPassword, 12) },
+    create: { email: platformEmail, brand: "tubot", name: "Super Admin", passwordHash: bcrypt.hashSync(platformPassword, 12) },
   });
   console.log(`✔ Admin de plataforma ${platformEmail} (password: valor de PLATFORM_ADMIN_PASSWORD o 'conversia-platform-dev')`);
 

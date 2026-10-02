@@ -13,7 +13,7 @@ import {
 import type { Request } from "express";
 import * as bcrypt from "bcryptjs";
 import { z } from "zod";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandFromOrigin } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
@@ -34,16 +34,9 @@ const registerSchema = z.object({
   vertical: z.string().trim().min(2).max(40).optional(),
 });
 
-/**
- * Marca derivada del Origin por allow-list (nunca del body): el panel de Conversia
- * (WEB_URL_CONVERSIA) → conversia; todo lo demás (incluido TuBot) → tubot. Así un
- * registro desde conversia.cl nace con brand=conversia sin confiar en el cliente.
- */
-export function brandFromOrigin(origin: string | undefined): string {
-  const env = getEnv();
-  if (origin && env.WEB_URL_CONVERSIA && origin === env.WEB_URL_CONVERSIA) return "conversia";
-  return "tubot";
-}
+// La derivación de marca por Origin vive en @conversia/config (compartida con el super
+// admin, D8). Se re-exporta aquí por compatibilidad con los imports/tests existentes.
+export { brandFromOrigin };
 
 /** Paleta curada de acentos de UI (F3 la consume; el registro valida contra ella). */
 const ACCENT_PALETTE = ["indigo", "violet", "blue", "teal", "emerald", "amber", "rose", "slate"] as const;
@@ -86,7 +79,7 @@ export class AuthController {
   }
 
   @Post("login")
-  async login(@Body() body: unknown) {
+  async login(@Body() body: unknown, @Req() req: Request) {
     const input = parse(loginSchema, body);
     // Límite por EMAIL (credencial atacada, no spoofeable) — anti credential stuffing
     const rl = await this.rateLimit.login(input.email);
@@ -96,7 +89,9 @@ export class AuthController {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-    return this.auth.login(input);
+    // La cuenta se resuelve en la marca del dominio de origen (D8): mismo correo, cuentas distintas.
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    return this.auth.login({ ...input, brand });
   }
 
   // --------------------------- Invitaciones ---------------------------
@@ -261,7 +256,7 @@ export class AuthController {
 
   /** Login con Google: valida el ID token con Google y emite nuestro JWT. */
   @Post("google")
-  async google(@Body() body: unknown) {
+  async google(@Body() body: unknown, @Req() req: Request) {
     const { credential } = parse(z.object({ credential: z.string().min(10) }), body);
     const env = getEnv();
     if (!env.GOOGLE_CLIENT_ID) throw new BadRequestException("El inicio con Google no está configurado.");
@@ -273,7 +268,9 @@ export class AuthController {
     if (!res.ok || info?.aud !== env.GOOGLE_CLIENT_ID || !info?.email || !emailVerified) {
       throw new UnauthorizedException("No se pudo validar tu cuenta de Google.");
     }
-    return this.auth.loginWithGoogle(String(info.email).toLowerCase());
+    // D8 — la cuenta de Google se resuelve dentro de la marca del Origin (TuBot vs Conversia).
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    return this.auth.loginWithGoogle(String(info.email).toLowerCase(), brand);
   }
 
   /** Organizaciones del usuario actual + cuál está activa (selector de tenant). */
