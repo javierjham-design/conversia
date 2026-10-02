@@ -718,6 +718,27 @@ export class PlatformController {
     return { ok: true };
   }
 
+  /** Resumen de caja del tenant (F9) — SOLO LECTURA: el super admin ve, nunca crea/edita/revierte. */
+  @Get("organizations/:id/cash-summary")
+  async orgCashSummary(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const since = new Date(Date.now() - 30 * 24 * 3600_000);
+    const [entries, closures] = await Promise.all([
+      db.cashLedger.findMany({ where: { organizationId: id, createdAt: { gte: since } }, select: { method: true, amount: true, status: true } }),
+      db.cashClosure.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 10, select: { fromAt: true, difference: true, declaredCash: true, calculatedCash: true, conciliado: true, declarado: true } }),
+    ]);
+    let net = 0, conciliado = 0, declarado = 0;
+    const byMethod: Record<string, number> = {};
+    for (const e of entries) {
+      net += e.amount;
+      byMethod[e.method] = (byMethod[e.method] ?? 0) + e.amount;
+      if (e.status === "conciliado") conciliado += e.amount;
+      else declarado += e.amount;
+    }
+    return { periodDays: 30, net, conciliado, declarado, byMethod, count: entries.length, closures };
+  }
+
   // ------------------- Cuenta del administrador del tenant -------------------
 
   /** Restablece la contraseña del admin y devuelve la temporal (mostrada una vez). */

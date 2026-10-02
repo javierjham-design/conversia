@@ -46,6 +46,7 @@ import { PlatformSessionService } from "./platform/platform-session.service";
 import { PublicController } from "./public/public.controller";
 import { ReportsController } from "./reports/reports.controller";
 import { ChargingController, ChargingWebhookController } from "./charging/charging.controller";
+import { CashController } from "./charging/cash.controller";
 import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
 import { AgendaController } from "./scheduling/agenda.controller";
 import { McpController } from "./mcp/mcp.controller";
@@ -95,6 +96,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     PlatformAuthController,
     PlatformController,
     ChargingController,
+    CashController,
     ChargingWebhookController,
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token

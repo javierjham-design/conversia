@@ -137,3 +137,16 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- 5. LIBRO DE CAJA APPEND-ONLY (F9): el rol de la app puede INSERTAR y LEER, pero NUNCA
+-- modificar ni borrar asientos/cierres. Un error se corrige con un asiento de REVERSA.
+-- Inmutabilidad A NIVEL DE BASE DE DATOS (no solo en la app). Guardado por si aún no existen.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'cash_ledger') THEN
+    EXECUTE 'REVOKE UPDATE, DELETE ON public.cash_ledger FROM conversia_app';
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'cash_closures') THEN
+    EXECUTE 'REVOKE UPDATE, DELETE ON public.cash_closures FROM conversia_app';
+  END IF;
+END $$;

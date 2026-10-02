@@ -473,6 +473,54 @@ model SupportTicket {
   @@map("support_tickets")
 }
 
+// ====================== F9 — Recaudación y caja (dinero) ======================
+// LIBRO APPEND-ONLY e INMUTABLE: nunca UPDATE/DELETE (revocados a nivel de BD en
+// setup.sql); un error se corrige con un asiento de REVERSA que referencia al original.
+// Montos en ENTEROS (CLP sin decimales), moneda explícita. La IA jamás escribe aquí.
+model CashLedger {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  type           String // ingreso | egreso | reversa
+  method         String // link_flow | link_getnet | efectivo | transferencia | tarjeta | otro
+  amount         Int // entero, en la unidad mínima de la moneda (CLP sin decimales)
+  currency       String   @default("CLP")
+  // Vínculo opcional del asiento: a una cita/cliente o un concepto libre.
+  refType        String?  @map("ref_type") // appointment | contact | concepto | payment
+  refId          String?  @map("ref_id")
+  concept        String?
+  reversalOf     String?  @map("reversal_of") // id del asiento que revierte (si type=reversa)
+  // conciliado = confirmado por webhook verificado (Flow/Getnet); declarado = manual.
+  status         String   @default("declarado")
+  createdById    String   @map("created_by_id") // userId humano o 'system' (solo webhooks verificados)
+  origin         String // panel | webhook
+  idempotencyKey String   @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, refType, refId])
+  @@map("cash_ledger")
+}
+
+// Cierre de caja diario: snapshot INMUTABLE. Reabrir = nuevo cierre (el anterior no se toca).
+model CashClosure {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  fromAt         DateTime @map("from_at")
+  toAt           DateTime @map("to_at")
+  totalsByMethod Json     @map("totals_by_method")
+  conciliado     Int      @default(0) // total conciliado (webhook)
+  declarado      Int      @default(0) // total declarado (manual)
+  declaredCash   Int      @map("declared_cash") // efectivo contado por el usuario
+  calculatedCash Int      @map("calculated_cash") // efectivo esperado por el libro
+  difference     Int // declaredCash - calculatedCash
+  closedById     String   @map("closed_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@map("cash_closures")
+}
+
 model OrganizationDomain {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
