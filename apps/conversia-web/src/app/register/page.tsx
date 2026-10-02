@@ -16,8 +16,11 @@ const COUNTRIES = [
   { code: "US", label: "Estados Unidos" },
 ];
 const VERTICALS = [
-  { key: "dental", emoji: "🦷", label: "Dental", desc: "Clínicas y consultas odontológicas" },
-  { key: "barberia", emoji: "💈", label: "Barbería / Peluquería", desc: "Barberías, peluquerías y estética" },
+  { key: "dental", emoji: "🦷", label: "Clínica dental", desc: "Odontología y consultas dentales" },
+  { key: "centro_medico", emoji: "🩺", label: "Centro médico", desc: "Consultas y especialidades médicas" },
+  { key: "estetica", emoji: "🌿", label: "Centro de estética", desc: "Faciales, corporales y depilación" },
+  { key: "barberia", emoji: "💈", label: "Barbería", desc: "Cortes, barba y combos" },
+  { key: "peluqueria", emoji: "✂️", label: "Peluquería", desc: "Corte, color, peinado y tratamientos" },
   { key: "generico", emoji: "✨", label: "Otro rubro", desc: "Configuración general lista para adaptar" },
 ];
 

@@ -1,31 +1,34 @@
 [
   {
     "key": "generico",
-    "version": 1,
-    "name": "General / otro — v1",
+    "version": 2,
+    "name": "General / otro rubro",
     "definition": {
       "industry": "generico",
       "businessHours": { "mon": ["09:00-18:00"], "tue": ["09:00-18:00"], "wed": ["09:00-18:00"], "thu": ["09:00-18:00"], "fri": ["09:00-18:00"], "sat": [], "sun": [] },
       "leadStatuses": [
-        { "code": "nuevo", "name": "Nuevo", "category": "open", "order": 0 },
+        { "code": "nuevo", "name": "Nuevo contacto", "category": "open", "order": 0 },
         { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
-        { "code": "ganado", "name": "Ganado", "category": "won", "order": 2 },
-        { "code": "perdido", "name": "Perdido", "category": "lost", "order": 3 }
+        { "code": "agendado", "name": "Agendado", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
       ],
       "services": [
-        { "code": "consulta", "name": "Consulta", "category": "general", "durationMin": 30, "price": 0 }
+        { "code": "consulta", "name": "Consulta inicial", "category": "general", "durationMin": 30, "price": 0 },
+        { "code": "atencion", "name": "Atención estándar", "category": "general", "durationMin": 45, "price": 0 }
       ],
       "tags": [
         { "name": "Primera vez", "color": "#2563eb" },
-        { "name": "Urgente", "color": "#dc2626" }
+        { "name": "Frecuente", "color": "#16a34a" },
+        { "name": "Seguimiento", "color": "#d97706" }
       ],
       "agents": [
         {
           "slug": "recepcion",
           "name": "Recepción",
-          "description": "Da la bienvenida, responde dudas frecuentes y deriva o agenda.",
+          "description": "Atiende, responde dudas y agenda.",
           "kind": "recepcion",
-          "systemPrompt": "Atiendes por WhatsApp de forma cercana, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Responde SOLO con información de tus herramientas; si no la tienes, reconócelo y ofrece que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
+          "systemPrompt": "Eres la recepción del negocio. Atiendes por WhatsApp de forma cálida, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas, respondes dudas y das información SOLO con lo que entregan tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
           "config": {},
           "tools": []
         }
@@ -34,16 +37,19 @@
         {
           "templateKey": "bienvenida",
           "name": "Bienvenida",
-          "description": "Saluda al primer mensaje del contacto.",
-          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! Gracias por escribir 🙌 ¿En qué te puedo ayudar?" } }], "edges": [{ "from": "start", "to": "welcome" }] }
+          "description": "Saluda y ofrece ayudar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 😊 Gracias por escribir. ¿En qué te puedo ayudar hoy?" } }], "edges": [{ "from": "start", "to": "welcome" }] }
         }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ", "documents": [{ "title": "Cómo atendemos", "content": "Atendemos y coordinamos por WhatsApp. Cuéntanos qué necesitas y te ayudamos a agendar o resolver tu consulta." }] }
       ]
     }
   },
   {
     "key": "dental",
-    "version": 1,
-    "name": "Dental / odontología — v1",
+    "version": 2,
+    "name": "Clínica dental",
     "definition": {
       "industry": "dental",
       "businessHours": { "mon": ["09:00-13:00", "15:00-19:00"], "tue": ["09:00-13:00", "15:00-19:00"], "wed": ["09:00-13:00", "15:00-19:00"], "thu": ["09:00-13:00", "15:00-19:00"], "fri": ["09:00-14:00"], "sat": [], "sun": [] },
@@ -57,12 +63,15 @@
       "services": [
         { "code": "consulta", "name": "Consulta / evaluación", "category": "diagnostico", "durationMin": 30, "price": 0 },
         { "code": "limpieza", "name": "Limpieza dental", "category": "preventiva", "durationMin": 45, "price": 35000 },
-        { "code": "ortodoncia", "name": "Evaluación de ortodoncia", "category": "ortodoncia", "durationMin": 40, "price": 0 }
+        { "code": "tapadura", "name": "Tapadura (obturación)", "category": "operatoria", "durationMin": 45, "price": 40000 },
+        { "code": "extraccion", "name": "Extracción", "category": "cirugia", "durationMin": 40, "price": 45000 },
+        { "code": "ortodoncia-eval", "name": "Evaluación de ortodoncia", "category": "ortodoncia", "durationMin": 40, "price": 0 }
       ],
       "tags": [
         { "name": "Primera vez", "color": "#2563eb" },
         { "name": "Urgencia", "color": "#dc2626" },
-        { "name": "Ortodoncia", "color": "#7c3aed" }
+        { "name": "Ortodoncia", "color": "#7c3aed" },
+        { "name": "Control", "color": "#16a34a" }
       ],
       "agents": [
         {
@@ -70,7 +79,7 @@
           "name": "Recepción dental",
           "description": "Atiende pacientes, responde dudas y agenda citas.",
           "kind": "recepcion",
-          "systemPrompt": "Eres la recepción de una clínica dental. Atiendes por WhatsApp de forma cálida, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas citas, respondes dudas de tratamientos y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como paciente.",
+          "systemPrompt": "Eres la recepción de una clínica dental. Atiendes por WhatsApp de forma cálida, profesional y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas citas, respondes dudas de tratamientos y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Ante dolor fuerte, sangrado o golpe reciente, trata la solicitud como URGENCIA y ofrece la hora más próxima. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como paciente.",
           "config": {},
           "tools": []
         }
@@ -82,38 +91,47 @@
           "description": "Saluda y ofrece agendar en el primer mensaje.",
           "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 😊 Gracias por escribir a la clínica. ¿Te gustaría agendar una evaluación o tienes alguna consulta?" } }], "edges": [{ "from": "start", "to": "welcome" }] }
         }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ dental", "documents": [
+          { "title": "Primera consulta", "content": "En la primera consulta evaluamos tu caso y te explicamos las opciones de tratamiento y presupuesto. Trae un documento de identidad y, si tienes, radiografías previas." },
+          { "title": "Urgencias", "content": "Si tienes dolor intenso, sangrado o un golpe reciente, avísanos: priorizamos tu atención y buscamos la hora más cercana disponible." }
+        ] }
       ]
     }
   },
   {
     "key": "barberia",
-    "version": 1,
-    "name": "Barbería / peluquería — v1",
+    "version": 2,
+    "name": "Barbería",
     "definition": {
       "industry": "barberia",
       "businessHours": { "mon": ["10:00-20:00"], "tue": ["10:00-20:00"], "wed": ["10:00-20:00"], "thu": ["10:00-20:00"], "fri": ["10:00-21:00"], "sat": ["10:00-18:00"], "sun": [] },
       "leadStatuses": [
-        { "code": "nuevo", "name": "Nuevo", "category": "open", "order": 0 },
-        { "code": "agendado", "name": "Reserva agendada", "category": "open", "order": 1 },
-        { "code": "atendido", "name": "Atendido", "category": "won", "order": 2 },
-        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 3 }
+        { "code": "nuevo", "name": "Nuevo cliente", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "agendado", "name": "Reserva agendada", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
       ],
       "services": [
         { "code": "corte", "name": "Corte de pelo", "category": "corte", "durationMin": 30, "price": 10000 },
         { "code": "barba", "name": "Perfilado de barba", "category": "barba", "durationMin": 20, "price": 7000 },
-        { "code": "corte-barba", "name": "Corte + barba", "category": "combo", "durationMin": 45, "price": 15000 }
+        { "code": "corte-barba", "name": "Corte + barba", "category": "combo", "durationMin": 45, "price": 15000 },
+        { "code": "corte-nino", "name": "Corte niño", "category": "corte", "durationMin": 25, "price": 8000 }
       ],
       "tags": [
-        { "name": "Cliente frecuente", "color": "#16a34a" },
-        { "name": "Primera vez", "color": "#2563eb" }
+        { "name": "Cliente nuevo", "color": "#2563eb" },
+        { "name": "Frecuente", "color": "#16a34a" },
+        { "name": "Combo", "color": "#d97706" }
       ],
       "agents": [
         {
           "slug": "recepcion",
-          "name": "Recepción barbería",
-          "description": "Agenda reservas y responde dudas de servicios y precios.",
+          "name": "Reservas barbería",
+          "description": "Agenda reservas y responde dudas.",
           "kind": "recepcion",
-          "systemPrompt": "Eres la recepción de una barbería. Atiendes por WhatsApp con onda, cercano y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas reservas, informas servicios y precios SOLO con la info de tus herramientas; si no la tienes, lo reconoces y ofreces que alguien del equipo siga. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como cliente.",
+          "systemPrompt": "Atiendes la barbería por WhatsApp: cercano, directo y breve (2-3 frases, una pregunta a la vez, un solo mensaje). Agendas reservas (corte, barba, combo), confirmas con qué barbero y a qué hora, y respondes dudas de servicios y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que el equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
           "config": {},
           "tools": []
         }
@@ -123,8 +141,171 @@
           "templateKey": "bienvenida",
           "name": "Bienvenida cliente",
           "description": "Saluda y ofrece reservar en el primer mensaje.",
-          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Buena! 💈 Gracias por escribir. ¿Quieres reservar una hora? Dime qué servicio y te paso los horarios." } }], "edges": [{ "from": "start", "to": "welcome" }] }
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 💈 ¿Quieres reservar una hora? Dime qué servicio (corte, barba o combo) y para cuándo." } }], "edges": [{ "from": "start", "to": "welcome" }] }
         }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ barbería", "documents": [
+          { "title": "Reservas", "content": "Reservas por WhatsApp. Dinos el servicio y el día/horario que prefieres y te confirmamos con un barbero disponible." },
+          { "title": "Formas de pago", "content": "Aceptamos efectivo y tarjetas en el local. Si necesitas boleta, avísanos al pagar." }
+        ] }
+      ]
+    }
+  },
+  {
+    "key": "peluqueria",
+    "version": 1,
+    "name": "Peluquería",
+    "definition": {
+      "industry": "peluqueria",
+      "businessHours": { "mon": ["10:00-19:00"], "tue": ["10:00-19:00"], "wed": ["10:00-19:00"], "thu": ["10:00-20:00"], "fri": ["10:00-20:00"], "sat": ["10:00-18:00"], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo cliente", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "agendado", "name": "Reserva agendada", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
+      ],
+      "services": [
+        { "code": "corte-mujer", "name": "Corte mujer", "category": "corte", "durationMin": 45, "price": 15000 },
+        { "code": "corte-hombre", "name": "Corte hombre", "category": "corte", "durationMin": 30, "price": 10000 },
+        { "code": "tintura", "name": "Tintura / color", "category": "color", "durationMin": 90, "price": 35000 },
+        { "code": "peinado", "name": "Peinado / brushing", "category": "peinado", "durationMin": 40, "price": 18000 },
+        { "code": "tratamiento", "name": "Tratamiento capilar", "category": "tratamiento", "durationMin": 60, "price": 25000 }
+      ],
+      "tags": [
+        { "name": "Cliente nuevo", "color": "#2563eb" },
+        { "name": "Color", "color": "#db2777" },
+        { "name": "Frecuente", "color": "#16a34a" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Reservas peluquería",
+          "description": "Agenda reservas y responde dudas.",
+          "kind": "recepcion",
+          "systemPrompt": "Atiendes la peluquería por WhatsApp: cálido, cercano y breve (2-3 frases, una pregunta a la vez, un solo mensaje). Agendas reservas (corte, color, peinado, tratamiento), consultas con qué estilista y para cuándo, y respondes dudas de servicios y precios SOLO con la información de tus herramientas. Para color o tratamientos, comenta que el valor final puede variar según el largo del cabello y que se confirma en el local. Si no tienes un dato, lo reconoces y ofreces que el equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida cliente",
+          "description": "Saluda y ofrece reservar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! ✨ ¿Te gustaría reservar una hora? Cuéntame qué servicio buscas (corte, color, peinado…) y para cuándo." } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ peluquería", "documents": [
+          { "title": "Color y tratamientos", "content": "El valor de color y tratamientos puede variar según el largo y estado del cabello; lo confirmamos al evaluarte en el local." },
+          { "title": "Reservas", "content": "Reserva por WhatsApp indicando el servicio y tu disponibilidad; te confirmamos con una estilista." }
+        ] }
+      ]
+    }
+  },
+  {
+    "key": "estetica",
+    "version": 1,
+    "name": "Centro de estética",
+    "definition": {
+      "industry": "estetica",
+      "businessHours": { "mon": ["10:00-19:00"], "tue": ["10:00-19:00"], "wed": ["10:00-19:00"], "thu": ["10:00-19:00"], "fri": ["10:00-19:00"], "sat": ["10:00-14:00"], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo cliente", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "agendado", "name": "Sesión agendada", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
+      ],
+      "services": [
+        { "code": "evaluacion", "name": "Evaluación / diagnóstico de piel", "category": "diagnostico", "durationMin": 30, "price": 0 },
+        { "code": "limpieza-facial", "name": "Limpieza facial profunda", "category": "facial", "durationMin": 60, "price": 30000 },
+        { "code": "depilacion-laser", "name": "Depilación láser (zona)", "category": "depilacion", "durationMin": 30, "price": 25000 },
+        { "code": "masaje", "name": "Masaje reductor / relajante", "category": "corporal", "durationMin": 60, "price": 28000 }
+      ],
+      "tags": [
+        { "name": "Primera vez", "color": "#2563eb" },
+        { "name": "Paquete/plan", "color": "#7c3aed" },
+        { "name": "Seguimiento", "color": "#16a34a" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción estética",
+          "description": "Agenda sesiones y responde dudas.",
+          "kind": "recepcion",
+          "systemPrompt": "Atiendes un centro de estética por WhatsApp: cálido, cuidadoso y breve (2-3 frases, una pregunta a la vez, un solo mensaje). Agendas sesiones (faciales, corporales, depilación), respondes dudas de tratamientos y precios SOLO con la información de tus herramientas. Para tratamientos por zonas o planes, indica que el plan y el valor final se confirman en una evaluación. No das indicaciones médicas; ante dudas de salud sugieres evaluación presencial. Si no tienes un dato, lo reconoces y ofreces que el equipo continúe. Nunca inventes precios, horarios ni disponibilidad.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida cliente",
+          "description": "Saluda y ofrece agendar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 🌿 ¿Buscas agendar un tratamiento? Cuéntame qué te interesa y te ayudo con la evaluación o la sesión." } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ estética", "documents": [
+          { "title": "Evaluación previa", "content": "Para varios tratamientos recomendamos una evaluación inicial: así definimos el plan adecuado y el valor según tu caso." },
+          { "title": "Planes y paquetes", "content": "Tenemos sesiones individuales y planes por zona; el detalle y los valores se confirman en la evaluación." }
+        ] }
+      ]
+    }
+  },
+  {
+    "key": "centro_medico",
+    "version": 1,
+    "name": "Centro médico",
+    "definition": {
+      "industry": "centro_medico",
+      "businessHours": { "mon": ["08:30-13:00", "14:30-19:00"], "tue": ["08:30-13:00", "14:30-19:00"], "wed": ["08:30-13:00", "14:30-19:00"], "thu": ["08:30-13:00", "14:30-19:00"], "fri": ["08:30-14:00"], "sat": ["09:00-13:00"], "sun": [] },
+      "leadStatuses": [
+        { "code": "nuevo", "name": "Nuevo paciente", "category": "open", "order": 0 },
+        { "code": "contactado", "name": "Contactado", "category": "open", "order": 1 },
+        { "code": "agendado", "name": "Hora agendada", "category": "open", "order": 2 },
+        { "code": "atendido", "name": "Atendido", "category": "won", "order": 3 },
+        { "code": "perdido", "name": "No concretó", "category": "lost", "order": 4 }
+      ],
+      "services": [
+        { "code": "consulta-general", "name": "Consulta médica general", "category": "consulta", "durationMin": 30, "price": 25000 },
+        { "code": "consulta-especialidad", "name": "Consulta de especialidad", "category": "consulta", "durationMin": 30, "price": 35000 },
+        { "code": "control", "name": "Control", "category": "consulta", "durationMin": 20, "price": 20000 },
+        { "code": "examen", "name": "Toma de exámenes", "category": "procedimiento", "durationMin": 20, "price": 0 }
+      ],
+      "tags": [
+        { "name": "Primera vez", "color": "#2563eb" },
+        { "name": "Control", "color": "#16a34a" },
+        { "name": "Convenio/seguro", "color": "#7c3aed" }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción centro médico",
+          "description": "Agenda horas y responde dudas administrativas.",
+          "kind": "recepcion",
+          "systemPrompt": "Eres la recepción de un centro médico. Atiendes por WhatsApp de forma cálida, respetuosa y breve (2-3 frases, una pregunta a la vez, un solo mensaje). Agendas horas, orientas sobre especialidades, requisitos y valores SOLO con la información de tus herramientas. NO entregas diagnósticos ni indicaciones clínicas: si te consultan por síntomas, recomiendas agendar una consulta y, ante señales de gravedad (dolor en el pecho, dificultad para respirar, sangrado abundante), sugieres acudir a urgencias. Si no tienes un dato, lo reconoces y ofreces que el equipo continúe. Nunca inventes precios, horarios ni disponibilidad. Trata a quien escribe como paciente.",
+          "config": {},
+          "tools": []
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida paciente",
+          "description": "Saluda y ofrece agendar en el primer mensaje.",
+          "definition": { "nodes": [{ "id": "start", "type": "trigger", "config": { "event": "message_received" } }, { "id": "welcome", "type": "send_text", "config": { "text": "¡Hola! 😊 Gracias por escribir. ¿Deseas agendar una hora? Cuéntame la especialidad o el motivo y te ayudo." } }], "edges": [{ "from": "start", "to": "welcome" }] }
+        }
+      ],
+      "knowledge": [
+        { "baseName": "FAQ centro médico", "documents": [
+          { "title": "Agendar una hora", "content": "Indícanos la especialidad o el motivo de consulta y tu disponibilidad; te ofrecemos las horas más cercanas con el profesional adecuado." },
+          { "title": "Urgencias", "content": "Este canal es para agendar y consultas administrativas. Ante una urgencia médica (dolor en el pecho, dificultad para respirar, sangrado abundante), acude al servicio de urgencias más cercano." }
+        ] }
       ]
     }
   }
