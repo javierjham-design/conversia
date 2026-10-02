@@ -14,10 +14,19 @@ type OrgRow = {
   subscriptionStatus: string | null;
   counts: { users: number; conversations: number; agents: number };
   messaging: { blocked: boolean; blockedBy: string | null; reason: string | null };
+  lifecycle?: { stage: string | null; setupPaid: boolean; deliveredAt: string | null };
 };
 
 const STATUS_LABEL: Record<string, string> = { ACTIVE: "Activo", TRIAL: "Prueba", SUSPENDED: "Suspendido", CANCELLED: "Cancelado" };
 const STATUS_COLOR: Record<string, string> = { ACTIVE: "var(--ok)", TRIAL: "var(--warn)", SUSPENDED: "var(--danger)", CANCELLED: "var(--ink-dim)" };
+
+/** Semáforo de implementación (F10): dónde está el cliente en su puesta en marcha. */
+function lifecycleBadge(lc?: { stage: string | null; setupPaid: boolean; deliveredAt: string | null }): { label: string; color: string } | null {
+  if (!lc) return null;
+  if (lc.stage === "active" || lc.deliveredAt) return { label: "🟢 En vivo", color: "var(--ok)" };
+  if (lc.stage === "implementing" || lc.setupPaid) return { label: "🟡 Implementando", color: "var(--warn)" };
+  return { label: "⚪ Prospecto", color: "var(--ink-dim)" };
+}
 
 export default function AdminOrganizations() {
   const [rows, setRows] = useState<OrgRow[] | null>(null);
@@ -69,6 +78,7 @@ export default function AdminOrganizations() {
               <span style={{ fontSize: 12, fontWeight: 600, color: STATUS_COLOR[r.status] ?? "var(--ink-dim)" }}>
                 ● {STATUS_LABEL[r.status] ?? r.status}
               </span>
+              {(() => { const b = lifecycleBadge(r.lifecycle); return b ? <span style={{ fontSize: 11, fontWeight: 600, color: b.color }}>{b.label}</span> : null; })()}
               <span className="text-dim" style={{ fontSize: 12, minWidth: 90 }}>{r.plan?.name ?? "Sin plan"}</span>
               <span className="text-dim" style={{ fontSize: 12 }}>
                 {r.counts.users}👤 · {r.counts.conversations}💬 · {r.counts.agents}🤖

@@ -63,10 +63,34 @@ modificar medios de pago · modificar administradores.
 
 Mecanismo: endpoint `POST /platform/auth/step-up` emite un claim `stepUpAt`; el guard de acciones críticas exige `stepUpAt` reciente.
 
-## 6. RBAC de plataforma (Fase A/G — pendiente)
+## 6. RBAC de plataforma — rol OPERADOR (IMPLEMENTADO en F10)
 
-Roles: Owner · Billing Admin · Support Admin · Security Admin · Operations Admin · Read Only.
-Tabla `platform_admin_roles` + permisos por acción; el `PlatformGuard` + un decorador `@RequirePlatformPerm('...')` autorizan por acción. **No todo admin tiene todos los permisos.**
+`platform_admins.role` distingue dos clases (sin migración nueva: la columna ya existía):
+
+- **SUPER ADMIN** (`owner` / `admin`): llave de todo (comportamiento actual).
+- **OPERADOR** (`operador`): el equipo de implementación. Opera la **ficha de clientes**
+  (agentes, flujos, números, paquetes, agenda, caja, impersonar **con auditoría**, generar
+  link de pago, marcar ENTREGADO) pero **NO** la configuración GLOBAL: planes/precios,
+  paquetes, cupones, tarifas/costos, límites globales, pesos de bolsa, pasarelas de pago,
+  MRR/facturas globales, márgenes, infra, bitácora, ni **otros administradores**.
+
+Enforcement: política **centralizada** en `apps/api/src/platform/platform-policy.ts`
+(`operatorMayAccess` = denylist de prefijos globales) aplicada en el `PlatformGuard` tras el
+chequeo de MFA. Una sola fuente de verdad, testeada (`test/platform-policy.spec.ts`, 66 casos:
+"lo prohibido, prohibido de verdad"). Las acciones de billing **por-org** (bajo
+`/platform/organizations/:id/...`) sí las puede el operador; el billing/config **global** no.
+
+- **MFA obligatorio también para el operador**: el guard exige `mfaEnabledAt` para todo
+  `/platform/*` salvo `/platform/auth/*`. El operador debe enrolar MFA en su primer ingreso
+  (la consola lo envía a Seguridad). Sin MFA no opera.
+- **Gestión de operadores**: solo el super admin (consola → Operadores, API `/platform/admins`
+  — en la denylist del operador). Alta con contraseña temporal de un uso; baja sin tocar SQL.
+- **Auditoría del rol**: cada acción de plataforma registra el rol del actor
+  (`after._actorRole`) además del `actorId` — "quién" + "con qué poder".
+- Aislamiento por marca (D8) se mantiene: el operador solo ve/opera tenants de su marca.
+
+**Pendiente (endurecimiento futuro, no bloqueante):** permisos finos por sub-acción dentro de
+la ficha (hoy el operador puede toda la ficha) y step-up TOTP para la impersonación (§5).
 
 ## 7. Auditoría (IMPLEMENTADO parcial → ampliar)
 
@@ -79,10 +103,11 @@ Hoy: `audit_logs` con `actorType='platform_admin'` en login y mutaciones de `pla
 | Tenant no accede al Super Admin | ✅ (identidad separada, verificado) |
 | Digital Dent no ingresa | ✅ (no está en `platform_admins`) |
 | Sesiones separadas | ✅ (audiencia + token + storage separados) · ⏳ revocación/gestión pendiente |
-| MFA obligatorio | ⏳ Fase A |
+| MFA obligatorio | ✅ (TOTP + códigos de recuperación; obligatorio para super admin **y operador**) |
+| RBAC de plataforma (operador) | ✅ F10 (denylist centralizada + tests) · ⏳ permisos finos por sub-acción |
 | Perímetro | ⏳ Cloudflare Access (infra) — `noindex`/robots ✅ hoy |
 | Reautenticación acciones críticas | ⏳ Fase A |
-| Auditoría | ✅ base · ⏳ ampliación |
+| Auditoría | ✅ base + rol del actor (F10) · ⏳ ampliación |
 
 ---
 

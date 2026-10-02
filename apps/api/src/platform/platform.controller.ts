@@ -26,7 +26,12 @@ import { createPaymentProvider } from "../billing/payment-provider";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
 import { PlatformGuard, type PlatformRequest } from "./platform.guard";
+import { isFullPlatformAdmin } from "./platform-policy";
 import { getRailwayInfra } from "./railway-metrics";
+import { randomBytes } from "node:crypto";
+import * as bcryptMod from "bcryptjs";
+
+const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 
 // ---------------------------------------------------------------------------
 // Evaluador (solo lectura) del gate de envío de plantillas — MISMA lógica y
@@ -103,6 +108,9 @@ export class PlatformController {
   ) {}
 
   private audit(req: PlatformRequest, action: string, entityType: string, entityId: string, after?: object) {
+    // F10 — trazamos el ROL del actor (super admin vs operador) en la bitácora sin migrar:
+    // va como metadata en `after` (actorId ya responde "quién"; el rol da el "con qué poder").
+    const role = req.platformAdmin?.role ?? "owner";
     return this.prisma.admin.auditLog.create({
       data: {
         actorType: "platform_admin",
@@ -110,7 +118,7 @@ export class PlatformController {
         action,
         entityType,
         entityId,
-        after: after ?? undefined,
+        after: { ...(after ?? {}), _actorRole: role },
       },
     });
   }
@@ -294,6 +302,11 @@ export class PlatformController {
         globalCap: caps.global,
         fuseTripped,
       });
+      // F10 — semáforo de implementación barato (solo settings, sin consultas por org):
+      // ciclo de vida Conversia + si el setup está pagado. El detalle del checklist de 6
+      // pasos va en GET /organizations/:id/implementation (una org a la vez).
+      const conversia = (settings.conversia ?? {}) as Record<string, any>;
+      const lifecycle = typeof conversia.lifecycle === "string" ? conversia.lifecycle : null; // implementing | active | null
       return {
         id: o.id,
         name: o.name,
@@ -306,6 +319,7 @@ export class PlatformController {
         subscriptionStatus: sub?.status ?? null,
         counts: { users: uc.get(o.id) ?? 0, conversations: cc.get(o.id) ?? 0, agents: ac.get(o.id) ?? 0 },
         messaging: { blocked: !gate.canSend, blockedBy: gate.blockedBy, reason: gate.reason },
+        lifecycle: { stage: lifecycle, setupPaid: settings.setupPaid === true, deliveredAt: typeof conversia.deliveredAt === "string" ? conversia.deliveredAt : null },
       };
     });
   }
@@ -425,6 +439,138 @@ export class PlatformController {
       },
       members: members.map((m) => ({ email: m.user.email, name: m.user.name, active: m.active })),
     };
+  }
+
+  // ----------------- F10 — implementación, contexto y GO-LIVE -----------------
+
+  /**
+   * Deriva el checklist de puesta en marcha de UNA org (mismo criterio que
+   * /onboarding del tenant, pero del lado plataforma con el cliente admin). TODAS las
+   * consultas filtran por organizationId (el cliente admin bypasea RLS) → nunca cruza tenant.
+   */
+  private async orgImplementation(id: string) {
+    const db = this.prisma.admin;
+    const [org, whatsappNumbers, templates, publishedAgents, publishedWorkflows, activeMembers] = await Promise.all([
+      db.organization.findUnique({ where: { id }, select: { settings: true } }),
+      db.whatsappPhoneNumber.count({ where: { organizationId: id, status: "active" } }),
+      db.whatsappTemplate.count({ where: { organizationId: id } }),
+      db.agentVersion.count({ where: { organizationId: id, status: "PUBLISHED" } }),
+      db.workflowVersion.count({ where: { organizationId: id, status: "PUBLISHED" } }),
+      db.organizationUser.count({ where: { organizationId: id, active: true } }),
+    ]);
+    const settings = (org?.settings ?? {}) as Record<string, any>;
+    const industry = String(settings.general?.industry ?? "");
+    const hasVertical = !!settings.vertical?.key;
+    const conversia = (settings.conversia ?? {}) as Record<string, any>;
+    const steps = [
+      { key: "whatsapp", title: "WhatsApp conectado y sano", done: whatsappNumbers > 0 },
+      { key: "templates", title: "Rubro definido + plantillas", done: !!industry && templates > 0 },
+      { key: "vertical", title: "Paquete del rubro instalado", done: hasVertical },
+      { key: "agent", title: "Agente publicado", done: publishedAgents > 0 },
+      { key: "workflow", title: "Flujo publicado", done: publishedWorkflows > 0 },
+      { key: "team", title: "Equipo invitado", done: activeMembers > 1 },
+    ];
+    const completed = steps.filter((s) => s.done).length;
+    return {
+      steps,
+      completed,
+      total: steps.length,
+      percent: Math.round((completed / steps.length) * 100),
+      goLiveReady: completed >= 5, // WhatsApp + agente + paquete + flujo + plantillas
+      lifecycle: {
+        stage: typeof conversia.lifecycle === "string" ? conversia.lifecycle : null,
+        setupPaid: settings.setupPaid === true,
+        setupVertical: typeof conversia.setupVertical === "string" ? conversia.setupVertical : null,
+        setupPaidAt: typeof conversia.setupPaidAt === "string" ? conversia.setupPaidAt : null,
+        deliveredAt: typeof conversia.deliveredAt === "string" ? conversia.deliveredAt : null,
+      },
+      whatsapp: { numbers: whatsappNumbers, templates },
+    };
+  }
+
+  /** Semáforo de implementación detallado de un tenant (ficha de operación). */
+  @Get("organizations/:id/implementation")
+  async implementation(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return this.orgImplementation(id);
+  }
+
+  /**
+   * TAREA 4 — Contexto total del cliente para el agente/equipo de soporte. Resumen
+   * estructurado + render en texto para inyectar al prompt. SOLO del tenant indicado
+   * (cada consulta filtra por organizationId). De SOLO LECTURA.
+   */
+  private async buildClientContext(id: string) {
+    const db = this.prisma.admin;
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const [org, sub, plans, phones, agents, wallet, consumedAgg, errors, tickets] = await Promise.all([
+      db.organization.findUnique({ where: { id }, select: { name: true, brand: true, country: true, status: true, settings: true } }),
+      db.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } }),
+      db.plan.findMany({ select: { id: true, code: true, name: true } }),
+      db.whatsappPhoneNumber.findMany({ where: { organizationId: id }, select: { displayPhone: true, status: true } }),
+      db.agent.findMany({ where: { organizationId: id, deletedAt: null }, select: { name: true, slug: true, active: true, currentVersionId: true } }),
+      db.messageWallet.findUnique({ where: { organizationId: id }, select: { balance: true, includedPerPeriod: true } }).catch(() => null),
+      db.walletLedger.aggregate({ where: { organizationId: id, reason: "send_debit", createdAt: { gte: monthStart } }, _sum: { delta: true } }).catch(() => ({ _sum: { delta: 0 } }) as any),
+      db.integrationEvent.findMany({ where: { organizationId: id, status: { in: ["warning", "error"] } }, orderBy: { createdAt: "desc" }, take: 5, select: { provider: true, type: true, status: true, message: true, createdAt: true } }),
+      db.supportTicket.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 5, select: { code: true, subject: true, status: true, createdAt: true } }),
+    ]);
+    const settings = (org?.settings ?? {}) as Record<string, any>;
+    const plan = sub ? plans.find((p) => p.id === sub.planId) ?? null : null;
+    const vertical = (settings.vertical ?? {}) as Record<string, any>;
+    const conversia = (settings.conversia ?? {}) as Record<string, any>;
+    const included = Number(wallet?.includedPerPeriod ?? 0);
+    const consumed = Math.abs(Number(consumedAgg?._sum?.delta ?? 0));
+    const pctUsed = included > 0 ? Math.round((consumed / included) * 100) : null;
+    const ctx = {
+      organization: { name: org?.name ?? id, brand: org?.brand ?? "tubot", country: org?.country ?? null, status: org?.status ?? null },
+      vertical: vertical.key ? { key: vertical.key, version: vertical.version ?? null, variant: vertical.variant ?? null } : null,
+      lifecycle: { stage: conversia.lifecycle ?? null, setupPaid: settings.setupPaid === true, deliveredAt: conversia.deliveredAt ?? null },
+      plan: plan ? { code: plan.code, name: plan.name } : null,
+      subscription: sub ? { status: sub.status, periodEnd: sub.periodEnd } : null,
+      channels: { whatsapp: phones.map((p) => ({ phone: p.displayPhone, status: p.status })) },
+      credits: { balance: Number(wallet?.balance ?? 0), included, consumedThisMonth: consumed, pctUsed, over80: pctUsed != null && pctUsed >= 80 },
+      agents: agents.map((a) => ({ name: a.name, slug: a.slug, active: a.active, published: !!a.currentVersionId })),
+      recentErrors: errors.map((e) => ({ provider: e.provider, type: e.type, status: e.status, message: e.message, at: e.createdAt })),
+      priorTickets: tickets.map((t) => ({ code: t.code, subject: t.subject, status: t.status, at: t.createdAt })),
+    };
+    return { ...ctx, text: renderClientContext(ctx), windowDays: 30, since };
+  }
+
+  /** TAREA 4 — contexto estructurado del cliente (ficha + soporte). */
+  @Get("organizations/:id/client-context")
+  async clientContext(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return this.buildClientContext(id);
+  }
+
+  /**
+   * TAREA 3 — marcar ENTREGADO (GO-LIVE). Flip del ciclo de vida Conversia a "active"
+   * (D5: la activación del cobro ocurre SOLO aquí, no al pagar el setup). Idempotente.
+   * Requiere setup pagado. La asignación del plan mensual es un paso explícito aparte
+   * (endpoint /subscription) — aquí no tocamos billing para no acoplar.
+   */
+  @Post("organizations/:id/lifecycle/delivered")
+  async markDelivered(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const org = await db.organization.findUnique({ where: { id }, select: { settings: true } });
+    if (!org) throw new NotFoundException("Organización no encontrada");
+    const settings = (org.settings ?? {}) as Record<string, any>;
+    const conversia = (settings.conversia ?? {}) as Record<string, any>;
+    if (settings.setupPaid !== true) {
+      throw new BadRequestException("El setup debe estar pagado antes de marcar ENTREGADO.");
+    }
+    if (conversia.lifecycle === "active") {
+      return { ok: true, alreadyDelivered: true, deliveredAt: conversia.deliveredAt ?? null };
+    }
+    const deliveredAt = new Date().toISOString();
+    const nextSettings = { ...settings, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
+    await db.organization.update({ where: { id }, data: { settings: nextSettings } });
+    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt });
+    return { ok: true, deliveredAt };
   }
 
   /** Configuración completa por tenant: vigencia, override de límites (token limiter),
@@ -1011,7 +1157,10 @@ export class PlatformController {
     if (!t) throw new NotFoundException("Ticket no encontrado");
     await this.assertOrgBrand(req, t.organizationId); // aislamiento por marca
     const org = await this.prisma.admin.organization.findUnique({ where: { id: t.organizationId }, select: { name: true } });
-    return { ...t, organizationName: org?.name ?? t.organizationId };
+    // F10 TAREA 4 — el contexto completo del cliente viaja CON el ticket: quien atiende
+    // (operador o agente de soporte) lo tiene a la mano desde el primer mensaje.
+    const clientContext = await this.buildClientContext(t.organizationId).catch(() => null);
+    return { ...t, organizationName: org?.name ?? t.organizationId, clientContext };
   }
 
   /** El equipo responde el ticket: agrega su mensaje al hilo (lo ve el cliente en el widget). */
@@ -1971,6 +2120,79 @@ export class PlatformController {
     await this.audit(req, "platform.invoice.mark_paid", "invoice", id);
     return { ok: true, status: invoice.status };
   }
+
+  // -------------- F10 — Administradores de plataforma (OPERADORES) --------------
+  // Solo el super admin (owner/admin) llega aquí: /platform/admins está en la denylist
+  // del operador. Permite dar de alta/baja al EQUIPO de implementación sin tocar SQL.
+
+  @Get("admins")
+  async listAdmins(@Req() req: PlatformRequest) {
+    const admins = await this.prisma.admin.platformAdmin.findMany({
+      where: { brand: this.reqBrand(req) },
+      select: { id: true, email: true, name: true, role: true, mfaEnabledAt: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+    return admins.map((a) => ({ ...a, mfaEnabled: !!a.mfaEnabledAt, isSuperAdmin: isFullPlatformAdmin(a.role) }));
+  }
+
+  /** Crea un OPERADOR (rol acotado) en la marca del super admin. Devuelve una contraseña
+   *  temporal UNA sola vez; el operador deberá enrolar MFA en su primer ingreso. */
+  @Post("admins")
+  async createAdmin(@Body() body: unknown, @Req() req: PlatformRequest) {
+    const parsed = z.object({ email: z.string().email(), name: z.string().trim().min(2).max(80) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Correo y nombre válidos requeridos.");
+    const brand = this.reqBrand(req);
+    const email = parsed.data.email.toLowerCase();
+    const exists = await this.prisma.admin.platformAdmin.findUnique({ where: { email_brand: { email, brand } } });
+    if (exists) throw new BadRequestException("Ya existe un administrador con ese correo en esta marca.");
+    const tempPassword = randomBytes(9).toString("base64url"); // ~12 chars, se muestra una vez
+    const admin = await this.prisma.admin.platformAdmin.create({
+      data: { email, name: parsed.data.name, brand, role: "operador", passwordHash: bcrypt.hashSync(tempPassword, 10) },
+      select: { id: true, email: true, name: true, role: true },
+    });
+    await this.audit(req, "platform.admin.create", "platform_admin", admin.id, { role: "operador", email });
+    return { ok: true, id: admin.id, email: admin.email, role: admin.role, tempPassword };
+  }
+
+  /** Elimina un OPERADOR (nunca a un super admin ni a uno mismo). */
+  @Delete("admins/:id")
+  async deleteAdmin(@Param("id") id: string, @Req() req: PlatformRequest) {
+    const target = await this.prisma.admin.platformAdmin.findUnique({ where: { id }, select: { id: true, brand: true, role: true } });
+    if (!target || target.brand !== this.reqBrand(req)) throw new NotFoundException("Administrador no encontrado");
+    if (target.id === req.platformAdmin?.sub) throw new BadRequestException("No puedes eliminar tu propia cuenta.");
+    if (isFullPlatformAdmin(target.role)) throw new BadRequestException("No puedes eliminar a un super admin desde aquí.");
+    await this.prisma.admin.platformAdmin.delete({ where: { id } });
+    await this.audit(req, "platform.admin.delete", "platform_admin", id, { role: target.role });
+    return { ok: true };
+  }
+}
+
+/** F10 — render en texto del contexto del cliente para inyectar al prompt del soporte. */
+function renderClientContext(c: {
+  organization: { name: string; country: string | null; status: string | null };
+  vertical: { key: string; version: unknown; variant: unknown } | null;
+  lifecycle: { stage: unknown; setupPaid: boolean; deliveredAt: unknown };
+  plan: { code: string; name: string } | null;
+  subscription: { status: string; periodEnd: unknown } | null;
+  channels: { whatsapp: { phone: string; status: string }[] };
+  credits: { balance: number; included: number; consumedThisMonth: number; pctUsed: number | null; over80: boolean };
+  agents: { name: string; active: boolean; published: boolean }[];
+  recentErrors: { provider: string; type: string; message: string | null; at: unknown }[];
+  priorTickets: { code: string | null; subject: string | null; status: string }[];
+}): string {
+  const L: string[] = [];
+  L.push(`CONTEXTO DEL CLIENTE (solo lectura — no inventes datos fuera de esto):`);
+  L.push(`• Negocio: ${c.organization.name}${c.organization.country ? ` (${c.organization.country})` : ""} — estado ${c.organization.status ?? "?"}.`);
+  if (c.vertical) L.push(`• Rubro/paquete: ${c.vertical.key}${c.vertical.version ? ` v${c.vertical.version}` : ""}.`);
+  L.push(`• Ciclo: ${c.lifecycle.stage ?? "sin marca"}${c.lifecycle.setupPaid ? ", setup pagado" : ", setup NO pagado"}${c.lifecycle.deliveredAt ? ", entregado" : ""}.`);
+  if (c.plan) L.push(`• Plan: ${c.plan.name} (${c.plan.code})${c.subscription ? ` — suscripción ${c.subscription.status}` : ""}.`);
+  const wa = c.channels.whatsapp;
+  L.push(`• WhatsApp: ${wa.length ? wa.map((p) => `${p.phone} [${p.status}]`).join(", ") : "sin número conectado"}.`);
+  L.push(`• Créditos: saldo ${c.credits.balance}${c.credits.included ? ` / ${c.credits.included} incluidos` : ""}${c.credits.pctUsed != null ? ` (${c.credits.pctUsed}% usado${c.credits.over80 ? " ⚠️ sobre 80%" : ""})` : ""}.`);
+  if (c.agents.length) L.push(`• Agentes: ${c.agents.map((a) => `${a.name}${a.published ? "" : " (sin publicar)"}${a.active ? "" : " (inactivo)"}`).join(", ")}.`);
+  if (c.recentErrors.length) L.push(`• Errores recientes: ${c.recentErrors.map((e) => `${e.provider}/${e.type}`).join(", ")}.`);
+  if (c.priorTickets.length) L.push(`• Tickets previos: ${c.priorTickets.map((t) => `${t.code ?? "?"} [${t.status}]`).join(", ")}.`);
+  return "\n\n" + L.join("\n");
 }
 
 // Validación de planes (helper con parse total/parcial)

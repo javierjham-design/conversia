@@ -4,6 +4,7 @@ import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { verifyPlatformToken, type PlatformClaims } from "./platform.jwt";
 import { PlatformSessionService } from "./platform-session.service";
+import { isFullPlatformAdmin, operatorMayAccess } from "./platform-policy";
 
 export interface PlatformRequest extends Request {
   platformAdmin?: PlatformClaims;
@@ -68,6 +69,13 @@ export class PlatformGuard implements CanActivate {
           mfaSetupRequired: true,
         });
       }
+    }
+
+    // F10 — autorización por rol: el OPERADOR opera la ficha de clientes pero no la
+    // configuración GLOBAL de la plataforma. El super admin (owner/admin) pasa todo.
+    const path = (req.originalUrl || req.url || req.path || "").split("?")[0];
+    if (!isFullPlatformAdmin(claims.role) && !operatorMayAccess(path)) {
+      throw new ForbiddenException("Tu rol de operador no permite esta acción (reservada al super admin).");
     }
     return true;
   }

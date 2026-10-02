@@ -73,6 +73,7 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
   const [obNotes, setObNotes] = useState("");
   const [channels, setChannels] = useState<{ connections: { id: string; type: string; name: string; status: string }[]; intents: { type: string; status: string }[] }>({ connections: [], intents: [] });
   const [cash, setCash] = useState<{ net: number; conciliado: number; declarado: number; byMethod: Record<string, number>; count: number } | null>(null);
+  const [impl, setImpl] = useState<{ steps: { key: string; title: string; done: boolean }[]; percent: number; goLiveReady: boolean; lifecycle: { stage: string | null; setupPaid: boolean; deliveredAt: string | null } } | null>(null);
 
   const load = () =>
     padmin<Detail>(`/platform/organizations/${id}`).then((x) => {
@@ -94,6 +95,7 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
     padmin<Wallet>(`/platform/organizations/${id}/wallet`).then(setWallet).catch(() => {});
     padmin<VerticalCat[]>("/platform/verticals").then(setCatalog).catch(() => {});
     padmin<typeof cash>(`/platform/organizations/${id}/cash-summary`).then(setCash).catch(() => {});
+    padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl).catch(() => {});
     padmin<{ steps: Record<string, boolean>; notes: string }>(`/platform/organizations/${id}/onboarding`).then((o) => { setSteps(o.steps); setObNotes(o.notes); }).catch(() => {});
     loadChannels();
   }, [id]);
@@ -350,6 +352,34 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
             </>
           ) : (
             <p className="text-dim" style={{ fontSize: 13 }}>Sin movimientos de caja.</p>
+          )}
+        </Card>
+
+        <Card title="Implementación (F10)">
+          {impl ? (
+            <>
+              <p className="display" style={{ margin: 0, fontSize: 22 }}>{impl.percent}%</p>
+              <p className="text-dim" style={{ fontSize: 12, margin: "2px 0 10px" }}>
+                {impl.lifecycle.deliveredAt || impl.lifecycle.stage === "active" ? "🟢 En vivo" : impl.lifecycle.setupPaid ? "🟡 Implementando" : "⚪ Prospecto"}
+                {impl.lifecycle.setupPaid ? " · setup pagado" : " · setup sin pagar"}
+              </p>
+              <ul style={{ listStyle: "none", padding: 0, margin: "0 0 10px", display: "flex", flexDirection: "column", gap: 4 }}>
+                {impl.steps.map((s) => <li key={s.key} style={{ fontSize: 12, color: s.done ? "var(--ok)" : "var(--ink-dim)" }}>{s.done ? "✓" : "○"} {s.title}</li>)}
+              </ul>
+              {impl.lifecycle.deliveredAt || impl.lifecycle.stage === "active" ? (
+                <p className="text-dim" style={{ fontSize: 11 }}>Cliente entregado.</p>
+              ) : (
+                <button
+                  className="btn-accent"
+                  disabled={!impl.lifecycle.setupPaid}
+                  title={!impl.lifecycle.setupPaid ? "Requiere setup pagado" : !impl.goLiveReady ? "Aún faltan pasos (puedes entregar igual)" : "Poner en vivo"}
+                  onClick={() => { if (confirm("¿Marcar ENTREGADO? Pone al cliente EN VIVO y activa su ciclo de cobro.")) run(() => padmin(`/platform/organizations/${id}/lifecycle/delivered`, { method: "POST" }).then(() => padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl)), "Cliente marcado como ENTREGADO."); }}
+                  style={{ width: "100%", opacity: impl.lifecycle.setupPaid ? 1 : 0.5 }}
+                >Marcar ENTREGADO</button>
+              )}
+            </>
+          ) : (
+            <p className="text-dim" style={{ fontSize: 13 }}>Sin datos de implementación.</p>
           )}
         </Card>
       </div>

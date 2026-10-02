@@ -92,3 +92,25 @@ recibido una solicitud de este tipo.
 - Postmortem sin culpas: qué pasó, impacto, causa raíz, detección, tiempo de respuesta, acciones.
 - Actualizar RISK_REGISTER y SECURITY_ROADMAP con las lecciones.
 - Evaluar obligación de notificación (autoridad/afectados) según normativa vigente — consultar asesoría legal (no incluida aquí).
+
+## Comunicación BI-MARCA (TuBot + Conversia comparten plataforma)
+
+Una caída de la plataforma (API, worker, Postgres, Redis, Railway) golpea **a las dos marcas
+a la vez**. Toda comunicación de incidente debe salir **por cada marca con su propia voz y
+canal** (el cliente de Conversia no sabe que existe TuBot y viceversa):
+
+- **Canal por marca:** definir y mantener un canal de estado por marca (mínimo: correo de
+  aviso vía Resend con el dominio de cada marca; idealmente una status page por marca —
+  `status.conversia.cl` / `status.tubot.cl` — pendiente de montar, no bloqueante si hay correo).
+- **Plantillas listas (rellenar y enviar):**
+  - *Investigando:* "Estamos al tanto de una intermitencia en {Marca} y trabajando en
+    resolverla. Te avisaremos apenas se normalice."
+  - *Identificado/mitigando:* "Identificamos la causa de la intermitencia en {Marca}; está en
+    proceso de solución."
+  - *Resuelto:* "El servicio de {Marca} ya opera con normalidad. Lamentamos las molestias."
+- **Regla:** mismo contenido técnico, **dos envíos** (uno por marca, con su remitente/marca).
+  Nunca mencionar la otra marca ni la infraestructura compartida en la comunicación al cliente.
+- **Responsable:** quien declara el incidente dispara ambos avisos. Registrar hora de cada envío.
+
+**Mínimo para lanzar:** estas plantillas + el canal de correo por marca definido. Status page =
+mejora futura.
