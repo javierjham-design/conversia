@@ -458,6 +458,11 @@ model SupportTicket {
   message              String
   url                  String? // página desde donde se reportó
   status               String    @default("open") // open | resolved
+  // Código legible del ticket (CV-XXXX) para el widget y la continuidad por WhatsApp (F7).
+  code                 String?   @unique
+  // Hilo de la conversación de soporte: [{ author: "user"|"team"|"agent", body, at }].
+  // JSON (no tabla aparte) para evitar RLS nueva; tamaño acotado por el widget.
+  thread               Json      @default("[]")
   // Conversación donde se atendió el ticket (futuro: bandeja de TuBot-tenant).
   routedConversationId String?   @map("routed_conversation_id")
   createdAt            DateTime  @default(now()) @map("created_at")
