@@ -35,6 +35,11 @@ export function mapClarivaEvent(
         : { status: "COMPLETED", publicEvent: "appointment.updated", trigger: null };
     case "patient.updated":
       return { status: null, publicEvent: null, trigger: null };
+    case "patient.treatment_pending":
+      // Asistió a la evaluación pero no inició el tratamiento. No es un evento de
+      // cita (no trae appointment.id): apunta a un CONTACTO por teléfono. Lo procesa
+      // una rama propia (como patient.updated); aquí solo se nombra el trigger.
+      return { status: null, publicEvent: null, trigger: "treatment_pending" };
     default:
       return { status: null, publicEvent: null, trigger: null };
   }
@@ -72,6 +77,37 @@ export async function processClarivaWebhook(
       if (payload.email && !contact.email) upd.email = payload.email;
       if (Object.keys(upd).length) await tx.contact.update({ where: { id: contact.id }, data: upd });
       return null;
+    }
+
+    if (event === "patient.treatment_pending") {
+      // Recaptura de tratamiento: NO es una cita. Resuelve/crea el contacto por
+      // teléfono y marca el resultado para despachar el trigger fuera del tx.
+      const phone = geoFromPhone(String(payload.patient?.phone ?? payload.phone ?? "")).phone;
+      if (!phone) return null;
+      let contact = await tx.contact.findFirst({ where: { phone, deletedAt: null } });
+      if (!contact) {
+        contact = await tx.contact.create({
+          data: {
+            organizationId,
+            phone,
+            firstName: payload.patient?.firstName ?? null,
+            lastName: payload.patient?.lastName ?? null,
+            source: "clariva",
+            createdVia: "integration",
+            acquisitionSource: "organic",
+          },
+        });
+      }
+      return {
+        treatmentPending: true as const,
+        contactId: contact.id,
+        data: {
+          source: "clariva",
+          planId: payload.planId ?? null,
+          planValue: payload.planValue ?? null,
+          serviceName: payload.serviceName ?? null,
+        },
+      };
     }
 
     // Eventos de cita: upsert de la proyección por (provider, externalId).
@@ -149,6 +185,22 @@ export async function processClarivaWebhook(
   });
 
   if (!result) return;
+
+  // Recaptura de tratamiento: dispara el trigger sobre el contacto (sin cita ni
+  // sync de calendario). El workflow C lo escucha.
+  if ("treatmentPending" in result) {
+    const { enqueueHubspotContact } = await import("./hubspot.js");
+    await enqueueHubspotContact(organizationId, result.contactId);
+    await dispatchEvent({
+      organizationId,
+      type: "treatment_pending",
+      contactId: result.contactId,
+      data: result.data,
+      occurredAt,
+    });
+    return;
+  }
+
   // Espejo a Google Calendar (si el tenant lo activó); cancelación borra el evento.
   const { enqueueCalendarSync } = await import("./google-calendar.js");
   await enqueueCalendarSync(organizationId, result.appointmentId, mapped.status === "CANCELLED" ? "cancel" : "upsert");

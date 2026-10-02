@@ -59,4 +59,12 @@ describe("mapClarivaEvent", () => {
     expect(mapClarivaEvent("patient.updated", {})).toEqual({ status: null, publicEvent: null, trigger: null });
     expect(mapClarivaEvent("otro.evento", {})).toEqual({ status: null, publicEvent: null, trigger: null });
   });
+
+  it("patient.treatment_pending → sin status/publicEvent, trigger treatment_pending", () => {
+    expect(mapClarivaEvent("patient.treatment_pending", {})).toEqual({
+      status: null,
+      publicEvent: null,
+      trigger: "treatment_pending",
+    });
+  });
 });

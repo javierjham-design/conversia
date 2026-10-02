@@ -313,6 +313,7 @@ export const TRIGGER_TYPES = [
   "appointment_cancelled",
   "appointment_upcoming",
   "no_show",
+  "treatment_pending",
   "no_reply_timeout",
   "webhook_received",
   "scheduled",

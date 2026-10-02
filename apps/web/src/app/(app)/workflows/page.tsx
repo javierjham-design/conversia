@@ -38,6 +38,8 @@ const TRIGGER_LABELS: Record<string, string> = {
   webhook_received: "Webhook entrante",
   conversation_closed: "Conversación cerrada",
   appointment_upcoming: "Recordatorio de cita",
+  no_show: "Inasistencia (no-show)",
+  treatment_pending: "Tratamiento pendiente (Cláriva)",
   missed_call: "Llamada perdida",
 };
 
