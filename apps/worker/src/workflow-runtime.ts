@@ -661,6 +661,15 @@ function makeDeps(): EngineDeps {
           return reply === null; // true = NO respondió
         });
       }
+      if (kind === "patient_is_new" && ctx.contactId) {
+        // Nuevo = menos de N citas ATENDIDAS (COMPLETED) en la proyección local.
+        // Gatea la recaptura a primeras visitas (no persigue a pacientes recurrentes).
+        const max = Number(config.maxCompleted ?? 2);
+        return withTenant(ctx.organizationId, async (tx) => {
+          const n = await tx.appointment.count({ where: { contactId: ctx.contactId!, status: "COMPLETED" } });
+          return n < max; // true = es nuevo → sigue la recaptura
+        });
+      }
       // Condición por defecto/desconocida: false (rama segura)
       return false;
     },

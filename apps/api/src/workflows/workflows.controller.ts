@@ -57,6 +57,8 @@ const TRIGGER_CATALOG = [
   { type: "appointment_rescheduled", label: "Cita reprogramada", description: "Al reprogramarse una cita — el recordatorio se re-agenda solo" },
   { type: "appointment_cancelled", label: "Cita cancelada", description: "Al cancelarse una cita — cancela el recordatorio pendiente" },
   { type: "appointment_upcoming", label: "Recordatorio de cita", description: "X horas antes de una cita; respeta el horario de atención", conditions: ["hoursBefore"] },
+  { type: "no_show", label: "Inasistencia (no-show)", description: "El paciente no asistió a su cita — ideal para recaptura/reagendar" },
+  { type: "treatment_pending", label: "Tratamiento pendiente (Cláriva)", description: "El paciente asistió a la evaluación pero no inició su tratamiento" },
   { type: "manual", label: "Disparo manual", description: "Se ejecuta a mano desde la bandeja o la lista de contactos" },
   { type: "link_scan", label: "Enlace / Código QR", description: "Genera un enlace (y QR) con un mensaje predefinido; al enviarlo, arranca este flujo. Para carteles, redes o el local.", conditions: ["code"] },
   // Próximamente (estructura lista; falta la fuente del evento):
