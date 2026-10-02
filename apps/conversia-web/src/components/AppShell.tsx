@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, Settings, Users } from "lucide-react";
+import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, Radio, Settings, Users } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 
 /**
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/conversaciones", label: "Conversaciones", Icon: MessageCircle },
   { href: "/agenda", label: "Agenda", Icon: CalendarDays },
   { href: "/clientes", label: "Clientes", Icon: Users },
+  { href: "/canales", label: "Canales", Icon: Radio },
   { href: "/cobros", label: "Cobros", Icon: CreditCard },
   { href: "/ajustes", label: "Ajustes", Icon: Settings },
 ];

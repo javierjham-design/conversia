@@ -134,4 +134,18 @@ export class OnboardingController {
     const result = await this.vertical.install(ctx.organizationId, parsed.data.key, { source: "tenant" });
     return { ok: true, ...result };
   }
+
+  /** Canales del tenant para SU pantalla: conexiones reales + los configurados (intents). */
+  @Get("channels")
+  async channels() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const [org, connections] = await Promise.all([
+        tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
+        tx.channelConnection.findMany({ select: { id: true, type: true, name: true, status: true } }),
+      ]);
+      const intents = (((org?.settings as Record<string, any>) ?? {}).channels ?? []) as { type: string; status: string }[];
+      return { connections, intents };
+    });
+  }
 }
