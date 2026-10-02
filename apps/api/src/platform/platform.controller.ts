@@ -530,6 +530,84 @@ export class PlatformController {
     return { ok: true, model: parsed.data.model ?? null };
   }
 
+  /** Detalle de UN agente del tenant (prompt/tools/estado de la versión vigente) para editar. */
+  @Get("organizations/:id/agents/:agentId")
+  async getAgent(@Param("id") id: string, @Param("agentId") agentId: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const db = this.prisma.admin;
+    const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
+    if (!agent) throw new NotFoundException("Agente no encontrado");
+    const version = agent.currentVersionId
+      ? await db.agentVersion.findUnique({ where: { id: agent.currentVersionId } })
+      : await db.agentVersion.findFirst({ where: { agentId }, orderBy: { version: "desc" } });
+    return {
+      id: agent.id,
+      slug: agent.slug,
+      name: agent.name,
+      kind: agent.kind,
+      active: agent.active,
+      systemPrompt: version?.systemPrompt ?? "",
+      tools: Array.isArray(version?.tools) ? version!.tools : [],
+      config: (version?.config ?? {}) as Record<string, unknown>,
+      status: version?.status ?? null,
+      version: version?.version ?? null,
+    };
+  }
+
+  /** Edita el system prompt (y opcionalmente las tools) del agente: publica la versión vigente. */
+  @Post("organizations/:id/agents/:agentId/prompt")
+  async setAgentPrompt(@Param("id") id: string, @Param("agentId") agentId: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = z.object({ systemPrompt: z.string().min(1).max(20000), tools: z.array(z.string().max(60)).max(40).optional() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("systemPrompt requerido");
+    const db = this.prisma.admin;
+    const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
+    if (!agent) throw new NotFoundException("Agente no encontrado");
+    let version = await db.agentVersion.findFirst({ where: { agentId }, orderBy: { version: "desc" } });
+    const toolsPatch = parsed.data.tools ? { tools: parsed.data.tools } : {};
+    if (version) {
+      version = await db.agentVersion.update({
+        where: { id: version.id },
+        data: { systemPrompt: parsed.data.systemPrompt, status: "PUBLISHED", publishedAt: new Date(), ...toolsPatch },
+      });
+    } else {
+      version = await db.agentVersion.create({
+        data: { organizationId: id, agentId, version: 1, config: {}, tools: parsed.data.tools ?? [], systemPrompt: parsed.data.systemPrompt, status: "PUBLISHED", publishedAt: new Date() },
+      });
+    }
+    await db.agent.update({ where: { id: agentId }, data: { currentVersionId: version.id } });
+    await this.audit(req, "platform.agent.prompt", "agent", agentId, { organizationId: id });
+    return { ok: true };
+  }
+
+  /** Activa/desactiva un agente del tenant. */
+  @Post("organizations/:id/agents/:agentId/active")
+  async setAgentActive(@Param("id") id: string, @Param("agentId") agentId: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = z.object({ active: z.boolean() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("active requerido");
+    const db = this.prisma.admin;
+    const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
+    if (!agent) throw new NotFoundException("Agente no encontrado");
+    await db.agent.update({ where: { id: agentId }, data: { active: parsed.data.active } });
+    await this.audit(req, "platform.agent.active", "agent", agentId, { organizationId: id, active: parsed.data.active });
+    return { ok: true, active: parsed.data.active };
+  }
+
+  /** Catálogo COMPLETO de rubros para la consola (incluye beta): mayor versión por key. */
+  @Get("verticals")
+  async verticalsCatalog() {
+    const rows = await this.prisma.admin.verticalTemplate.findMany({ where: { active: true }, orderBy: [{ wave: "asc" }, { key: "asc" }, { version: "desc" }] });
+    const seen = new Set<string>();
+    const out: { key: string; name: string; wave: number; status: string; variant: string; requiresFeature: string[] }[] = [];
+    for (const r of rows) {
+      if (seen.has(r.key)) continue;
+      seen.add(r.key);
+      out.push({ key: r.key, name: r.name, wave: r.wave, status: r.status, variant: r.variant, requiresFeature: Array.isArray(r.requiresFeature) ? (r.requiresFeature as string[]) : [] });
+    }
+    return out;
+  }
+
   // ------------------- Cuenta del administrador del tenant -------------------
 
   /** Restablece la contraseña del admin y devuelve la temporal (mostrada una vez). */
