@@ -15,7 +15,10 @@ const COUNTRIES = [
   { code: "ES", label: "España" },
   { code: "US", label: "Estados Unidos" },
 ];
-const VERTICALS = [
+type Vertical = { key: string; emoji: string; label: string; desc: string };
+// Fallback (si el endpoint público no responde). La fuente real es GET /public/verticals
+// (solo ola 1 active); así el Super Admin activa rubros por dato sin deploy.
+const FALLBACK_VERTICALS: Vertical[] = [
   { key: "dental", emoji: "🦷", label: "Clínica dental", desc: "Odontología y consultas dentales" },
   { key: "centro_medico", emoji: "🩺", label: "Centro médico", desc: "Consultas y especialidades médicas" },
   { key: "estetica", emoji: "🌿", label: "Centro de estética", desc: "Faciales, corporales y depilación" },
@@ -31,16 +34,26 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [country, setCountry] = useState("CL");
+  const [verticals, setVerticals] = useState<Vertical[]>(FALLBACK_VERTICALS);
   const [vertical, setVertical] = useState("dental");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Rubros disponibles desde el catálogo (solo ola 1 active); fallback a la lista local.
+  useEffect(() => {
+    api<{ key: string; name: string; emoji: string; tagline: string }[]>("/public/verticals")
+      .then((rows) => {
+        if (rows.length) setVerticals(rows.map((r) => ({ key: r.key, emoji: r.emoji || "✨", label: r.name, desc: r.tagline || "" })));
+      })
+      .catch(() => {});
+  }, []);
 
   // Autoservicio (D7): el bot comercial manda /registro?vertical=barberia → preselecciona
   // el rubro. También acepta ?country= para el acento/moneda.
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
     const v = qs.get("vertical");
-    if (v && VERTICALS.some((x) => x.key === v)) setVertical(v);
+    if (v) setVertical(v);
     const c = qs.get("country")?.toUpperCase();
     if (c && COUNTRIES.some((x) => x.code === c)) {
       setCountry(c);
@@ -110,7 +123,7 @@ export default function Register() {
 
         <p style={{ ...label, marginBottom: 2 }}>¿Cuál es tu rubro?</p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
-          {VERTICALS.map((v) => {
+          {verticals.map((v) => {
             const on = vertical === v.key;
             return (
               <button

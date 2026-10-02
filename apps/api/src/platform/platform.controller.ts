@@ -575,7 +575,7 @@ export class PlatformController {
     await this.assertOrgBrand(req, id);
     const parsed = z.object({ key: z.string().trim().min(2).max(40), version: z.number().int().positive().optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("key requerido (version opcional)");
-    const result = await this.vertical.install(id, parsed.data.key, parsed.data.version);
+    const result = await this.vertical.install(id, parsed.data.key, { version: parsed.data.version, source: "platform" });
     await this.audit(req, "platform.org.vertical_install", "organization", id, result);
     return { ok: true, ...result };
   }

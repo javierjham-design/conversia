@@ -156,7 +156,7 @@ export class AuthService {
     // Best-effort: si falla, el usuario queda creado y puede instalarlo desde onboarding.
     if (input.vertical) {
       try {
-        await this.vertical.install(result.org.id, input.vertical);
+        await this.vertical.install(result.org.id, input.vertical, { source: "registration" });
       } catch (e) {
         console.error(`✖ No se pudo instalar el paquete vertical "${input.vertical}" en ${result.org.id}:`, (e as Error).message);
       }

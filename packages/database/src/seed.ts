@@ -220,15 +220,16 @@ async function main() {
   // Catálogo de PAQUETES VERTICALES (globales, organizationId NULL). Idempotente por
   // (key, version). Los instala el motor de F2 en cada tenant (borrador editable).
   const verticalsRaw = readFileSync(join(__dirname, "..", "seeds", "vertical-templates.json"), "utf-8");
-  const verticals = JSON.parse(verticalsRaw) as Array<{ key: string; version: number; name: string; definition: any }>;
+  const verticals = JSON.parse(verticalsRaw) as Array<{ key: string; version: number; name: string; definition: any; wave?: number; status?: string; variant?: string; requiresFeature?: string[] }>;
   for (const v of verticals) {
+    const meta = { wave: v.wave ?? 1, status: v.status ?? "active", variant: v.variant ?? "citas", requiresFeature: (v.requiresFeature ?? []) as unknown as object };
     await prisma.verticalTemplate.upsert({
       where: { key_version: { key: v.key, version: v.version } },
-      update: { name: v.name, definition: v.definition, active: true },
-      create: { key: v.key, version: v.version, name: v.name, definition: v.definition, active: true },
+      update: { name: v.name, definition: v.definition, active: true, ...meta },
+      create: { key: v.key, version: v.version, name: v.name, definition: v.definition, active: true, ...meta },
     });
   }
-  console.log(`✔ ${verticals.length} paquetes verticales (dental, barberia, generico).`);
+  console.log(`✔ ${verticals.length} paquetes verticales del catálogo.`);
 
   // Administrador de PLATAFORMA (super-admin). Identidad separada de los tenants.
   const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "conversia-platform-dev";

@@ -32,6 +32,28 @@ export class PublicController {
     }));
   }
 
+  /**
+   * Rubros disponibles en el REGISTRO público (catálogo CONVERSIA_RUBROS.md): SOLO los
+   * de ola 1 con status active. El Super Admin activa los demás por dato (wave/status),
+   * sin deploy, y aquí aparecen solos. Devuelve la mayor versión activa por key.
+   */
+  @Get("verticals")
+  async verticals() {
+    const rows = await this.prisma.admin.verticalTemplate.findMany({
+      where: { active: true, status: "active", wave: 1 },
+      orderBy: [{ key: "asc" }, { version: "desc" }],
+    });
+    const seen = new Set<string>();
+    const out: { key: string; name: string; emoji: string; tagline: string; variant: string }[] = [];
+    for (const r of rows) {
+      if (seen.has(r.key)) continue; // nos quedamos con la mayor versión (orderBy desc)
+      seen.add(r.key);
+      const ui = (((r.definition ?? {}) as Record<string, any>).ui ?? {}) as { emoji?: string; tagline?: string };
+      out.push({ key: r.key, name: r.name, emoji: ui.emoji ?? "✨", tagline: ui.tagline ?? "", variant: r.variant });
+    }
+    return out;
+  }
+
   /** Solicitud de demo desde la web ("Empezar"/"Solicitar demo"). Rate-limited. */
   @Post("demo-request")
   async demoRequest(@Body() body: unknown) {
