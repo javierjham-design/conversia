@@ -60,7 +60,7 @@ export default function Login() {
           {loading ? "Entrando…" : "Entrar"}
         </button>
         <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 16 }}>
-          ¿No tienes cuenta? <a href="/register" className="text-accent" style={{ textDecoration: "none" }}>Crear cuenta</a>
+          ¿No tienes cuenta? <a href="/registro" className="text-accent" style={{ textDecoration: "none" }}>Crear cuenta</a>
         </p>
       </form>
     </main>

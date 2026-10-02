@@ -34,6 +34,11 @@ const nextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // El alta de autoservicio (D7) y el bot comercial usan /registro (ES). Mantener /register
+  // como alias por compatibilidad.
+  async redirects() {
+    return [{ source: "/register", destination: "/registro", permanent: true }];
+  },
 };
 
 export default nextConfig;
