@@ -34,6 +34,8 @@ export function startScheduler(): () => void {
           await startWorkflowById(job.organizationId, String(p.workflowId), {
             conversationId: p.conversationId ? String(p.conversationId) : undefined,
             contactId: p.contactId ? String(p.contactId) : undefined,
+            // Ata el recordatorio a la cita EXACTA que lo programó (no a la más próxima).
+            appointmentExternalId: p.appointmentExternalId ? String(p.appointmentExternalId) : undefined,
           });
         }
         await prisma.scheduledJob.update({

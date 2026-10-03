@@ -10,6 +10,11 @@ export async function resolveTemplateParams(
   organizationId: string,
   contactId: string | null,
   fields: string[],
+  // `appointmentExternalId`: ata appointment.* a ESA cita exacta (p.ej. el
+  // recordatorio de UNA sesión), no a la más próxima del contacto. Sin él (o si
+  // esa cita ya no está en la proyección) cae al comportamiento previo: la
+  // próxima cita PENDING/CONFIRMED — así nunca sale vacío.
+  opts?: { appointmentExternalId?: string | null },
 ): Promise<string[]> {
   if (!fields.length) return [];
   return withTenant(organizationId, async (tx) => {
@@ -18,12 +23,21 @@ export async function resolveTemplateParams(
       tx.organization.findUnique({ where: { id: organizationId }, select: { name: true, timezone: true } }),
     ]);
     const needsAppointment = fields.some((f) => f.startsWith("appointment."));
-    const appointment = needsAppointment && contactId
-      ? await tx.appointment.findFirst({
+    let appointment = null;
+    if (needsAppointment && contactId) {
+      if (opts?.appointmentExternalId) {
+        appointment = await tx.appointment.findFirst({
+          where: { contactId, externalId: opts.appointmentExternalId },
+        });
+      }
+      // Fallback: si no vino la cita exacta (o no está en la proyección), la próxima.
+      if (!appointment) {
+        appointment = await tx.appointment.findFirst({
           where: { contactId, startsAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED"] } },
           orderBy: { startsAt: "asc" },
-        })
-      : null;
+        });
+      }
+    }
     const [service, professional] = await Promise.all([
       appointment?.serviceId ? tx.service.findUnique({ where: { id: appointment.serviceId } }) : Promise.resolve(null),
       appointment?.professionalId ? tx.professional.findUnique({ where: { id: appointment.professionalId } }) : Promise.resolve(null),
