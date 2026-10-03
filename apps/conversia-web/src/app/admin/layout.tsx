@@ -54,7 +54,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         setReady(true);
       })
       .catch(() => {
-        /* 401 → padmin ya redirige al login */
+        // Cualquier fallo del guard (401 por sesión expirada, red, etc.): NO dejar la consola
+        // pegada en "Cargando…" — limpiar token y volver al login.
+        if (!alive) return;
+        clearPlatformToken();
+        router.replace("/admin/login");
       });
     return () => {
       alive = false;
