@@ -425,7 +425,10 @@ function makeDeps(): EngineDeps {
       }
       const body = (data.template.body as Record<string, any>) ?? {};
       const fields: string[] = Array.isArray(body.variableFields) ? body.variableFields : [];
-      const params = await resolveTemplateParams(ctx.organizationId, data.conversation.contactId, fields);
+      // appointment.* se ata a la cita EXACTA del recordatorio si el run la trae
+      // (reservada en variables.__appointmentExternalId); si no, a la más próxima.
+      const apptExternalId = ctx.variables?.__appointmentExternalId || undefined;
+      const params = await resolveTemplateParams(ctx.organizationId, data.conversation.contactId, fields, { appointmentExternalId: apptExternalId });
       const rendered = renderTemplateBody(body.components ?? [], params);
 
       const message = await withTenant(ctx.organizationId, async (tx) => {
@@ -802,7 +805,7 @@ export async function startWorkflowByName(
 export async function startWorkflowById(
   organizationId: string,
   workflowId: string,
-  target: { conversationId?: string; contactId?: string },
+  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string },
 ): Promise<{ ok: boolean; error?: string }> {
   const wf = await withTenant(organizationId, (tx) =>
     tx.workflow.findFirst({
@@ -822,7 +825,7 @@ async function runWorkflowVersion(
   workflowId: string,
   versionId: string,
   definition: unknown,
-  target: { conversationId?: string; contactId?: string },
+  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string },
 ): Promise<{ ok: boolean; error?: string }> {
   const parsed = workflowDefinitionSchema.safeParse(definition);
   if (!parsed.success) return { ok: false, error: "La definición del flujo es inválida" };
@@ -831,6 +834,11 @@ async function runWorkflowVersion(
   if (!start) return { ok: false, error: "El flujo no tiene nodo inicial" };
 
   const idempotencyKey = `manual:${workflowId}:${target.conversationId ?? target.contactId ?? "global"}:${Date.now()}`;
+  // Cita exacta del recordatorio: reservada en variables (persiste → el retry la
+  // conserva); sendTemplate la lee para atar appointment.* a ESA cita.
+  const vars: Record<string, string> = target.appointmentExternalId
+    ? { __appointmentExternalId: target.appointmentExternalId }
+    : {};
   const run = await withTenant(organizationId, (tx) =>
     tx.workflowRun.create({
       data: {
@@ -842,7 +850,7 @@ async function runWorkflowVersion(
         conversationId: target.conversationId,
         triggerEvent: { manual: true },
         idempotencyKey,
-        variables: {},
+        variables: vars,
       },
     }),
   );
@@ -853,7 +861,7 @@ async function runWorkflowVersion(
     versionId,
     conversationId: target.conversationId,
     contactId: target.contactId,
-    variables: {},
+    variables: vars,
   };
   const result = await executeFrom(deps, ctx, def, start.id);
   await finishRun(organizationId, run.id, result);
