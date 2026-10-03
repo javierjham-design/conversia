@@ -567,9 +567,13 @@ export class PlatformController {
       return { ok: true, alreadyDelivered: true, deliveredAt: conversia.deliveredAt ?? null };
     }
     const deliveredAt = new Date().toISOString();
-    const nextSettings = { ...settings, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
+    // F-1 — registrar la permanencia al entregar (base del enforcement manual de 6 meses,
+    // CICLO_VIDA_CLIENTE §3). No sobreescribe un contrato ya existente.
+    const contract = (settings.contract as Record<string, any>) ?? {};
+    const nextContract = contract.startedAt ? contract : { commitmentMonths: 6, startedAt: deliveredAt };
+    const nextSettings = { ...settings, contract: nextContract, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
     await db.organization.update({ where: { id }, data: { settings: nextSettings } });
-    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt });
+    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt, commitmentMonths: nextContract.commitmentMonths });
     return { ok: true, deliveredAt };
   }
 

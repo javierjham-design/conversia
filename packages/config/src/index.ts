@@ -193,6 +193,13 @@ export function getEnv(): Env {
       if (cached.CREDENTIALS_ENCRYPTION_KEY === "0".repeat(64)) {
         throw new Error("CREDENTIALS_ENCRYPTION_KEY debe definirse en producción");
       }
+      // M1 — avisos de seguridad en prod (NO crashean el arranque para no tumbar TuBot,
+      // pero deben resolverse): envs que en su default dejan agujeros conocidos.
+      const warn = (m: string) => console.error(`⚠️  [config/prod] ${m}`);
+      if (!cached.META_APP_SECRET) warn("META_APP_SECRET vacío → la firma del webhook de WhatsApp NO se verifica. Configúralo.");
+      if (cached.MOCK_INBOUND_TOKEN === "dev-mock-inbound-token") warn("MOCK_INBOUND_TOKEN en su default público → inyección de inbound simulado posible. Cámbialo.");
+      if (!cached.SUPER_ADMIN_SESSION_SECRET) warn("SUPER_ADMIN_SESSION_SECRET vacío → el token de plataforma comparte secreto con los de tenant. Define uno separado.");
+      if (!cached.SUPER_ADMIN_REQUIRE_MFA) warn("SUPER_ADMIN_REQUIRE_MFA=false → MFA deshabilitado para super admin y operador (bloqueante de auditoría).");
     }
   }
   return cached;

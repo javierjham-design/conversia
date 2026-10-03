@@ -95,3 +95,12 @@ Hetzner/AWS con: Postgres gestionado (RDS/Cloud SQL) + réplicas, Redis gestiona
 ## CI/CD
 
 GitHub Actions (`.github/workflows/ci.yml`): install → prisma generate → build → typecheck → test. Deploy: conectar Railway al repo (auto-deploy por rama) + job de migraciones. Pendiente: entorno staging separado + smoke test post-deploy.
+
+## Rollback de deploy (A8)
+
+Deploy = merge a `main` (api/worker autodespliegan de GitHub) + `railway up --service conversia-web --ci` (web). Para REVERTIR una versión de código:
+
+1. **Vía dashboard de Railway (lo más rápido):** servicio → *Deployments* → en el deploy ANTERIOR sano, botón **"Rollback"** (o "Redeploy"). Hacerlo en **api y worker** (comparten el repo) y, si la web regresó, `railway up` del commit anterior.
+2. **Vía git:** `git revert <sha>` del merge problemático → push a `main` → autodespliega la versión revertida (preferible a `reset --hard` en una rama protegida).
+3. **Regla de ORO con migraciones:** api + worker + web comparten la MISMA base. Un rollback de CÓDIGO con una migración ya aplicada solo es seguro si las migraciones son **aditivas/compatibles hacia atrás** (política vigente; por eso el repo evita DROP/renames en caliente). Para revertir el ESQUEMA, ver `DISASTER_RECOVERY.md §C`.
+4. **Tras el rollback:** smoke test (`/health/status`, `/health/fuse`, login, un envío de prueba) y registrar en `docs/PROGRESS.md`.

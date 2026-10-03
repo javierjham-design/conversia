@@ -40,14 +40,14 @@ Separación **real y server-side** entre plataforma y tenant:
 
 ---
 
-## 3. Autenticación reforzada (Fase A — pendiente de implementar)
+## 3. Autenticación reforzada (IMPLEMENTADO en su mayoría)
 
-- **MFA TOTP obligatorio**: campo `totpSecret` (cifrado) + `mfaEnabledAt` en `platform_admins`; enrolamiento con QR (issuer `SUPER_ADMIN_MFA_ISSUER`), verificación de 6 dígitos en login, **códigos de recuperación** de un solo uso (hasheados).
-- **Secreto de sesión separado**: `SUPER_ADMIN_SESSION_SECRET` distinto de `JWT_SECRET` para firmar el token de plataforma.
-- **Gestión de sesiones**: tabla `platform_admin_sessions` (jti, IP, UA, creada, última actividad, revocada) → sesiones visibles + cierre remoto + expiración por inactividad + expiración absoluta + revocación inmediata (validar jti contra la tabla en el guard).
-- **Reautenticación** para acciones críticas (ver §5).
-- Cookies HttpOnly/Secure/SameSite si se migra de `localStorage` a cookie de sesión (recomendado).
-- Historial de accesos (IP, país, navegador, dispositivo, resultado) + alertas de inicio de sesión.
+- **MFA TOTP obligatorio** ✅ IMPLEMENTADO: `mfaSecret` (cifrado) + `mfaEnabledAt` en `platform_admins`; enrolamiento con QR (issuer `SUPER_ADMIN_MFA_ISSUER`), verificación de 6 dígitos en login, **códigos de recuperación** de un solo uso (hasheados). El `PlatformGuard` bloquea todo `/platform/*` (salvo `/platform/auth/*`) si `SUPER_ADMIN_REQUIRE_MFA` y el admin no enroló MFA — aplica a super admin **y operador** (F10). ⚠️ Si `SUPER_ADMIN_REQUIRE_MFA=false`, se apaga global → el arranque lo AVISA (config/prod warn, F-4); confirmar que está en `true` en prod.
+- **Secreto de sesión separado** ✅ IMPLEMENTADO: `SUPER_ADMIN_SESSION_SECRET` (cae a `JWT_SECRET` si falta → el arranque lo avisa en prod).
+- **Gestión de sesiones** ✅ IMPLEMENTADO: sesiones en Redis (jti), revocables (logout/`revokeAllForAdmin`), expiración por `SUPER_ADMIN_SESSION_HOURS`; el guard valida el jti.
+- **Reautenticación** para acciones críticas: endpoint `/platform/auth/reauth` (step-up) existe; falta atarlo a cada acción crítica (ver §5).
+- Cookies HttpOnly/Secure/SameSite si se migra de `localStorage` a cookie de sesión (pendiente, recomendado).
+- Historial de accesos (IP, país, navegador, dispositivo) + alertas de inicio de sesión (pendiente).
 
 ## 4. Rate limiting y anti-abuso (PARCIAL)
 
