@@ -1504,18 +1504,25 @@ export class PlatformController {
 
   /** Pesos por categoría (A: 1/1/1 por cantidad · B: marketing>1 ponderado). */
   @Get("wallet-weights")
-  async walletWeights() {
-    return this.readWalletWeights();
+  async walletWeights(@Req() req: PlatformRequest) {
+    // A5 — pesos POR MARCA (misma clave que lee el worker: walletWeights / walletWeights:conversia).
+    return this.readWalletWeights(this.reqBrand(req));
   }
 
   @Patch("wallet-weights")
   async setWalletWeights(@Body() body: unknown, @Req() req: PlatformRequest) {
     const parsed = z
-      .object({ utility: z.number().int().min(1).max(100), authentication: z.number().int().min(1).max(100), marketing: z.number().int().min(1).max(100) })
+      .object({
+        utility: z.number().int().min(1).max(100),
+        authentication: z.number().int().min(1).max(100),
+        marketing: z.number().int().min(1).max(100),
+        service: z.number().int().min(1).max(100), // A5 — mensajes de servicio (sobre el free tier de Meta)
+      })
       .safeParse(body);
-    if (!parsed.success) throw new BadRequestException("Pesos inválidos (enteros ≥ 1)");
-    await this.prisma.admin.platformSetting.upsert({ where: { key: "walletWeights" }, update: { value: JSON.stringify(parsed.data) }, create: { key: "walletWeights", value: JSON.stringify(parsed.data) } });
-    await this.audit(req, "platform.wallet_weights_update", "platform_setting", "walletWeights", parsed.data);
+    if (!parsed.success) throw new BadRequestException("Pesos inválidos (enteros ≥ 1): utility, authentication, marketing, service");
+    const key = this.reqBrand(req) === "conversia" ? "walletWeights:conversia" : "walletWeights";
+    await this.prisma.admin.platformSetting.upsert({ where: { key }, update: { value: JSON.stringify(parsed.data) }, create: { key, value: JSON.stringify(parsed.data) } });
+    await this.audit(req, "platform.wallet_weights_update", "platform_setting", key, parsed.data);
     return parsed.data;
   }
 
@@ -1703,15 +1710,15 @@ export class PlatformController {
     return { month: monthStart.toISOString().slice(0, 7), rows };
   }
 
-  /** Catálogo de paquetes (para el CRUD del Super Admin). */
+  /** Catálogo de paquetes de la MARCA del super admin (A4 — no mezcla marcas). */
   @Get("packages")
-  packages() {
-    return this.prisma.admin.messagePackage.findMany({ orderBy: { order: "asc" } });
+  packages(@Req() req: PlatformRequest) {
+    return this.prisma.admin.messagePackage.findMany({ where: { brand: this.reqBrand(req) }, orderBy: { order: "asc" } });
   }
 
   @Post("packages")
   async createPackage(@Body() body: unknown, @Req() req: PlatformRequest) {
-    const d = this.parsePackage(body);
+    const d = { ...this.parsePackage(body), brand: this.reqBrand(req) }; // A4 — el pack nace en la marca del admin
     const pkg = await this.prisma.admin.messagePackage.create({ data: d });
     await this.audit(req, "platform.package_create", "package", pkg.id, d);
     return pkg;
@@ -1747,13 +1754,14 @@ export class PlatformController {
     return r.data as any;
   }
 
-  private async readWalletWeights(): Promise<{ utility: number; authentication: number; marketing: number }> {
-    const def = { utility: 1, authentication: 1, marketing: 1 };
+  private async readWalletWeights(brand = "tubot"): Promise<{ utility: number; authentication: number; marketing: number; service: number }> {
+    const def = { utility: 1, authentication: 1, marketing: 1, service: 1 };
+    const key = brand === "conversia" ? "walletWeights:conversia" : "walletWeights";
     try {
-      const row = await this.prisma.admin.platformSetting.findUnique({ where: { key: "walletWeights" } });
+      const row = await this.prisma.admin.platformSetting.findUnique({ where: { key } });
       if (row) {
         const p = JSON.parse(row.value);
-        return { utility: Number(p.utility) || 1, authentication: Number(p.authentication) || 1, marketing: Number(p.marketing) || 1 };
+        return { utility: Number(p.utility) || 1, authentication: Number(p.authentication) || 1, marketing: Number(p.marketing) || 1, service: Number(p.service) || 1 };
       }
     } catch {
       /* defaults */

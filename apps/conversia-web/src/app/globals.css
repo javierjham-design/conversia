@@ -107,10 +107,42 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
 }
+/* C3 — luz ambiental: 2 blobs del acento con deriva lenta (solo decorativa, detrás de todo). */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  width: 44vmax;
+  height: 44vmax;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+}
+body::before {
+  background: var(--acc-glow);
+  top: -16vmax;
+  left: -12vmax;
+  animation: drift1 20s ease-in-out infinite alternate;
+}
+body::after {
+  background: var(--acc-dim);
+  bottom: -18vmax;
+  right: -12vmax;
+  animation: drift2 24s ease-in-out infinite alternate;
+}
+@keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(4vmax, 3vmax) scale(1.08); } }
+@keyframes drift2 { from { transform: translate(0, 0) scale(1); } to { transform: translate(-5vmax, -3vmax) scale(1.1); } }
+@keyframes pulseDot { 0% { box-shadow: 0 0 0 0 var(--ok); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
 @media (prefers-reduced-motion: reduce) {
   body {
     background: var(--bg);
   }
+  body::before,
+  body::after { animation: none; }
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }
 
 /* Serif de display para marca, saludos y titulares (Fraunces; fallback serif). */

@@ -333,9 +333,12 @@ export class BillingController {
   @Get("wallet")
   async wallet() {
     const ctx = requireContext();
+    // A4 — solo los sobres de la MARCA del tenant (sin filtro = fuga de packs/pricing de la otra marca).
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+    const brand = brandOf(org).key;
     const [wallet, packages] = await Promise.all([
       this.prisma.withTenant(ctx.organizationId, (tx) => tx.messageWallet.findUnique({ where: { organizationId: ctx.organizationId } })),
-      this.prisma.admin.messagePackage.findMany({ where: { active: true }, orderBy: { order: "asc" } }),
+      this.prisma.admin.messagePackage.findMany({ where: { active: true, brand }, orderBy: { order: "asc" } }),
     ]);
     const balance = wallet?.balance ?? 0;
     const included = wallet?.includedPerPeriod ?? 0;

@@ -2164,7 +2164,9 @@ model MessagePackage {
   priceUsd Decimal @map("price_usd") @db.Decimal(10, 2)
   active   Boolean @default(true)
   order    Int     @default(0)
+  brand    String  @default("tubot") // A4 — sobre/pack POR MARCA: una org solo ve los de su marca
 
+  @@index([brand])
   @@map("message_packages")
 }
 

@@ -64,8 +64,16 @@ export async function loadProfessionals(db: DbClient, orgId: string, items: any[
   for (const p of items ?? []) {
     let prof = await db.professional.findFirst({ where: { organizationId: orgId, name: p.name } });
     if (!prof) {
+      // A2 — meta con horario (lo lee la agenda NATIVA: Professional.meta.workingHours) + isExample
+      // (la consola los muestra como "reemplazar en implementación") + clinicIds + duración por defecto.
+      const clinicIds = (p.clinics ?? []).map((s: string) => clinicsBySlug[s]).filter(Boolean);
+      const meta: Record<string, unknown> = { ...(p.meta ?? {}) };
+      if (p.workingHours ?? p.meta?.workingHours) meta.workingHours = p.workingHours ?? p.meta?.workingHours;
+      if (p.defaultDurationMin ?? p.meta?.defaultDurationMin) meta.defaultDurationMin = p.defaultDurationMin ?? p.meta?.defaultDurationMin;
+      if (clinicIds.length) meta.clinicIds = clinicIds;
+      if (p.isExample === true) meta.isExample = true;
       prof = await db.professional.create({
-        data: { organizationId: orgId, clinicId: Object.values(clinicsBySlug)[0] ?? null, name: p.name, specialty: p.specialty },
+        data: { organizationId: orgId, clinicId: clinicIds[0] ?? Object.values(clinicsBySlug)[0] ?? null, name: p.name, specialty: p.specialty, ...(Object.keys(meta).length ? { meta: meta as object } : {}) },
       });
     }
     for (const code of p.services ?? []) {
@@ -186,12 +194,29 @@ export async function loadChannel(db: DbClient, orgId: string, channel: any | un
  * agentes/flujos quedan en borrador). NO aplica horarios/vocabulario/módulos: eso lo
  * hace el instalador con industries.ts (ver apps/api).
  */
+/**
+ * A2 — para verticales de AGENDA sin profesionales en la plantilla, siembra UN recurso de
+ * ejemplo (isExample) con horario típico, para que la agenda sea demostrable al instalar y la
+ * consola lo muestre como "reemplazar en implementación". No pisa recursos ya creados.
+ */
+async function ensureExampleResource(db: DbClient, orgId: string, data: any, clinicsBySlug: Record<string, string>): Promise<void> {
+  const agendaOn = data?.modules?.agenda === true || !!data?.businessHours;
+  if (!agendaOn) return;
+  if ((await db.professional.count({ where: { organizationId: orgId } })) > 0) return;
+  const word = typeof data?.vocabulary?.professional === "string" ? data.vocabulary.professional : "Recurso";
+  const workingHours = [1, 2, 3, 4, 5].map((day) => ({ day, start: "09:00", end: "18:00" }));
+  await db.professional.create({
+    data: { organizationId: orgId, clinicId: Object.values(clinicsBySlug)[0] ?? null, name: `${word} de ejemplo`, meta: { workingHours, defaultDurationMin: 30, isExample: true } as object },
+  });
+}
+
 export async function loadVerticalData(db: DbClient, orgId: string, orgMeta: OrgMeta, data: any, opts: { publish: boolean }): Promise<void> {
   const clinicsBySlug = await loadClinics(db, orgId, data.clinics, orgMeta.timezone);
   await loadTeams(db, orgId, data.teams);
   await loadLeadStatuses(db, orgId, data.leadStatuses);
   const servicesByCode = await loadServices(db, orgId, data.services, orgMeta.currency);
   await loadProfessionals(db, orgId, data.professionals, clinicsBySlug, servicesByCode);
+  await ensureExampleResource(db, orgId, data, clinicsBySlug);
   await loadTags(db, orgId, data.tags);
   const agentsBySlug = await loadAgents(db, orgId, data.agents, opts);
   await loadWorkflows(db, orgId, data.workflows, opts);
