@@ -13,7 +13,7 @@ import {
 import type { Request } from "express";
 import * as bcrypt from "bcryptjs";
 import { z } from "zod";
-import { getEnv, brandFromOrigin } from "@conversia/config";
+import { getEnv, brandFromOrigin, ACCENTS } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { requireContext } from "../tenancy/context";
@@ -355,7 +355,11 @@ export class AuthController {
       .object({ accent: z.enum(ACCENT_PALETTE).optional() })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Preferencias inválidas");
-    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { settings: true } });
+    const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { settings: true, brand: true } });
+    // M6 — Conversia solo acepta los 6 acentos curados (Nocturna); el resto no tiene tokens de color.
+    if (parsed.data.accent && user?.brand === "conversia" && !ACCENTS.includes(parsed.data.accent as (typeof ACCENTS)[number])) {
+      throw new BadRequestException("Acento no disponible para esta marca");
+    }
     const current = (user?.settings as Record<string, unknown>) ?? {};
     const next = { ...current, ...(parsed.data.accent ? { accent: parsed.data.accent } : {}) };
     await this.prisma.admin.user.update({ where: { id: ctx.userId }, data: { settings: next as object } });

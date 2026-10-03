@@ -70,7 +70,7 @@ export default function Conversaciones() {
   selRef.current = sel;
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 759px)");
+    const mq = window.matchMedia("(max-width: 619px)"); // M8 — alineado con el riel/tabs (620)
     const on = () => setNarrow(mq.matches);
     on();
     mq.addEventListener("change", on);
@@ -312,6 +312,19 @@ export default function Conversaciones() {
                   ) : thread ? (
                     <span className="text-dim" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}><BotOff size={13} /> Manual</span>
                   ) : null}
+                  {thread ? (() => {
+                    // A11/W-3 — indicador de ventana de 24h (último INBOUND del hilo). Fuera de la
+                    // ventana Meta solo permite plantillas aprobadas; esto lo señala en la UI.
+                    const lastIn = [...thread.messages].reverse().find((m) => m.direction === "INBOUND");
+                    if (!lastIn) return null;
+                    const hrs = (Date.now() - new Date(lastIn.createdAt).getTime()) / 3_600_000;
+                    const open = hrs < 24;
+                    return (
+                      <span title={open ? "Dentro de la ventana de 24h: puedes responder con texto libre." : "Fuera de la ventana de 24h: solo plantillas aprobadas."} style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, color: open ? "var(--ok)" : "var(--warn)" }}>
+                        {open ? `🟢 24h · ${Math.max(0, Math.floor(24 - hrs))}h` : "🔒 fuera de 24h"}
+                      </span>
+                    );
+                  })() : null}
                   {thread ? (
                     <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                       <button

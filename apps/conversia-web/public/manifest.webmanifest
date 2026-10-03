@@ -1,0 +1,22 @@
+{
+  "name": "Conversia",
+  "short_name": "Conversia",
+  "description": "Tu negocio, atendido. Atención por WhatsApp con IA.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f2027",
+  "theme_color": "#0f2027",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Hoy", "short_name": "Hoy", "url": "/" },
+    { "name": "Conversaciones", "short_name": "Chats", "url": "/conversaciones" },
+    { "name": "Agenda", "short_name": "Agenda", "url": "/agenda" }
+  ]
+}
