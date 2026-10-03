@@ -229,7 +229,7 @@ export class BillingController {
     else await this.prisma.admin.subscription.create({ data: { organizationId: ctx.organizationId, status: "TRIALING", ...data } });
     let reg: { url: string; token: string };
     try {
-      reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${getEnv().WEB_URL}/billing?card=1` });
+      reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${brandOf(org).webUrl}/billing?card=1` });
     } catch (err) {
       // El comercio aún no tiene contratado "cobro automático" en Flow: error
       // claro y marcado para que el frontend caiga al checkout de pago único.
@@ -322,8 +322,10 @@ export class BillingController {
   private async startCollect(organizationId: string, subId: string, customerRef: string, amount: number, currency: string, planName: string, interval: string, kind: "auto" | "manual", attemptNumber: number) {
     const cfg = await this.flowCfg();
     const commerceOrder = `sub-${subId}-${Date.now()}`;
+    // F1/B2 — asunto y retorno por marca del tenant (no el panel de TuBot fijo).
+    const brand = brandOf(await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } }));
     await this.prisma.admin.paymentAttempt.create({ data: { organizationId, subscriptionId: subId, commerceOrder, amount, currency, kind, attemptNumber, status: "pending", provider: "flow" } });
-    const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: `${getEnv().WEB_URL}/billing` });
+    const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `${brand.paymentSubjectPrefix} · Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: `${brand.webUrl}/billing` });
     await this.prisma.admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
   }
 
@@ -669,13 +671,16 @@ export class BillingController {
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
-    const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
-    const balance = (w?.balance ?? 0) + pkg.credits;
-    await this.prisma.admin.messageWallet.upsert({
-      where: { organizationId },
-      create: { organizationId, balance, includedPerPeriod: 0, carryoverCap: 0 },
-      update: { balance },
-    });
+    // B3 — acreditación ATÓMICA (SET balance = balance + credits) para no perder créditos
+    // pagados bajo concurrencia (dos compras / compra + renovación). Si la bolsa no existe, se crea.
+    let balance: number;
+    try {
+      const updated = await this.prisma.admin.messageWallet.update({ where: { organizationId }, data: { balance: { increment: pkg.credits } }, select: { balance: true } });
+      balance = updated.balance;
+    } catch {
+      const created = await this.prisma.admin.messageWallet.create({ data: { organizationId, balance: pkg.credits, includedPerPeriod: 0, carryoverCap: 0 }, select: { balance: true } });
+      balance = created.balance;
+    }
     await this.prisma.admin.walletLedger.create({
       data: { organizationId, delta: pkg.credits, reason: "package_purchase", balanceAfter: balance, refType: "package", refId: pkg.code },
     });

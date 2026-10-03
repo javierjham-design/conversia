@@ -3,7 +3,7 @@
  * hacia el/los administrador(es) del tenant. Español, claros, sin tono amenazante, con el
  * botón de pago siempre visible. No pasan por el SMTP del tenant (es cobranza nuestra).
  */
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
 
 export type BillingEmailKind = "payment_failed" | "payment_succeeded" | "suspended" | "reactivated";
@@ -19,11 +19,11 @@ async function adminEmails(orgId: string): Promise<string[]> {
   return [...new Set(emails)];
 }
 
-function render(kind: BillingEmailKind, payUrl: string, data: Record<string, unknown>): { subject: string; html: string } {
+function render(kind: BillingEmailKind, payUrl: string, brandName: string, data: Record<string, unknown>): { subject: string; html: string } {
   const btn = `<p style="margin:24px 0"><a href="${payUrl}" style="background:#0891b2;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600">Ir a pagar</a></p>`;
   const wrap = (title: string, body: string) => ({
     subject: title,
-    html: `<div style="font-family:system-ui,Arial;max-width:520px;margin:auto;color:#0f172a"><h2 style="color:#0e7490">${title}</h2>${body}${btn}<p style="font-size:12px;color:#64748b">TuBot — atención conversacional</p></div>`,
+    html: `<div style="font-family:system-ui,Arial;max-width:520px;margin:auto;color:#0f172a"><h2 style="color:#0e7490">${title}</h2>${body}${btn}<p style="font-size:12px;color:#64748b">${brandName} — atención conversacional</p></div>`,
   });
   switch (kind) {
     case "payment_failed": {
@@ -44,13 +44,16 @@ export async function sendBillingEmail(orgId: string, kind: BillingEmailKind, da
   if (!env.RESEND_API_KEY) return; // sin remitente de plataforma no se envía (el panel ya avisó)
   const to = await adminEmails(orgId);
   if (!to.length) return;
-  const payUrl = `${env.WEB_URL}/billing`;
-  const { subject, html } = render(kind, payUrl, data);
+  // F1/A4 — cobranza por marca del tenant: remitente, link de pago y pie de la marca.
+  const org = await getAdminPrisma().organization.findUnique({ where: { id: orgId }, select: { brand: true } });
+  const brand = brandOf(org);
+  const payUrl = `${brand.webUrl}/billing`;
+  const { subject, html } = render(kind, payUrl, brand.name, data);
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: env.RESEND_FROM, to, subject, html }),
+      body: JSON.stringify({ from: brand.mailFrom, to, subject, html }),
     });
   } catch {
     /* el panel (integration_event) ya dejó constancia */

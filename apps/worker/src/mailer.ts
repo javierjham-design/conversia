@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { QUEUE_NAMES, type EmailJob } from "@conversia/types";
 import { decryptCredential } from "./credentials";
@@ -105,10 +105,12 @@ export async function sendTenantEmail(
       await log("error", "Correo no enviado: la plataforma no tiene RESEND_API_KEY configurada");
       return { ok: false, detail: "Remitente de plataforma no configurado" };
     }
+    // F1/A2 — remitente por marca del tenant (no el de TuBot fijo) en el modo plataforma.
+    const brandOrg = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: env.RESEND_FROM, to: mail.to, subject: mail.subject, html: mail.html }),
+      body: JSON.stringify({ from: brandOf(brandOrg).mailFrom, to: mail.to, subject: mail.subject, html: mail.html }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

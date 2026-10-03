@@ -41,6 +41,8 @@ describe("F10 — operatorMayAccess: rutas GLOBALES prohibidas al operador", () 
     "/platform/audit",
     "/platform/admins",
     "/platform/admins/op_1",
+    "/platform/metrics",
+    "/platform/quality",
   ];
   for (const path of forbidden) {
     it(`deniega ${path}`, () => expect(operatorMayAccess(path)).toBe(false));
@@ -70,8 +72,6 @@ describe("F10 — operatorMayAccess: operar la FICHA del cliente sí se permite"
     "/platform/organizations/org_1/client-context",
     "/platform/organizations/org_1/lifecycle/delivered",
     "/platform/organizations/org_1/cash-summary",
-    "/platform/metrics",
-    "/platform/quality",
     "/platform/alerts",
     "/platform/support",
     "/platform/support/t_1/reply",

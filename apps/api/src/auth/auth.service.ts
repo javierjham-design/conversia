@@ -183,7 +183,7 @@ export class AuthService {
 <p style="color:#64748b;font-size:13px">O copia este enlace: <br/>${link}</p>
 <p style="color:#64748b;font-size:13px">El enlace vence en 2 días. Si no creaste esta cuenta, ignora este mensaje.</p>
 </div>`;
-    return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html });
+    return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html, from: brand.mailFrom });
   }
 
   /** Marca el correo del usuario como verificado a partir del token del link. */
