@@ -84,6 +84,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!getToken()) router.replace("/login");
   }, [router]);
 
+  // Hidrata el ACENTO del usuario desde el servidor en TODA pantalla (no solo Ajustes) para
+  // que la personalización de color persista cross-dispositivo (CONVERSIA_DISENO.md §3).
+  useEffect(() => {
+    if (!getToken()) return;
+    api<{ user?: { settings?: { accent?: string } | null } }>("/auth/me")
+      .then((me) => {
+        const a = me.user?.settings?.accent;
+        if (a && typeof a === "string") {
+          document.documentElement.setAttribute("data-accent", a);
+          try { localStorage.setItem("conversia_accent", a); } catch { /* ignore */ }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Cierra la hoja "Más" al navegar.
   useEffect(() => { setMoreOpen(false); }, [pathname]);
 

@@ -10,81 +10,84 @@
  */
 
 :root {
-  /* Modo CLARO (porcelana luminosa) — default. */
-  --bg: #eef1f5;
-  --bg-tint: #e6ebf2;
-  --surface: rgba(255, 255, 255, 0.72);
+  /* Modo CLARO (porcelana luminosa cálida) — valores canónicos CONVERSIA_DISENO.md §2. */
+  --bg: linear-gradient(176deg, #fbfaf7 0%, #f4f2ec 60%, #efede6 100%);
+  --bg-tint: #f4f2ec;
+  --surface: rgba(255, 255, 255, 0.74);
   --surface-solid: #ffffff;
-  --ink: #171a21;
-  --ink-dim: #5a6474;
-  --line: rgba(23, 26, 33, 0.1);
-  --hairline: rgba(23, 26, 33, 0.08);
-  --shadow: 0 10px 34px rgba(23, 26, 33, 0.08);
-  /* Semánticos de créditos (independientes del acento). */
-  --ok: #16a34a;
+  --ink: #1d1f22;
+  --ink-dim: #70747b;
+  --line: rgba(25, 28, 24, 0.09);
+  --hairline: rgba(25, 28, 24, 0.07);
+  --shadow: 0 8px 26px rgba(25, 28, 20, 0.07);
+  --doodle: rgba(25, 28, 24, 0.035); /* textura del hilo de chat */
+  /* Semánticos de créditos (independientes del acento) — semáforo claro §4. */
+  --ok: #0ea371;
   --warn: #d97706;
   --danger: #dc2626;
 }
 
 [data-theme="dark"] {
-  /* Modo OSCURO (grafito azulado profundo con luz ambiental sutil). */
-  --bg: #0b0f16;
+  /* Modo OSCURO (grafito azulado profundo, jamás #000) — canónicos §2. */
+  --bg: linear-gradient(176deg, #0d1016 0%, #090b0f 55%, #07080b 100%);
   --bg-tint: #0e1420;
-  --surface: rgba(28, 35, 48, 0.55);
-  --surface-solid: #141a24;
-  --ink: #e9edf4;
-  --ink-dim: #99a3b4;
-  --line: rgba(255, 255, 255, 0.08);
-  --hairline: rgba(255, 255, 255, 0.12);
+  --surface: rgba(255, 255, 255, 0.04); /* vidrio esmerilado */
+  --surface-solid: #141a24; /* opaco para inputs/selects */
+  --ink: #ecedf0;
+  --ink-dim: #8d9199;
+  --line: rgba(255, 255, 255, 0.1);
+  --hairline: rgba(255, 255, 255, 0.075);
   --shadow: 0 12px 44px rgba(0, 0, 0, 0.45);
+  --doodle: rgba(255, 255, 255, 0.028);
+  /* Semáforo oscuro §4. */
   --ok: #34d399;
   --warn: #fbbf24;
   --danger: #f87171;
 }
 
-/* ---- Acentos de la paleta curada (aplican en ambos modos). Default: Menta. ---- */
+/* ---- Acentos de la paleta curada (ambos modos). Hex EXACTOS de CONVERSIA_DISENO.md §3. ---- */
 :root,
 [data-accent="menta"] {
   --acc: #2dd4bf;
-  --acc-deep: #0f9e8e;
-  --acc-ink: #04221e;
+  --acc-deep: #0d9488;
+  --acc-ink: #04211c;
   --acc-dim: rgba(45, 212, 191, 0.16);
   --acc-glow: rgba(45, 212, 191, 0.38);
 }
 [data-accent="artico"] {
-  --acc: #38bdf8;
+  --acc: #7dd3fc;
   --acc-deep: #0284c7;
-  --acc-ink: #04212e;
-  --acc-dim: rgba(56, 189, 248, 0.16);
-  --acc-glow: rgba(56, 189, 248, 0.38);
+  --acc-ink: #06222e;
+  --acc-dim: rgba(125, 211, 252, 0.16);
+  --acc-glow: rgba(125, 211, 252, 0.38);
 }
 [data-accent="indigo"] {
   --acc: #818cf8;
   --acc-deep: #4f46e5;
-  --acc-ink: #10112e;
+  --acc-ink: #0d0f2a;
   --acc-dim: rgba(129, 140, 248, 0.16);
   --acc-glow: rgba(129, 140, 248, 0.38);
 }
 [data-accent="lima"] {
   --acc: #a3e635;
-  --acc-deep: #65a30d;
-  --acc-ink: #15230a;
+  --acc-deep: #4d7c0f;
+  --acc-ink: #13210a;
   --acc-dim: rgba(163, 230, 53, 0.16);
   --acc-glow: rgba(163, 230, 53, 0.36);
 }
 [data-accent="oro"] {
-  --acc: #fbbf24;
-  --acc-deep: #d97706;
-  --acc-ink: #2a1c02;
-  --acc-dim: rgba(251, 191, 36, 0.16);
-  --acc-glow: rgba(251, 191, 36, 0.36);
+  --acc: #e8c784;
+  --acc-deep: #a97c33;
+  --acc-ink: #1c1406;
+  --acc-dim: rgba(232, 199, 132, 0.18);
+  --acc-glow: rgba(232, 199, 132, 0.36);
 }
 [data-accent="coral"] {
-  --acc: #fb7185;
-  --acc-deep: #e11d48;
-  --acc-ink: #2e070e;
-  --acc-dim: rgba(251, 113, 133, 0.16);
-  --acc-glow: rgba(251, 113, 133, 0.36);
+  --acc: #fb923c;
+  --acc-deep: #c2500c;
+  --acc-ink: #271103;
+  --acc-dim: rgba(251, 146, 60, 0.16);
+  --acc-glow: rgba(251, 146, 60, 0.36);
 }
 
 * {

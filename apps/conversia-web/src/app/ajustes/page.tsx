@@ -4,13 +4,14 @@ import { Check, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 
-const ACCENTS: { key: string; label: string; color: string }[] = [
-  { key: "menta", label: "Menta", color: "#2dd4bf" },
-  { key: "artico", label: "Ártico", color: "#38bdf8" },
-  { key: "indigo", label: "Índigo", color: "#818cf8" },
-  { key: "lima", label: "Lima", color: "#a3e635" },
-  { key: "oro", label: "Oro", color: "#fbbf24" },
-  { key: "coral", label: "Coral", color: "#fb7185" },
+// Hex canónicos de CONVERSIA_DISENO.md §3 (deben coincidir con --acc de globals.css).
+const ACCENTS: { key: string; label: string; color: string; ink: string }[] = [
+  { key: "menta", label: "Menta", color: "#2dd4bf", ink: "#04211c" },
+  { key: "artico", label: "Ártico", color: "#7dd3fc", ink: "#06222e" },
+  { key: "indigo", label: "Índigo", color: "#818cf8", ink: "#0d0f2a" },
+  { key: "lima", label: "Lima", color: "#a3e635", ink: "#13210a" },
+  { key: "oro", label: "Oro", color: "#e8c784", ink: "#1c1406" },
+  { key: "coral", label: "Coral", color: "#fb923c", ink: "#271103" },
 ];
 
 type Me = { user: { name: string | null; email: string; settings?: { accent?: string } | null } };
@@ -119,7 +120,7 @@ export default function Ajustes() {
                 aria-label={a.label}
                 style={{ width: 42, height: 42, borderRadius: "50%", background: a.color, border: accent === a.key ? "3px solid var(--ink)" : "3px solid transparent", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
-                {accent === a.key ? <Check size={18} color="#04221e" /> : null}
+                {accent === a.key ? <Check size={18} color={a.ink} /> : null}
               </button>
             ))}
           </div>
