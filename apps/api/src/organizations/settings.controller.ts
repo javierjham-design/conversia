@@ -388,7 +388,7 @@ export class SettingsController {
     const ctx = requirePermission("settings:write");
     const parsed = z
       .object({
-        type: z.enum(["contacts", "conversations", "appointments"]),
+        type: z.enum(["contacts", "conversations", "appointments", "cash"]), // F-2: incluye la caja (append-only) para el offboarding/portabilidad
         from: z.string().optional(), // ISO date
         to: z.string().optional(),
       })

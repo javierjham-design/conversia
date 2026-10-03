@@ -35,19 +35,49 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
+const FULL_ROLES = new Set(["owner", "admin"]);
+
 export default function AdminDashboard() {
   const [m, setM] = useState<Metrics | null>(null);
   const [q, setQ] = useState<Quality | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isOperator, setIsOperator] = useState(false);
 
   useEffect(() => {
-    Promise.all([padmin<Metrics>("/platform/metrics"), padmin<Quality>("/platform/quality")])
-      .then(([mm, qq]) => {
-        setM(mm);
-        setQ(qq);
+    // El panel de métricas (MRR/ingresos/costos) es solo del super admin. El operador
+    // ve un panel sin cifras de dinero (el backend además deniega /platform/metrics).
+    padmin<{ admin?: { role?: string } }>("/platform/auth/me")
+      .then((me) => {
+        const full = FULL_ROLES.has(me.admin?.role ?? "owner");
+        setIsOperator(!full);
+        if (!full) return;
+        return Promise.all([padmin<Metrics>("/platform/metrics"), padmin<Quality>("/platform/quality")]).then(([mm, qq]) => { setM(mm); setQ(qq); });
       })
       .catch((e) => setError((e as Error).message));
   }, []);
+
+  if (isOperator) {
+    return (
+      <div style={{ maxWidth: 1000 }}>
+        <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Panel</h1>
+        <p className="text-dim" style={{ margin: "0 0 22px", fontSize: 14 }}>Opera la implementación de tus clientes.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+          <a href="/admin/organizations" className="card" style={{ padding: 20, textDecoration: "none", color: "var(--ink)" }}>
+            <p className="display" style={{ margin: 0, fontSize: 18 }}>Cartera de clientes →</p>
+            <p className="text-dim" style={{ margin: "6px 0 0", fontSize: 13 }}>Ver y operar la ficha de cada tenant.</p>
+          </a>
+          <a href="/admin/alta" className="card" style={{ padding: 20, textDecoration: "none", color: "var(--ink)" }}>
+            <p className="display" style={{ margin: 0, fontSize: 18 }}>Alta guiada →</p>
+            <p className="text-dim" style={{ margin: "6px 0 0", fontSize: 13 }}>Pon en marcha un cliente nuevo hasta GO-LIVE.</p>
+          </a>
+          <a href="/admin/soporte" className="card" style={{ padding: 20, textDecoration: "none", color: "var(--ink)" }}>
+            <p className="display" style={{ margin: 0, fontSize: 18 }}>Soporte →</p>
+            <p className="text-dim" style={{ margin: "6px 0 0", fontSize: 13 }}>Tickets de tus clientes con su contexto.</p>
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 1000 }}>

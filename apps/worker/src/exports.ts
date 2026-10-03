@@ -79,6 +79,21 @@ export async function processExport(organizationId: string, payload: { exportId:
         ]),
       );
       rows = messages.length;
+    } else if (job.type === "cash") {
+      // F-2 — libro de caja (append-only, F9): dato contable del tenant, exportable para
+      // el offboarding/portabilidad. Respeta RLS (withTenant) y el rango de fechas.
+      const entries = await withTenant(organizationId, (tx) =>
+        tx.cashLedger.findMany({
+          where: dateFilter ? { createdAt: dateFilter } : {},
+          orderBy: { createdAt: "asc" },
+          take: MAX_ROWS,
+        }),
+      );
+      csv = toCsv(
+        ["fecha", "tipo", "metodo", "monto", "moneda", "estado", "concepto", "refType", "refId", "origen"],
+        entries.map((e) => [e.createdAt.toISOString(), e.type, e.method, e.amount, e.currency, e.status, e.concept ?? "", e.refType ?? "", e.refId ?? "", e.origin]),
+      );
+      rows = entries.length;
     } else {
       const appointments = await withTenant(organizationId, (tx) =>
         tx.appointment.findMany({

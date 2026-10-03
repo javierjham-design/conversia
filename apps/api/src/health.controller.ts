@@ -28,14 +28,21 @@ export class HealthController {
   @Header("cache-control", "no-store")
   async fuse() {
     const date = new Date().toISOString().slice(0, 10);
-    let tripped = false;
+    let tmpl = false;
+    let svc = false;
     try {
-      tripped = (await this.queues.connection.get(`msgcap:fuse:${date}`)) === "1";
+      // M4 — exponer AMBOS fusibles: el de plantillas (msgcap:fuse) y el de SERVICIO
+      // (msgcap:svc-fuse). Antes solo se veía el de plantillas → el monitor externo no
+      // alertaba si se cortaba el de servicio (gasto de mensajes de servicio sobre el techo).
+      const [t, s] = await this.queues.connection.mget(`msgcap:fuse:${date}`, `msgcap:svc-fuse:${date}`);
+      tmpl = t === "1";
+      svc = s === "1";
     } catch {
       /* redis caído → no afirmamos que el fusible cortó */
     }
-    if (tripped) {
-      throw new ServiceUnavailableException({ ok: false, fuse: "tripped", message: "Fusible de mensajería cortado: envíos de plantilla en pausa." });
+    if (tmpl || svc) {
+      const which = [tmpl ? "plantillas" : null, svc ? "servicio" : null].filter(Boolean).join(" + ");
+      throw new ServiceUnavailableException({ ok: false, fuse: "tripped", tripped: { templates: tmpl, service: svc }, message: `Fusible de mensajería cortado (${which}): envíos en pausa.` });
     }
     return { ok: true, fuse: "ok" };
   }

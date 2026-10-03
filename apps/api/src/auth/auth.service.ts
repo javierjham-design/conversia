@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, UnauthorizedExcepti
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
-import { brandOf } from "@conversia/config";
+import { brandOf, accentForCountry } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken } from "./jwt";
@@ -122,6 +122,9 @@ export class AuthService {
           brand, // cuenta de ESTA marca (D8)
           passwordHash: bcrypt.hashSync(input.password, BCRYPT_COST),
           name: input.name,
+          // F3/A13 — acento de UI por defecto según el país (solo Conversia; el usuario
+          // puede cambiarlo luego vía PATCH /me/preferences). TuBot no usa acento.
+          ...(brand === "conversia" ? { settings: { accent: accentForCountry(country) } as object } : {}),
         },
       });
       await tx.organizationUser.create({
@@ -183,7 +186,7 @@ export class AuthService {
 <p style="color:#64748b;font-size:13px">O copia este enlace: <br/>${link}</p>
 <p style="color:#64748b;font-size:13px">El enlace vence en 2 días. Si no creaste esta cuenta, ignora este mensaje.</p>
 </div>`;
-    return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html });
+    return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html, from: brand.mailFrom });
   }
 
   /** Marca el correo del usuario como verificado a partir del token del link. */

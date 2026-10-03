@@ -28,6 +28,8 @@ export function isFullPlatformAdmin(role: string | undefined | null): boolean {
  * operador; lo que se bloquea aquí es el billing/config GLOBAL de la plataforma.
  */
 export const OPERATOR_DENY_PREFIXES = [
+  "/platform/metrics", // dashboard con MRR/ingresos/costos de la marca (dato financiero global)
+  "/platform/quality", // ranking de tenants (dato sensible agregado) — reservado al super admin
   "/platform/plans", // planes y precios
   "/platform/packages", // paquetes de mensajes
   "/platform/coupons", // cupones

@@ -3,8 +3,17 @@ import { useEffect, useState } from "react";
 import { api, getToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 
-function greeting(): string {
-  const h = new Date().getHours();
+/** Hora actual en la zona horaria del NEGOCIO (A14), no la del navegador. */
+function hourIn(tz?: string): number {
+  try {
+    if (tz) return Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: tz }).format(new Date()));
+  } catch {
+    /* zona inválida → hora local */
+  }
+  return new Date().getHours();
+}
+function greeting(tz?: string): string {
+  const h = hourIn(tz);
   if (h < 12) return "Buenos días";
   if (h < 20) return "Buenas tardes";
   return "Buenas noches";
@@ -15,16 +24,22 @@ interface WalletSummary {
   included: number;
   consumed: number;
   pctUsed: number;
+  projected: number;
+  over80: boolean;
 }
 
 export default function Home() {
   const [name, setName] = useState("");
+  const [tz, setTz] = useState<string | undefined>(undefined);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
 
   useEffect(() => {
     if (!getToken()) return; // el AppShell redirige al login
-    api<{ user?: { name?: string } }>("/auth/me")
-      .then((me) => setName(me.user?.name?.split(" ")[0] ?? ""))
+    api<{ user?: { name?: string }; organization?: { timezone?: string } }>("/auth/me")
+      .then((me) => {
+        setName(me.user?.name?.split(" ")[0] ?? "");
+        setTz(me.organization?.timezone);
+      })
       .catch(() => undefined);
     api<WalletSummary>("/billing/wallet/summary").then(setSummary).catch(() => undefined);
   }, []);
@@ -50,7 +65,7 @@ export default function Home() {
           <div>
             <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Conversia</p>
             <h1 className="display" style={{ fontSize: 30, margin: "2px 0 0" }}>
-              {greeting()}
+              {greeting(tz)}
               {name ? <span className="display-italic">, {name}</span> : null}
             </h1>
           </div>
@@ -79,6 +94,12 @@ export default function Home() {
                   {summary.consumed.toLocaleString("es-CL")} usados este mes
                   {summary.included > 0 ? ` · ${pct}% del plan` : ""}
                 </p>
+                {summary.included > 0 ? (
+                  <p className="text-dim" style={{ fontSize: 12, margin: "6px 0 0", color: summary.projected > summary.included ? "var(--warn)" : undefined }}>
+                    Proyección fin de mes: {summary.projected.toLocaleString("es-CL")}
+                    {summary.projected > summary.included ? " ⚠️ superarás el plan" : ""}
+                  </p>
+                ) : null}
               </>
             ) : (
               <p className="text-dim" style={{ fontSize: 14, margin: 0 }}>Cargando saldo…</p>

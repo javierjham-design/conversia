@@ -243,7 +243,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
       fecha: local.toISOString().slice(0, 10),
       hora_inicio: local.toISOString().slice(11, 16),
       duracion: durMin,
-      comentario: input.notes ?? "Agendada por TuBot",
+      comentario: input.notes ?? "Agendada por asistente virtual", // neutral de marca (M13): no filtrar "TuBot" en fichas de tenants Conversia
     });
     return mapDentalinkCita(cita, offset);
   }

@@ -14,7 +14,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter } from "@conversia/agents";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
@@ -567,9 +567,13 @@ export class PlatformController {
       return { ok: true, alreadyDelivered: true, deliveredAt: conversia.deliveredAt ?? null };
     }
     const deliveredAt = new Date().toISOString();
-    const nextSettings = { ...settings, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
+    // F-1 — registrar la permanencia al entregar (base del enforcement manual de 6 meses,
+    // CICLO_VIDA_CLIENTE §3). No sobreescribe un contrato ya existente.
+    const contract = (settings.contract as Record<string, any>) ?? {};
+    const nextContract = contract.startedAt ? contract : { commitmentMonths: 6, startedAt: deliveredAt };
+    const nextSettings = { ...settings, contract: nextContract, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
     await db.organization.update({ where: { id }, data: { settings: nextSettings } });
-    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt });
+    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt, commitmentMonths: nextContract.commitmentMonths });
     return { ok: true, deliveredAt };
   }
 
@@ -904,11 +908,14 @@ export class PlatformController {
     await this.assertOrgBrand(req, id);
     const res = await this.auth.resetOrgAdminPassword(id);
     if (!res) throw new BadRequestException("La organización no tiene usuarios activos");
+    // F1/B1 — correo por marca: nombre, link y remitente de la marca del tenant (no TuBot fijo).
+    const brand = brandOf({ brand: this.reqBrand(req) });
+    const loginUrl = `${brand.webUrl}/login`;
     const html = `<p>Hola,</p>
-<p>Se restableció el acceso a tu cuenta de TuBot.</p>
+<p>Se restableció el acceso a tu cuenta de ${brand.name}.</p>
 <p><b>Usuario:</b> ${res.email}<br/><b>Contraseña temporal:</b> ${res.tempPassword}</p>
-<p>Ingresa en <a href="https://tubot.cl/login">tubot.cl/login</a> y cámbiala.</p>`;
-    const sent = await sendEmail({ to: res.email, subject: "Restablecimiento de acceso · TuBot", html });
+<p>Ingresa en <a href="${loginUrl}">${loginUrl.replace(/^https?:\/\//, "")}</a> y cámbiala.</p>`;
+    const sent = await sendEmail({ to: res.email, subject: `Restablecimiento de acceso · ${brand.name}`, html, from: brand.mailFrom });
     await this.audit(req, "platform.admin.send_reset", "user", res.userId, { email: res.email, sent });
     return { ok: true, email: res.email, sent, tempPassword: sent ? null : res.tempPassword };
   }

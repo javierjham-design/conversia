@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Post, Put, Query, R
 import { z } from "zod";
 import type { Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
@@ -56,9 +56,10 @@ export interface OAuthTokens {
  * cierra sola. Si no hay opener (flujo en la misma pestaña o popup bloqueado),
  * cae al redirect clásico a /integrations?provider=resultado.
  */
-function oauthResultPage(provider: "google" | "hubspot", result: "connected" | "denied" | "invalid" | "error"): string {
-  const env = getEnv();
-  const target = `${env.WEB_URL}/integrations?${provider}=${result}`;
+function oauthResultPage(provider: "google" | "hubspot", result: "connected" | "denied" | "invalid" | "error", webUrl: string, brandName: string): string {
+  // F1/A3 — webUrl y nombre POR MARCA del tenant (no el panel/título de TuBot): el popup
+  // debe volver/postear al panel correcto o la integración no notifica al panel de Conversia.
+  const target = `${webUrl}/integrations?${provider}=${result}`;
   const label = provider === "google" ? "Google" : "HubSpot";
   const message =
     result === "connected"
@@ -67,7 +68,7 @@ function oauthResultPage(provider: "google" | "hubspot", result: "connected" | "
         ? `La conexión con ${label} fue cancelada. Puedes cerrar esta ventana.`
         : `No se pudo completar la conexión con ${label}. Puedes cerrar esta ventana e intentarlo de nuevo.`;
   // provider/result vienen de valores fijos del servidor (no input del usuario).
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>TuBot</title></head>
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${brandName}</title></head>
 <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a">
 <p style="max-width:26rem;text-align:center;font-size:15px">${message}</p>
 <script>
@@ -75,7 +76,7 @@ function oauthResultPage(provider: "google" | "hubspot", result: "connected" | "
   var payload = { source: "conversia-oauth", provider: "${provider}", result: "${result}" };
   try {
     if (window.opener && !window.opener.closed) {
-      window.opener.postMessage(payload, "${env.WEB_URL}");
+      window.opener.postMessage(payload, "${target.replace(/\/integrations.*$/, "")}");
       setTimeout(function () { window.close(); }, 800);
       return;
     }
@@ -119,9 +120,10 @@ export class OAuthController {
   @Get("public/oauth/google/callback")
   async googleCallback(@Query("code") code: string, @Query("state") state: string, @Query("error") error: string, @Res() res: Response) {
     const env = getEnv();
-    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("google", q));
-    if (error) return back("denied");
     const orgId = verifyState(state ?? "");
+    const brand = brandOf(orgId ? await this.prisma.admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } }) : null);
+    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("google", q, brand.webUrl, brand.name));
+    if (error) return back("denied");
     if (!orgId || !code) return back("invalid");
     try {
       const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -245,8 +247,9 @@ export class OAuthController {
   @Get("public/oauth/hubspot/callback")
   async hubspotCallback(@Query("code") code: string, @Query("state") state: string, @Res() res: Response) {
     const env = getEnv();
-    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("hubspot", q));
     const orgId = verifyState(state ?? "");
+    const brand = brandOf(orgId ? await this.prisma.admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } }) : null);
+    const back = (q: "connected" | "denied" | "invalid" | "error") => res.status(200).type("html").send(oauthResultPage("hubspot", q, brand.webUrl, brand.name));
     if (!orgId || !code) return back("invalid");
     try {
       const tokenRes = await fetch("https://api.hubapi.com/oauth/v1/token", {

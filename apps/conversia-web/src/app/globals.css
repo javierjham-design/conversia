@@ -100,7 +100,7 @@ body {
     radial-gradient(1200px 600px at 100% -10%, var(--acc-dim), transparent 60%),
     var(--bg);
   color: var(--ink);
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: var(--font-inter), Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
 }
@@ -112,11 +112,11 @@ body {
 
 /* Serif de display para marca, saludos y titulares (Fraunces; fallback serif). */
 .display {
-  font-family: Fraunces, Georgia, "Times New Roman", serif;
+  font-family: var(--font-fraunces), Fraunces, Georgia, "Times New Roman", serif;
   letter-spacing: -0.01em;
 }
 .display-italic {
-  font-family: Fraunces, Georgia, serif;
+  font-family: var(--font-fraunces), Fraunces, Georgia, serif;
   font-style: italic;
 }
 
