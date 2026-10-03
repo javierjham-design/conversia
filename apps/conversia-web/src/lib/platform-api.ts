@@ -42,8 +42,11 @@ export async function padmin<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    // Sesión caída/expirada (no en el flujo de login) → al login del super admin.
-    if (res.status === 401 && typeof window !== "undefined" && !path.includes("/platform/auth/")) {
+    // Sesión caída/expirada → al login del super admin. Solo excluimos el POST de LOGIN
+    // (un 401 ahí = credenciales malas, lo maneja la propia pantalla); el resto —incluido
+    // /platform/auth/me, que el layout usa para el guard— SÍ debe limpiar token y redirigir
+    // (si no, la consola queda pegada en "Cargando…" con un token expirado).
+    if (res.status === 401 && typeof window !== "undefined" && !path.includes("/platform/auth/login")) {
       clearPlatformToken();
       if (!location.pathname.startsWith("/admin/login")) location.replace("/admin/login");
     }
