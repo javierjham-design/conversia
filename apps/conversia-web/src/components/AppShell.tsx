@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, Radio, Settings, Users, Wallet } from "lucide-react";
+import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Users, Wallet, X } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 
@@ -22,6 +22,11 @@ const NAV = [
   { href: "/cobros", label: "Cobros", Icon: CreditCard },
   { href: "/ajustes", label: "Ajustes", Icon: Settings },
 ];
+
+// M9 — en móvil la barra inferior muestra 4 primarios + "Más" (el riel de escritorio los
+// muestra todos). Evita saturar la tab bar con 8 iconos.
+const PRIMARY = NAV.slice(0, 4);
+const OVERFLOW = NAV.slice(4);
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -72,10 +77,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [moreOpen, setMoreOpen] = useState(false);
+
   // Guard de sesión: sin token → al login (toda pantalla con shell es privada).
   useEffect(() => {
     if (!getToken()) router.replace("/login");
   }, [router]);
+
+  // Cierra la hoja "Más" al navegar.
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
+
+  const moreActive = OVERFLOW.some((n) => isActive(pathname, n.href));
 
   return (
     <div className="shell">
@@ -100,13 +112,38 @@ export function AppShell({ children }: { children: ReactNode }) {
       <SupportWidget />
 
 
+      {/* M9 — hoja "Más" (overflow) para móvil */}
+      {moreOpen ? (
+        <>
+          <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 40 }} />
+          <div className="card" style={{ position: "fixed", left: 12, right: 12, bottom: 76, zIndex: 41, padding: 10, borderRadius: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 8px 8px" }}>
+              <span className="text-dim" style={{ fontSize: 12, fontWeight: 600 }}>Más</span>
+              <button onClick={() => setMoreOpen(false)} aria-label="Cerrar" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }}><X size={18} /></button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+              {OVERFLOW.map(({ href, label, Icon }) => (
+                <a key={href} href={href} className={isActive(pathname, href) ? "nav-item active" : "nav-item"} style={{ width: "100%", height: 46, justifyContent: "flex-start", gap: 10, padding: "0 12px", fontSize: 14 }}>
+                  <Icon size={20} strokeWidth={2} />
+                  <span>{label}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
+
       <nav className="shell-tabs" aria-label="Navegación">
-        {NAV.map(({ href, label, Icon }) => (
+        {PRIMARY.map(({ href, label, Icon }) => (
           <a key={href} href={href} className={isActive(pathname, href) ? "tab-item active" : "tab-item"} aria-label={label}>
             <Icon size={22} strokeWidth={2} />
             <span>{label}</span>
           </a>
         ))}
+        <button type="button" onClick={() => setMoreOpen((v) => !v)} className={moreActive || moreOpen ? "tab-item active" : "tab-item"} aria-label="Más" style={{ border: "none", background: "transparent", cursor: "pointer" }}>
+          <MoreHorizontal size={22} strokeWidth={2} />
+          <span>Más</span>
+        </button>
       </nav>
     </div>
   );
