@@ -870,7 +870,8 @@ REGLAS
   no-restricted-imports que lo bloquee (y nada de copiar componentes con estilos).
   Solo se importa de packages/* (@conversia/types principalmente).
 · Design system propio en src/design, según el BRIEF DE DISEÑO decidido el 2026-09-30
-  (referencia visual: artifact "Direcciones visuales Conversia" v5):
+  — CONSOLIDADO CON TOKENS EXACTOS EN docs/CONVERSIA_DISENO.md (leerlo completo;
+  referencia visual: artifact "Direcciones visuales Conversia" v11):
   - Identidad "Nocturna": modo oscuro = grafito azulado profundo con luz ambiental
     sutil (se apaga con prefers-reduced-motion), tarjetas de vidrio esmerilado
     (blur + borde hairline + highlight superior); modo claro = EL MISMO layout y
