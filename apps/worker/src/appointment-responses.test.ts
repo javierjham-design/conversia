@@ -14,6 +14,17 @@ describe("detectAppointmentResponse", () => {
     }
   });
 
+  it("detecta Cancelar (F4)", () => {
+    for (const t of ["Cancelar", "cancelar", "cancelar mi cita", "anular", "quiero anular", "ya no puedo ir", "no podré asistir", "dar de baja"]) {
+      expect(detectAppointmentResponse(t)).toBe("cancel");
+    }
+  });
+
+  it("'cancelar y reagendar' se interpreta como reagendar", () => {
+    expect(detectAppointmentResponse("cancelar y reagendar")).toBe("reschedule");
+    expect(detectAppointmentResponse("quiero cambiar de día")).toBe("reschedule");
+  });
+
   it("ignora mensajes normales y vacíos", () => {
     for (const t of ["", "  ", "Hola, quiero saber los precios", "gracias", "¿tienen hora mañana?", null, undefined]) {
       expect(detectAppointmentResponse(t)).toBeNull();

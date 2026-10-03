@@ -947,8 +947,25 @@ export class PlatformController {
     await this.assertOrgBrand(req, id);
     const parsed = z.object({ status: z.enum(["ACTIVE", "TRIAL", "SUSPENDED", "CANCELLED"]) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("status inválido");
-    const org = await this.prisma.admin.organization.update({ where: { id }, data: { status: parsed.data.status } });
-    await this.audit(req, `platform.org.${parsed.data.status.toLowerCase()}`, "organization", id, { status: parsed.data.status });
+    // F-3 — al CANCELAR se marca la ventana de retención/purga (purgeAt = +90d): señal y fecha
+    // para el offboarding (la purga la ejecuta el operador — ver CICLO_VIDA_CLIENTE §2). Al
+    // REACTIVAR se limpia. No se auto-borran datos en un timer (operación destructiva).
+    const current = await this.prisma.admin.organization.findUnique({ where: { id }, select: { settings: true } });
+    const settings = (current?.settings ?? {}) as Record<string, any>;
+    let nextSettings: Record<string, any> | undefined;
+    if (parsed.data.status === "CANCELLED" && !(settings.offboarding as any)?.purgeAt) {
+      const cancelledAt = new Date();
+      const purgeAt = new Date(cancelledAt.getTime() + 90 * 24 * 3600_000);
+      nextSettings = { ...settings, offboarding: { cancelledAt: cancelledAt.toISOString(), purgeAt: purgeAt.toISOString(), retentionDays: 90 } };
+    } else if (parsed.data.status === "ACTIVE" && settings.offboarding) {
+      const { offboarding: _drop, ...rest } = settings;
+      nextSettings = rest;
+    }
+    const org = await this.prisma.admin.organization.update({
+      where: { id },
+      data: { status: parsed.data.status, ...(nextSettings ? { settings: nextSettings } : {}) },
+    });
+    await this.audit(req, `platform.org.${parsed.data.status.toLowerCase()}`, "organization", id, { status: parsed.data.status, purgeAt: (nextSettings?.offboarding as any)?.purgeAt });
     return { ok: true, status: org.status };
   }
 

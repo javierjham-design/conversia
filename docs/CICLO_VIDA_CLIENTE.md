@@ -36,11 +36,16 @@ Cuando un cliente se da de baja (voluntaria o por impago terminal):
      plazo de retención (abajo).
 3. **Export de datos.** Entregar al cliente sus datos con el exportador existente
    (`exports.ts` → conversaciones, contactos, agenda, caja). Dejar constancia del envío.
-4. **Retención y purga.** Retención por defecto **90 días** tras la baja (permite
-   reactivación y disputas). Pasado el plazo: purga de datos del tenant (hoy manual vía
-   script acotado por `organizationId`; existe purga automática solo para trials). La IA de
-   caja es **append-only**: los asientos no se borran (se conservan para cuadratura), salvo
-   purga total del tenant al final de la retención.
+4. **Retención y purga.** Al poner la org en `CANCELLED` (consola → ficha → estado), el
+   sistema marca automáticamente `settings.offboarding = { cancelledAt, purgeAt: +90 días,
+   retentionDays: 90 }` (F-3). Esa fecha `purgeAt` es la SEÑAL y el disparador: permite
+   reactivación/disputas dentro de la ventana (al REACTIVAR se limpia la marca). **La purga
+   en sí es un paso MANUAL del operador** (no se auto-borra en un timer, por ser destructiva):
+   pasado `purgeAt`, correr el script de purga acotado por `organizationId` contra la BD de
+   prod (`railway run -s Postgres`, ver [[reference_conversia_prod_deploy_tooling]]) con
+   backup previo. La IA de caja es **append-only**: los asientos no se borran (se conservan
+   para cuadratura) salvo purga total del tenant al final de la retención. Antes de purgar,
+   entregar el export (incluye ahora la **caja**, F-2).
 5. **Facturación.** Cerrar suscripción y pendientes. Ver permanencia (§3).
 
 **Mínimo para lanzar:** este procedimiento escrito + confirmar quién ejecuta cada paso.
