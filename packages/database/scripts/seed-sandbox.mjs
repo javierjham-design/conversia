@@ -119,6 +119,43 @@ async function enrichTenant() {
     }
     console.log(`  ✔ Caja demo: ${n} asientos`);
   } catch (e) { console.log("  ✖ caja:", e.message); }
+
+  // Profesional de ejemplo (meta.workingHours → lo lee la agenda nativa).
+  let profId = null;
+  try {
+    let prof = await prisma.professional.findFirst({ where: { organizationId: ORG_ID } });
+    if (!prof) {
+      const wh = [1, 2, 3, 4, 5].map((day) => ({ day, start: "09:00", end: "18:00" }));
+      prof = await prisma.professional.create({ data: { organizationId: ORG_ID, name: "Barbero demo", meta: { workingHours: wh, defaultDurationMin: 30, isExample: true } } });
+    }
+    profId = prof.id;
+    console.log("  ✔ Profesional de ejemplo:", prof.name);
+  } catch (e) { console.log("  ✖ profesional:", e.message); }
+
+  // Citas de HOY (para que el Hoy/agenda tengan contenido).
+  try {
+    const svc = await prisma.service.findFirst({ where: { organizationId: ORG_ID, active: true } }).catch(() => null);
+    const contacts = await prisma.contact.findMany({ where: { organizationId: ORG_ID }, take: 3 });
+    const existing = await prisma.appointment.count({ where: { organizationId: ORG_ID } });
+    if (existing === 0 && profId && contacts.length) {
+      const base = new Date(); base.setHours(0, 0, 0, 0);
+      const slots = [[10, 0], [12, 30], [16, 0]];
+      let n = 0;
+      for (let i = 0; i < Math.min(3, contacts.length); i++) {
+        const [h, m] = slots[i]; const st = new Date(base); st.setHours(h, m, 0, 0); const en = new Date(st.getTime() + 30 * 60000);
+        await prisma.appointment.create({ data: { organizationId: ORG_ID, contactId: contacts[i].id, professionalId: profId, ...(svc ? { serviceId: svc.id } : {}), startsAt: st, endsAt: en, status: i === 0 ? "CONFIRMED" : "PENDING" } });
+        n++;
+      }
+      console.log(`  ✔ Citas de hoy: ${n}`);
+    } else console.log(`  • Citas: ${existing} ya existen (o faltan prof/contactos)`);
+  } catch (e) { console.log("  ✖ citas:", e.message); }
+
+  // Pesos de bolsa POR MARCA (A5) — así el panel del super admin y el worker usan 1/1/4/1.
+  try {
+    const w = JSON.stringify({ utility: 1, authentication: 1, marketing: 4, service: 1 });
+    await prisma.platformSetting.upsert({ where: { key: "walletWeights:conversia" }, create: { key: "walletWeights:conversia", value: w }, update: { value: w } });
+    console.log("  ✔ walletWeights:conversia = utility1/auth1/marketing4/service1");
+  } catch (e) { console.log("  ✖ wallet-weights:", e.message); }
 }
 
 async function main() {
