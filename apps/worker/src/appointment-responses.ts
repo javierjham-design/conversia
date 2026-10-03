@@ -18,22 +18,23 @@ import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./ch
 import { getChannelProvider } from "./channel-providers";
 import { dispatchEvent } from "./workflow-runtime";
 import { getSchedulingProviderFor } from "./tool-services";
-import { enqueueEscalationEmail } from "./mailer";
 import { recordServiceSend } from "./service-metering";
 import { chargeServiceSend } from "./messaging-guard";
 import { refundForMessage } from "./wallet";
 
-export type ApptResponse = "confirm" | "reschedule";
+export type ApptResponse = "confirm" | "reschedule" | "cancel";
 
 /**
- * ¿El texto (o el tap de un botón del recordatorio) es Confirmar o Reagendar?
+ * ¿El texto (o el tap de un botón del recordatorio) es Confirmar, Reagendar o Cancelar?
  * Puro y determinista. Deliberadamente estricto para no capturar frases largas.
  */
 export function detectAppointmentResponse(text: string | null | undefined): ApptResponse | null {
   const t = (text ?? "").trim().toLowerCase();
   if (!t || t.length > 40) return null;
   if (/^(s[ií],?\s*)?(confirm(o|ar|ada|o mi cita)?|confirmo asistencia|s[ií] confirmo|asistir[eé])\b/.test(t)) return "confirm";
-  if (/\b(reagend|reprogram|cambiar( la)? (hora|cita)|otro (d[ií]a|horario))/.test(t)) return "reschedule";
+  // Cancelar ANTES que reagendar: "cancelar y reagendar" es reagendar; "cancelar" solo es cancelar.
+  if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|an[uú]la(r|me)?|dar de baja|no (podr[eé]|voy a) (ir|asistir)|ya no (puedo|voy))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (d[ií]a|horario))/.test(t)) return "cancel";
+  if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|d[ií]a)|mover( la)? (cita|hora|d[ií]a)|otro (d[ií]a|horario))/.test(t)) return "reschedule";
   return null;
 }
 
@@ -127,14 +128,49 @@ export async function handleAppointmentResponse(
     return true;
   }
 
-  // Reagendar → derivar a recepción (handoff humano) + acuse.
-  await sendReplyText(orgId, conversationId, "Con gusto te ayudo a reagendar 📅. Te comunico con recepción para coordinar el nuevo horario.");
-  const handoff = await withTenant(orgId, async (tx) => {
-    await tx.conversation.update({ where: { id: conversationId }, data: { aiEnabled: false } });
-    return tx.humanHandoff.create({
-      data: { organizationId: orgId, conversationId, requestedBy: "rule", reason: "Reagendar cita (recordatorio)", status: "PENDING" },
+  // Cancela la cita: BD local (status CANCELLED) + write-back externo si aplica + evento.
+  // El cupo de la agenda NATIVA se libera solo (la disponibilidad se recomputa desde las
+  // citas ACTIVAS de la BD, así que una cita cancelada deja de ocupar el bloque).
+  async function cancelAppt(reason: string): Promise<void> {
+    await withTenant(orgId, (tx) => tx.appointment.update({ where: { id: appt!.id }, data: { status: "CANCELLED" } }));
+    if (appt!.externalId) {
+      try {
+        const provider = await getSchedulingProviderFor(orgId);
+        await provider.cancelAppointment(appt!.externalId);
+        await logAgenda(orgId, "ok", `Cita ${appt!.externalId} cancelada por el paciente (write-back OK)`);
+      } catch (err) {
+        await logAgenda(orgId, "error", `No se pudo cancelar en la agenda externa: ${(err as Error).message}`);
+      }
+    }
+    await dispatchEvent({
+      organizationId: orgId,
+      type: "appointment_cancelled",
+      conversationId,
+      contactId: contactId!, // garantizado no-null por el guard de arriba (el closure pierde el narrowing)
+      data: { appointmentId: appt!.id, externalId: appt!.externalId, reason, source: "whatsapp_button" },
+      occurredAt: now.toISOString(),
     });
-  });
-  await enqueueEscalationEmail(orgId, handoff.id, conversationId);
-  return true;
+  }
+
+  if (kind === "cancel") {
+    await cancelAppt("patient_cancel");
+    await sendReplyText(orgId, conversationId, "Listo, cancelé tu cita ✅. Cuando quieras agendar de nuevo, escríbeme y te muestro horarios 📅.");
+    return true;
+  }
+
+  // Reagendar (F4): liberamos el cupo anterior y dejamos que el AGENTE ofrezca horarios y
+  // agende el nuevo (tiene las tools de disponibilidad/agenda). Una nota interna lo guía;
+  // devolvemos false para que el turno del agente continúe y responda con los horarios.
+  await cancelAppt("patient_reschedule");
+  await withTenant(orgId, (tx) =>
+    tx.conversationAiNote.create({
+      data: {
+        organizationId: orgId,
+        conversationId,
+        body: "El paciente pidió REAGENDAR su cita (la anterior quedó liberada). Ofrécele los horarios disponibles y agenda el nuevo.",
+        active: true,
+      },
+    }),
+  );
+  return false;
 }
