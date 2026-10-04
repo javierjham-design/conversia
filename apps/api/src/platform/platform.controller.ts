@@ -8,16 +8,20 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
-import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter } from "@conversia/agents";
+import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, buildCoreTools } from "@conversia/agents";
 import { getEnv, brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
+import { enforcePlanLimit } from "../common/plan-limits";
+// R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
+import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
@@ -681,27 +685,161 @@ export class PlatformController {
   }
 
   /** Detalle de UN agente del tenant (prompt/tools/estado de la versión vigente) para editar. */
+  // ======================= R2 — Configurador COMPLETO de agentes (paridad TuBot) =======================
+  // API espejo del controller del tenant, bajo /platform, con withTenant(id) (RLS) + assertOrgBrand +
+  // auditoría de plataforma. Reusa los schemas y el probador compartidos (agent-test.ts): cero duplicación
+  // de la lógica volátil. Alcanzable por super admin y operador (operar la ficha del cliente).
+
+  /** Catálogo de herramientas (igual que el del tenant; respeta el runtime, la UI filtra por grupos). */
+  @Get("organizations/:id/agents/meta/tools")
+  async agentToolCatalog(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return buildCoreTools().map((t) => ({ name: t.name, description: t.description }));
+  }
+
+  /** Bases de conocimiento del tenant (para elegir fuentes por agente). */
+  @Get("organizations/:id/agents/meta/knowledge")
+  async agentKnowledge(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return this.prisma.withTenant(id, async (tx) => {
+      const bases = await tx.knowledgeBase.findMany({ orderBy: { createdAt: "asc" }, include: { _count: { select: { documents: { where: { status: "PUBLISHED" } } } } } });
+      return bases.map((b) => ({ id: b.id, name: b.name, description: b.description, publishedDocs: b._count.documents }));
+    });
+  }
+
+  /** Profesionales/recursos del tenant (para habilitar agendamiento por agente). */
+  @Get("organizations/:id/agents/meta/professionals")
+  async agentProfessionals(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return this.prisma.withTenant(id, async (tx) => {
+      const pros = await tx.professional.findMany({ where: { active: true }, orderBy: { name: "asc" } });
+      return pros.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty, isExample: ((p.meta as any)?.isExample) === true }));
+    });
+  }
+
+  /** Lista de agentes del tenant (versión actual/borrador/modelo). */
+  @Get("organizations/:id/agents")
+  async agentList(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    return this.prisma.withTenant(id, async (tx) => {
+      const agents = await tx.agent.findMany({ where: { deletedAt: null }, include: { versions: { orderBy: { version: "desc" }, take: 5 } }, orderBy: { createdAt: "asc" } });
+      return agents.map((a) => {
+        const published = a.versions.find((v) => v.status === "PUBLISHED");
+        const draft = a.versions.find((v) => v.status === "DRAFT");
+        return {
+          id: a.id, slug: a.slug, name: a.name, kind: a.kind, description: a.description, active: a.active,
+          publishedVersion: published?.version ?? null, publishedAt: published?.publishedAt ?? null,
+          hasDraft: Boolean(draft && (!published || draft.version > published.version)),
+          model: ((published ?? draft)?.config as any)?.model ?? null,
+          avatar: ((published ?? draft)?.config as any)?.emoji ?? null,
+        };
+      });
+    });
+  }
+
+  /** Crea un agente nuevo (borrador inicial). */
+  @Post("organizations/:id/agents")
+  async agentCreate(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = createAgentSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => i.message).join("; "));
+    const input = parsed.data;
+    const agent = await this.prisma.withTenant(id, async (tx) => {
+      await enforcePlanLimit(tx, "agents", await tx.agent.count({ where: { deletedAt: null } }));
+      let slug = agentSlugify(input.name) || "agente";
+      if (await tx.agent.findUnique({ where: { organizationId_slug: { organizationId: id, slug } } })) slug = `${slug}-${Math.random().toString(36).slice(2, 5)}`;
+      const a = await tx.agent.create({ data: { organizationId: id, slug, name: input.name, kind: input.kind, description: input.description, active: true } });
+      await tx.agentVersion.create({ data: { organizationId: id, agentId: a.id, version: 1, status: "DRAFT", systemPrompt: DEFAULT_PROMPT, config: { model: "gpt-4o-mini", maxTokens: 400, maxToolRounds: 5, language: "es" }, tools: ["getServices", "getServicePrice", "searchKnowledgeBase", "transferToHuman"], changelog: "Borrador inicial" } });
+      return a;
+    });
+    await this.audit(req, "platform.agent.create", "agent", agent.id, { organizationId: id, name: input.name });
+    return agent;
+  }
+
+  /** Detalle completo del agente (borrador + publicada + historial de versiones) — para el editor. */
   @Get("organizations/:id/agents/:agentId")
   async getAgent(@Param("id") id: string, @Param("agentId") agentId: string, @Req() req: PlatformRequest) {
     await this.assertOrgBrand(req, id);
-    const db = this.prisma.admin;
-    const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
-    if (!agent) throw new NotFoundException("Agente no encontrado");
-    const version = agent.currentVersionId
-      ? await db.agentVersion.findUnique({ where: { id: agent.currentVersionId } })
-      : await db.agentVersion.findFirst({ where: { agentId }, orderBy: { version: "desc" } });
-    return {
-      id: agent.id,
-      slug: agent.slug,
-      name: agent.name,
-      kind: agent.kind,
-      active: agent.active,
-      systemPrompt: version?.systemPrompt ?? "",
-      tools: Array.isArray(version?.tools) ? version!.tools : [],
-      config: (version?.config ?? {}) as Record<string, unknown>,
-      status: version?.status ?? null,
-      version: version?.version ?? null,
-    };
+    return this.prisma.withTenant(id, async (tx) => {
+      const agent = await tx.agent.findFirst({ where: { id: agentId, deletedAt: null }, include: { versions: { orderBy: { version: "desc" }, take: 20 } } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      const published = agent.versions.find((v) => v.status === "PUBLISHED");
+      const draft = agent.versions.find((v) => v.status === "DRAFT" && (!published || v.version > published.version));
+      const editing = draft ?? published ?? agent.versions[0];
+      return {
+        id: agent.id, slug: agent.slug, name: agent.name, kind: agent.kind, description: agent.description, active: agent.active,
+        publishedVersion: published?.version ?? null, draftVersion: draft?.version ?? null,
+        editing: editing ? { systemPrompt: editing.systemPrompt, config: editing.config, tools: editing.tools, status: editing.status, version: editing.version } : null,
+        versions: agent.versions.map((v) => ({ version: v.version, status: v.status, changelog: v.changelog, publishedAt: v.publishedAt, createdAt: v.createdAt })),
+      };
+    });
+  }
+
+  /** Guarda el borrador (actualiza el DRAFT vigente o crea la versión siguiente). */
+  @Put("organizations/:id/agents/:agentId/draft")
+  async agentDraft(@Param("id") id: string, @Param("agentId") agentId: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = draftSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+    const input = parsed.data;
+    const result = await this.prisma.withTenant(id, async (tx) => {
+      const agent = await tx.agent.findFirst({ where: { id: agentId, deletedAt: null } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      if (input.name || input.kind || input.description !== undefined) {
+        await tx.agent.update({ where: { id: agentId }, data: { ...(input.name ? { name: input.name } : {}), ...(input.kind ? { kind: input.kind } : {}), ...(input.description !== undefined ? { description: input.description } : {}) } });
+      }
+      const latest = await tx.agentVersion.findFirst({ where: { agentId }, orderBy: { version: "desc" } });
+      const data = { systemPrompt: input.systemPrompt, config: input.config as object, tools: input.tools, changelog: input.changelog ?? null };
+      const version = latest && latest.status === "DRAFT"
+        ? await tx.agentVersion.update({ where: { id: latest.id }, data })
+        : await tx.agentVersion.create({ data: { organizationId: id, agentId, version: (latest?.version ?? 0) + 1, status: "DRAFT", ...data } });
+      return version.version;
+    });
+    await this.audit(req, "platform.agent.draft", "agent", agentId, { organizationId: id, draftVersion: result });
+    return { ok: true, draftVersion: result };
+  }
+
+  /** Publica el borrador (DRAFT → PUBLISHED). */
+  @Post("organizations/:id/agents/:agentId/publish")
+  async agentPublish(@Param("id") id: string, @Param("agentId") agentId: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const result = await this.prisma.withTenant(id, async (tx) => {
+      const agent = await tx.agent.findFirst({ where: { id: agentId, deletedAt: null } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      const draft = await tx.agentVersion.findFirst({ where: { agentId, status: "DRAFT" }, orderBy: { version: "desc" } });
+      if (!draft) throw new BadRequestException("No hay borrador para publicar");
+      const published = await tx.agentVersion.update({ where: { id: draft.id }, data: { status: "PUBLISHED", publishedAt: new Date() } });
+      await tx.agent.update({ where: { id: agentId }, data: { currentVersionId: published.id } });
+      return published.version;
+    });
+    await this.audit(req, "platform.agent.publish", "agent", agentId, { organizationId: id, version: result });
+    return { ok: true, publishedVersion: result };
+  }
+
+  /** PROBADOR: ejecuta con la config pasada SIN publicar (helper compartido, withTenant(id)). */
+  @Post("organizations/:id/agents/:agentId/test")
+  async agentTest(@Param("id") id: string, @Param("agentId") agentId: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = testSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+    const result = await runAgentTest(this.prisma, id, agentId, parsed.data);
+    await this.audit(req, "platform.agent.test", "agent", agentId, { organizationId: id, ok: (result as { ok?: boolean }).ok });
+    return result;
+  }
+
+  /** Elimina (soft-delete) un agente; bloquea si es default de un canal. */
+  @Delete("organizations/:id/agents/:agentId")
+  async agentDelete(@Param("id") id: string, @Param("agentId") agentId: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    await this.prisma.withTenant(id, async (tx) => {
+      const agent = await tx.agent.findFirst({ where: { id: agentId, deletedAt: null } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      const usedAsDefault = await tx.channelConnection.findFirst({ where: { defaultAgentId: agentId } });
+      if (usedAsDefault) throw new BadRequestException(`Es el agente por defecto del canal "${usedAsDefault.name}". Cámbialo antes de eliminarlo.`);
+      await tx.agent.update({ where: { id: agentId }, data: { deletedAt: new Date(), active: false } });
+    });
+    await this.audit(req, "platform.agent.delete", "agent", agentId, { organizationId: id });
+    return { ok: true };
   }
 
   /** Edita el system prompt (y opcionalmente las tools) del agente: publica la versión vigente. */
@@ -742,6 +880,23 @@ export class PlatformController {
     await db.agent.update({ where: { id: agentId }, data: { active: parsed.data.active } });
     await this.audit(req, "platform.agent.active", "agent", agentId, { organizationId: id, active: parsed.data.active });
     return { ok: true, active: parsed.data.active };
+  }
+
+  /** R2 — asigna el agente por defecto de un canal del tenant (activar/asignar). */
+  @Post("organizations/:id/channels/:channelId/default-agent")
+  async setChannelDefaultAgent(@Param("id") id: string, @Param("channelId") channelId: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const parsed = z.object({ agentId: z.string().min(1) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("agentId requerido");
+    await this.prisma.withTenant(id, async (tx) => {
+      const ch = await tx.channelConnection.findFirst({ where: { id: channelId } });
+      if (!ch) throw new NotFoundException("Canal no encontrado");
+      const agent = await tx.agent.findFirst({ where: { id: parsed.data.agentId, deletedAt: null } });
+      if (!agent) throw new NotFoundException("Agente no encontrado");
+      await tx.channelConnection.update({ where: { id: channelId }, data: { defaultAgentId: parsed.data.agentId } });
+    });
+    await this.audit(req, "platform.channel.default_agent", "channel", channelId, { organizationId: id, agentId: parsed.data.agentId });
+    return { ok: true };
   }
 
   /** Catálogo COMPLETO de rubros para la consola (incluye beta): mayor versión por key. */

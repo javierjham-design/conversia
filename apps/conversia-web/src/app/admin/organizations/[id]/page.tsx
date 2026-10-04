@@ -68,7 +68,6 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
   const [vertical, setVertical] = useState("");
   const [catalog, setCatalog] = useState<VerticalCat[]>([]);
   const [adjust, setAdjust] = useState("");
-  const [editAgent, setEditAgent] = useState<string | null>(null);
   const [steps, setSteps] = useState<Record<string, boolean>>({});
   const [obNotes, setObNotes] = useState("");
   const [channels, setChannels] = useState<{ connections: { id: string; type: string; name: string; status: string }[]; intents: { type: string; status: string }[] }>({ connections: [], intents: [] });
@@ -290,20 +289,19 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
           </div>
         </Card>
 
-        {d.agents.length ? (
-          <Card title="Agentes de IA">
-            {d.agents.map((a) => (
-              <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid var(--hairline)", fontSize: 13 }}>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  {a.name} <span className="text-dim">· {a.kind}</span>
-                  {!a.active ? <span style={{ color: "var(--warn)", fontSize: 11 }}> · inactivo</span> : null}
-                  <br /><span className="text-dim" style={{ fontSize: 11 }}>{a.effectiveModel}</span>
-                </span>
-                <button onClick={() => setEditAgent(a.id)} className="text-accent" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 13 }}>Editar</button>
-              </div>
-            ))}
-          </Card>
-        ) : null}
+        <Card title="Agentes de IA">
+          {d.agents.length ? d.agents.map((a) => (
+            <a key={a.id} href={`/admin/organizations/${id}/agents/${a.id}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: "1px solid var(--hairline)", fontSize: 13, textDecoration: "none", color: "var(--ink)" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {a.name} <span className="text-dim">· {a.kind}</span>
+                {!a.active ? <span style={{ color: "var(--warn)", fontSize: 11 }}> · inactivo</span> : null}
+                <br /><span className="text-dim" style={{ fontSize: 11 }}>{a.effectiveModel}</span>
+              </span>
+              <span className="text-accent" style={{ fontSize: 13 }}>Configurar →</span>
+            </a>
+          )) : <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Sin agentes aún.</p>}
+          <a href={`/admin/organizations/${id}/agents`} className="btn-accent" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 14 }}>Abrir configurador de agentes</a>
+        </Card>
 
         <Card title="Canales (conexión por tenant)">
           {channels.connections.length ? channels.connections.map((c) => (
@@ -385,62 +383,6 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
       </div>
 
       <button className="btn-accent" onClick={saveConfig} style={{ marginTop: 20, padding: "12px 28px", fontSize: 15 }}>Guardar configuración</button>
-
-      {editAgent ? <AgentEditor orgId={id} agentId={editAgent} onClose={() => setEditAgent(null)} onSaved={() => { setEditAgent(null); load(); }} /> : null}
-    </div>
-  );
-}
-
-function AgentEditor({ orgId, agentId, onClose, onSaved }: { orgId: string; agentId: string; onClose: () => void; onSaved: () => void }) {
-  const [a, setA] = useState<{ name: string; kind: string; active: boolean; systemPrompt: string } | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [active, setActive] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    padmin<{ name: string; kind: string; active: boolean; systemPrompt: string }>(`/platform/organizations/${orgId}/agents/${agentId}`)
-      .then((x) => { setA(x); setPrompt(x.systemPrompt); setActive(x.active); })
-      .catch((e) => setErr((e as Error).message));
-  }, [orgId, agentId]);
-
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setErr(null);
-    try {
-      await padmin(`/platform/organizations/${orgId}/agents/${agentId}/prompt`, { method: "POST", body: JSON.stringify({ systemPrompt: prompt }) });
-      if (a && active !== a.active) {
-        await padmin(`/platform/organizations/${orgId}/agents/${agentId}/active`, { method: "POST", body: JSON.stringify({ active }) });
-      }
-      onSaved();
-    } catch (e) {
-      setErr((e as Error).message);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={save} className="card" style={{ width: "100%", maxWidth: 640, padding: 22, maxHeight: "92dvh", overflowY: "auto" }}>
-        <h2 className="display" style={{ fontSize: 19, margin: "0 0 2px" }}>{a ? a.name : "Agente"}</h2>
-        <p className="text-dim" style={{ fontSize: 12, margin: "0 0 12px" }}>{a ? a.kind : ""} · editar prompt y estado</p>
-        {!a && !err ? <p className="text-dim">Cargando…</p> : null}
-        {a ? (
-          <>
-            <label style={LABEL}>System prompt</label>
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={16} style={{ ...NAPSE, fontFamily: "ui-monospace, monospace", fontSize: 13, lineHeight: 1.5, resize: "vertical" }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 14 }}>
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Agente activo
-            </label>
-          </>
-        ) : null}
-        {err ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 10 }}>{err}</p> : null}
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-          <button type="button" onClick={onClose} className="nav-item" style={{ flex: 1, height: 42, justifyContent: "center", border: "1px solid var(--line)", background: "transparent", cursor: "pointer" }}>Cancelar</button>
-          <button className="btn-accent" type="submit" disabled={busy || !a} style={{ flex: 1, opacity: busy || !a ? 0.6 : 1 }}>{busy ? "Guardando…" : "Guardar y publicar"}</button>
-        </div>
-      </form>
     </div>
   );
 }

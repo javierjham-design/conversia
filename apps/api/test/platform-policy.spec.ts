@@ -72,6 +72,13 @@ describe("F10 — operatorMayAccess: operar la FICHA del cliente sí se permite"
     "/platform/organizations/org_1/client-context",
     "/platform/organizations/org_1/lifecycle/delivered",
     "/platform/organizations/org_1/cash-summary",
+    "/platform/organizations/org_1/agents", // R2 — configurador de agentes (operar la ficha)
+    "/platform/organizations/org_1/agents/meta/tools",
+    "/platform/organizations/org_1/agents/ag_1",
+    "/platform/organizations/org_1/agents/ag_1/draft",
+    "/platform/organizations/org_1/agents/ag_1/publish",
+    "/platform/organizations/org_1/agents/ag_1/test",
+    "/platform/organizations/org_1/channels/ch_1/default-agent",
     "/platform/alerts",
     "/platform/support",
     "/platform/support/t_1/reply",
