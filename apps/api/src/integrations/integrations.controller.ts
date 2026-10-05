@@ -1319,12 +1319,34 @@ export class IntegrationsController {
 
   // ---------------------------- Cláriva ----------------------------
 
+  /** Empuja (best-effort) las plantillas APROBADAS a Cláriva para su Gestor de IA.
+   *  No lanza: una Cláriva inalcanzable no debe romper el guardado de la conexión. */
+  private async pushClarivaTemplates(organizationId: string, baseUrl: string, apiKey: string): Promise<void> {
+    try {
+      const rows = await this.prisma.withTenant(organizationId, (tx) =>
+        tx.whatsappTemplate.findMany({ where: { status: "APPROVED" } }),
+      );
+      if (!rows.length) return;
+      const templates = rows.map((r) => ({
+        name: r.name,
+        language: r.language,
+        category: r.category,
+        status: r.status,
+        variables: Array.isArray((r.body as any)?.variableFields) ? ((r.body as any).variableFields as string[]) : [],
+      }));
+      await new ClarivaSchedulingProvider({ baseUrl, apiKey }).pushTemplates(templates);
+    } catch (err) {
+      // best-effort: se reintenta en cada sync periódica del worker.
+      console.error(`push plantillas→Cláriva (org ${organizationId}):`, (err as Error).message);
+    }
+  }
+
   @Post("clariva")
-  connectClariva(@Body() body: unknown) {
+  async connectClariva(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
     const input = parse(clarivaSchema, body);
     assertUrlAllowed(input.baseUrl);
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const result = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const credential = await tx.integrationCredential.create({
         data: {
           organizationId: ctx.organizationId,
@@ -1360,6 +1382,9 @@ export class IntegrationsController {
       });
       return { ok: true };
     });
+    // Al conectar: empuja de inmediato las plantillas APROBADAS (el worker reintenta cada sync).
+    await this.pushClarivaTemplates(ctx.organizationId, input.baseUrl, input.apiKey);
+    return result;
   }
 
   /**

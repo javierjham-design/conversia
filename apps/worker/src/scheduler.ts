@@ -37,6 +37,8 @@ export function startScheduler(): () => void {
           const reminderVars: Record<string, string> = {};
           if (p.r2Enabled != null) reminderVars.__r2Enabled = String(p.r2Enabled);
           if (p.r2DelayHours != null) reminderVars.__r2DelayHours = String(p.r2DelayHours);
+          if (p.r1TemplateName != null) reminderVars.__r1TemplateName = String(p.r1TemplateName);
+          if (p.r2TemplateName != null) reminderVars.__r2TemplateName = String(p.r2TemplateName);
           await startWorkflowById(job.organizationId, String(p.workflowId), {
             conversationId: p.conversationId ? String(p.conversationId) : undefined,
             contactId: p.contactId ? String(p.contactId) : undefined,

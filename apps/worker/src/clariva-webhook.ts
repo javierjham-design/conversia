@@ -106,6 +106,8 @@ export async function processClarivaWebhook(
           planId: payload.planId ?? null,
           planValue: payload.planValue ?? null,
           serviceName: payload.serviceName ?? null,
+          // C(b): plantilla de recaptura de tratamiento elegida en el Gestor de IA.
+          templateName: typeof payload.templateName === "string" ? payload.templateName : null,
         },
       };
     }
@@ -211,7 +213,12 @@ export async function processClarivaWebhook(
   await enqueueCalendarSync(organizationId, result.appointmentId, mapped.status === "CANCELLED" ? "cancel" : "upsert");
   const { enqueueHubspotContact } = await import("./hubspot.js");
   await enqueueHubspotContact(organizationId, result.contactId);
-  const eventData = { appointmentId: result.appointmentId, externalId: result.externalId, contactId: result.contactId, source: "clariva", ...(result.meta ?? {}) };
+  const eventData = {
+    appointmentId: result.appointmentId, externalId: result.externalId, contactId: result.contactId, source: "clariva",
+    // C(b): plantilla de recaptura no-show elegida en el Gestor de IA (si vino en el payload).
+    recapturaTemplate: typeof payload.recapturaTemplate === "string" ? payload.recapturaTemplate : null,
+    ...(result.meta ?? {}),
+  };
   if (mapped.publicEvent) await emitPlatformEvent(organizationId, mapped.publicEvent, eventData);
   if (mapped.trigger) {
     await dispatchEvent({ organizationId, type: mapped.trigger, contactId: result.contactId, data: eventData, occurredAt });
