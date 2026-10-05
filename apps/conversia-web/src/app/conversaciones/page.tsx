@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, BotOff, CalendarPlus, CheckCircle2, CreditCard, Lock, MessageSquareText, Paperclip, Plus, RotateCcw, Send, StickyNote, X } from "lucide-react";
+import { ArrowLeft, Bot, BotOff, CalendarPlus, CheckCircle2, CreditCard, Lock, MessageSquareText, Paperclip, Plus, RotateCcw, Send, StickyNote, UserRound, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { OperationBar, Avatar, type OpState, type OpStage } from "@/components/OperationBar";
+import { FichaPanel } from "@/components/FichaPanel";
 import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
 
@@ -89,6 +90,7 @@ export default function Conversaciones() {
   const [internal, setInternal] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [showFicha, setShowFicha] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // B2 — acciones del redactor
@@ -421,6 +423,14 @@ export default function Conversaciones() {
                   {thread ? (
                     <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                       <button
+                        onClick={() => setShowFicha((v) => !v)}
+                        title="Ver ficha del cliente"
+                        style={{ ...headerBtn, ...(showFicha ? { background: "var(--acc-dim)", color: "var(--acc-deep)", border: "none" } : {}) }}
+                      >
+                        <UserRound size={16} />
+                        <span style={{ fontSize: 12 }}>Ver ficha</span>
+                      </button>
+                      <button
                         onClick={() => action(aiOn ? "takeover" : "release")}
                         disabled={busyAction}
                         title={aiOn ? "Tomar el control (pausa la IA)" : "Devolver a la IA"}
@@ -555,6 +565,9 @@ export default function Conversaciones() {
             )}
           </div>
         ) : null}
+
+        {/* B3 — ficha del cliente bajo demanda (drawer derecho; overlay completo en móvil) */}
+        {showFicha && sel ? <FichaPanel conversationId={sel} narrow={narrow} onClose={() => setShowFicha(false)} /> : null}
       </div>
       {showNew ? (
         <NewConversation
