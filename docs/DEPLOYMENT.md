@@ -48,6 +48,38 @@ Pasos (dashboard o CLI; el dueño los ejecuta):
 Primer release recomendado DESPUÉS de aplicar las migraciones E3/F1/F2/F5 + `db:setup` +
 `db:seed` (planes/paquetes/pesos conversia), para que el frontend tenga datos reales.
 
+### API por dominio propio — `api.conversia.cl` (B8)
+
+Hoy el frontend de Conversia llama a la api por el dominio Railway
+(`NEXT_PUBLIC_API_URL=https://api-production-cf8e.up.railway.app`). Para servir la MISMA api
+(un solo backend) también por `api.conversia.cl` **el código ya está listo**: todo es
+env-driven (conversia-web lee `NEXT_PUBLIC_API_URL`; el backend arma webhooks/links con
+`API_URL`; el CORS acepta los orígenes WEB `WEB_URL` + `WEB_URL_CONVERSIA`, que NO cambian).
+**No hay cambios de código** — solo DNS + env. El host Railway sigue válido durante la
+transición (nada se corta).
+
+**El DUEÑO ejecuta (3 pasos):**
+
+1. **DNS + dominio en Railway.** En el servicio `api` del proyecto `conversia`, agregar el
+   **custom domain** `api.conversia.cl` y crear el **CNAME** `api.conversia.cl` → el destino que
+   Railway indique (p. ej. `…up.railway.app`). Esperar a que Railway marque el dominio
+   **verificado** y emita el certificado TLS.
+2. **Verificar** que la api responde por el nuevo host (sin cortar el anterior):
+   ```bash
+   curl -s https://api.conversia.cl/health   # debe responder 200/OK
+   ```
+   Además, si se usarán webhooks/links por el nuevo host, setear en el servicio `api`:
+   `API_URL=https://api.conversia.cl` (así los retornos de Flow/Getnet y el link de
+   verificación de correo salen con el dominio propio). El CORS no cambia.
+3. **Apuntar el frontend** al dominio propio: en el servicio `conversia-web`, cambiar
+   `NEXT_PUBLIC_API_URL=https://api.conversia.cl` y **redeploy**
+   (`railway up --service conversia-web --ci`; es build arg, se inlinea en el bundle).
+   Confirmar que el **login del sandbox** y la **Bandeja** funcionan por la nueva base
+   (DevTools → Network: las llamadas van a `api.conversia.cl`).
+
+**Rollback:** volver `NEXT_PUBLIC_API_URL` al host Railway y redeploy (el host anterior nunca
+se desactiva hasta confirmar el switch). TuBot no se ve afectado (usa su propio `API_URL`).
+
 ## Runbook de migración a producción (obligatorio)
 
 Procedimiento fijo antes de aplicar cualquier migración a prod (acordado 2026-08-03). **Doble backup real** — nunca improvisar:
