@@ -21,6 +21,19 @@ function slug(s: string): string {
 }
 
 /**
+ * N2 — inicio del día local del negocio (medianoche en el offset dado), devuelto como Date UTC.
+ * Evita que las citas de hoy "desaparezcan" al avanzar la hora (el rango no debe partir en "ahora").
+ */
+function startOfLocalDay(offset: string): Date {
+  const sign = offset.trim().startsWith("-") ? -1 : 1;
+  const [h, m] = offset.replace(/[+-]/, "").split(":").map((n) => Number(n) || 0);
+  const offsetMin = sign * (h * 60 + m);
+  const local = new Date(Date.now() + offsetMin * 60000);
+  local.setUTCHours(0, 0, 0, 0);
+  return new Date(local.getTime() - offsetMin * 60000);
+}
+
+/**
  * AGENDA NATIVA de TuBot — gestión: config (granularidad/buffer/anticipación), personas
  * (con horarios), servicios y citas. Todo por-tenant (RLS). La disponibilidad la calcula
  * el proveedor nativo (worker) con estos datos. Coexiste con Cláriva/Dentalink: `status`
@@ -292,8 +305,12 @@ export class AgendaController {
   @Get("appointments")
   async listAppointments(@Query("from") from?: string, @Query("to") to?: string) {
     const ctx = requireContext();
-    const gte = from ? new Date(from) : new Date(Date.now() - 24 * 3600 * 1000);
-    const lte = to ? new Date(to) : new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    // N2 — por defecto el rango parte en el INICIO del día local del negocio (no "hace 24 h"),
+    // para que las citas de hoy sigan visibles aunque ya haya pasado su hora.
+    const org0 = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const offset = (((org0?.settings as Record<string, any> | null)?.agenda?.offset as string) || "-04:00");
+    const gte = from ? new Date(from) : startOfLocalDay(offset);
+    const lte = to ? new Date(to) : new Date(gte.getTime() + 30 * 24 * 3600 * 1000);
 
     const provider = await this.externalProvider(ctx.organizationId);
     if (provider && typeof provider.listAppointments === "function") {
@@ -313,15 +330,25 @@ export class AgendaController {
         take: 500,
       });
       const meta = (a: (typeof appts)[number]) => (a.meta as Record<string, unknown> | null) ?? {};
+      // N1 — resuelve los nombres de profesional/servicio por id (en lote), con fallback a meta.
+      // Antes quedaban en null porque createAppointment no siempre escribe meta.
+      const proIds = [...new Set(appts.map((a) => a.professionalId).filter(Boolean))] as string[];
+      const svcIds = [...new Set(appts.map((a) => a.serviceId).filter(Boolean))] as string[];
+      const [proRows, svcRows] = await Promise.all([
+        proIds.length ? tx.professional.findMany({ where: { id: { in: proIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
+        svcIds.length ? tx.service.findMany({ where: { id: { in: svcIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
+      ]);
+      const proName = new Map(proRows.map((p) => [p.id, p.name]));
+      const svcName = new Map(svcRows.map((s) => [s.id, s.name]));
       return {
         source: provider?.kind ?? "native",
         live: false,
         appointments: appts.map((a) => ({
           id: a.id,
           professionalId: a.professionalId,
-          professionalName: (meta(a).professionalName as string | undefined) ?? null,
+          professionalName: (a.professionalId ? proName.get(a.professionalId) : undefined) ?? (meta(a).professionalName as string | undefined) ?? null,
           serviceId: a.serviceId ?? null,
-          serviceName: (meta(a).serviceName as string | undefined) ?? null,
+          serviceName: (a.serviceId ? svcName.get(a.serviceId) : undefined) ?? (meta(a).serviceName as string | undefined) ?? null,
           status: a.status,
           startsAt: a.startsAt.toISOString(),
           endsAt: a.endsAt.toISOString(),
@@ -339,8 +366,16 @@ export class AgendaController {
       .object({ contactId: z.string().min(1), professionalId: z.string().optional(), serviceId: z.string().optional(), startsAt: z.string(), endsAt: z.string(), notes: z.string().max(1000).optional() })
       .safeParse(body);
     if (!p.success) throw new BadRequestException("Datos de cita inválidos");
-    return this.prisma.withTenant(ctx.organizationId, (tx) =>
-      tx.appointment.create({
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // N1 — guarda los nombres en meta al crear (ficha del cliente y otros consumidores de meta).
+      const [pro, svc] = await Promise.all([
+        p.data.professionalId ? tx.professional.findUnique({ where: { id: p.data.professionalId }, select: { name: true } }) : Promise.resolve(null),
+        p.data.serviceId ? tx.service.findUnique({ where: { id: p.data.serviceId }, select: { name: true } }) : Promise.resolve(null),
+      ]);
+      const meta: Record<string, string> = {};
+      if (pro?.name) meta.professionalName = pro.name;
+      if (svc?.name) meta.serviceName = svc.name;
+      return tx.appointment.create({
         data: {
           organizationId: ctx.organizationId,
           contactId: p.data.contactId,
@@ -351,9 +386,10 @@ export class AgendaController {
           startsAt: new Date(p.data.startsAt),
           endsAt: new Date(p.data.endsAt),
           notes: p.data.notes ?? null,
+          ...(Object.keys(meta).length ? { meta: meta as object } : {}),
         },
-      }),
-    );
+      });
+    });
   }
 
   @Patch("appointments/:id")
