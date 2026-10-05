@@ -209,6 +209,10 @@ export class ConversationsController {
       const nameByUser = new Map(members.map((m) => [m.userId, m.user.name]));
       const teams = await tx.team.findMany({ select: { id: true, name: true } });
       const nameByTeam = new Map(teams.map((t) => [t.id, t.name]));
+      // N3 (B1): nombre del agente IA activo en lote (para pintar el chip sin N+1).
+      const agentIds = [...new Set(page.map((c) => c.activeAgentId).filter(Boolean))] as string[];
+      const agentRows = agentIds.length ? await tx.agent.findMany({ where: { id: { in: agentIds } }, select: { id: true, name: true } }) : [];
+      const nameByAgent = new Map(agentRows.map((a) => [a.id, a.name]));
 
       return {
         items: page.map((c) => ({
@@ -220,6 +224,7 @@ export class ConversationsController {
           assignedTeamId: c.assignedTeamId,
           assignedTeamName: c.assignedTeamId ? (nameByTeam.get(c.assignedTeamId) ?? null) : null,
           activeAgentId: c.activeAgentId,
+          activeAgentName: c.activeAgentId ? (nameByAgent.get(c.activeAgentId) ?? null) : null,
           channelConnectionId: c.channelConnectionId,
           unreadCount: c.unreadCount,
           lastMessagePreview: c.lastMessagePreview,
