@@ -21,6 +21,44 @@ function getnetAuth(cfg: GetnetChargeConfig) {
   return { login: cfg.login, tranKey, nonce: rawNonce.toString("base64"), seed };
 }
 
+/**
+ * Crea una sesión de cobro Getnet y devuelve el link (processUrl) para enviarle al cliente.
+ * Espejo de la tool del worker (enviarLinkDePago) para el link de pago MANUAL desde el chat (B2).
+ */
+export async function createGetnetSession(
+  cfg: GetnetChargeConfig,
+  input: { reference: string; description: string; amount: number; currency: string; returnUrl: string; notificationUrl: string },
+): Promise<{ ok: boolean; url?: string; requestId?: string; error?: string }> {
+  const body = {
+    locale: "es_CL",
+    auth: getnetAuth(cfg),
+    payment: {
+      reference: input.reference,
+      description: input.description.slice(0, 250),
+      amount: { currency: input.currency, total: Math.round(input.amount) },
+    },
+    expiration: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    returnUrl: input.returnUrl,
+    notificationUrl: input.notificationUrl,
+    ipAddress: "127.0.0.1",
+    userAgent: "Conversia",
+  };
+  try {
+    const res = await fetch(`${cfg.baseUrl}/api/session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const r: any = await res.json().catch(() => ({}));
+    if (r?.status?.status === "OK" && r?.processUrl && r?.requestId != null) {
+      return { ok: true, url: String(r.processUrl), requestId: String(r.requestId) };
+    }
+    return { ok: false, error: r?.status?.message ?? `Getnet no devolvió el link (status ${r?.status?.status ?? "?"})` };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 /** Consulta el estado de una sesión (fuente de verdad para confirmar el pago). */
 export async function getGetnetSessionStatus(cfg: GetnetChargeConfig, requestId: string): Promise<{ approved: boolean; amount: number | null; raw: any }> {
   try {
