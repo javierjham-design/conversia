@@ -20,6 +20,23 @@
 > entra por la rama `replied`). El botón "Confirmar" lo resuelve ahora el agente con
 > la tool **`confirmAppointment`** (deja la cita *Confirmada* en Cláriva), ya no el
 > flujo por palabra clave de la §3. Son **4 plantillas** en total (ver §2 y §2-bis).
+>
+> **Actualización (2026-10-05) — §1.4: horarios y toggle de R2 DESDE el payload.** El
+> Gestor de IA de Cláriva configura los horarios y el on/off de la 2ª reconfirmación
+> por clínica; Cláriva los manda en el payload de `appointment.created/rescheduled`:
+> ```json
+> "reminders": { "enabled": true, "first": {"time":"12:00"}, "second": {"enabled":true,"time":"18:00"} }
+> ```
+> Mapeo en TuBot (manda sobre las horas fijas del workflow; **backward-compat** si el
+> payload no trae `reminders`):
+> - **R1** → `dueAt` el día anterior a `reminders.first.time` (si falta, al `sendAt`
+>   fijo del workflow, 12:00).
+> - **wait_reply n2** → timeout = `second.time − first.time` vía variable del run
+>   `__r2DelayHours` (nodo con `config.hoursVar`); si falta, su `hours` estático.
+> - **2ª reconfirmación** → nodo condición `n2b` (`kind:"flag"`, `var:"__r2Enabled"`,
+>   `default:true`): si `reminders.second.enabled === false` termina sin R2.
+> El toggle `reminders.enabled === false` equivale a `remindersEnabled:false` (§1.3):
+> no se programa ningún recordatorio.
 
 
 Hallazgo (2026-08-04): el flujo publicado **"Confirmación de cita"** de Digital

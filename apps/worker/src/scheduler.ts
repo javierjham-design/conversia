@@ -31,11 +31,18 @@ export function startScheduler(): () => void {
         } else if (job.kind === "appointment_reminder") {
           // Recordatorio de cita: ejecuta el workflow appointment_upcoming.
           const p = job.payload as Record<string, unknown>;
+          // Toggle/horario de la 2ª reconfirmación (§1.4): el run los recibe como
+          // variables (__r2Enabled para la condición "flag", __r2DelayHours para el
+          // timeout del wait_reply entre R1 y R2). Solo se incluyen si el payload los trae.
+          const reminderVars: Record<string, string> = {};
+          if (p.r2Enabled != null) reminderVars.__r2Enabled = String(p.r2Enabled);
+          if (p.r2DelayHours != null) reminderVars.__r2DelayHours = String(p.r2DelayHours);
           await startWorkflowById(job.organizationId, String(p.workflowId), {
             conversationId: p.conversationId ? String(p.conversationId) : undefined,
             contactId: p.contactId ? String(p.contactId) : undefined,
             // Ata el recordatorio a la cita EXACTA que lo programó (no a la más próxima).
             appointmentExternalId: p.appointmentExternalId ? String(p.appointmentExternalId) : undefined,
+            variables: Object.keys(reminderVars).length ? reminderVars : undefined,
           });
         }
         await prisma.scheduledJob.update({

@@ -600,11 +600,18 @@ async function executeNode(
       return {};
     case "wait":
       return { wait: computeWaitDue(cfg, deps.now()) };
-    case "wait_reply":
+    case "wait_reply": {
       // Espera una respuesta del contacto hasta el timeout. El runtime reanuda por
       // "replied" (si responde) o "no_reply" (si vence). NO usa cancelOn: la
       // respuesta no cancela el run, lo continúa por la rama "replied".
-      return { wait: computeWaitDue(cfg, deps.now()) };
+      // `hoursVar`: nombre de una variable del run que, si existe, FIJA el timeout
+      // en horas (p. ej. el recordatorio calcula R2−R1 desde el payload de Cláriva).
+      const hv = cfg.hoursVar ? ctx.variables?.[String(cfg.hoursVar)] : undefined;
+      const effCfg = hv != null && String(hv) !== "" && Number.isFinite(Number(hv))
+        ? { ...cfg, hours: Number(hv), minutes: 0, days: 0 }
+        : cfg;
+      return { wait: computeWaitDue(effCfg, deps.now()) };
+    }
     case "condition": {
       const result = await deps.evaluateCondition(ctx, cfg);
       return { branch: String(result) };

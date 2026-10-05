@@ -184,7 +184,9 @@ export async function processClarivaWebhook(
     // `remindersEnabled` (Gestor de IA de Cláriva): si viene false, NO se programan
     // recordatorios para esta cita, pero la proyección y los demás flujos siguen.
     const remindersEnabled = typeof payload.remindersEnabled === "boolean" ? payload.remindersEnabled : null;
-    return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(apptMeta), remindersEnabled };
+    // `reminders` (§1.4): horarios por clínica + toggle de la 2ª reconfirmación.
+    const reminders = payload.reminders && typeof payload.reminders === "object" ? payload.reminders : null;
+    return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(apptMeta), remindersEnabled, reminders };
   });
 
   if (!result) return;
@@ -218,7 +220,7 @@ export async function processClarivaWebhook(
   if (mapped.trigger === "appointment_created" || mapped.trigger === "appointment_rescheduled") {
     await scheduleAppointmentReminders(
       organizationId,
-      { id: result.externalId, start: result.startsAt, serviceId: result.meta?.serviceId, professionalId: result.meta?.professionalId, clinicId: result.meta?.clinicId, remindersEnabled: result.remindersEnabled },
+      { id: result.externalId, start: result.startsAt, serviceId: result.meta?.serviceId, professionalId: result.meta?.professionalId, clinicId: result.meta?.clinicId, remindersEnabled: result.remindersEnabled, reminders: result.reminders },
       { contactId: result.contactId },
     );
   } else if (mapped.trigger === "appointment_cancelled") {
