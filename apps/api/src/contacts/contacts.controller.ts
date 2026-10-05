@@ -201,6 +201,20 @@ const csvEscape = (v: unknown): string => {
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+/**
+ * B5 — asigna la etapa inicial "Nuevo" a un contacto recién creado que aún no tiene lead.
+ * Prefiere el estado de código "nuevo"; si no existe, el primer estado OPEN por orden.
+ * No-op si el tenant no tiene estados definidos o el contacto ya tiene lead.
+ */
+async function assignInitialStage(tx: any, organizationId: string, contactId: string): Promise<void> {
+  const already = await tx.lead.findFirst({ where: { contactId }, select: { id: true } });
+  if (already) return;
+  const status =
+    (await tx.leadStatus.findFirst({ where: { code: "nuevo", active: true }, select: { id: true } })) ??
+    (await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" }, select: { id: true } }));
+  if (status) await tx.lead.create({ data: { organizationId, contactId, statusId: status.id } });
+}
+
 @Controller("contacts")
 export class ContactsController {
   constructor(
@@ -305,6 +319,7 @@ export class ContactsController {
         },
         select: { id: true },
       });
+      await assignInitialStage(tx, ctx.organizationId, contact.id);
       await tx.auditLog.create({
         data: {
           organizationId: ctx.organizationId,

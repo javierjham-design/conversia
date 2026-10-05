@@ -86,7 +86,7 @@ async function enrichTenant() {
     console.log("  ✔ Bolsa: 1.500 créditos");
   } catch (e) { console.log("  ✖ bolsa:", e.message); }
 
-  // Contactos demo.
+  // Contactos demo (con etapa inicial "Nuevo" — B5 — para que Clientes muestre el ciclo de vida).
   try {
     const demo = [
       { firstName: "Camila", lastName: "Rojas", phone: "+56990000011" },
@@ -94,12 +94,19 @@ async function enrichTenant() {
       { firstName: "Valentina", lastName: "Soto", phone: "+56990000033" },
       { firstName: "Matías", lastName: "Herrera", phone: "+56990000044" },
     ];
+    const nuevo =
+      (await prisma.leadStatus.findFirst({ where: { organizationId: ORG_ID, code: "nuevo" } }).catch(() => null)) ||
+      (await prisma.leadStatus.findFirst({ where: { organizationId: ORG_ID, category: "OPEN" }, orderBy: { order: "asc" } }).catch(() => null));
     let n = 0;
     for (const c of demo) {
-      const ex = await prisma.contact.findFirst({ where: { organizationId: ORG_ID, phone: c.phone } });
-      if (!ex) { await prisma.contact.create({ data: { organizationId: ORG_ID, ...c } }); n++; }
+      let contact = await prisma.contact.findFirst({ where: { organizationId: ORG_ID, phone: c.phone } });
+      if (!contact) { contact = await prisma.contact.create({ data: { organizationId: ORG_ID, ...c } }); n++; }
+      if (nuevo) {
+        const hasLead = await prisma.lead.findFirst({ where: { organizationId: ORG_ID, contactId: contact.id } });
+        if (!hasLead) await prisma.lead.create({ data: { organizationId: ORG_ID, contactId: contact.id, statusId: nuevo.id } });
+      }
     }
-    console.log(`  ✔ Contactos demo: ${n} creados (${demo.length} total)`);
+    console.log(`  ✔ Contactos demo: ${n} creados${nuevo ? ' + etapa "Nuevo"' : ""}`);
   } catch (e) { console.log("  ✖ contactos:", e.message); }
 
   // Caja demo (append-only; postgres puede insertar).
