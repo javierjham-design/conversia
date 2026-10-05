@@ -68,30 +68,37 @@ BEGIN
   SELECT id INTO v_tpl_ns  FROM whatsapp_templates WHERE organization_id = v_org AND name = 'recaptura_noshow'              AND status = 'APPROVED' LIMIT 1;
   SELECT id INTO v_tpl_tr  FROM whatsapp_templates WHERE organization_id = v_org AND name = 'recaptura_tratamiento'         AND status = 'APPROVED' LIMIT 1;
 
-  -- A) Recordatorio de cita: dos envíos el día ANTERIOR (12:00 + 18:00 si no responde).
-  --    R1 a las 12:00 (hora fija vía trigger.sendAt). Si el paciente responde dentro de 6 h
-  --    → agente (confirma/reagenda) y R2 NO se envía. Si NO responde en 6 h → R2 insistencia
-  --    (~18:00); si responde dentro de 18 h → agente. Regla de negocio §1.2: R2 jamás se envía
-  --    si ya respondió a R1. Requiere AMBAS plantillas (recordatorio_cita + _insistencia).
+  -- A) Recordatorio de cita: dos envíos el día ANTERIOR (R1 + R2 si no responde).
+  --    Horarios y toggle de R2 vienen del Gestor de IA de Cláriva por el payload (§1.4):
+  --      · R1 a reminders.first.time (default sendAt 12:00 si el payload no lo trae).
+  --      · timeout del wait_reply n2 = reminders.second.time − first.time (var __r2DelayHours;
+  --        default 6 h = 12:00→18:00). Si el paciente responde → agente (confirma/reagenda).
+  --      · condición n2b (flag __r2Enabled, default true): si la clínica apagó la 2ª
+  --        reconfirmación (reminders.second.enabled=false) → termina sin R2.
+  --    Regla de negocio §1.2/§1.4: R2 jamás se envía si ya respondió a R1. Requiere AMBAS
+  --    plantillas (recordatorio_cita + _insistencia).
   IF v_tpl_rec IS NOT NULL AND v_tpl_ins IS NOT NULL THEN
     PERFORM pg_temp.seed_wf(v_org, 'Recordatorio de cita',
-      'Recuerda la cita el día anterior a las 12:00; si no responde, insiste a las 18:00. Cualquier respuesta deriva al agente de agendamiento para confirmar o reagendar.',
+      'Recuerda la cita el día anterior (horario del Gestor de IA de Cláriva, default 12:00); si no responde y la 2ª reconfirmación está activa, insiste (default 18:00). Cualquier respuesta deriva al agente de agendamiento para confirmar o reagendar.',
       jsonb_build_object(
         'trigger', jsonb_build_object('type','appointment_upcoming','config', jsonb_build_object('sendAt', jsonb_build_object('daysBefore',1,'time','12:00'),'avoidOffHours',true)),
         'variables', '{}'::jsonb,
         'nodes', jsonb_build_array(
           jsonb_build_object('id','n1','type','send_template','config', jsonb_build_object('templateId', v_tpl_rec)),
-          jsonb_build_object('id','n2','type','wait_reply','config', jsonb_build_object('hours',6)),
+          jsonb_build_object('id','n2','type','wait_reply','config', jsonb_build_object('hours',6,'hoursVar','__r2DelayHours')),
+          jsonb_build_object('id','n2b','type','condition','config', jsonb_build_object('kind','flag','var','__r2Enabled','default',true)),
           jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins)),
           jsonb_build_object('id','n4','type','wait_reply','config', jsonb_build_object('hours',18)),
           jsonb_build_object('id','n5','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
         ),
         'edges', jsonb_build_array(
           jsonb_build_object('from','n1','to','n2'),
-          jsonb_build_object('from','n2','to','n5','when','replied'),   -- respondió a R1 → agente (no se envía R2)
-          jsonb_build_object('from','n2','to','n3','when','no_reply'),  -- sin respuesta en 6 h → insistencia (~18:00)
+          jsonb_build_object('from','n2','to','n5','when','replied'),    -- respondió a R1 → agente (no se envía R2)
+          jsonb_build_object('from','n2','to','n2b','when','no_reply'),  -- sin respuesta → ¿2ª reconfirmación activa?
+          jsonb_build_object('from','n2b','to','n3','when','true'),      -- sí → insistencia
           jsonb_build_object('from','n3','to','n4'),
-          jsonb_build_object('from','n4','to','n5','when','replied')    -- respondió a R2 → agente
+          jsonb_build_object('from','n4','to','n5','when','replied')     -- respondió a R2 → agente
+          -- n2b when=false sin arista → termina (clínica apagó la 2ª reconfirmación)
         )
       ));
   ELSE

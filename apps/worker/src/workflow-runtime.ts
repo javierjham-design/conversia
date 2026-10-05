@@ -664,6 +664,15 @@ function makeDeps(): EngineDeps {
           return reply === null; // true = NO respondió
         });
       }
+      if (kind === "flag") {
+        // Bandera booleana leída de una variable del run (p. ej. el toggle de la 2ª
+        // reconfirmación `__r2Enabled` que Cláriva manda por cita). Si la variable no
+        // viene (payload sin `reminders`), devuelve `default` (true salvo que se fije
+        // en false) → preserva el comportamiento previo.
+        const raw = ctx.variables?.[String(config.var ?? "")];
+        if (raw === undefined || raw === null || String(raw) === "") return (config.default as boolean) !== false;
+        return raw === "true" || raw === "1" || (raw as unknown) === true;
+      }
       if (kind === "patient_is_new" && ctx.contactId) {
         // Nuevo = menos de N citas ATENDIDAS (COMPLETED) en la proyección local.
         // Gatea la recaptura a primeras visitas (no persigue a pacientes recurrentes).
@@ -805,7 +814,7 @@ export async function startWorkflowByName(
 export async function startWorkflowById(
   organizationId: string,
   workflowId: string,
-  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string },
+  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string; variables?: Record<string, string> },
 ): Promise<{ ok: boolean; error?: string }> {
   const wf = await withTenant(organizationId, (tx) =>
     tx.workflow.findFirst({
@@ -825,7 +834,7 @@ async function runWorkflowVersion(
   workflowId: string,
   versionId: string,
   definition: unknown,
-  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string },
+  target: { conversationId?: string; contactId?: string; appointmentExternalId?: string; variables?: Record<string, string> },
 ): Promise<{ ok: boolean; error?: string }> {
   const parsed = workflowDefinitionSchema.safeParse(definition);
   if (!parsed.success) return { ok: false, error: "La definición del flujo es inválida" };
@@ -835,10 +844,12 @@ async function runWorkflowVersion(
 
   const idempotencyKey = `manual:${workflowId}:${target.conversationId ?? target.contactId ?? "global"}:${Date.now()}`;
   // Cita exacta del recordatorio: reservada en variables (persiste → el retry la
-  // conserva); sendTemplate la lee para atar appointment.* a ESA cita.
-  const vars: Record<string, string> = target.appointmentExternalId
-    ? { __appointmentExternalId: target.appointmentExternalId }
-    : {};
+  // conserva); sendTemplate la lee para atar appointment.* a ESA cita. `variables`
+  // extra (p. ej. toggle/horario de R2 del payload de Cláriva) se agregan aquí.
+  const vars: Record<string, string> = {
+    ...(target.appointmentExternalId ? { __appointmentExternalId: target.appointmentExternalId } : {}),
+    ...(target.variables ?? {}),
+  };
   const run = await withTenant(organizationId, (tx) =>
     tx.workflowRun.create({
       data: {
@@ -920,11 +931,34 @@ async function loadOrgBusinessHours(tx: any, organizationId: string): Promise<{ 
  */
 export async function scheduleAppointmentReminders(
   organizationId: string,
-  appt: { id: string; start: string; serviceId?: string | null; professionalId?: string | null; clinicId?: string | null; remindersEnabled?: boolean | null },
+  appt: {
+    id: string; start: string;
+    serviceId?: string | null; professionalId?: string | null; clinicId?: string | null;
+    remindersEnabled?: boolean | null;
+    // Horarios/toggle de recordatorio por clínica (Gestor de IA de Cláriva, §1.4).
+    reminders?: { enabled?: boolean; first?: { time?: string }; second?: { enabled?: boolean; time?: string } } | null;
+  },
   target: { conversationId?: string; contactId?: string },
 ): Promise<void> {
   const startsAt = new Date(appt.start);
   const now = new Date();
+
+  // §1.4 — config de recordatorio DESDE el payload (manda sobre las horas fijas del
+  // workflow). Si no viene `reminders`, se conserva el comportamiento del workflow.
+  const rem = appt.reminders ?? null;
+  const toMin = (t?: string): number | null => {
+    if (typeof t !== "string" || !/^\d{1,2}:\d{2}$/.test(t)) return null;
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const r1Time = typeof rem?.first?.time === "string" ? rem.first.time : null;
+  const r1Min = toMin(r1Time ?? undefined);
+  const r2Min = toMin(rem?.second?.time);
+  const r2Enabled = rem?.second?.enabled === true;
+  // Timeout del wait_reply entre R1 y R2 = (segunda − primera) en horas (solo si ambas
+  // y la segunda es posterior). Si falta, el workflow usa su timeout estático.
+  const r2DelayHours = r1Min != null && r2Min != null && r2Min > r1Min ? (r2Min - r1Min) / 60 : null;
+  const remindersDisabled = rem?.enabled === false || appt.remindersEnabled === false;
   await withTenant(organizationId, async (tx) => {
     const { bh, timezone } = await loadOrgBusinessHours(tx, organizationId);
     const wfs = await tx.workflow.findMany({
@@ -947,12 +981,15 @@ export async function scheduleAppointmentReminders(
         now,
         startsAt,
         hoursBefore: Number(cfg.hoursBefore ?? 24),
-        sendAt:
-          cfg.sendAt && typeof cfg.sendAt.time === "string"
+        // R1 a la hora del payload (reminders.first.time) si viene; si no, al sendAt
+        // fijo del workflow (backward-compat).
+        sendAt: r1Time
+          ? { daysBefore: 1, time: r1Time }
+          : cfg.sendAt && typeof cfg.sendAt.time === "string"
             ? { daysBefore: Number(cfg.sendAt.daysBefore ?? 1), time: String(cfg.sendAt.time) }
             : null,
         // Confirmaciones apagadas desde el Gestor de IA de Cláriva → no programar.
-        remindersDisabled: appt.remindersEnabled === false,
+        remindersDisabled,
         existing: existing ? { status: existing.status, dueAt: existing.dueAt } : null,
         businessHours: bh,
         timezone,
@@ -978,6 +1015,9 @@ export async function scheduleAppointmentReminders(
             conversationId: target.conversationId ?? null,
             appointmentExternalId: appt.id,
             startsAt: startsAt.toISOString(),
+            // §1.4 — toggle/horario de R2 para el run (null si el payload no los trae).
+            r2Enabled: rem ? r2Enabled : null,
+            r2DelayHours,
           },
         },
       });

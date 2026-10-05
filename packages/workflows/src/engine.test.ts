@@ -274,6 +274,33 @@ describe("motor de workflows v0", () => {
     expect(calls).toEqual(["status:nuevo", "agent:recepcionista", "timer:n3"]);
   });
 
+  it("wait_reply con hoursVar: fija el timeout desde la variable del run (§1.4)", async () => {
+    let dueAt: Date | undefined;
+    const { deps } = makeDeps({ scheduleTimer: async (_c, _n, due) => void (dueAt = due) });
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} }, variables: {},
+      nodes: [{ id: "w", type: "wait_reply", config: { hours: 18, hoursVar: "__r2DelayHours" } }],
+      edges: [],
+    };
+    const c: RunCtx = { ...ctx, variables: { __r2DelayHours: "6" } };
+    const r = await executeFrom(deps, c, flow, "w");
+    expect(r).toEqual({ status: "waiting", nodeId: "w" });
+    expect(dueAt?.toISOString()).toBe("2026-01-01T18:00:00.000Z"); // now 12:00 + 6 h (var), no las 18 estáticas
+  });
+
+  it("wait_reply sin la variable → usa el timeout estático del nodo", async () => {
+    let dueAt: Date | undefined;
+    const { deps } = makeDeps({ scheduleTimer: async (_c, _n, due) => void (dueAt = due) });
+    const flow: WorkflowDefinition = {
+      trigger: { type: "manual", config: {} }, variables: {},
+      nodes: [{ id: "w", type: "wait_reply", config: { hours: 6, hoursVar: "__r2DelayHours" } }],
+      edges: [],
+    };
+    const r = await executeFrom(deps, { ...ctx, variables: {} }, flow, "w");
+    expect(r).toEqual({ status: "waiting", nodeId: "w" });
+    expect(dueAt?.toISOString()).toBe("2026-01-01T18:00:00.000Z"); // now 12:00 + 6 h estáticas
+  });
+
   it("reanuda tras el timer, evalúa condición y renderiza variables", async () => {
     const { deps, calls } = makeDeps();
     const result = await resumeAfterWait(deps, ctx, def, "n3");
