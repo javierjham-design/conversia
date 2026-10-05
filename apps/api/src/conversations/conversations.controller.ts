@@ -315,6 +315,77 @@ export class ConversationsController {
     });
   }
 
+  /**
+   * B3 — ficha del cliente bajo demanda ("Ver ficha"): extras no incluidos en /context
+   * (próxima cita + historial, pagos del contacto, campos personalizados y notas persistentes).
+   */
+  @Get(":id/ficha")
+  ficha(@Param("id") id: string) {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id }, select: { contactId: true } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const contactId = conversation.contactId;
+      const now = new Date();
+      const [appts, payments, cfValues, cfDefs, contact] = await Promise.all([
+        tx.appointment.findMany({ where: { contactId }, orderBy: { startsAt: "desc" }, take: 30 }),
+        tx.customerPayment.findMany({ where: { contactId }, orderBy: { createdAt: "desc" }, take: 20 }),
+        tx.customFieldValue.findMany({ where: { entityId: contactId } }),
+        tx.customFieldDefinition.findMany({ where: { entity: "contact" }, orderBy: { order: "asc" } }),
+        tx.contact.findUnique({ where: { id: contactId }, select: { attributes: true } }),
+      ]);
+      const mapAppt = (a: (typeof appts)[number]) => {
+        const m = (a.meta as Record<string, unknown> | null) ?? {};
+        return {
+          id: a.id,
+          startsAt: a.startsAt.toISOString(),
+          endsAt: a.endsAt.toISOString(),
+          status: a.status,
+          professionalName: (m.professionalName as string | undefined) ?? null,
+          serviceName: (m.serviceName as string | undefined) ?? null,
+          notes: a.notes,
+        };
+      };
+      const upcoming = appts
+        .filter((a) => a.startsAt >= now && a.status !== "CANCELLED" && a.status !== "NO_SHOW")
+        .sort((x, y) => x.startsAt.getTime() - y.startsAt.getTime());
+      const defById = new Map(cfDefs.map((d) => [d.id, d]));
+      const customFields = cfValues.flatMap((v) => {
+        const d = defById.get(v.definitionId);
+        return d ? [{ key: d.key, label: d.label, type: d.type, value: v.value }] : [];
+      });
+      const notesRaw = (contact?.attributes as Record<string, unknown> | null)?.notes;
+      const notes = Array.isArray(notesRaw) ? notesRaw : [];
+      return {
+        next: upcoming[0] ? mapAppt(upcoming[0]) : null,
+        recent: appts.slice(0, 5).map(mapAppt),
+        payments: payments.map((p) => ({ id: p.id, amount: p.amount, currency: p.currency, subject: p.subject, status: p.status, createdAt: p.createdAt, paidAt: p.paidAt })),
+        customFields,
+        notes,
+      };
+    });
+  }
+
+  /** B3 — agrega una nota persistente al CONTACTO (visible en su ficha desde cualquier chat). */
+  @Post(":id/contact-note")
+  contactNote(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ text: z.string().trim().min(1).max(2000) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("La nota no puede estar vacía");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conversation = await tx.conversation.findUnique({ where: { id }, select: { contactId: true } });
+      if (!conversation) throw new NotFoundException("Conversación no encontrada");
+      const contact = await tx.contact.findUnique({ where: { id: conversation.contactId }, select: { attributes: true } });
+      const attrs = (contact?.attributes as Record<string, unknown> | null) ?? {};
+      const prev = Array.isArray(attrs.notes) ? (attrs.notes as unknown[]) : [];
+      const byName = await this.userName(tx, ctx.userId);
+      const entry = { at: new Date().toISOString(), by: ctx.userId, byName, text: parsed.data.text };
+      const notes = [entry, ...prev].slice(0, 100);
+      await tx.contact.update({ where: { id: conversation.contactId }, data: { attributes: { ...attrs, notes } as object } });
+      return { ok: true, notes };
+    });
+  }
+
   /** Cierra la conversación; nota de cierre opcional como comentario interno. */
   @Post(":id/close")
   close(@Param("id") id: string, @Body() body?: unknown) {
