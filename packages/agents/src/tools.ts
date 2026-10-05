@@ -378,6 +378,44 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       },
     },
     {
+      name: "confirmAppointment",
+      description:
+        "Deja CONFIRMADA en la agenda la próxima cita del paciente cuando confirma su asistencia ('sí voy', 'confirmo', 'ahí estaré'). Sin parámetros confirma su cita próxima (lo normal). Si NO confirma sino que quiere cambiarla, NO uses esto: usa getAvailability + createAppointment para reagendar.",
+      inputSchema: z.object({
+        appointmentId: z.string().optional().describe("Id externo de la cita. Normalmente NO hace falta: sin él se confirma la próxima cita del paciente."),
+      }),
+      async execute(ctx, input: { appointmentId?: string }) {
+        const s = services(ctx);
+        const contact = await s.contactInfo();
+        if (!contact.phone) return { error: "No tengo el teléfono del paciente, no puedo ubicar su cita." };
+        const now = Date.now();
+        let targetId = input.appointmentId;
+        if (!targetId) {
+          // Sin id: la próxima cita del paciente (PENDING/CONFIRMED, start a futuro).
+          const appts = await s.scheduling.getPatientAppointments(contact.phone).catch(() => [] as SchedAppointment[]);
+          const upcoming = appts
+            .filter((a) => ["pending", "confirmed"].includes(a.status) && new Date(a.start).getTime() >= now)
+            .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+          const target = upcoming[0] ?? null;
+          if (!target) return { error: "No encuentro una cita próxima a nombre del paciente. Pregúntale si quiere que agenden una." };
+          targetId = target.id;
+          if (target.status === "confirmed") {
+            return { ok: true, alreadyConfirmed: true, cuando: slotWhen.format(new Date(target.start)), message: `Su cita del ${slotWhen.format(new Date(target.start))} ya estaba confirmada. Agradécele y cierra con calidez.` };
+          }
+        }
+        let appt: SchedAppointment;
+        try {
+          appt = await s.scheduling.confirmAppointment(String(targetId));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { error: `No pude confirmar la cita en la agenda (${msg.slice(0, 80)}). Discúlpate y dile que el equipo lo confirmará a la brevedad.` };
+        }
+        await s.recordAppointment(appt).catch(() => undefined);
+        const cuando = slotWhen.format(new Date(appt.start));
+        return { ok: true, cuando, appointment: appt, message: `Cita CONFIRMADA para ${cuando}. Confírmaselo al paciente con esa fecha/hora exacta y cierra con calidez (p. ej. "¡listo, te esperamos!").` };
+      },
+    },
+    {
       name: "getLeadStatuses",
       description: "Lista las ETAPAS válidas del lead configuradas por la cuenta (code + nombre). Úsala antes de updateLeadStatus para usar el code exacto; nunca inventes códigos.",
       inputSchema: z.object({}),

@@ -947,6 +947,10 @@ export async function scheduleAppointmentReminders(
         now,
         startsAt,
         hoursBefore: Number(cfg.hoursBefore ?? 24),
+        sendAt:
+          cfg.sendAt && typeof cfg.sendAt.time === "string"
+            ? { daysBefore: Number(cfg.sendAt.daysBefore ?? 1), time: String(cfg.sendAt.time) }
+            : null,
         existing: existing ? { status: existing.status, dueAt: existing.dueAt } : null,
         businessHours: bh,
         timezone,

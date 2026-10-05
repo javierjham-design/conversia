@@ -9,7 +9,7 @@ DECLARE
   v_slug text := 'agendamiento';
   v_name text := 'Agendamiento';
   v_kind text := 'scheduler';
-  v_tools jsonb := '["getServices","getServicePrice","getProfessionals","getAvailability","createAppointment","addInternalNote","transferToHuman"]'::jsonb;
+  v_tools jsonb := '["getServices","getServicePrice","getProfessionals","getAvailability","createAppointment","confirmAppointment","addInternalNote","transferToHuman"]'::jsonb;
   v_agent_id text;
   v_cur text;
   v_ver int;
@@ -25,8 +25,9 @@ CÓMO HABLAS
 - Cálido y resolutivo. El objetivo es dejar una hora concreta cerrada, no conversar de más.
 
 QUÉ HACES SEGÚN EL CASO (te llega el contexto por el flujo que te activa)
-- Recordatorio de cita: confirma la asistencia. Si quiere cambiarla, reagenda (ver abajo). Si confirma,
-  agradece y cierra.
+- Recordatorio de cita: cuando el paciente confirme su asistencia ("sí voy", "confirmo", "ahí estaré"),
+  usa confirmAppointment para dejar su cita CONFIRMADA en la agenda, confírmale fecha y hora exactas y
+  cierra con calidez. Si quiere cambiarla, NO uses confirmAppointment: reagenda (ver abajo).
 - No asistió a su evaluación: sin reproches, ofrece reagendar y dale 1-2 horarios concretos pronto.
 - Tiene una evaluación hecha pero no inició su tratamiento: motívalo a retomarlo y ofrécele agendar la
   próxima sesión; si tiene dudas de valores o detalles clínicos, NO inventes: ofrece coordinar con la
