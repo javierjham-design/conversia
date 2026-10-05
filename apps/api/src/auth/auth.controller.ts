@@ -160,7 +160,9 @@ export class AuthController {
     }
     await this.prisma.admin.user.update({
       where: { id: user.id },
-      data: { passwordHash: bcrypt.hashSync(input.password, 12) },
+      // B7 — un usuario INVITADO por el equipo/dueño es de confianza: su correo queda verificado
+      // al aceptar (recibió el enlace en su bandeja). No se le exige el flujo de verificación.
+      data: { passwordHash: bcrypt.hashSync(input.password, 12), emailVerifiedAt: user.emailVerifiedAt ?? new Date() },
     });
     return { ok: true, email: user.email };
   }

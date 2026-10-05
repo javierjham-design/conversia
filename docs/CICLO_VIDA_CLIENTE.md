@@ -31,6 +31,22 @@ conectar WhatsApp → publicar agente/flujo → checklist → **Marcar ENTREGADO
   "demo"`): operativa, **sin cobro ni purga**. Endpoint `POST .../lifecycle/demo`, auditado
   (`platform.org.demo`). Botón "Marcar como demo" en la ficha.
 
+### Verificación de correo (B7 / D6)
+
+Política antiabuso por marca:
+
+- **Registro público (Conversia)**: la cuenta nace con el correo **sin verificar** y se le envía
+  el enlace de verificación. La verificación es **blanda** (no bloquea el login) + **aviso
+  persistente** en el panel con botón "Reenviar". El antiabuso duro es **estructural**: una cuenta
+  self-service **no puede ir en vivo ni enviar** hasta que el EQUIPO la marque ENTREGADA (setup
+  pagado, B6) — un registro falso no causa daño.
+- **Gate concreto**: un dueño con el correo **sin verificar no puede invitar más usuarios**
+  (evita que cuentas no verificadas generen más cuentas). Exento: cuentas **demo** y usuarios ya
+  verificados.
+- **Invitados por el equipo/dueño**: su correo queda **verificado al aceptar** la invitación
+  (recibieron el enlace en su bandeja → de confianza; sin fricción de verificación).
+- **TuBot**: sin cambios (no exige verificación).
+
 ---
 
 ## 2. Offboarding / baja de un cliente Conversia
