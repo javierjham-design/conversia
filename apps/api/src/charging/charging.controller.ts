@@ -57,6 +57,36 @@ export async function resolveTenantFlow(prisma: PrismaService, orgId: string): P
   }
 }
 
+/** Crea un link de pago Flow (payment/create firmado). Espejo de la tool del worker para el cobro MANUAL. */
+async function createFlowPaymentLink(
+  cfg: FlowConfig,
+  input: { commerceOrder: string; subject: string; amount: number; currency: string; email: string; urlConfirmation: string; urlReturn: string },
+): Promise<{ ok: boolean; url?: string; token?: string; error?: string }> {
+  const params: Record<string, string> = {
+    apiKey: cfg.apiKey,
+    commerceOrder: input.commerceOrder,
+    subject: input.subject.slice(0, 100),
+    currency: input.currency,
+    amount: String(Math.round(input.amount)),
+    email: input.email,
+    urlConfirmation: input.urlConfirmation,
+    urlReturn: input.urlReturn,
+  };
+  params.s = flowSign(params, cfg.secretKey);
+  try {
+    const res = await fetch(`${cfg.baseUrl}/payment/create`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+    const r: any = await res.json().catch(() => ({}));
+    if (r?.url && r?.token) return { ok: true, url: `${r.url}?token=${r.token}`, token: String(r.token) };
+    return { ok: false, error: r?.message ?? `Flow no devolvió el link (code ${r?.code ?? "?"})` };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 /**
  * COBROS del tenant a SUS clientes vía Flow (cuenta Flow del propio tenant). El bot
  * genera links de pago con el monto acordado; este controlador administra la config
@@ -65,6 +95,86 @@ export async function resolveTenantFlow(prisma: PrismaService, orgId: string): P
 @Controller("charging")
 export class ChargingController {
   constructor(private prisma: PrismaService) {}
+
+  /**
+   * B2 — link de pago MANUAL desde el chat: genera el link (Flow/Getnet del tenant) por el
+   * monto/concepto indicados y registra el CustomerPayment (pending). Devuelve la URL para
+   * que el operador la inserte en el compositor y la envíe (respeta el gating de 24 h del envío).
+   * El cobro debe estar habilitado y con credenciales del proveedor elegido.
+   */
+  @Post("link")
+  async createLink(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z
+      .object({ conversationId: z.string().optional(), amount: z.number().int().positive(), concept: z.string().trim().min(1).max(120) })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Monto y concepto requeridos (monto entero > 0).");
+    const { amount, concept } = parsed.data;
+    const env = getEnv();
+
+    // Contexto del tenant (RLS): config de cobro + moneda + contacto/email de la conversación.
+    const setup = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true, currency: true } });
+      const conv = parsed.data.conversationId
+        ? await tx.conversation.findUnique({ where: { id: parsed.data.conversationId }, select: { id: true, contactId: true, contact: { select: { email: true } } } })
+        : null;
+      const charging = ((org?.settings as Record<string, unknown> | null)?.charging as ChargingSettings) ?? {};
+      return { charging, currency: org?.currency ?? "CLP", conversationId: conv?.id ?? null, contactId: conv?.contactId ?? null, email: conv?.contact?.email ?? null };
+    });
+    if (setup.charging.enabled !== true) {
+      throw new BadRequestException("El cobro no está configurado. Actívalo en Configuración → Cobros.");
+    }
+    const provider = setup.charging.provider === "getnet" ? "getnet" : "flow";
+    const commerceOrder = `cp-${ctx.organizationId.slice(-6)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    let link: { ok: boolean; url?: string; token?: string | null; error?: string };
+    if (provider === "getnet") {
+      const cred = await this.prisma.admin.integrationCredential.findFirst({ where: { organizationId: ctx.organizationId, provider: GETNET_PROVIDER } });
+      if (!cred) throw new BadRequestException("Primero guarda tus credenciales de Getnet.");
+      let creds: { login: string; secretKey: string };
+      try {
+        creds = JSON.parse(decryptSecret(cred.ciphertext));
+      } catch {
+        throw new BadRequestException("Las credenciales de Getnet no son legibles.");
+      }
+      const { createGetnetSession } = await import("./getnet-charge.js");
+      const r = await createGetnetSession(
+        { login: creds.login, secretKey: creds.secretKey, baseUrl: setup.charging.sandbox ? GETNET_SANDBOX : GETNET_PROD },
+        { reference: commerceOrder, description: concept, amount, currency: setup.currency, returnUrl: `${env.WEB_URL}`, notificationUrl: `${env.API_URL}/webhooks/getnet-charge` },
+      );
+      link = { ok: r.ok, url: r.url, token: r.requestId ?? null, error: r.error };
+    } else {
+      const cfg = await resolveTenantFlow(this.prisma, ctx.organizationId);
+      if (!cfg) throw new BadRequestException("Primero guarda tus credenciales de Flow.");
+      link = await createFlowPaymentLink(cfg, {
+        commerceOrder,
+        subject: concept,
+        amount,
+        currency: setup.currency,
+        email: setup.email || `pagos+${commerceOrder}@conversia.cl`,
+        urlConfirmation: `${env.API_URL}/webhooks/flow-charge`,
+        urlReturn: `${env.WEB_URL}`,
+      });
+    }
+    if (!link.ok || !link.url) throw new BadRequestException(`No se pudo generar el link de pago (${link.error ?? "error del proveedor"}).`);
+
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.customerPayment.create({
+        data: {
+          organizationId: ctx.organizationId,
+          contactId: setup.contactId,
+          conversationId: setup.conversationId,
+          amount,
+          currency: setup.currency,
+          subject: concept.slice(0, 120),
+          status: "pending",
+          flowToken: link.token ?? null,
+          commerceOrder,
+        },
+      }),
+    );
+    return { ok: true, url: link.url, amount, concept, currency: setup.currency, provider };
+  }
 
   @Get()
   async get() {

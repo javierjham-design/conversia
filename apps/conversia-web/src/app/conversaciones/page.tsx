@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Bot, BotOff, CheckCircle2, Paperclip, Plus, RotateCcw, Send, StickyNote, X } from "lucide-react";
+import { ArrowLeft, Bot, BotOff, CalendarPlus, CheckCircle2, CreditCard, Lock, MessageSquareText, Paperclip, Plus, RotateCcw, Send, StickyNote, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { OperationBar, Avatar, type OpState, type OpStage } from "@/components/OperationBar";
 import { api } from "@/lib/api";
@@ -25,6 +25,7 @@ type ConvItem = {
   contact: Contact;
 };
 type ConvContext = { tags: string[] };
+type Snippet = { id: string; shortcut: string; body: string };
 type Msg = {
   id: string;
   direction: "INBOUND" | "OUTBOUND";
@@ -60,6 +61,21 @@ function shortTime(iso: string | null): string {
     ? d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })
     : d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" });
 }
+// B2 — estilo de los chips de acción del redactor (activo = acento).
+function composerChip(active: boolean): React.CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12,
+    padding: "5px 10px",
+    borderRadius: 999,
+    cursor: "pointer",
+    border: active ? "none" : "1px solid var(--line)",
+    background: active ? "var(--acc-dim)" : "transparent",
+    color: active ? "var(--acc-deep)" : "var(--ink-dim)",
+  };
+}
 
 export default function Conversaciones() {
   const [status, setStatus] = useState<(typeof STATUSES)[number]["key"]>("open");
@@ -75,6 +91,12 @@ export default function Conversaciones() {
   const [showNew, setShowNew] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // B2 — acciones del redactor
+  const [snips, setSnips] = useState<Snippet[]>([]);
+  const [showSnips, setShowSnips] = useState(false);
+  const [showAgendar, setShowAgendar] = useState(false);
+  const [showPago, setShowPago] = useState(false);
+  const [templateFor, setTemplateFor] = useState<string | null>(null); // teléfono para enviar plantilla (fuera de 24h)
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const selRef = useRef<string | null>(null);
@@ -229,10 +251,28 @@ export default function Conversaciones() {
     }
   }
 
+  // B2 — respuestas rápidas (snippets): se cargan una vez (semilla al primer uso en el backend).
+  useEffect(() => {
+    api<Snippet[]>("/inbox/snippets").then(setSnips).catch(() => setSnips([]));
+  }, []);
+
+  // B2 — "/atajo" abre el buscador de respuestas rápidas; elegir una reemplaza el texto.
+  function onComposerChange(v: string) {
+    setText(v);
+    setShowSnips(v.startsWith("/") && !internal);
+  }
+  const snipQuery = text.startsWith("/") ? text.slice(1).toLowerCase() : "";
+  const snipMatches = showSnips ? snips.filter((s) => s.shortcut.toLowerCase().includes(snipQuery) || s.body.toLowerCase().includes(snipQuery)).slice(0, 6) : [];
+  function pickSnippet(s: Snippet) {
+    setText(s.body);
+    setShowSnips(false);
+  }
+
   const showList = !narrow || !sel;
   const showThread = !narrow || !!sel;
   const closed = thread?.conversation.status === "CLOSED";
   const aiOn = thread?.conversation.aiEnabled;
+  const contactPhone = thread?.conversation.contact.phone ?? null;
 
   // B1 — estado de la barra de operación: funde el ConvItem de la lista (nombres de
   // agente/asignado/etapa, sin llamadas extra), el hilo (aiEnabled fresco + ventana 24h)
@@ -432,10 +472,10 @@ export default function Conversaciones() {
                               {m.body ?? (m.type !== "TEXT" ? `[${m.type.toLowerCase()}]` : "")}
                             </div>
                             <div className="text-dim" style={{ fontSize: 10, marginTop: 2, textAlign: out ? "right" : "left" }}>
-                              {m.authorType === "AGENT" ? "🤖 " : ""}
+                              {m.authorType === "AGENT" ? "IA · " : ""}
                               {note ? "Nota · " : ""}
                               {shortTime(m.createdAt)}
-                              {out && m.status === "FAILED" ? " · ✖ falló" : ""}
+                              {out && m.status === "FAILED" ? " · no se envió" : ""}
                             </div>
                           </div>
                         );
@@ -444,30 +484,69 @@ export default function Conversaciones() {
                   <div ref={bottomRef} />
                 </div>
 
-                <div style={{ borderTop: "1px solid var(--hairline)" }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 16px 0" }}>
+                <div style={{ borderTop: "1px solid var(--hairline)", position: "relative" }}>
+                  {/* B2 — fila de acciones del redactor */}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "8px 16px 0", flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => setInternal((v) => !v)}
                       title="Nota interna (no se envía al cliente)"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, padding: "5px 10px", borderRadius: 999, cursor: "pointer", border: internal ? "none" : "1px solid var(--line)", background: internal ? "var(--warn)" : "transparent", color: internal ? "#2a1c02" : "var(--ink-dim)" }}
+                      style={composerChip(internal)}
                     >
                       <StickyNote size={14} /> Nota interna
                     </button>
-                    {internal ? <span className="text-dim" style={{ fontSize: 11 }}>Solo tu equipo la verá.</span> : null}
+                    <button type="button" onClick={() => setShowSnips((v) => !v)} title="Respuestas rápidas (escribe / )" style={composerChip(showSnips)} disabled={internal}>
+                      <MessageSquareText size={14} /> Respuestas
+                    </button>
+                    <button type="button" onClick={() => setShowAgendar(true)} title="Agendar una cita desde el chat" style={composerChip(false)}>
+                      <CalendarPlus size={14} /> Agendar
+                    </button>
+                    <button type="button" onClick={() => setShowPago(true)} title="Enviar un link de pago" style={composerChip(false)}>
+                      <CreditCard size={14} /> Link de pago
+                    </button>
+                    {internal ? <span className="text-dim" style={{ fontSize: 11, marginLeft: "auto" }}>Solo tu equipo la verá.</span> : null}
                   </div>
+
+                  {/* B2 — buscador de respuestas rápidas */}
+                  {showSnips && !internal ? (
+                    <div className="card" style={{ margin: "8px 16px 0", padding: 6, maxHeight: 220, overflowY: "auto" }}>
+                      {snipMatches.length === 0 ? (
+                        <p className="text-dim" style={{ fontSize: 12, padding: "8px 10px", margin: 0 }}>Sin respuestas rápidas. Créalas en Bandeja.</p>
+                      ) : (
+                        snipMatches.map((s) => (
+                          <button key={s.id} type="button" onClick={() => pickSnippet(s)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 10px", borderRadius: 10, border: "none", background: "transparent", cursor: "pointer", color: "var(--ink)" }}>
+                            <b style={{ fontSize: 12, color: "var(--acc-deep)" }}>/{s.shortcut}</b>
+                            <span style={{ display: "block", fontSize: 12.5, color: "var(--ink-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.body}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+
+                  {/* B2 — gating de la ventana de 24 h: fuera de ventana solo se puede reactivar con plantilla */}
+                  {opState?.windowOpen === false && !internal ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 16px 0", padding: "9px 12px", borderRadius: 12, background: "color-mix(in srgb, var(--warn) 14%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)" }}>
+                      <Lock size={15} style={{ color: "var(--warn)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: "var(--ink-dim)", flex: 1 }}>La ventana de 24 h está cerrada. Para escribirle primero debes enviar una plantilla aprobada.</span>
+                      {contactPhone ? (
+                        <button type="button" className="btn-accent" onClick={() => setTemplateFor(contactPhone)} style={{ fontSize: 12, padding: "6px 12px", flexShrink: 0 }}>Enviar plantilla</button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <form onSubmit={send} style={{ display: "flex", gap: 8, padding: "10px 16px 12px", alignItems: "center" }}>
                     <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={onPickFile} style={{ display: "none" }} />
-                    <button type="button" onClick={() => fileRef.current?.click()} disabled={sending || internal} title="Adjuntar imagen o PDF" style={{ border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", borderRadius: "50%", width: 40, height: 40, display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0, opacity: internal ? 0.4 : 1 }} aria-label="Adjuntar">
+                    <button type="button" onClick={() => fileRef.current?.click()} disabled={sending || internal || (opState?.windowOpen === false)} title="Adjuntar imagen o PDF" style={{ border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", borderRadius: "50%", width: 40, height: 40, display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0, opacity: internal || opState?.windowOpen === false ? 0.4 : 1 }} aria-label="Adjuntar">
                       <Paperclip size={18} />
                     </button>
                     <input
                       value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      placeholder={internal ? "Escribe una nota interna…" : "Escribe un mensaje…"}
-                      style={{ flex: 1, padding: "11px 14px", borderRadius: 999, border: internal ? "1px solid var(--warn)" : "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }}
+                      onChange={(e) => onComposerChange(e.target.value)}
+                      disabled={opState?.windowOpen === false && !internal}
+                      placeholder={opState?.windowOpen === false && !internal ? "Ventana de 24 h cerrada — envía una plantilla" : internal ? "Escribe una nota interna…" : "Escribe un mensaje…  (usa / para respuestas rápidas)"}
+                      style={{ flex: 1, padding: "11px 14px", borderRadius: 999, border: internal ? "1px solid var(--warn)" : "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14, opacity: opState?.windowOpen === false && !internal ? 0.6 : 1 }}
                     />
-                    <button className="btn-accent" type="submit" disabled={sending || !text.trim()} style={{ borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", opacity: sending || !text.trim() ? 0.5 : 1, flexShrink: 0 }} aria-label="Enviar">
+                    <button className="btn-accent" type="submit" disabled={sending || !text.trim() || (opState?.windowOpen === false && !internal)} style={{ borderRadius: "50%", width: 44, height: 44, display: "grid", placeItems: "center", opacity: sending || !text.trim() || (opState?.windowOpen === false && !internal) ? 0.5 : 1, flexShrink: 0 }} aria-label="Enviar">
                       <Send size={18} />
                     </button>
                   </form>
@@ -488,6 +567,40 @@ export default function Conversaciones() {
           }}
         />
       ) : null}
+      {/* B2 — enviar plantilla para reabrir la ventana de 24 h (contacto existente prellenado) */}
+      {templateFor ? (
+        <NewConversation
+          prefillPhone={templateFor}
+          onClose={() => setTemplateFor(null)}
+          onCreated={(convId) => {
+            setTemplateFor(null);
+            loadList();
+            openConv(convId);
+          }}
+        />
+      ) : null}
+      {/* B2 — agendar una cita desde el chat */}
+      {showAgendar && sel && thread ? (
+        <AgendarModal
+          contactId={thread.conversation.contact.id}
+          onClose={() => setShowAgendar(false)}
+          onCreated={(line) => {
+            setShowAgendar(false);
+            setText((t) => (t.trim() ? `${t}\n${line}` : line));
+          }}
+        />
+      ) : null}
+      {/* B2 — generar link de pago; se inserta en el compositor para enviarlo */}
+      {showPago && sel ? (
+        <PagoModal
+          conversationId={sel}
+          onClose={() => setShowPago(false)}
+          onCreated={(line) => {
+            setShowPago(false);
+            setText((t) => (t.trim() ? `${t}\n${line}` : line));
+          }}
+        />
+      ) : null}
       {error ? <p style={{ color: "var(--danger)", fontSize: 12, position: "fixed", bottom: 8, left: 80 }}>{error}</p> : null}
     </AppShell>
   );
@@ -495,8 +608,8 @@ export default function Conversaciones() {
 
 type Template = { id: string; name: string; language: string; category: string; bodyText: string; variableFields: string[] };
 
-function NewConversation({ onClose, onCreated }: { onClose: () => void; onCreated: (convId: string) => void }) {
-  const [phone, setPhone] = useState("");
+function NewConversation({ onClose, onCreated, prefillPhone }: { onClose: () => void; onCreated: (convId: string) => void; prefillPhone?: string }) {
+  const [phone, setPhone] = useState(prefillPhone ?? "");
   const [name, setName] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState("");
@@ -569,6 +682,151 @@ function NewConversation({ onClose, onCreated }: { onClose: () => void; onCreate
         {err ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{err}</p> : null}
         <button className="btn-accent" type="submit" disabled={saving} style={{ width: "100%", marginTop: 18, opacity: saving ? 0.6 : 1 }}>
           {saving ? "Enviando…" : "Iniciar conversación"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ------------------------- B2: agendar desde el chat -------------------------
+type Pro = { id: string; name: string; specialty: string | null; type: string; durationMin: number | null };
+type Slot = { professionalId: string; start: string; end: string };
+
+function AgendarModal({ contactId, onClose, onCreated }: { contactId: string; onClose: () => void; onCreated: (line: string) => void }) {
+  const [pros, setPros] = useState<Pro[]>([]);
+  const [proId, setProId] = useState("");
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api<Pro[]>("/agenda/professionals").catch(() => [] as Pro[]),
+      api<{ slots: Slot[] }>("/agenda/availability").catch(() => ({ slots: [] as Slot[] })),
+    ])
+      .then(([p, a]) => {
+        setPros(p);
+        setSlots(a.slots ?? []);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const proName = (id: string) => pros.find((p) => p.id === id)?.name ?? "";
+  const filtered = (proId ? slots.filter((s) => s.professionalId === proId) : slots).slice().sort((a, b) => a.start.localeCompare(b.start));
+  const byDay = new Map<string, Slot[]>();
+  for (const s of filtered) {
+    const key = new Date(s.start).toLocaleDateString("es-CL", { weekday: "long", day: "2-digit", month: "long" });
+    (byDay.get(key) ?? byDay.set(key, []).get(key)!).push(s);
+  }
+
+  async function book(slot: Slot) {
+    setSaving(true);
+    setErr(null);
+    try {
+      await api("/agenda/appointments", {
+        method: "POST",
+        body: JSON.stringify({ contactId, professionalId: slot.professionalId || undefined, startsAt: slot.start, endsAt: slot.end }),
+      });
+      const d = new Date(slot.start);
+      const who = slot.professionalId ? ` con ${proName(slot.professionalId)}` : "";
+      const line = `Te agendé para el ${d.toLocaleDateString("es-CL", { weekday: "long", day: "2-digit", month: "long" })} a las ${d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}${who}.`;
+      onCreated(line);
+    } catch (e) {
+      setErr((e as Error).message);
+      setSaving(false);
+    }
+  }
+
+  const field: React.CSSProperties = { width: "100%", padding: "10px 12px", marginTop: 5, borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} className="card" style={{ width: "100%", maxWidth: 480, padding: 24, maxHeight: "90dvh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+          <h2 className="display" style={{ fontSize: 20, margin: 0 }}>Agendar una cita</h2>
+          <button type="button" onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }} aria-label="Cerrar"><X size={20} /></button>
+        </div>
+        {pros.length > 1 ? (
+          <select style={field} value={proId} onChange={(e) => setProId(e.target.value)}>
+            <option value="">Cualquier recurso</option>
+            {pros.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        ) : null}
+        {loading ? (
+          <p className="text-dim" style={{ fontSize: 14, marginTop: 14 }}>Cargando disponibilidad…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-dim" style={{ fontSize: 14, marginTop: 14 }}>No hay horas disponibles. Configura horarios en Agenda.</p>
+        ) : (
+          <div style={{ marginTop: 10 }}>
+            {[...byDay.entries()].map(([day, list]) => (
+              <div key={day} style={{ marginTop: 12 }}>
+                <p className="text-dim" style={{ fontSize: 12, textTransform: "capitalize", margin: "0 0 6px" }}>{day}</p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {list.slice(0, 24).map((s) => (
+                    <button key={s.start + s.professionalId} type="button" disabled={saving} onClick={() => book(s)} style={{ padding: "7px 11px", borderRadius: 999, border: "1px solid var(--line)", background: "transparent", color: "var(--ink)", cursor: "pointer", fontSize: 13, opacity: saving ? 0.5 : 1 }}>
+                      {new Date(s.start).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {err ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{err}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------- B2: link de pago desde el chat -------------------------
+function PagoModal({ conversationId, onClose, onCreated }: { conversationId: string; onClose: () => void; onCreated: (line: string) => void }) {
+  const [amount, setAmount] = useState("");
+  const [concept, setConcept] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const amt = Math.round(Number(amount));
+    if (!amt || amt <= 0 || !concept.trim()) {
+      setErr("Ingresa un monto (> 0) y un concepto.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await api<{ url: string; amount: number; concept: string }>("/charging/link", {
+        method: "POST",
+        body: JSON.stringify({ conversationId, amount: amt, concept: concept.trim() }),
+      });
+      onCreated(`Aquí está tu link de pago por $${r.amount.toLocaleString("es-CL")} (${r.concept}): ${r.url}`);
+    } catch (e) {
+      setErr((e as Error).message);
+      setSaving(false);
+    }
+  }
+
+  const field: React.CSSProperties = { width: "100%", padding: "10px 12px", marginTop: 5, borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 };
+  const lbl: React.CSSProperties = { fontSize: 12, color: "var(--ink-dim)", display: "block", marginTop: 12 };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+      <form onClick={(e) => e.stopPropagation()} onSubmit={submit} className="card" style={{ width: "100%", maxWidth: 400, padding: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 2 }}>
+          <h2 className="display" style={{ fontSize: 20, margin: 0 }}>Link de pago</h2>
+          <button type="button" onClick={onClose} style={{ marginLeft: "auto", border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }} aria-label="Cerrar"><X size={20} /></button>
+        </div>
+        <p className="text-dim" style={{ fontSize: 12, margin: "4px 0 0" }}>Se genera con tu cuenta de cobros y se inserta en el mensaje para que lo envíes.</p>
+        <label style={lbl}>Monto (CLP)
+          <input style={field} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ""))} placeholder="15000" inputMode="numeric" />
+        </label>
+        <label style={lbl}>Concepto
+          <input style={field} value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="Reserva de hora" maxLength={120} />
+        </label>
+        {err ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{err}</p> : null}
+        <button className="btn-accent" type="submit" disabled={saving} style={{ width: "100%", marginTop: 18, opacity: saving ? 0.6 : 1 }}>
+          {saving ? "Generando…" : "Generar link"}
         </button>
       </form>
     </div>
