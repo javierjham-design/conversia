@@ -10,13 +10,26 @@ no hay feature, el camino **manual del operador** es el procedimiento vigente.
 
 ---
 
-## 1. Alta (resumen — ya implementado en F10)
+## 1. Alta (resumen — F10 + B6)
 
-El cliente se registra en `app.conversia.cl` (crea org + owner, prueba de 7 días). El
-EQUIPO lo pone en marcha desde la **consola → Alta guiada**: instalar paquete del rubro →
+**Conversia NO usa el trial autoservicio 7+7 de TuBot** (B6/F5). Al registrarse en
+`app.conversia.cl` la org **nace "pendiente de implementación"** (`settings.conversia.lifecycle =
+"pending"`): existe y es operable por el EQUIPO, pero **sin countdown, sin purga y sin
+suscripción contadora** (el worker de trial ya exime a la marca conversia). TuBot conserva su
+prueba de 7 días intacta.
+
+El EQUIPO lo pone en marcha desde la **consola → Alta guiada**: instalar paquete del rubro →
 conectar WhatsApp → publicar agente/flujo → checklist → **Marcar ENTREGADO** (GO-LIVE).
-Marcar ENTREGADO exige **setup pagado** y activa el ciclo de cobro (D5). Auditado
-(`platform.org.delivered`).
+
+- **Marcar ENTREGADO** exige **setup pagado** y **arranca el ciclo de cobro** (crea/activa la
+  suscripción ACTIVE desde la fecha de entrega) + fija la permanencia (contrato 6 meses, F-1).
+  Auditado (`platform.org.delivered`). `lifecycle → "active"`.
+- **Override de entrega** (B6): un **super admin** puede entregar **sin setup pagado** pasando
+  `{ override: true, reason }` (motivo obligatorio). Queda auditado con `override` + motivo y marca
+  `conversia.deliveredOverride`. Botón "Entregar con override…" en la ficha.
+- **Cuenta demo** (B6): un super admin puede marcar una org como **demo interna** (`lifecycle =
+  "demo"`): operativa, **sin cobro ni purga**. Endpoint `POST .../lifecycle/demo`, auditado
+  (`platform.org.demo`). Botón "Marcar como demo" en la ficha.
 
 ---
 
