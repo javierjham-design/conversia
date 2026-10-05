@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planAppointmentReminder, nextBusinessOpen, type BusinessHoursConfig } from "./appointment-reminders";
+import { planAppointmentReminder, nextBusinessOpen, wallClockToUtc, sendAtDue, type BusinessHoursConfig } from "./appointment-reminders";
 
 const allDay = (from: string, to: string): BusinessHoursConfig => ({
   hours: {
@@ -126,5 +126,52 @@ describe("planAppointmentReminder", () => {
     });
     expect(p.action).toBe("schedule");
     expect(p.dueAt?.toISOString()).toBe("2026-08-12T15:00:00.000Z");
+  });
+
+  // Hora fija (sendAt): 12:00 del día anterior, manda sobre hoursBefore.
+  it("sendAt {1d, 12:00} UTC → día anterior a las 12:00, ignora hoursBefore", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-08-10T10:00:00Z"), startsAt: D("2026-08-12T09:00:00Z"),
+      hoursBefore: 24, sendAt: { daysBefore: 1, time: "12:00" },
+      businessHours: bh, timezone: tz,
+    });
+    expect(p.action).toBe("schedule");
+    expect(p.dueAt?.toISOString()).toBe("2026-08-11T12:00:00.000Z"); // NO 2026-08-11T09:00 (hoursBefore)
+    expect(p.reason).toMatch(/hora fija/);
+  });
+
+  it("sendAt {1d, 12:00} en Santiago (verano UTC-3) → 15:00 UTC del día anterior", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-10-10T10:00:00Z"), startsAt: D("2026-10-15T18:00:00Z"),
+      hoursBefore: 24, sendAt: { daysBefore: 1, time: "12:00" },
+      businessHours: bh, timezone: "America/Santiago",
+    });
+    expect(p.action).toBe("schedule");
+    expect(p.dueAt?.toISOString()).toBe("2026-10-14T15:00:00.000Z");
+  });
+
+  it("sendAt en el pasado (la hora fija ya pasó) → se envía de inmediato", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-08-11T14:00:00Z"), startsAt: D("2026-08-12T09:00:00Z"),
+      hoursBefore: 24, sendAt: { daysBefore: 1, time: "12:00" }, // 2026-08-11T12:00 < now
+      businessHours: bh, timezone: tz,
+    });
+    expect(p.action).toBe("schedule");
+    expect(p.dueAt?.toISOString()).toBe("2026-08-11T14:00:00.000Z");
+    expect(p.reason).toMatch(/inmediato/);
+  });
+});
+
+describe("wallClockToUtc / sendAtDue (DST-aware)", () => {
+  it("12:00 en Santiago verano (UTC-3) = 15:00 UTC", () => {
+    expect(wallClockToUtc("2026-10-14", "12:00", "America/Santiago").toISOString()).toBe("2026-10-14T15:00:00.000Z");
+  });
+  it("12:00 en Santiago invierno (UTC-4) = 16:00 UTC", () => {
+    expect(wallClockToUtc("2026-07-14", "12:00", "America/Santiago").toISOString()).toBe("2026-07-14T16:00:00.000Z");
+  });
+  it("sendAtDue resta días sobre la FECHA local, no 24h exactas", () => {
+    // Cita 2026-10-15 a las 00:30 UTC = 2026-10-14 21:30 Santiago → fecha local 14 → 1 día antes = 13
+    const due = sendAtDue(D("2026-10-15T00:30:00Z"), 1, "12:00", "America/Santiago");
+    expect(due.toISOString()).toBe("2026-10-13T15:00:00.000Z");
   });
 });
