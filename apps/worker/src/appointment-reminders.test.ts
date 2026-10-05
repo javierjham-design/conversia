@@ -128,6 +128,34 @@ describe("planAppointmentReminder", () => {
     expect(p.dueAt?.toISOString()).toBe("2026-08-12T15:00:00.000Z");
   });
 
+  // remindersEnabled:false (Gestor de IA de Cláriva) → no programar.
+  it("recordatorios desactivados, sin job → skip (no se programa)", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-08-10T10:00:00Z"), startsAt: D("2026-08-12T15:00:00Z"),
+      hoursBefore: 24, remindersDisabled: true, businessHours: bh, timezone: tz,
+    });
+    expect(p.action).toBe("skip");
+    expect(p.reason).toMatch(/desactivados/);
+  });
+
+  it("recordatorios desactivados con job PENDIENTE → cancela el huérfano", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-08-10T10:00:00Z"), startsAt: D("2026-08-12T15:00:00Z"),
+      hoursBefore: 24, remindersDisabled: true, businessHours: bh, timezone: tz,
+      existing: { status: "PENDING", dueAt: D("2026-08-11T15:00:00Z") },
+    });
+    expect(p.action).toBe("cancel");
+  });
+
+  it("remindersDisabled:false (o ausente) → comportamiento normal", () => {
+    const p = planAppointmentReminder({
+      now: D("2026-08-10T10:00:00Z"), startsAt: D("2026-08-12T15:00:00Z"),
+      hoursBefore: 24, remindersDisabled: false, businessHours: bh, timezone: tz,
+    });
+    expect(p.action).toBe("schedule");
+    expect(p.dueAt?.toISOString()).toBe("2026-08-11T15:00:00.000Z");
+  });
+
   // Hora fija (sendAt): 12:00 del día anterior, manda sobre hoursBefore.
   it("sendAt {1d, 12:00} UTC → día anterior a las 12:00, ignora hoursBefore", () => {
     const p = planAppointmentReminder({

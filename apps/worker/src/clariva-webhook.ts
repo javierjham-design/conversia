@@ -181,7 +181,10 @@ export async function processClarivaWebhook(
         meta: apptMeta as object,
       },
     });
-    return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(apptMeta) };
+    // `remindersEnabled` (Gestor de IA de Cláriva): si viene false, NO se programan
+    // recordatorios para esta cita, pero la proyección y los demás flujos siguen.
+    const remindersEnabled = typeof payload.remindersEnabled === "boolean" ? payload.remindersEnabled : null;
+    return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(apptMeta), remindersEnabled };
   });
 
   if (!result) return;
@@ -215,7 +218,7 @@ export async function processClarivaWebhook(
   if (mapped.trigger === "appointment_created" || mapped.trigger === "appointment_rescheduled") {
     await scheduleAppointmentReminders(
       organizationId,
-      { id: result.externalId, start: result.startsAt, serviceId: result.meta?.serviceId, professionalId: result.meta?.professionalId, clinicId: result.meta?.clinicId },
+      { id: result.externalId, start: result.startsAt, serviceId: result.meta?.serviceId, professionalId: result.meta?.professionalId, clinicId: result.meta?.clinicId, remindersEnabled: result.remindersEnabled },
       { contactId: result.contactId },
     );
   } else if (mapped.trigger === "appointment_cancelled") {

@@ -920,7 +920,7 @@ async function loadOrgBusinessHours(tx: any, organizationId: string): Promise<{ 
  */
 export async function scheduleAppointmentReminders(
   organizationId: string,
-  appt: { id: string; start: string; serviceId?: string | null; professionalId?: string | null; clinicId?: string | null },
+  appt: { id: string; start: string; serviceId?: string | null; professionalId?: string | null; clinicId?: string | null; remindersEnabled?: boolean | null },
   target: { conversationId?: string; contactId?: string },
 ): Promise<void> {
   const startsAt = new Date(appt.start);
@@ -951,6 +951,8 @@ export async function scheduleAppointmentReminders(
           cfg.sendAt && typeof cfg.sendAt.time === "string"
             ? { daysBefore: Number(cfg.sendAt.daysBefore ?? 1), time: String(cfg.sendAt.time) }
             : null,
+        // Confirmaciones apagadas desde el Gestor de IA de Cláriva → no programar.
+        remindersDisabled: appt.remindersEnabled === false,
         existing: existing ? { status: existing.status, dueAt: existing.dueAt } : null,
         businessHours: bh,
         timezone,
