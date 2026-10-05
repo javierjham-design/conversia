@@ -1,5 +1,6 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
+import { ClarivaSchedulingProvider } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 
 /**
@@ -139,7 +140,46 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
       if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
     });
   }
+  // Tras proyectar las APROBADAS, empújalas a Cláriva para su Gestor de IA (best-effort).
+  await pushApprovedTemplatesToClariva(organizationId).catch((err) =>
+    console.error(`✖ push plantillas→Cláriva org ${organizationId}:`, (err as Error).message),
+  );
   return synced;
+}
+
+/**
+ * Empuja a Cláriva (PUT /api/v1/tubot/templates, Bearer tbk_) el catálogo de
+ * plantillas WhatsApp APROBADAS de la org, reusando la conexión CLARIVA ya guardada
+ * (baseUrl + apiKey cifrado). Sin conexión Cláriva o sin plantillas → no hace nada.
+ */
+export async function pushApprovedTemplatesToClariva(organizationId: string): Promise<void> {
+  const conn = await withTenant(organizationId, (tx) =>
+    tx.schedulingConnection.findFirst({ where: { provider: "CLARIVA", status: "active" } }),
+  );
+  const baseUrl = (conn?.config as any)?.baseUrl as string | undefined;
+  if (!conn || !baseUrl || !conn.credentialId) return;
+  const cred = await withTenant(organizationId, (tx) =>
+    tx.integrationCredential.findUnique({ where: { id: conn.credentialId! } }),
+  );
+  if (!cred) return;
+  let apiKey: string;
+  try {
+    apiKey = decryptCredential(cred.ciphertext);
+  } catch {
+    return; // CREDENTIALS_ENCRYPTION_KEY distinta: no empujar con un token inválido.
+  }
+  const rows = await withTenant(organizationId, (tx) =>
+    tx.whatsappTemplate.findMany({ where: { status: "APPROVED" } }),
+  );
+  if (!rows.length) return;
+  const templates = rows.map((r) => ({
+    name: r.name,
+    language: r.language,
+    category: r.category,
+    status: r.status,
+    variables: Array.isArray((r.body as any)?.variableFields) ? ((r.body as any).variableFields as string[]) : [],
+  }));
+  await new ClarivaSchedulingProvider({ baseUrl, apiKey }).pushTemplates(templates);
 }
 
 /** Sync periódica de todas las organizaciones con WABAs conectadas. */

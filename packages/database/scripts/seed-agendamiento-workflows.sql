@@ -84,10 +84,10 @@ BEGIN
         'trigger', jsonb_build_object('type','appointment_upcoming','config', jsonb_build_object('sendAt', jsonb_build_object('daysBefore',1,'time','12:00'),'avoidOffHours',true)),
         'variables', '{}'::jsonb,
         'nodes', jsonb_build_array(
-          jsonb_build_object('id','n1','type','send_template','config', jsonb_build_object('templateId', v_tpl_rec)),
+          jsonb_build_object('id','n1','type','send_template','config', jsonb_build_object('templateId', v_tpl_rec, 'templateNameVar','__r1TemplateName')),
           jsonb_build_object('id','n2','type','wait_reply','config', jsonb_build_object('hours',6,'hoursVar','__r2DelayHours')),
           jsonb_build_object('id','n2b','type','condition','config', jsonb_build_object('kind','flag','var','__r2Enabled','default',true)),
-          jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins)),
+          jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins, 'templateNameVar','__r2TemplateName')),
           jsonb_build_object('id','n4','type','wait_reply','config', jsonb_build_object('hours',18)),
           jsonb_build_object('id','n5','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
         ),
@@ -117,7 +117,7 @@ BEGIN
         'nodes', jsonb_build_array(
           jsonb_build_object('id','n0','type','wait','config', jsonb_build_object('hours',12)),
           jsonb_build_object('id','n1','type','condition','config', jsonb_build_object('kind','patient_is_new','maxCompleted',2)),
-          jsonb_build_object('id','n2','type','send_template','config', jsonb_build_object('templateId', v_tpl_ns)),
+          jsonb_build_object('id','n2','type','send_template','config', jsonb_build_object('templateId', v_tpl_ns, 'templateNameVar','__recapturaTemplate')),
           jsonb_build_object('id','n3','type','wait_reply','config', jsonb_build_object('hours',72)),
           jsonb_build_object('id','n4','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
         ),
@@ -141,7 +141,7 @@ BEGIN
         'variables', '{}'::jsonb,
         'nodes', jsonb_build_array(
           jsonb_build_object('id','n1','type','condition','config', jsonb_build_object('kind','patient_is_new','maxCompleted',2)),
-          jsonb_build_object('id','n2','type','send_template','config', jsonb_build_object('templateId', v_tpl_tr)),
+          jsonb_build_object('id','n2','type','send_template','config', jsonb_build_object('templateId', v_tpl_tr, 'templateNameVar','__templateName')),
           jsonb_build_object('id','n3','type','wait_reply','config', jsonb_build_object('hours',72)),
           jsonb_build_object('id','n4','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
         ),

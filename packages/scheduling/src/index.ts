@@ -305,6 +305,17 @@ export interface ClarivaClientOptions {
   timeoutMs?: number;
 }
 
+/** Descriptor de plantilla WhatsApp que TuBot empuja a Cláriva (para que el Gestor
+ *  de IA ofrezca las APROBADAS en sus dropdowns). `variables` = mapeo posicional a
+ *  campos semánticos (p. ej. ["contact.firstName","appointment.date"]). */
+export interface TubotTemplateDescriptor {
+  name: string;
+  language: string;
+  category: string;
+  status: string;
+  variables: string[];
+}
+
 export class ClarivaSchedulingProvider implements SchedulingProvider {
   readonly kind = "clariva";
 
@@ -330,10 +341,17 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
         const text = await res.text().catch(() => "");
         throw new Error(`Cláriva ${method} ${path} → ${res.status}: ${text.slice(0, 300)}`);
       }
-      return (await res.json()) as T;
+      // Tolera 204/cuerpo vacío (p. ej. el PUT de plantillas): no todo endpoint responde JSON.
+      return (await res.json().catch(() => ({}))) as T;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Empuja a Cláriva el catálogo de plantillas WhatsApp APROBADAS de la clínica,
+   *  para que su Gestor de IA las ofrezca por nombre. Idempotente del lado Cláriva. */
+  pushTemplates(templates: TubotTemplateDescriptor[]): Promise<unknown> {
+    return this.request<unknown>("PUT", "/tubot/templates", { templates });
   }
 
   getClinics() {

@@ -409,13 +409,22 @@ function makeDeps(): EngineDeps {
       }
       if (!ctx.conversationId) return;
       const templateId = String(cfg.templateId ?? "");
+      // C(b): el nombre de la plantilla puede venir del payload de Cláriva por una
+      // variable del run (p. ej. __r1TemplateName, __recapturaTemplate). Se resuelve
+      // por nombre entre las APROBADAS y cae al templateId del workflow si no viene
+      // o no se encuentra (backward-compat).
+      const nameVar = cfg.templateNameVar ? String(cfg.templateNameVar) : "";
+      const wantName = nameVar ? String(ctx.variables?.[nameVar] ?? "").trim() : "";
       const data = await withTenant(ctx.organizationId, async (tx) => {
         const conversation = await tx.conversation.findUnique({
           where: { id: ctx.conversationId! },
           include: { contact: true },
         });
         if (!conversation?.contact.phone) return null;
-        const template = await tx.whatsappTemplate.findUnique({ where: { id: templateId } });
+        let template = wantName
+          ? await tx.whatsappTemplate.findFirst({ where: { name: wantName, status: "APPROVED" }, orderBy: { updatedAt: "desc" } })
+          : null;
+        if (!template && templateId) template = await tx.whatsappTemplate.findUnique({ where: { id: templateId } });
         return { conversation, template };
       });
       if (!data) return;
@@ -441,7 +450,7 @@ function makeDeps(): EngineDeps {
             body: rendered || `[plantilla ${data.template!.name}]`,
             authorType: "SYSTEM",
             status: "PENDING",
-            payload: { templateId, workflowRunId: ctx.runId },
+            payload: { templateId: data.template!.id, workflowRunId: ctx.runId },
           },
         });
         await tx.conversation.update({
@@ -935,8 +944,12 @@ export async function scheduleAppointmentReminders(
     id: string; start: string;
     serviceId?: string | null; professionalId?: string | null; clinicId?: string | null;
     remindersEnabled?: boolean | null;
-    // Horarios/toggle de recordatorio por clínica (Gestor de IA de Cláriva, §1.4).
-    reminders?: { enabled?: boolean; first?: { time?: string }; second?: { enabled?: boolean; time?: string } } | null;
+    // Horarios/toggle/plantillas de recordatorio por clínica (Gestor de IA de Cláriva).
+    reminders?: {
+      enabled?: boolean;
+      first?: { time?: string; templateName?: string };
+      second?: { enabled?: boolean; time?: string; templateName?: string };
+    } | null;
   },
   target: { conversationId?: string; contactId?: string },
 ): Promise<void> {
@@ -955,6 +968,9 @@ export async function scheduleAppointmentReminders(
   const r1Min = toMin(r1Time ?? undefined);
   const r2Min = toMin(rem?.second?.time);
   const r2Enabled = rem?.second?.enabled === true;
+  // Nombres de plantilla por envío (C(b)): el Gestor de IA de Cláriva los elige.
+  const r1TemplateName = typeof rem?.first?.templateName === "string" ? rem.first.templateName : null;
+  const r2TemplateName = typeof rem?.second?.templateName === "string" ? rem.second.templateName : null;
   // Timeout del wait_reply entre R1 y R2 = (segunda − primera) en horas (solo si ambas
   // y la segunda es posterior). Si falta, el workflow usa su timeout estático.
   const r2DelayHours = r1Min != null && r2Min != null && r2Min > r1Min ? (r2Min - r1Min) / 60 : null;
@@ -1018,6 +1034,9 @@ export async function scheduleAppointmentReminders(
             // §1.4 — toggle/horario de R2 para el run (null si el payload no los trae).
             r2Enabled: rem ? r2Enabled : null,
             r2DelayHours,
+            // C(b) — nombres de plantilla elegidos en el Gestor de IA (null = usa la del workflow).
+            r1TemplateName,
+            r2TemplateName,
           },
         },
       });
@@ -1258,6 +1277,13 @@ async function buildRunVars(event: PlatformEvent): Promise<Record<string, string
     if (event.contactId) {
       const contact = await tx.contact.findUnique({ where: { id: event.contactId } });
       if (contact) vars["contact.firstName"] = contact.firstName ?? "";
+    }
+    // C(b) — nombre de plantilla de recaptura elegido en el Gestor de IA de Cláriva,
+    // propagado en el evento (no-show: recapturaTemplate · tratamiento: templateName).
+    const d = event.data as Record<string, unknown> | undefined;
+    if (d) {
+      if (typeof d.recapturaTemplate === "string") vars.__recapturaTemplate = d.recapturaTemplate;
+      if (typeof d.templateName === "string") vars.__templateName = d.templateName;
     }
     // Webhook entrante: el payload queda disponible como variables del flujo
     // (webhook.campo, webhook.objeto.campo, …) para usarlas en {{…}}.
