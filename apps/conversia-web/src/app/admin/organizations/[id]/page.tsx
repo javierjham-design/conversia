@@ -358,22 +358,38 @@ export default function AdminOrgDetail({ params }: { params: Promise<{ id: strin
             <>
               <p className="display" style={{ margin: 0, fontSize: 22 }}>{impl.percent}%</p>
               <p className="text-dim" style={{ fontSize: 12, margin: "2px 0 10px" }}>
-                {impl.lifecycle.deliveredAt || impl.lifecycle.stage === "active" ? "🟢 En vivo" : impl.lifecycle.setupPaid ? "🟡 Implementando" : "⚪ Prospecto"}
-                {impl.lifecycle.setupPaid ? " · setup pagado" : " · setup sin pagar"}
+                {impl.lifecycle.stage === "demo" ? "Cuenta demo (sin cobro)" : impl.lifecycle.deliveredAt || impl.lifecycle.stage === "active" ? "En vivo" : impl.lifecycle.setupPaid ? "Implementando" : "Prospecto"}
+                {impl.lifecycle.stage === "demo" ? "" : impl.lifecycle.setupPaid ? " · setup pagado" : " · setup sin pagar"}
               </p>
               <ul style={{ listStyle: "none", padding: 0, margin: "0 0 10px", display: "flex", flexDirection: "column", gap: 4 }}>
                 {impl.steps.map((s) => <li key={s.key} style={{ fontSize: 12, color: s.done ? "var(--ok)" : "var(--ink-dim)" }}>{s.done ? "✓" : "○"} {s.title}</li>)}
               </ul>
               {impl.lifecycle.deliveredAt || impl.lifecycle.stage === "active" ? (
-                <p className="text-dim" style={{ fontSize: 11 }}>Cliente entregado.</p>
+                <p className="text-dim" style={{ fontSize: 11 }}>Cliente entregado{impl.lifecycle.deliveredAt ? ` · ${new Date(impl.lifecycle.deliveredAt).toLocaleDateString("es-CL")}` : ""}.</p>
+              ) : impl.lifecycle.stage === "demo" ? (
+                <p className="text-dim" style={{ fontSize: 11 }}>Cuenta interna de prueba. No se factura.</p>
               ) : (
-                <button
-                  className="btn-accent"
-                  disabled={!impl.lifecycle.setupPaid}
-                  title={!impl.lifecycle.setupPaid ? "Requiere setup pagado" : !impl.goLiveReady ? "Aún faltan pasos (puedes entregar igual)" : "Poner en vivo"}
-                  onClick={() => { if (confirm("¿Marcar ENTREGADO? Pone al cliente EN VIVO y activa su ciclo de cobro.")) run(() => padmin(`/platform/organizations/${id}/lifecycle/delivered`, { method: "POST" }).then(() => padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl)), "Cliente marcado como ENTREGADO."); }}
-                  style={{ width: "100%", opacity: impl.lifecycle.setupPaid ? 1 : 0.5 }}
-                >Marcar ENTREGADO</button>
+                <>
+                  <button
+                    className="btn-accent"
+                    disabled={!impl.lifecycle.setupPaid}
+                    title={!impl.lifecycle.setupPaid ? "Requiere setup pagado (o usa override)" : !impl.goLiveReady ? "Aún faltan pasos (puedes entregar igual)" : "Poner en vivo"}
+                    onClick={() => { if (confirm("¿Marcar ENTREGADO? Pone al cliente EN VIVO y activa su ciclo de cobro.")) run(() => padmin(`/platform/organizations/${id}/lifecycle/delivered`, { method: "POST" }).then(() => padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl)), "Cliente marcado como ENTREGADO."); }}
+                    style={{ width: "100%", opacity: impl.lifecycle.setupPaid ? 1 : 0.5 }}
+                  >Marcar ENTREGADO</button>
+                  {/* B6 — entregar sin setup pagado requiere override con motivo (auditado, solo super admin) */}
+                  {!impl.lifecycle.setupPaid ? (
+                    <button
+                      onClick={() => { const reason = prompt("Entregar SIN setup pagado (override auditado). Motivo:"); if (reason && reason.trim()) run(() => padmin(`/platform/organizations/${id}/lifecycle/delivered`, { method: "POST", body: JSON.stringify({ override: true, reason: reason.trim() }) }).then(() => padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl)), "Entregado con override."); }}
+                      style={{ width: "100%", marginTop: 8, padding: "9px 12px", fontSize: 13, borderRadius: 10, border: "1px solid var(--warn)", background: "transparent", color: "var(--ink)", cursor: "pointer" }}
+                    >Entregar con override…</button>
+                  ) : null}
+                  {/* B6 — marcar como cuenta demo interna (operativa, sin cobro) */}
+                  <button
+                    onClick={() => { const reason = prompt("Marcar como cuenta DEMO interna (operativa, sin cobro). Motivo (opcional):") ?? ""; if (confirm("¿Marcar esta cuenta como DEMO? No se facturará.")) run(() => padmin(`/platform/organizations/${id}/lifecycle/demo`, { method: "POST", body: JSON.stringify({ reason: reason.trim() || undefined }) }).then(() => padmin<typeof impl>(`/platform/organizations/${id}/implementation`).then(setImpl)), "Cuenta marcada como demo."); }}
+                    style={{ width: "100%", marginTop: 8, padding: "9px 12px", fontSize: 13, borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", cursor: "pointer" }}
+                  >Marcar como demo</button>
+                </>
               )}
             </>
           ) : (

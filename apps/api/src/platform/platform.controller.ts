@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -557,15 +558,21 @@ export class PlatformController {
    * (endpoint /subscription) — aquí no tocamos billing para no acoplar.
    */
   @Post("organizations/:id/lifecycle/delivered")
-  async markDelivered(@Param("id") id: string, @Req() req: PlatformRequest) {
+  async markDelivered(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
     await this.assertOrgBrand(req, id);
+    const parsed = z.object({ override: z.boolean().optional(), reason: z.string().trim().max(500).optional() }).safeParse(body ?? {});
+    const override = parsed.success ? parsed.data.override === true : false;
+    const reason = parsed.success ? parsed.data.reason : undefined;
     const db = this.prisma.admin;
-    const org = await db.organization.findUnique({ where: { id }, select: { settings: true } });
+    const org = await db.organization.findUnique({ where: { id }, select: { settings: true, planId: true } });
     if (!org) throw new NotFoundException("Organización no encontrada");
     const settings = (org.settings ?? {}) as Record<string, any>;
     const conversia = (settings.conversia ?? {}) as Record<string, any>;
+    // B6 — no se puede entregar sin setup pagado SALVO override auditado de un super admin (con motivo).
     if (settings.setupPaid !== true) {
-      throw new BadRequestException("El setup debe estar pagado antes de marcar ENTREGADO.");
+      if (!override) throw new BadRequestException("El setup debe estar pagado antes de marcar ENTREGADO (o usa override con motivo).");
+      if (!isFullPlatformAdmin(req.platformAdmin?.role)) throw new ForbiddenException("Solo un super admin puede entregar con override.");
+      if (!reason) throw new BadRequestException("El override de entrega requiere un motivo (queda auditado).");
     }
     if (conversia.lifecycle === "active") {
       return { ok: true, alreadyDelivered: true, deliveredAt: conversia.deliveredAt ?? null };
@@ -575,10 +582,44 @@ export class PlatformController {
     // CICLO_VIDA_CLIENTE §3). No sobreescribe un contrato ya existente.
     const contract = (settings.contract as Record<string, any>) ?? {};
     const nextContract = contract.startedAt ? contract : { commitmentMonths: 6, startedAt: deliveredAt };
-    const nextSettings = { ...settings, contract: nextContract, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null } };
+    const nextSettings = { ...settings, contract: nextContract, conversia: { ...conversia, lifecycle: "active", deliveredAt, deliveredBy: req.platformAdmin?.sub ?? null, ...(override ? { deliveredOverride: true } : {}) } };
     await db.organization.update({ where: { id }, data: { settings: nextSettings } });
-    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt, commitmentMonths: nextContract.commitmentMonths });
-    return { ok: true, deliveredAt };
+    // B6 — el ciclo de cobro ARRANCA al entregar: activa (o crea) la suscripción desde hoy.
+    try {
+      const sub = await db.subscription.findFirst({ where: { organizationId: id }, orderBy: { createdAt: "desc" } });
+      const periodEnd = new Date(Date.now() + 30 * 86_400_000);
+      if (sub) {
+        await db.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", periodStart: new Date(), periodEnd } });
+      } else if (org.planId) {
+        await db.subscription.create({ data: { organizationId: id, planId: org.planId, status: "ACTIVE", interval: "monthly", periodStart: new Date(), periodEnd } });
+      }
+    } catch (e) {
+      // No bloquea la entrega si la suscripción falla; queda en el log para revisión.
+      console.error(`✖ markDelivered: no se pudo arrancar la suscripción de ${id}:`, (e as Error).message);
+    }
+    await this.audit(req, "platform.org.delivered", "organization", id, { deliveredAt, commitmentMonths: nextContract.commitmentMonths, override, reason: reason ?? null });
+    return { ok: true, deliveredAt, override };
+  }
+
+  /**
+   * B6 — marca una cuenta como DEMO/sandbox interna: operativa, sin trial/purga ni ciclo de cobro.
+   * Solo super admin (bypassa la facturación). Auditado. Ver CICLO_VIDA_CLIENTE.
+   */
+  @Post("organizations/:id/lifecycle/demo")
+  async markDemo(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    if (!isFullPlatformAdmin(req.platformAdmin?.role)) throw new ForbiddenException("Solo un super admin puede marcar una cuenta como demo.");
+    const reason = z.object({ reason: z.string().trim().max(500).optional() }).safeParse(body ?? {}).data?.reason;
+    const db = this.prisma.admin;
+    const org = await db.organization.findUnique({ where: { id }, select: { settings: true } });
+    if (!org) throw new NotFoundException("Organización no encontrada");
+    const settings = (org.settings ?? {}) as Record<string, any>;
+    const conversia = (settings.conversia ?? {}) as Record<string, any>;
+    const nextSettings: Record<string, any> = { ...settings, conversia: { ...conversia, lifecycle: "demo", demoAt: new Date().toISOString(), demoBy: req.platformAdmin?.sub ?? null } };
+    delete nextSettings.trial; // sin countdown ni purga (además el brand conversia ya está exento)
+    await db.organization.update({ where: { id }, data: { settings: nextSettings } });
+    await this.audit(req, "platform.org.demo", "organization", id, { reason: reason ?? null });
+    return { ok: true, lifecycle: "demo" };
   }
 
   /** Configuración completa por tenant: vigencia, override de límites (token limiter),
