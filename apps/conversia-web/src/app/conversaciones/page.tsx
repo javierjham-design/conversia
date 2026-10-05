@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Bot, BotOff, CheckCircle2, Paperclip, Plus, RotateCcw, Send, StickyNote, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { OperationBar, Avatar, type OpState, type OpStage } from "@/components/OperationBar";
 import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
 
@@ -13,8 +14,17 @@ type ConvItem = {
   unreadCount: number;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
+  // B1 — estado de operación que el backend ya expone por chat (pintado sin llamadas extra).
+  activeAgentId: string | null;
+  activeAgentName: string | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  assignedTeamId: string | null;
+  assignedTeamName: string | null;
+  stage: OpStage;
   contact: Contact;
 };
+type ConvContext = { tags: string[] };
 type Msg = {
   id: string;
   direction: "INBOUND" | "OUTBOUND";
@@ -57,6 +67,7 @@ export default function Conversaciones() {
   const [loadingList, setLoadingList] = useState(true);
   const [sel, setSel] = useState<string | null>(null);
   const [thread, setThread] = useState<Thread | null>(null);
+  const [ctx, setCtx] = useState<ConvContext | null>(null);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [internal, setInternal] = useState(false);
@@ -111,22 +122,46 @@ export default function Conversaciones() {
     }
   }, []);
 
+  // B1 — contexto del chat (etiquetas del contacto) para la barra de operación.
+  const loadContext = useCallback(async (id: string) => {
+    try {
+      const c = await api<ConvContext>(`/conversations/${id}/context`);
+      setCtx({ tags: c.tags ?? [] });
+    } catch {
+      setCtx({ tags: [] }); // la barra sigue operable aunque falle la carga de etiquetas
+    }
+  }, []);
+
   function openConv(id: string) {
     setSel(id);
     setThread(null);
+    setCtx(null);
     loadThread(id);
+    loadContext(id);
   }
 
-  // Tiempo real: refresca el hilo abierto y la lista cuando llegan eventos.
+  // Tiempo real: refresca el hilo abierto, su contexto y la lista cuando llegan eventos.
   useEffect(() => {
     const close = openRealtime((e: RealtimeEvent) => {
       if ((e.type === "message.created" || e.type === "message.updated" || e.type === "conversation.updated")) {
-        if (e.conversationId && e.conversationId === selRef.current) loadThread(selRef.current);
+        if (e.conversationId && e.conversationId === selRef.current) {
+          loadThread(selRef.current);
+          loadContext(selRef.current);
+        }
         loadList();
       }
     });
     return close;
-  }, [loadThread, loadList]);
+  }, [loadThread, loadContext, loadList]);
+
+  // B1 — tras una operación de la barra: refresca lista + hilo + contexto del chat abierto.
+  const refreshOpen = useCallback(() => {
+    loadList();
+    if (selRef.current) {
+      loadThread(selRef.current);
+      loadContext(selRef.current);
+    }
+  }, [loadList, loadThread, loadContext]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -198,6 +233,32 @@ export default function Conversaciones() {
   const showThread = !narrow || !!sel;
   const closed = thread?.conversation.status === "CLOSED";
   const aiOn = thread?.conversation.aiEnabled;
+
+  // B1 — estado de la barra de operación: funde el ConvItem de la lista (nombres de
+  // agente/asignado/etapa, sin llamadas extra), el hilo (aiEnabled fresco + ventana 24h)
+  // y el contexto (etiquetas del contacto).
+  const selItem = sel ? items.find((c) => c.id === sel) ?? null : null;
+  const opState: OpState | null =
+    sel && thread
+      ? (() => {
+          const lastIn = [...thread.messages].reverse().find((m) => m.direction === "INBOUND");
+          const hrs = lastIn ? (Date.now() - new Date(lastIn.createdAt).getTime()) / 3_600_000 : null;
+          return {
+            conversationId: sel,
+            contactId: thread.conversation.contact.id,
+            aiEnabled: thread.conversation.aiEnabled,
+            activeAgentId: selItem?.activeAgentId ?? null,
+            activeAgentName: selItem?.activeAgentName ?? null,
+            assignedUserId: selItem?.assignedUserId ?? null,
+            assignedUserName: selItem?.assignedUserName ?? null,
+            stage: selItem?.stage ?? null,
+            tags: ctx?.tags ?? [],
+            windowOpen: hrs === null ? null : hrs < 24,
+            windowHoursLeft: hrs === null ? null : 24 - hrs,
+          };
+        })()
+      : null;
+
   const headerBtn: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
@@ -277,11 +338,15 @@ export default function Conversaciones() {
                       </span>
                       <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginTop: 2 }}>
                         <span className="text-dim" style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.lastMessagePreview ?? "—"}</span>
-                        {c.unreadCount > 0 ? (
-                          <span style={{ background: "var(--acc)", color: "var(--acc-ink)", borderRadius: 999, fontSize: 11, fontWeight: 700, minWidth: 18, height: 18, display: "grid", placeItems: "center", padding: "0 5px", flexShrink: 0 }}>{c.unreadCount}</span>
-                        ) : c.aiEnabled ? (
-                          <Bot size={14} className="text-dim" style={{ flexShrink: 0 }} />
-                        ) : null}
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          {/* B1 — mini-indicador del responsable asignado (paridad con la bandeja de TuBot). */}
+                          {c.assignedUserName ? <Avatar name={c.assignedUserName} size={18} /> : null}
+                          {c.unreadCount > 0 ? (
+                            <span style={{ background: "var(--acc)", color: "var(--acc-ink)", borderRadius: 999, fontSize: 11, fontWeight: 700, minWidth: 18, height: 18, display: "grid", placeItems: "center", padding: "0 5px" }}>{c.unreadCount}</span>
+                          ) : c.aiEnabled ? (
+                            <Bot size={14} className="text-dim" />
+                          ) : null}
+                        </span>
                       </span>
                     </span>
                   </button>
@@ -312,19 +377,7 @@ export default function Conversaciones() {
                   ) : thread ? (
                     <span className="text-dim" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}><BotOff size={13} /> Manual</span>
                   ) : null}
-                  {thread ? (() => {
-                    // A11/W-3 — indicador de ventana de 24h (último INBOUND del hilo). Fuera de la
-                    // ventana Meta solo permite plantillas aprobadas; esto lo señala en la UI.
-                    const lastIn = [...thread.messages].reverse().find((m) => m.direction === "INBOUND");
-                    if (!lastIn) return null;
-                    const hrs = (Date.now() - new Date(lastIn.createdAt).getTime()) / 3_600_000;
-                    const open = hrs < 24;
-                    return (
-                      <span title={open ? "Dentro de la ventana de 24h: puedes responder con texto libre." : "Fuera de la ventana de 24h: solo plantillas aprobadas."} style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, color: open ? "var(--ok)" : "var(--warn)" }}>
-                        {open ? `🟢 24h · ${Math.max(0, Math.floor(24 - hrs))}h` : "🔒 fuera de 24h"}
-                      </span>
-                    );
-                  })() : null}
+                  {/* B1 — la píldora de ventana de 24h se movió a la barra de operación (abajo). */}
                   {thread ? (
                     <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                       <button
@@ -348,6 +401,9 @@ export default function Conversaciones() {
                     </span>
                   ) : null}
                 </div>
+
+                {/* B1 — barra de operación: chips de agente / asignado / etapa / etiquetas + ventana 24h. */}
+                {opState ? <OperationBar state={opState} narrow={narrow} onChanged={refreshOpen} /> : null}
 
                 <div style={{ flex: 1, overflowY: "auto", padding: "18px", display: "flex", flexDirection: "column", gap: 8 }}>
                   {!thread ? (
