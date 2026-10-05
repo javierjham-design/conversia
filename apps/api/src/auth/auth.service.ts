@@ -53,15 +53,20 @@ export class AuthService {
 
     // La PRUEBA de 7 días queda fijada DESDE el registro (no espera el tick del
     // worker): el banner de días restantes y el corte del día 7 valen desde ya.
+    // B6/F5 — Conversia NO usa el trial autoservicio: la cuenta NACE "pendiente de
+    // implementación" (sin countdown ni purga) y el ciclo de cobro arranca al ENTREGAR.
+    const isConversia = brand === "conversia";
     const now = new Date();
     const endsAt = new Date(now.getTime() + 7 * 86_400_000).toISOString();
-    const trial = {
-      startedAt: now.toISOString(),
-      endsAt,
-      purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
-      state: "active",
-      warnedDays: [],
-    };
+    const trial = isConversia
+      ? null
+      : {
+          startedAt: now.toISOString(),
+          endsAt,
+          purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
+          state: "active",
+          warnedDays: [],
+        };
 
     // La cuenta nace ASIGNADA al plan Free (no "sin plan / todo en 0"): se crea una
     // suscripción TRIALING al plan gratuito para que la plataforma quede OPERATIVA
@@ -84,13 +89,16 @@ export class AuthService {
           country,
           currency,
           planId: freePlan?.id ?? null,
-          settings: { trial, validUntil: endsAt } as object,
+          // Conversia: pendiente de implementación (sin trial/vigencia). TuBot: prueba 7 días.
+          settings: (isConversia ? { conversia: { lifecycle: "pending" } } : { trial, validUntil: endsAt }) as object,
         },
       });
       // Habilita las políticas RLS para los inserts hijos de esta transacción.
       // (El INSERT en organizations requiere rol admin — ver docs/MULTITENANCY.md.)
       await tx.$queryRaw`SELECT set_config('app.org_id', ${org.id}, true)`;
-      if (freePlan) {
+      // TuBot nace TRIALING (prueba). Conversia NO crea suscripción al registrarse: el ciclo de
+      // cobro arranca al marcar ENTREGADO (platform markDelivered la activa). Ver CICLO_VIDA_CLIENTE.
+      if (freePlan && !isConversia) {
         await tx.subscription.create({
           data: {
             organizationId: org.id,
