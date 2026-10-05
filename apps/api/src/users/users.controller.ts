@@ -205,8 +205,20 @@ export class UsersController {
 
       // Usuario de la MARCA de esta organización (D8): el invitado se resuelve/crea en la
       // misma marca (puede existir ya por pertenecer a otra org de la misma marca).
-      const inviteOrg = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+      const inviteOrg = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true, settings: true } });
       const inviteBrand = inviteOrg?.brand ?? "tubot";
+      // B7 — antiabuso de verificación de correo: en Conversia, un dueño con el correo SIN
+      // verificar no puede invitar más usuarios (evita que cuentas self-service no verificadas
+      // generen más cuentas). Exento: cuentas DEMO y usuarios ya verificados. TuBot no cambia.
+      if (inviteBrand === "conversia") {
+        const lifecycle = (((inviteOrg?.settings as Record<string, any> | null)?.conversia ?? {}) as Record<string, any>).lifecycle;
+        if (lifecycle !== "demo") {
+          const inviter = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { emailVerifiedAt: true } });
+          if (!inviter?.emailVerifiedAt) {
+            throw new BadRequestException("Verifica tu correo antes de invitar usuarios (revisa tu bandeja o reenvía el enlace desde el aviso superior).");
+          }
+        }
+      }
       let user = await this.prisma.admin.user.findUnique({ where: { email_brand: { email: input.email, brand: inviteBrand } } });
       let tempPassword: string | null = null;
       if (!user) {
