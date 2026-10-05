@@ -103,6 +103,9 @@ export interface PlanReminderInput {
   sendAt?: { daysBefore: number; time: string } | null;
   /** La cita quedó cancelada (o en el pasado ya se maneja aparte). */
   cancelled?: boolean;
+  /** Confirmaciones apagadas desde el Gestor de IA de Cláriva (`remindersEnabled:false`
+   *  en el payload): no se programa recordatorio y se limpia cualquier job pendiente. */
+  remindersDisabled?: boolean;
   /** Job existente para esta (cita, workflow), si lo hay. */
   existing?: { status: string; dueAt: Date } | null;
   businessHours?: BusinessHoursConfig | null;
@@ -121,6 +124,11 @@ export function planAppointmentReminder(input: PlanReminderInput): ReminderPlan 
   // 1) Cita cancelada → cancelar el recordatorio pendiente (si existe).
   if (input.cancelled) {
     return { action: existing ? "cancel" : "skip", reason: "cita cancelada" };
+  }
+  // 1-bis) Confirmaciones apagadas en Cláriva → no programar; limpiar job huérfano
+  //        (p. ej. si se apagaron tras haber programado y llega un reschedule).
+  if (input.remindersDisabled) {
+    return { action: existing ? "cancel" : "skip", reason: "recordatorios desactivados (Gestor de IA)" };
   }
   // 2) Cita en el pasado → no recordar; cancelar job huérfano si lo hubiera.
   if (startsAt.getTime() <= now.getTime()) {
