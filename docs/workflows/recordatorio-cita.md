@@ -1,5 +1,27 @@
 # Flujo de recordatorio de cita (borrador de referencia)
 
+> **Actualización (2026-10-04) — Cierre de agendamiento.** El recordatorio ya NO
+> es de 1 envío: pasa a **dos envíos el día ANTERIOR** (12:00 + 18:00 si no
+> responde) y lo siembra `packages/database/scripts/seed-agendamiento-workflows.sql`
+> (workflow **"Recordatorio de cita"**). La definición canónica vive en ese seed;
+> este doc queda como referencia del diseño. Cadencia real:
+>
+> 1. **R1 a las 12:00** del día anterior (hora fija vía `trigger.config.sendAt =
+>    { daysBefore: 1, time: "12:00" }`; ver `planAppointmentReminder`/`sendAtDue`).
+>    Plantilla `recordatorio_cita`.
+> 2. `wait_reply` 6 h. Si el paciente **responde** → `switch_agent` a
+>    **agendamiento** (confirma con `confirmAppointment` o reagenda) y **R2 no se
+>    envía**.
+> 3. Si **no responde** en 6 h → **R2 insistencia (~18:00)**, plantilla
+>    `recordatorio_cita_insistencia`.
+> 4. `wait_reply` 18 h. Si responde → `switch_agent` a agendamiento.
+>
+> Regla de negocio: **R2 jamás se envía si ya respondió a R1** (cualquier respuesta
+> entra por la rama `replied`). El botón "Confirmar" lo resuelve ahora el agente con
+> la tool **`confirmAppointment`** (deja la cita *Confirmada* en Cláriva), ya no el
+> flujo por palabra clave de la §3. Son **4 plantillas** en total (ver §2 y §2-bis).
+
+
 Hallazgo (2026-08-04): el flujo publicado **"Confirmación de cita"** de Digital
 Dent usa `send_text` como primer paso. Eso está **roto** para el caso real:
 
@@ -74,6 +96,27 @@ variableFields = ["contact.firstName","organization.name","appointment.date","ap
 > **verificar con una cita real** que Cláriva envía el nombre del servicio en el
 > webhook; si solo manda `serviceId`, hará falta un pull de `services`. Cuando esté
 > verificado se crea la plantilla v2 con la 5.ª variable `appointment.serviceName`.
+
+## 2-bis) Plantilla de insistencia (R2, ~18:00) — `recordatorio_cita_insistencia`
+
+Segunda plantilla del nuevo recordatorio de 2 envíos. Se envía solo si el paciente
+NO respondió a `recordatorio_cita` dentro de las 6 h (≈ 18:00 del día anterior).
+
+- **Nombre:** `recordatorio_cita_insistencia`
+- **Categoría:** **UTILITY**
+- **Idioma:** Español (`es`)
+- **Cuerpo (4 variables, MISMO orden y mapeo que `recordatorio_cita`):**
+
+  > Hola {{1}} 👋 Solo para confirmar tu cita de mañana en {{2}} el {{3}} a las {{4}}. ¿Nos confirmas que vienes?
+
+- **Botones (quick reply):** `Confirmar` · `Reagendar`
+
+```
+variableFields = ["contact.firstName","organization.name","appointment.date","appointment.time"]
+```
+
+> Debe quedar **APPROVED** igual que `recordatorio_cita`; el seed de workflows omite
+> el flujo "Recordatorio de cita" mientras falte CUALQUIERA de las dos.
 
 ## 3) Respuestas a los botones (interino, sin código)
 
