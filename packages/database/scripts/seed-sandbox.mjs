@@ -139,22 +139,29 @@ async function enrichTenant() {
     console.log("  ✔ Profesional de ejemplo:", prof.name);
   } catch (e) { console.log("  ✖ profesional:", e.message); }
 
-  // Citas de HOY (para que el Hoy/agenda tengan contenido).
+  // Citas de HOY (N2 — relativas a hoy; se REFRESCAN en cada re-seed para que la demo siempre tenga
+  // citas vigentes). Las de ejemplo se marcan con meta.isExample para poder reubicarlas sin tocar reales.
   try {
     const svc = await prisma.service.findFirst({ where: { organizationId: ORG_ID, active: true } }).catch(() => null);
     const contacts = await prisma.contact.findMany({ where: { organizationId: ORG_ID }, take: 3 });
-    const existing = await prisma.appointment.count({ where: { organizationId: ORG_ID } });
-    if (existing === 0 && profId && contacts.length) {
-      const base = new Date(); base.setHours(0, 0, 0, 0);
-      const slots = [[10, 0], [12, 30], [16, 0]];
+    const base = new Date(); base.setHours(0, 0, 0, 0);
+    const slots = [[10, 0], [12, 30], [16, 0]];
+    const slotAt = (i) => { const [h, m] = slots[i % slots.length]; const st = new Date(base); st.setHours(h, m, 0, 0); return { st, en: new Date(st.getTime() + 30 * 60000) }; };
+    const all = await prisma.appointment.findMany({ where: { organizationId: ORG_ID } });
+    const examples = all.filter((a) => (a.meta && a.meta.isExample) === true);
+    if (examples.length) {
+      let n = 0;
+      for (let i = 0; i < examples.length; i++) { const { st, en } = slotAt(i); await prisma.appointment.update({ where: { id: examples[i].id }, data: { startsAt: st, endsAt: en } }); n++; }
+      console.log(`  ✔ Citas de ejemplo refrescadas a hoy: ${n}`);
+    } else if (all.length === 0 && profId && contacts.length) {
       let n = 0;
       for (let i = 0; i < Math.min(3, contacts.length); i++) {
-        const [h, m] = slots[i]; const st = new Date(base); st.setHours(h, m, 0, 0); const en = new Date(st.getTime() + 30 * 60000);
-        await prisma.appointment.create({ data: { organizationId: ORG_ID, contactId: contacts[i].id, professionalId: profId, ...(svc ? { serviceId: svc.id } : {}), startsAt: st, endsAt: en, status: i === 0 ? "CONFIRMED" : "PENDING" } });
+        const { st, en } = slotAt(i);
+        await prisma.appointment.create({ data: { organizationId: ORG_ID, contactId: contacts[i].id, professionalId: profId, ...(svc ? { serviceId: svc.id } : {}), startsAt: st, endsAt: en, status: i === 0 ? "CONFIRMED" : "PENDING", meta: { isExample: true } } });
         n++;
       }
       console.log(`  ✔ Citas de hoy: ${n}`);
-    } else console.log(`  • Citas: ${existing} ya existen (o faltan prof/contactos)`);
+    } else console.log(`  • Citas: ${all.length} ya existen (reales; no se tocan)`);
   } catch (e) { console.log("  ✖ citas:", e.message); }
 
   // Pesos de bolsa POR MARCA (A5) — así el panel del super admin y el worker usan 1/1/4/1.
