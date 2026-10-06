@@ -53,14 +53,20 @@ export async function resolveTemplateParams(
       d.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: tz });
     const fmtTime = (d: Date) => d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", timeZone: tz });
 
+    // Nombre del paciente de Cláriva (guardado en la cita): en un recordatorio se usa
+    // ESE nombre, no el de perfil de WhatsApp del contacto. Solo aplica si hay cita
+    // con ese dato; si no, cae al nombre del contacto.
+    const apptFirst = typeof apptMeta.patientFirstName === "string" ? apptMeta.patientFirstName.trim() : "";
+    const apptLast = typeof apptMeta.patientLastName === "string" ? apptMeta.patientLastName.trim() : "";
+    const apptFull = [apptFirst, apptLast].filter(Boolean).join(" ");
     const value = (field: string): string => {
       switch (field) {
         case "contact.firstName":
-          return contact?.firstName ?? contact?.profileName ?? "";
+          return apptFirst || contact?.firstName || contact?.profileName || "";
         case "contact.lastName":
-          return contact?.lastName ?? "";
+          return apptLast || contact?.lastName || "";
         case "contact.fullName":
-          return [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") || (contact?.profileName ?? "");
+          return apptFull || [contact?.firstName, contact?.lastName].filter(Boolean).join(" ") || (contact?.profileName ?? "");
         case "contact.phone":
           return contact?.phone ?? "";
         case "appointment.date":
