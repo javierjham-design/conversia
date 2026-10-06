@@ -70,6 +70,24 @@ export async function buildSandboxServices(
       return allowed ? slots.filter((x) => !x.professionalId || allowed.has(x.professionalId)) : slots;
     };
     s.createAppointment = async (input) => simulateCreate(input);
+    // confirmar/cancelar también se SIMULAN: lee la cita real (para mostrar fecha/hora
+    // correctas) pero NO muta la agenda externa — probar el bot jamás toca Cláriva real.
+    const readAppt = async (id: string): Promise<SchedAppointment | null> => {
+      const getter = (base as Partial<SchedulingProvider>).getAppointment;
+      return getter ? await getter.call(base, id).catch(() => null) : null;
+    };
+    const stub = (id: string, status: SchedAppointment["status"]): SchedAppointment =>
+      ({ id, clinicId: "", professionalId: "", patient: { firstName: "", phone: "" }, start: new Date().toISOString(), end: new Date().toISOString(), status });
+    s.confirmAppointment = async (id) => {
+      track("confirmAppointment", `(simulado) cita ${id}`);
+      const appt = await readAppt(id);
+      return appt ? { ...appt, status: "confirmed" } : stub(id, "confirmed");
+    };
+    s.cancelAppointment = async (id, reason) => {
+      track("cancelAppointment", `(simulado) cita ${id}${reason ? ` — ${reason}` : ""}`);
+      const appt = await readAppt(id);
+      return appt ? { ...appt, status: "cancelled" } : stub(id, "cancelled");
+    };
     return s;
   };
 
