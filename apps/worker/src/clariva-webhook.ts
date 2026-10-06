@@ -117,7 +117,9 @@ export async function processClarivaWebhook(
     if (!externalId) return null;
     const existing = await tx.appointment.findFirst({ where: { provider: "CLARIVA", externalId } });
 
-    // Servicio / profesional / sede del payload (para filtros de trigger y variables).
+    // Servicio / profesional / sede / PACIENTE del payload (para filtros de trigger y
+    // variables de plantilla). El nombre del paciente de Cláriva se guarda en la cita
+    // para que el recordatorio use ESE nombre (no el de perfil de WhatsApp del contacto).
     const apptMeta = {
       clinicId: payload.clinicId ?? null,
       clinicName: payload.clinicName ?? payload.clinic?.name ?? null,
@@ -125,6 +127,8 @@ export async function processClarivaWebhook(
       professionalName: payload.professionalName ?? payload.professional?.name ?? null,
       serviceId: payload.serviceId ?? null,
       serviceName: payload.serviceName ?? payload.service?.name ?? null,
+      patientFirstName: payload.patient?.firstName ?? null,
+      patientLastName: payload.patient?.lastName ?? null,
     };
     const metaForEvent = (m: Record<string, any> | null | undefined) => ({
       serviceId: m?.serviceId ?? null,
