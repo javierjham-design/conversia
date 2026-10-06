@@ -315,9 +315,23 @@ export async function processInbound(job: InboundJob): Promise<void> {
       // E.164, país inferido, atribución CTWA (referral) + payload crudo.
       const parsedContact = { waId: msg.from, profileName: msg.profileName ?? null, referral: msg.referral };
       if (!contact) {
-        contact = await tx.contact.create({
-          data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate(parsedContact, new Date()) },
-        });
+        // Antes de crear uno nuevo: ¿ya existe un contacto con este MISMO teléfono
+        // (p. ej. creado por Cláriva al agendar, o importado)? Si sí, se reusa y se le
+        // adjunta la identidad de WhatsApp — así el recordatorio (que salió por ese
+        // contacto) y la respuesta del paciente quedan en el MISMO contacto/conversación,
+        // en vez de fragmentarse en un contacto nuevo que cae a recepción.
+        const normPhone = geoFromPhone(msg.from).phone;
+        const byPhone = normPhone
+          ? await tx.contact.findFirst({ where: { organizationId, phone: normPhone, deletedAt: null }, orderBy: { createdAt: "asc" } })
+          : null;
+        if (byPhone) {
+          contact = byPhone;
+          await tx.contact.update({ where: { id: contact.id }, data: buildContactUpdate(contact, parsedContact, new Date()) });
+        } else {
+          contact = await tx.contact.create({
+            data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate(parsedContact, new Date()) },
+          });
+        }
         await tx.contactIdentity.create({
           data: { organizationId, contactId: contact.id, channelType, externalId: msg.from },
         });
