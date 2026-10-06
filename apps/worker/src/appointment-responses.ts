@@ -125,6 +125,9 @@ export async function handleAppointmentResponse(
       occurredAt: now.toISOString(),
     });
     await sendReplyText(orgId, conversationId, "¡Listo! Tu cita quedó confirmada ✅ Te esperamos.");
+    // Confirmada y agradecida: no queda nada pendiente → cierra la conversación
+    // (se reabre sola si el paciente vuelve a escribir).
+    await withTenant(orgId, (tx) => tx.conversation.update({ where: { id: conversationId }, data: { status: "CLOSED" } })).catch(() => undefined);
     return true;
   }
 
