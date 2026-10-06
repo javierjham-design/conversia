@@ -87,7 +87,7 @@ BEGIN
           jsonb_build_object('id','n1','type','send_template','config', jsonb_build_object('templateId', v_tpl_rec, 'templateNameVar','__r1TemplateName')),
           jsonb_build_object('id','n2','type','wait_reply','config', jsonb_build_object('hours',6,'hoursVar','__r2DelayHours')),
           jsonb_build_object('id','n2b','type','condition','config', jsonb_build_object('kind','flag','var','__r2Enabled','default',true)),
-          jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins, 'templateNameVar','__r2TemplateName')),
+          jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins, 'templateNameVar','__r2TemplateName','checkResolvedBeforeSend',true)),
           jsonb_build_object('id','n4','type','wait_reply','config', jsonb_build_object('hours',18)),
           jsonb_build_object('id','n5','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
         ),

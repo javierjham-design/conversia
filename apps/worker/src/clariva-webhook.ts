@@ -230,7 +230,9 @@ export async function processClarivaWebhook(
       { id: result.externalId, start: result.startsAt, serviceId: result.meta?.serviceId, professionalId: result.meta?.professionalId, clinicId: result.meta?.clinicId, remindersEnabled: result.remindersEnabled, reminders: result.reminders },
       { contactId: result.contactId },
     );
-  } else if (mapped.trigger === "appointment_cancelled") {
+  } else if (mapped.trigger === "appointment_cancelled" || mapped.trigger === "appointment_confirmed") {
+    // Resuelta por otro medio (recepción confirmó, o se canceló) → cancelar R1/R2
+    // pendientes y el run WAITING: no se insiste a quien ya quedó confirmado/cancelado.
     await cancelAppointmentReminders(organizationId, result.externalId);
   }
 }

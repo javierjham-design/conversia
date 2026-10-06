@@ -408,6 +408,14 @@ function makeDeps(): EngineDeps {
         if (convId) ctx.conversationId = convId;
       }
       if (!ctx.conversationId) return;
+      // Adición E(c): antes de la INSISTENCIA (nodos con checkResolvedBeforeSend), si la
+      // cita ya se resolvió por otro medio (confirmada por recepción / cancelada / atendida),
+      // NO se envía el R2. El R1 no lleva este flag, así que siempre sale.
+      const apptExtId = String(ctx.variables?.__appointmentExternalId ?? "");
+      if (cfg.checkResolvedBeforeSend && apptExtId && (await isAppointmentResolved(ctx.organizationId, apptExtId))) {
+        console.log(`↩ Recordatorio R2 omitido: cita ${apptExtId} ya resuelta (confirmada/cancelada/atendida).`);
+        return; // no se envía la insistencia; el motor continúa el flujo sin efecto
+      }
       const templateId = String(cfg.templateId ?? "");
       // C(b): el nombre de la plantilla puede venir del payload de Cláriva por una
       // variable del run (p. ej. __r1TemplateName, __recapturaTemplate). Se resuelve
@@ -504,6 +512,10 @@ function makeDeps(): EngineDeps {
         await withTenant(ctx.organizationId, (tx) =>
           tx.message.update({ where: { id: message.id }, data: { status: "SENT", externalId: sent.externalId, sentAt: new Date() } }),
         );
+        // Adición E(a): recordatorio (R1/R2) enviado → marca la cita "Notificado por
+        // WhatsApp" en la agenda del proveedor + historial. Solo los runs de recordatorio
+        // traen __appointmentExternalId, así que no afecta a otros envíos de plantilla.
+        if (apptExtId) await markAppointmentNotified(ctx.organizationId, apptExtId);
       } catch (err) {
         const failText = err instanceof ChannelConfigError ? err.userMessage : (err as Error).message.slice(0, 500);
         await withTenant(ctx.organizationId, (tx) =>
@@ -1049,17 +1061,59 @@ export async function scheduleAppointmentReminders(
  * cancelarse la cita — evita recordatorios huérfanos de una cita inexistente.
  * Clave por id EXTERNO de la cita (mismo que usa el scheduling).
  */
+/** Estados de cita que cuentan como RESUELTA: ya no se insiste con el recordatorio. */
+const RESOLVED_APPT_STATUSES = new Set(["confirmed", "cancelled", "completed", "no_show"]);
+
+/** ¿La cita ya se resolvió por otro medio (confirmada/cancelada/atendida)? Best-effort:
+ *  ante cualquier duda devuelve false (NO bloquea el envío). */
+async function isAppointmentResolved(orgId: string, externalId: string): Promise<boolean> {
+  try {
+    const { getSchedulingProviderFor } = await import("./tool-services.js");
+    const provider = await getSchedulingProviderFor(orgId);
+    if (typeof provider.getAppointment !== "function") return false;
+    const appt = await provider.getAppointment(externalId);
+    return !!appt && RESOLVED_APPT_STATUSES.has(String(appt.status).toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** Marca la cita como "Notificado por WhatsApp" en la agenda del proveedor (best-effort). */
+async function markAppointmentNotified(orgId: string, externalId: string): Promise<void> {
+  try {
+    const { getSchedulingProviderFor } = await import("./tool-services.js");
+    const provider = await getSchedulingProviderFor(orgId);
+    if (typeof provider.markNotified === "function") {
+      await provider.markNotified(externalId, "Recordatorio enviado por WhatsApp");
+    }
+  } catch {
+    /* best-effort: el envío no depende de que la agenda externa responda */
+  }
+}
+
 export async function cancelAppointmentReminders(organizationId: string, appointmentExternalId: string): Promise<void> {
-  await withTenant(organizationId, (tx) =>
-    tx.scheduledJob.updateMany({
+  await withTenant(organizationId, async (tx) => {
+    // 1) Jobs de recordatorio pendientes (antes de que dispare R1).
+    await tx.scheduledJob.updateMany({
       where: {
         kind: "appointment_reminder",
         status: "PENDING",
         uniqueKey: { endsWith: `:${appointmentExternalId}` },
       },
       data: { status: "CANCELLED" },
-    }),
-  );
+    });
+    // 2) Runs del recordatorio YA en marcha (R1 enviado, esperando en wait_reply para
+    //    la insistencia R2): se cancelan el run y su timer para no mandar el R2 si la
+    //    cita se resolvió por otro medio (confirmada/cancelada por recepción).
+    const waiting = await tx.workflowRun.findMany({ where: { status: "WAITING" }, select: { id: true, variables: true } });
+    const runIds = waiting
+      .filter((r) => (r.variables as Record<string, unknown> | null)?.__appointmentExternalId === appointmentExternalId)
+      .map((r) => r.id);
+    if (runIds.length) {
+      await tx.workflowRun.updateMany({ where: { id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
+      await tx.scheduledJob.updateMany({ where: { kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
+    }
+  });
 }
 
 /** Reanuda un run cuyo timer venció (invocado por el scheduler). */

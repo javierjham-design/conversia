@@ -434,6 +434,11 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
   getPatientAppointments(phone: string) {
     return this.request<SchedAppointment[]>("GET", `/patients/${encodeURIComponent(phone)}/appointments`);
   }
+  async markNotified(id: string, detalle?: string): Promise<void> {
+    // Agenda → "Notificado por WhatsApp" + registro en el historial. No pisa estados
+    // superiores (Confirmado/Atendido): del lado proveedor solo agrega el registro.
+    await this.request<unknown>("POST", `/appointments/${encodeURIComponent(id)}/notified`, detalle ? { detalle } : {});
+  }
   createOrUpdatePatient(patient: SchedPatient) {
     return this.request<SchedPatient>("PUT", "/patients", patient);
   }
@@ -572,6 +577,11 @@ export class CustomSchedulingProvider implements SchedulingProvider {
   }
   getPatientAppointments(phone: string) {
     return this.request<SchedAppointment[]>("GET", `/patients/${encodeURIComponent(phone)}/appointments`);
+  }
+  async markNotified(id: string, detalle?: string): Promise<void> {
+    // Agenda → "Notificado por WhatsApp" + registro en el historial. No pisa estados
+    // superiores (Confirmado/Atendido): del lado proveedor solo agrega el registro.
+    await this.request<unknown>("POST", `/appointments/${encodeURIComponent(id)}/notified`, detalle ? { detalle } : {});
   }
   createOrUpdatePatient(patient: SchedPatient) {
     return this.request<SchedPatient>("PUT", "/patients", patient);
