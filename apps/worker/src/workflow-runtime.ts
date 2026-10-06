@@ -959,6 +959,9 @@ export async function scheduleAppointmentReminders(
     // Horarios/toggle/plantillas de recordatorio por clínica (Gestor de IA de Cláriva).
     reminders?: {
       enabled?: boolean;
+      // Adición F: reenvío manual "por el bot" desde recepción → enviar R1 AHORA y
+      // re-armar siempre (bypass de idempotencia), ignorando first.time.
+      sendNow?: boolean;
       first?: { time?: string; templateName?: string };
       second?: { enabled?: boolean; time?: string; templateName?: string };
     } | null;
@@ -987,8 +990,36 @@ export async function scheduleAppointmentReminders(
   // y la segunda es posterior). Si falta, el workflow usa su timeout estático.
   const r2DelayHours = r1Min != null && r2Min != null && r2Min > r1Min ? (r2Min - r1Min) / 60 : null;
   const remindersDisabled = rem?.enabled === false || appt.remindersEnabled === false;
+  // Adición F — reenvío manual "por el bot": R1 ahora, re-armado siempre (sin idempotencia).
+  const sendNow = rem?.sendNow === true;
+  // Payload del scheduled_job de recordatorio (igual para el camino normal y el sendNow).
+  const reminderPayload = (workflowId: string) => ({
+    workflowId,
+    contactId: target.contactId ?? null,
+    conversationId: target.conversationId ?? null,
+    appointmentExternalId: appt.id,
+    startsAt: startsAt.toISOString(),
+    // §1.4 — toggle/horario de R2 para el run (null si el payload no los trae).
+    r2Enabled: rem ? r2Enabled : null,
+    r2DelayHours,
+    // C(b) — nombres de plantilla elegidos en el Gestor de IA (null = usa la del workflow).
+    r1TemplateName,
+    r2TemplateName,
+  });
   await withTenant(organizationId, async (tx) => {
     const { bh, timezone } = await loadOrgBusinessHours(tx, organizationId);
+    // sendNow: resetea el estado previo del recordatorio de ESTA cita (runs WAITING que
+    // esperaban el R2) para no duplicar la insistencia; luego cada workflow re-arma su job.
+    if (sendNow) {
+      const waiting = await tx.workflowRun.findMany({ where: { status: "WAITING" }, select: { id: true, variables: true } });
+      const runIds = waiting
+        .filter((r) => (r.variables as Record<string, unknown> | null)?.__appointmentExternalId === appt.id)
+        .map((r) => r.id);
+      if (runIds.length) {
+        await tx.workflowRun.updateMany({ where: { id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
+        await tx.scheduledJob.updateMany({ where: { kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
+      }
+    }
     const wfs = await tx.workflow.findMany({
       where: { active: true, deletedAt: null },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
@@ -1001,6 +1032,16 @@ export async function scheduleAppointmentReminders(
       // programa recordatorio para este flujo.
       if (!matchesApptFilter(cfg, { serviceId: appt.serviceId, professionalId: appt.professionalId, clinicId: appt.clinicId })) continue;
       const uniqueKey = `apptreminder:${wf.id}:${appt.id}`;
+      // Adición F: reenvío manual → re-arma el job a AHORA SIEMPRE, aunque el anterior
+      // estuviera DONE/CANCELLED (la cita se había confirmado antes). Sin idempotencia.
+      if (sendNow) {
+        await tx.scheduledJob.upsert({
+          where: { organizationId_uniqueKey: { organizationId, uniqueKey } },
+          update: { dueAt: now, status: "PENDING" },
+          create: { organizationId, kind: "appointment_reminder", dueAt: now, uniqueKey, payload: reminderPayload(wf.id) },
+        });
+        continue;
+      }
       const existing = await tx.scheduledJob.findUnique({
         where: { organizationId_uniqueKey: { organizationId, uniqueKey } },
         select: { id: true, status: true, dueAt: true },
@@ -1032,25 +1073,7 @@ export async function scheduleAppointmentReminders(
       await tx.scheduledJob.upsert({
         where: { organizationId_uniqueKey: { organizationId, uniqueKey } },
         update: { dueAt: plan.dueAt!, status: "PENDING" },
-        create: {
-          organizationId,
-          kind: "appointment_reminder",
-          dueAt: plan.dueAt!,
-          uniqueKey,
-          payload: {
-            workflowId: wf.id,
-            contactId: target.contactId ?? null,
-            conversationId: target.conversationId ?? null,
-            appointmentExternalId: appt.id,
-            startsAt: startsAt.toISOString(),
-            // §1.4 — toggle/horario de R2 para el run (null si el payload no los trae).
-            r2Enabled: rem ? r2Enabled : null,
-            r2DelayHours,
-            // C(b) — nombres de plantilla elegidos en el Gestor de IA (null = usa la del workflow).
-            r1TemplateName,
-            r2TemplateName,
-          },
-        },
+        create: { organizationId, kind: "appointment_reminder", dueAt: plan.dueAt!, uniqueKey, payload: reminderPayload(wf.id) },
       });
     }
   });

@@ -134,6 +134,11 @@ export async function processClarivaWebhook(
       clinicId: m?.clinicId ?? null,
       clinicName: m?.clinicName ?? null,
     });
+    // `remindersEnabled` (§1.3) + `reminders` (§1.4 horarios/toggle/plantillas + F sendNow):
+    // se propagan en AMBAS ramas (cita nueva y existente) — el reenvío manual "por el bot"
+    // llega como appointment.created de una cita YA existente.
+    const remindersEnabled = typeof payload.remindersEnabled === "boolean" ? payload.remindersEnabled : null;
+    const reminders = payload.reminders && typeof payload.reminders === "object" ? payload.reminders : null;
 
     if (existing) {
       const upd: Record<string, unknown> = {};
@@ -148,7 +153,7 @@ export async function processClarivaWebhook(
       for (const [k, v] of Object.entries(apptMeta)) if (v != null && prevMeta[k] == null) mergedMeta[k] = v;
       upd.meta = mergedMeta as object;
       const appt = await tx.appointment.update({ where: { id: existing.id }, data: upd });
-      return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(mergedMeta) };
+      return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(mergedMeta), remindersEnabled, reminders };
     }
 
     // Cita nueva (o desconocida): necesita horario y un contacto (por teléfono).
@@ -183,11 +188,6 @@ export async function processClarivaWebhook(
         meta: apptMeta as object,
       },
     });
-    // `remindersEnabled` (Gestor de IA de Cláriva): si viene false, NO se programan
-    // recordatorios para esta cita, pero la proyección y los demás flujos siguen.
-    const remindersEnabled = typeof payload.remindersEnabled === "boolean" ? payload.remindersEnabled : null;
-    // `reminders` (§1.4): horarios por clínica + toggle de la 2ª reconfirmación.
-    const reminders = payload.reminders && typeof payload.reminders === "object" ? payload.reminders : null;
     return { appointmentId: appt.id, contactId: appt.contactId, externalId, startsAt: appt.startsAt.toISOString(), meta: metaForEvent(apptMeta), remindersEnabled, reminders };
   });
 
