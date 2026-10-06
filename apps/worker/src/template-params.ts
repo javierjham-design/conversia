@@ -3,8 +3,12 @@ import { withTenant } from "@conversia/database";
 /**
  * Resuelve los valores REALES de los campos de una plantilla (mapeo
  * posición→campo guardado al crearla: contact.firstName, appointment.date, …).
- * Campos sin dato resuelven a "" — Meta acepta parámetros vacíos y es mejor
- * que inventar. Fechas en la zona horaria del tenant.
+ * Fechas en la zona horaria del tenant.
+ *
+ * IMPORTANTE: Meta RECHAZA los parámetros de cuerpo vacíos (#131008 "Required
+ * parameter is missing"). Por eso cualquier campo sin dato se envía como un
+ * espacio (" ") en vez de "" — así el recordatorio NUNCA se cae por un dato
+ * faltante (mejor un hueco mínimo que no entregar nada).
  */
 export async function resolveTemplateParams(
   organizationId: string,
@@ -70,14 +74,18 @@ export async function resolveTemplateParams(
         case "appointment.serviceName":
           return typeof apptMeta.serviceName === "string" ? apptMeta.serviceName : "";
         case "appointment.professional":
-          return professional?.name ?? "";
+          // Citas de Cláriva: professionalId (columna) va nulo; el nombre vive en
+          // meta.professionalName (igual que serviceName). Sin este fallback, {{n}}
+          // salía vacío y Meta rechazaba el envío con #131008.
+          return professional?.name ?? (typeof apptMeta.professionalName === "string" ? apptMeta.professionalName : "");
         case "organization.name":
           return org?.name ?? "";
         default:
           return "";
       }
     };
-    return fields.map(value);
+    // Red de seguridad: Meta no acepta parámetros vacíos → el vacío va como " ".
+    return fields.map((f) => value(f) || " ");
   });
 }
 
