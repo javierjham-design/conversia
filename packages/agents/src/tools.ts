@@ -416,6 +416,39 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       },
     },
     {
+      name: "getPatientAppointments",
+      description:
+        "Lista las citas del paciente (id, fecha, profesional, servicio, estado) por su teléfono. Úsala al REAGENDAR o cuando venga de un no-show/recaptura: te dice con QUÉ profesional y servicio tenía su hora para reagendar con el MISMO por defecto. No pide parámetros: usa el teléfono del paciente de la conversación.",
+      inputSchema: z.object({}),
+      async execute(ctx) {
+        const s = services(ctx);
+        const contact = await s.contactInfo();
+        if (!contact.phone) return { error: "No tengo el teléfono del paciente, no puedo buscar sus citas." };
+        const appts = await s.scheduling.getPatientAppointments(contact.phone).catch(() => [] as SchedAppointment[]);
+        if (!appts.length) {
+          return { citas: [], message: "El paciente no tiene citas registradas. Pregúntale qué necesita y, si corresponde, ofrécele agendar una hora." };
+        }
+        const now = Date.now();
+        // Más reciente primero: la cita de referencia para reagendar es la última.
+        const ordered = [...appts].sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+        const citas = ordered.map((a) => ({
+          id: a.id,
+          cuando: slotWhen.format(new Date(a.start)),
+          estado: a.status,
+          profesional: a.professionalName ?? a.professionalId ?? null,
+          profesionalId: a.professionalId ?? null,
+          servicio: a.serviceName ?? a.serviceId ?? null,
+          servicioId: a.serviceId ?? null,
+          proxima: new Date(a.start).getTime() >= now,
+        }));
+        return {
+          citas,
+          message:
+            "Para reagendar, por defecto usa el MISMO profesional y servicio de su cita (el profesionalId/servicioId de arriba) al llamar a getAvailability. Cambia de profesional solo si el paciente lo pide o si no hay cupo razonablemente pronto con el suyo.",
+        };
+      },
+    },
+    {
       name: "getLeadStatuses",
       description: "Lista las ETAPAS válidas del lead configuradas por la cuenta (code + nombre). Úsala antes de updateLeadStatus para usar el code exacto; nunca inventes códigos.",
       inputSchema: z.object({}),
