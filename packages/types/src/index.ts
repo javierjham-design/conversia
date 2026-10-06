@@ -115,6 +115,8 @@ export interface SchedulingProvider {
   getPatientAppointments(phone: string): Promise<SchedAppointment[]>;
   /** Lista las citas del proveedor en un rango (para visualizar la agenda real en el panel). Opcional: no todos los proveedores lo exponen. */
   listAppointments?(query: AvailabilityQuery): Promise<SchedAppointment[]>;
+  /** Marca la cita como "Notificado por WhatsApp" + registro en el historial del proveedor (sin pisar estados superiores). Opcional. */
+  markNotified?(id: string, detalle?: string): Promise<void>;
   createOrUpdatePatient(patient: SchedPatient): Promise<SchedPatient>;
   markAttendance(id: string): Promise<void>;
   markNoShow(id: string): Promise<void>;
