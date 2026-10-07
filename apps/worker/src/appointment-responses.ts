@@ -113,7 +113,9 @@ export async function handleAppointmentResponse(
   const now = new Date();
   const appt = await withTenant(orgId, (tx) =>
     tx.appointment.findFirst({
-      where: { contactId, startsAt: { gte: now }, status: { in: ["PENDING", "CONFIRMED"] } },
+      // RESCHEDULED = cita reagendada (cambió de hora) sigue ACTIVA/confirmable: sin esto,
+      // un paciente que reagendó y luego confirma caía al agente genérico ("no tenías hora?").
+      where: { contactId, startsAt: { gte: now }, status: { in: ["PENDING", "CONFIRMED", "RESCHEDULED"] } },
       orderBy: { startsAt: "asc" },
     }),
   );

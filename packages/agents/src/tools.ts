@@ -391,10 +391,10 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const now = Date.now();
         let targetId = input.appointmentId;
         if (!targetId) {
-          // Sin id: la próxima cita del paciente (PENDING/CONFIRMED, start a futuro).
+          // Sin id: la próxima cita ACTIVA del paciente (incluye rescheduled = reagendada).
           const appts = await s.scheduling.getPatientAppointments(contact.phone).catch(() => [] as SchedAppointment[]);
           const upcoming = appts
-            .filter((a) => ["pending", "confirmed"].includes(a.status) && new Date(a.start).getTime() >= now)
+            .filter((a) => ["pending", "confirmed", "rescheduled"].includes(a.status) && new Date(a.start).getTime() >= now)
             .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
           const target = upcoming[0] ?? null;
           if (!target) return { error: "No encuentro una cita próxima a nombre del paciente. Pregúntale si quiere que agenden una." };
