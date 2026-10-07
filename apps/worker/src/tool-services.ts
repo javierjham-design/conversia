@@ -494,8 +494,10 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
             start: a.startsAt.toISOString(),
             end: (a.endsAt ?? a.startsAt).toISOString(),
             status: String(a.status).toLowerCase(),
-            // El professionalId usable para getAvailability es el EXTERNO (de Cláriva), que vive en meta.
-            professionalId: (m.professionalExternalId as string) ?? (m.professionalId as string) ?? null,
+            // professionalId usable por getAvailability y por el allowlist del agente = el id LOCAL
+            // (Professional.id). Las citas de Cláriva ya lo guardan en meta.professionalId; caemos a la
+            // columna FK y, en último caso, al ref externo. (El allowlist compara contra ids locales.)
+            professionalId: (a.professionalId as string | null) ?? (m.professionalId as string) ?? (m.professionalExternalId as string) ?? null,
             professionalName: (m.professionalName as string) ?? null,
             serviceId: (m.serviceExternalId as string) ?? (m.serviceId as string) ?? null,
             serviceName: (m.serviceName as string) ?? null,
