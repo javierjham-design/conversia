@@ -127,9 +127,15 @@ export class InboxController {
       return {
         firstResponseTargetMinutes,
         fixed: { all, mine, unassigned, unanswered, blocked },
-        agents: byAgentRaw
-          .filter((r) => r.activeAgentId && agentName.has(r.activeAgentId))
-          .map((r) => ({ id: r.activeAgentId!, name: agentName.get(r.activeAgentId!)!, count: r._count._all })),
+        // TODOS los agentes de IA activos (no solo los que tienen conversaciones), con su
+        // conteo (0 si no tiene). Así el sidebar permite filtrar por cualquier agente —
+        // p. ej. "Agendamiento" aunque aún no tenga chats. Orden: más conversaciones primero.
+        agents: (() => {
+          const countByAgent = new Map(byAgentRaw.filter((r) => r.activeAgentId).map((r) => [r.activeAgentId!, r._count._all]));
+          return agents
+            .map((a) => ({ id: a.id, name: a.name, count: countByAgent.get(a.id) ?? 0 }))
+            .sort((x, y) => y.count - x.count || x.name.localeCompare(y.name));
+        })(),
         stages: byStage,
         teams: byTeamRaw
           .filter((r) => r.assignedTeamId && teamName.has(r.assignedTeamId))
