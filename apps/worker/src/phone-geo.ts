@@ -35,8 +35,13 @@ export function toE164(raw: string): string {
 
 /** Infiere país ISO + zona horaria estimada desde el teléfono (por prefijo). */
 export function geoFromPhone(raw: string): { phone: string; country: string | null; timezone: string | null } {
-  const phone = toE164(raw);
-  const digits = phone.replace(/^\+/, "");
+  let digits = toE164(raw).replace(/^\+/, "");
+  // Móvil chileno SIN código de país: 9XXXXXXXX (9 díg empezando en 9). Cláriva a veces
+  // manda el número así → se anteponía "+" a secas (+961426592) y no cruzaba con el real
+  // (+56961426592) de WhatsApp, creando contactos duplicados. El producto es chileno:
+  // se asume CL y se antepone "56". (Los wa_id de WhatsApp ya traen el código → 11 díg, no entran aquí.)
+  if (/^9\d{8}$/.test(digits)) digits = "56" + digits;
+  const phone = digits ? `+${digits}` : "";
   for (const [prefix, country, tz] of SORTED) {
     if (digits.startsWith(prefix)) return { phone, country, timezone: tz };
   }

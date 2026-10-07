@@ -29,6 +29,13 @@ describe("phone-geo", () => {
     expect(geoFromPhone("999").country).toBeNull();
     expect(geoFromPhone("56912345678").timezone).toBe("America/Santiago");
   });
+  it("móvil chileno SIN código de país (Cláriva) → antepone 56 y queda E.164 válido", () => {
+    expect(geoFromPhone("961426592").phone).toBe("+56961426592");
+    expect(geoFromPhone("961426592").country).toBe("CL");
+    expect(geoFromPhone("+961426592").phone).toBe("+56961426592"); // con + pero sin 56
+    // números que YA traen código (wa_id de WhatsApp, 11 díg) no se tocan
+    expect(geoFromPhone("56961426592").phone).toBe("+56961426592");
+  });
 });
 
 describe("contact-capture", () => {

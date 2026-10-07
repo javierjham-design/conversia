@@ -79,6 +79,22 @@ async function logAgenda(orgId: string, status: "ok" | "error", message: string)
   );
 }
 
+/** Etiqueta la conversación para clasificarla en la Bandeja (ver fácil las confirmaciones
+ *  vs los chats de venta). Best-effort e idempotente. */
+async function tagConversation(orgId: string, conversationId: string, name: string): Promise<void> {
+  await withTenant(orgId, async (tx) => {
+    const tag = await tx.tag.upsert({
+      where: { organizationId_name: { organizationId: orgId, name } },
+      update: {},
+      create: { organizationId: orgId, name },
+    });
+    await tx.tagAssignment.createMany({
+      data: [{ organizationId: orgId, tagId: tag.id, entityType: "conversation", entityId: conversationId }],
+      skipDuplicates: true,
+    });
+  }).catch(() => undefined);
+}
+
 /**
  * Procesa una posible respuesta al recordatorio. Devuelve true si la manejó
  * (el inbound entonces omite el turno del agente y el trigger message_received).
@@ -125,6 +141,7 @@ export async function handleAppointmentResponse(
       occurredAt: now.toISOString(),
     });
     await sendReplyText(orgId, conversationId, "¡Listo! Tu cita quedó confirmada ✅ Te esperamos.");
+    await tagConversation(orgId, conversationId, "Cita confirmada");
     // Confirmada y agradecida: no queda nada pendiente → cierra la conversación
     // (se reabre sola si el paciente vuelve a escribir).
     await withTenant(orgId, (tx) => tx.conversation.update({ where: { id: conversationId }, data: { status: "CLOSED" } })).catch(() => undefined);
@@ -157,6 +174,7 @@ export async function handleAppointmentResponse(
 
   if (kind === "cancel") {
     await cancelAppt("patient_cancel");
+    await tagConversation(orgId, conversationId, "Cita cancelada");
     await sendReplyText(orgId, conversationId, "Listo, cancelé tu cita ✅. Cuando quieras agendar de nuevo, escríbeme y te muestro horarios 📅.");
     return true;
   }
@@ -165,6 +183,7 @@ export async function handleAppointmentResponse(
   // agende el nuevo (tiene las tools de disponibilidad/agenda). Una nota interna lo guía;
   // devolvemos false para que el turno del agente continúe y responda con los horarios.
   await cancelAppt("patient_reschedule");
+  await tagConversation(orgId, conversationId, "Reagenda solicitada");
   await withTenant(orgId, (tx) =>
     tx.conversationAiNote.create({
       data: {
