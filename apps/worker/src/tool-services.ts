@@ -478,6 +478,33 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       });
     },
 
+    async listContactAppointments() {
+      if (!t.contactId) return [];
+      return withTenant(orgId, async (tx) => {
+        const rows = await tx.appointment.findMany({
+          where: { contactId: t.contactId, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+          orderBy: { startsAt: "asc" },
+          take: 20,
+        });
+        return rows.map((a) => {
+          const m = (a.meta as Record<string, any> | null) ?? {};
+          const durationMin = a.endsAt ? Math.max(5, Math.round((a.endsAt.getTime() - a.startsAt.getTime()) / 60000)) : 30;
+          return {
+            id: a.externalId ?? a.id,
+            start: a.startsAt.toISOString(),
+            end: (a.endsAt ?? a.startsAt).toISOString(),
+            status: String(a.status).toLowerCase(),
+            // El professionalId usable para getAvailability es el EXTERNO (de Cláriva), que vive en meta.
+            professionalId: (m.professionalExternalId as string) ?? (m.professionalId as string) ?? null,
+            professionalName: (m.professionalName as string) ?? null,
+            serviceId: (m.serviceExternalId as string) ?? (m.serviceId as string) ?? null,
+            serviceName: (m.serviceName as string) ?? null,
+            durationMin,
+          };
+        });
+      });
+    },
+
     async recordAppointment(appt: SchedAppointment) {
       const created = await withTenant(orgId, async (tx) => {
         const row = await tx.appointment.create({

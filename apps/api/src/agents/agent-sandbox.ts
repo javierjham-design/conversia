@@ -192,6 +192,37 @@ export async function buildSandboxServices(
       return { firstName: state.contact.firstName, lastName: state.contact.lastName, phone: state.contact.phone };
     },
 
+    async listContactAppointments() {
+      // Probador: resuelve el contacto REAL por teléfono y lee sus citas de la proyección
+      // local (igual que producción; sin depender del lookup por teléfono del proveedor).
+      const phone = state.contact.phone;
+      if (!phone) return [];
+      return withTenant(orgId, async (tx) => {
+        const contact = await tx.contact.findFirst({ where: { phone, deletedAt: null } });
+        if (!contact) return [];
+        const rows = await tx.appointment.findMany({
+          where: { contactId: contact.id, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+          orderBy: { startsAt: "asc" },
+          take: 20,
+        });
+        return rows.map((a) => {
+          const m = (a.meta as Record<string, any> | null) ?? {};
+          const durationMin = a.endsAt ? Math.max(5, Math.round((a.endsAt.getTime() - a.startsAt.getTime()) / 60000)) : 30;
+          return {
+            id: a.externalId ?? a.id,
+            start: a.startsAt.toISOString(),
+            end: (a.endsAt ?? a.startsAt).toISOString(),
+            status: String(a.status).toLowerCase(),
+            professionalId: (m.professionalExternalId as string) ?? (m.professionalId as string) ?? null,
+            professionalName: (m.professionalName as string) ?? null,
+            serviceId: (m.serviceExternalId as string) ?? (m.serviceId as string) ?? null,
+            serviceName: (m.serviceName as string) ?? null,
+            durationMin,
+          };
+        });
+      });
+    },
+
     async searchKnowledge(query: string) {
       return withTenant(orgId, async (tx) => {
         const words = query.split(/\s+/).filter((w) => w.length > 3).slice(0, 4);
