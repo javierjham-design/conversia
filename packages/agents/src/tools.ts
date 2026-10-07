@@ -41,6 +41,12 @@ export interface ToolServices {
   scheduling: SchedulingProvider;
   contactInfo(): Promise<{ firstName: string | null; lastName: string | null; phone: string | null }>;
   recordAppointment(appt: SchedAppointment): Promise<void>;
+  /** Citas del contacto desde la PROYECCIÓN LOCAL (ya cruzada por el contacto), no vía el
+   *  lookup por teléfono del proveedor externo (que falla con teléfonos malformados de Cláriva).
+   *  Trae durationMin (end−start) para reagendar conservando la duración original. */
+  listContactAppointments(): Promise<
+    Array<{ id: string; start: string; end: string; status: string; professionalId: string | null; professionalName: string | null; serviceId: string | null; serviceName: string | null; durationMin: number }>
+  >;
   updateLeadStatus(code: string): Promise<void>;
   listLeadStatuses(): Promise<Array<{ code: string; name: string }>>;
   addTag(name: string): Promise<void>;
@@ -239,8 +245,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         fromDate: isoDate.optional(),
         toDate: isoDate.optional(),
         franja: z.enum(["manana", "tarde"]).optional().describe("Filtro horario: manana = 09:00–13:59, tarde = desde las 14:00. Úsalo SIEMPRE que el paciente pida mañana/tarde."),
+        durationMin: z.number().int().positive().max(480).optional().describe("Duración de la cita en minutos. Al REAGENDAR, pasa la duracionMin que te dio getPatientAppointments para conservar la duración original."),
       }),
-      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; franja?: "manana" | "tarde" }) {
+      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; franja?: "manana" | "tarde"; durationMin?: number }) {
         // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…").
         // Se ancla el inicio desde HOY (Chile) y se RESPETA el rango que pidió el modelo
         // (si pide un día, se le dan las horas de ESE día, sin mezclar días lejanos).
@@ -249,7 +256,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
         const to = input.toDate && input.toDate >= from ? input.toDate : plus(14);
         const sched = services(ctx).scheduling;
-        const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined };
+        const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
         // FRANJA (hora de Chile): sin este filtro, el tope de 6 opciones dejaba solo las
         // horas más tempranas (mañanas) y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
@@ -391,15 +398,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const now = Date.now();
         let targetId = input.appointmentId;
         if (!targetId) {
-          // Sin id: la próxima cita ACTIVA del paciente (incluye rescheduled = reagendada).
-          const appts = await s.scheduling.getPatientAppointments(contact.phone).catch(() => [] as SchedAppointment[]);
+          // Sin id: la próxima cita ACTIVA desde la PROYECCIÓN LOCAL (incluye rescheduled).
+          const appts = await s.listContactAppointments().catch(() => [] as Awaited<ReturnType<ToolServices["listContactAppointments"]>>);
           const upcoming = appts
-            .filter((a) => ["pending", "confirmed", "rescheduled"].includes(a.status) && new Date(a.start).getTime() >= now)
+            .filter((a) => ["pending", "confirmed", "rescheduled"].includes(String(a.status).toLowerCase()) && new Date(a.start).getTime() >= now)
             .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
           const target = upcoming[0] ?? null;
           if (!target) return { error: "No encuentro una cita próxima a nombre del paciente. Pregúntale si quiere que agenden una." };
           targetId = target.id;
-          if (target.status === "confirmed") {
+          if (String(target.status).toLowerCase() === "confirmed") {
             return { ok: true, alreadyConfirmed: true, cuando: slotWhen.format(new Date(target.start)), message: `Su cita del ${slotWhen.format(new Date(target.start))} ya estaba confirmada. Agradécele y cierra con calidez.` };
           }
         }
@@ -418,15 +425,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     {
       name: "getPatientAppointments",
       description:
-        "Lista las citas del paciente (id, fecha, profesional, servicio, estado) por su teléfono. Úsala al REAGENDAR o cuando venga de un no-show/recaptura: te dice con QUÉ profesional y servicio tenía su hora para reagendar con el MISMO por defecto. No pide parámetros: usa el teléfono del paciente de la conversación.",
+        "Lista las citas del paciente (id, fecha, profesional, servicio, estado, duración) desde la agenda. Úsala SIEMPRE al REAGENDAR/confirmar/no-show/recaptura ANTES que nada: te dice con QUÉ profesional, servicio y duración tenía su hora, para reagendar con el MISMO profesional y la MISMA duración. No pide parámetros.",
       inputSchema: z.object({}),
       async execute(ctx) {
         const s = services(ctx);
-        const contact = await s.contactInfo();
-        if (!contact.phone) return { error: "No tengo el teléfono del paciente, no puedo buscar sus citas." };
-        const appts = await s.scheduling.getPatientAppointments(contact.phone).catch(() => [] as SchedAppointment[]);
+        const appts = await s.listContactAppointments().catch(() => [] as Awaited<ReturnType<ToolServices["listContactAppointments"]>>);
         if (!appts.length) {
-          return { citas: [], message: "El paciente no tiene citas registradas. Pregúntale qué necesita y, si corresponde, ofrécele agendar una hora." };
+          return { citas: [], message: "El paciente no tiene citas en la agenda. Si pide confirmar o reagendar y no aparece ninguna cita, deriva a una persona con transferToHuman (nota breve)." };
         }
         const now = Date.now();
         // Más reciente primero: la cita de referencia para reagendar es la última.
@@ -439,12 +444,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           profesionalId: a.professionalId ?? null,
           servicio: a.serviceName ?? a.serviceId ?? null,
           servicioId: a.serviceId ?? null,
+          duracionMin: a.durationMin,
           proxima: new Date(a.start).getTime() >= now,
         }));
         return {
           citas,
           message:
-            "Para reagendar, por defecto usa el MISMO profesional y servicio de su cita (el profesionalId/servicioId de arriba) al llamar a getAvailability. Cambia de profesional solo si el paciente lo pide o si no hay cupo razonablemente pronto con el suyo.",
+            "Para REAGENDAR: usa SIEMPRE el MISMO profesionalId y la MISMA duracionMin de su cita al llamar getAvailability (nunca otro profesional). Si getAvailability no devuelve cupos con su profesional (p. ej. su doctor no agenda por este medio), NO ofrezcas otro: deriva a una persona con transferToHuman.",
         };
       },
     },
