@@ -20,6 +20,23 @@ describe("detectAppointmentResponse", () => {
     }
   });
 
+  it("detecta confirmaciones en lenguaje natural", () => {
+    for (const t of ["ahí estaré", "Ahí estoy", "estaré mañana", "estaré ahí", "estare mañana sin falta", "sí voy", "si iré", "ahí nos vemos"]) {
+      expect(detectAppointmentResponse(t)).toBe("confirm");
+    }
+  });
+
+  it("detecta 'no puedo asistir' como cancelar", () => {
+    for (const t of ["no puedo asistir", "no puedo ir", "no podré llegar"]) {
+      expect(detectAppointmentResponse(t)).toBe("cancel");
+    }
+  });
+
+  it("NO confunde 'voy a ...' genérico con confirmar", () => {
+    expect(detectAppointmentResponse("voy a preguntar algo")).toBeNull();
+    expect(detectAppointmentResponse("voy a cancelar")).toBe("cancel");
+  });
+
   it("'cancelar y reagendar' se interpreta como reagendar", () => {
     expect(detectAppointmentResponse("cancelar y reagendar")).toBe("reschedule");
     expect(detectAppointmentResponse("quiero cambiar de día")).toBe("reschedule");

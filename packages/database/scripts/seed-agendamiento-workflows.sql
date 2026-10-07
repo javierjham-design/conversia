@@ -85,20 +85,26 @@ BEGIN
         'variables', '{}'::jsonb,
         'nodes', jsonb_build_array(
           jsonb_build_object('id','n1','type','send_template','config', jsonb_build_object('templateId', v_tpl_rec, 'templateNameVar','__r1TemplateName')),
+          -- Al ENVIAR el recordatorio, la conversación pasa de inmediato al agente de
+          -- agendamiento: cualquier respuesta del paciente (confirmar/reagendar/"no puedo"/
+          -- "ya está agendada"/su nombre) la maneja agendamiento, no el agente de venta/
+          -- recepción que estuviera activo. Además deja la conversación filtrable en la Bandeja.
+          jsonb_build_object('id','na','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento')),
           jsonb_build_object('id','n2','type','wait_reply','config', jsonb_build_object('hours',6,'hoursVar','__r2DelayHours')),
           jsonb_build_object('id','n2b','type','condition','config', jsonb_build_object('kind','flag','var','__r2Enabled','default',true)),
           jsonb_build_object('id','n3','type','send_template','config', jsonb_build_object('templateId', v_tpl_ins, 'templateNameVar','__r2TemplateName','checkResolvedBeforeSend',true)),
-          jsonb_build_object('id','n4','type','wait_reply','config', jsonb_build_object('hours',18)),
-          jsonb_build_object('id','n5','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento'))
+          jsonb_build_object('id','nb','type','switch_agent','config', jsonb_build_object('agentSlug','agendamiento')),
+          jsonb_build_object('id','n4','type','wait_reply','config', jsonb_build_object('hours',18))
         ),
         'edges', jsonb_build_array(
-          jsonb_build_object('from','n1','to','n2'),
-          jsonb_build_object('from','n2','to','n5','when','replied'),    -- respondió a R1 → agente (no se envía R2)
+          jsonb_build_object('from','n1','to','na'),
+          jsonb_build_object('from','na','to','n2'),
           jsonb_build_object('from','n2','to','n2b','when','no_reply'),  -- sin respuesta → ¿2ª reconfirmación activa?
           jsonb_build_object('from','n2b','to','n3','when','true'),      -- sí → insistencia
-          jsonb_build_object('from','n3','to','n4'),
-          jsonb_build_object('from','n4','to','n5','when','replied')     -- respondió a R2 → agente
-          -- n2b when=false sin arista → termina (clínica apagó la 2ª reconfirmación)
+          jsonb_build_object('from','n3','to','nb'),
+          jsonb_build_object('from','nb','to','n4')
+          -- n2/n4 rama "replied" sin arista → termina (agendamiento ya tomó la conversación).
+          -- n2b when=false sin arista → termina (clínica apagó la 2ª reconfirmación).
         )
       ));
   ELSE
