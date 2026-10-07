@@ -29,12 +29,14 @@ export type ApptResponse = "confirm" | "reschedule" | "cancel";
  * Puro y determinista. Deliberadamente estricto para no capturar frases largas.
  */
 export function detectAppointmentResponse(text: string | null | undefined): ApptResponse | null {
-  const t = (text ?? "").trim().toLowerCase();
+  // Sin acentos (NFD + quitar marcas combinantes): "asistiré"/"ahí"/"día" matchean igual
+  // vengan con acento compuesto o descompuesto, o sin acento. Evita falsos negativos.
+  const t = (text ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   if (!t || t.length > 40) return null;
-  if (/^(s[ií],?\s*)?(confirm(o|ar|ada|o mi cita)?|confirmo asistencia|s[ií] confirmo|asistir[eé])\b/.test(t)) return "confirm";
+  if (/^(si,?\s*(confirmo|ire|voy|asisto)|confirm(o|ar|ada|o mi cita)?|asistire|ahi\s+(estare|estoy|voy|nos vemos)|estare\s+(ahi|manana|presente|sin falta|puntual))\b/.test(t)) return "confirm";
   // Cancelar ANTES que reagendar: "cancelar y reagendar" es reagendar; "cancelar" solo es cancelar.
-  if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|an[uú]la(r|me)?|dar de baja|no (podr[eé]|voy a) (ir|asistir)|ya no (puedo|voy))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (d[ií]a|horario))/.test(t)) return "cancel";
-  if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|d[ií]a)|mover( la)? (cita|hora|d[ií]a)|otro (d[ií]a|horario))/.test(t)) return "reschedule";
+  if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|anula(r|me)?|dar de baja|no (podre|puedo|voy a|podria) (ir|asistir|llegar)|ya no (puedo|voy|podre))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (dia|horario))/.test(t)) return "cancel";
+  if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|dia)|mover( la)? (cita|hora|dia)|otro (dia|horario))/.test(t)) return "reschedule";
   return null;
 }
 
