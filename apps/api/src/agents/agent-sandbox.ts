@@ -213,7 +213,8 @@ export async function buildSandboxServices(
             start: a.startsAt.toISOString(),
             end: (a.endsAt ?? a.startsAt).toISOString(),
             status: String(a.status).toLowerCase(),
-            professionalId: (m.professionalExternalId as string) ?? (m.professionalId as string) ?? null,
+            // id LOCAL (Professional.id) para que calce con el allowlist del agente y getAvailability.
+            professionalId: (a.professionalId as string | null) ?? (m.professionalId as string) ?? (m.professionalExternalId as string) ?? null,
             professionalName: (m.professionalName as string) ?? null,
             serviceId: (m.serviceExternalId as string) ?? (m.serviceId as string) ?? null,
             serviceName: (m.serviceName as string) ?? null,
