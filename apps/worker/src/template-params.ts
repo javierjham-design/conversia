@@ -37,7 +37,7 @@ export async function resolveTemplateParams(
       // Fallback: si no vino la cita exacta (o no está en la proyección), la próxima.
       if (!appointment) {
         appointment = await tx.appointment.findFirst({
-          where: { contactId, startsAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED"] } },
+          where: { contactId, startsAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED", "RESCHEDULED"] } },
           orderBy: { startsAt: "asc" },
         });
       }
