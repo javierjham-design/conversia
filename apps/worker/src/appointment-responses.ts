@@ -183,19 +183,38 @@ export async function handleAppointmentResponse(
     return true;
   }
 
-  // Reagendar (F4): liberamos el cupo anterior y dejamos que el AGENTE ofrezca horarios y
-  // agende el nuevo (tiene las tools de disponibilidad/agenda). Una nota interna lo guía;
-  // devolvemos false para que el turno del agente continúe y responda con los horarios.
+  // Reagendar (F4): el AGENTE ofrece horarios y agenda el nuevo (tiene las tools de agenda).
+  // CLAVE: capturamos profesional + duración de la cita ANTES de liberarla y se los pasamos al
+  // agente en una nota DIRECTIVA (prioridad alta). Antes se liberaba sin contexto → el agente
+  // llamaba getPatientAppointments, ya NO la encontraba (recién cancelada) y respondía "no tienes
+  // cita" escalando (caso Raquel). Con la nota, reagenda con el MISMO profesional y duración sin
+  // depender de getPatientAppointments.
+  const m = (appt.meta as Record<string, any> | null) ?? {};
+  // id LOCAL del profesional (= el del allowlist y el que espera getAvailability). Las citas de
+  // Cláriva lo guardan en meta.professionalId; caemos a la columna FK y, por último, al ref externo.
+  const profId =
+    (m.professionalId as string) ?? (appt.professionalId as string | null) ?? (m.professionalExternalId as string) ?? null;
+  const profName = typeof m.professionalName === "string" ? m.professionalName : null;
+  const durMin = appt.endsAt ? Math.max(5, Math.round((appt.endsAt.getTime() - appt.startsAt.getTime()) / 60000)) : 30;
+  const tz = appt.timezone || "America/Santiago";
+  const fechaTxt = appt.startsAt.toLocaleString("es-CL", {
+    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: tz,
+  });
+
   await cancelAppt("patient_reschedule");
   await tagConversation(orgId, conversationId, "Reagenda solicitada");
+  const note =
+    `REAGENDAR: el paciente pidió cambiar su hora y YA liberé su cita anterior` +
+    (profName ? ` (era con ${profName} el ${fechaTxt})` : ` (del ${fechaTxt})`) +
+    `. Reagéndale con el MISMO profesional y la MISMA duración: ` +
+    (profId ? `professionalId=${profId}` : `el mismo profesional de esa cita`) +
+    `, durationMin=${durMin}. Llama getAvailability con ESE professionalId y durationMin, ofrece 2-3 horas ` +
+    `reales (las más cercanas a lo que pida) y agéndala con createAppointment usando el id exacto del horario. ` +
+    `NO necesitas getPatientAppointments para esto (esa cita ya no está): guíate por esta nota. ` +
+    `Si getAvailability NO devuelve ningún cupo con ese profesional, discúlpate y escala a una persona con transferToHuman.`;
   await withTenant(orgId, (tx) =>
     tx.conversationAiNote.create({
-      data: {
-        organizationId: orgId,
-        conversationId,
-        body: "El paciente pidió REAGENDAR su cita (la anterior quedó liberada). Ofrécele los horarios disponibles y agenda el nuevo.",
-        active: true,
-      },
+      data: { organizationId: orgId, conversationId, body: note, active: true },
     }),
   );
   return false;
