@@ -115,6 +115,13 @@ export async function processClarivaWebhook(
     // Eventos de cita: upsert de la proyección por (provider, externalId).
     const externalId = payload.id != null ? String(payload.id) : null;
     if (!externalId) return null;
+    // Lock de transacción por (org, externalId): Cláriva puede entregar el MISMO
+    // appointment.created dos veces casi a la vez (reintento/reenvío). Sin esto, los dos
+    // `findFirst` de abajo devuelven null antes de que cualquiera confirme → ambos `create`
+    // → cita DUPLICADA (misma hora, mismo externalId; caso Amalia/Cesar: 2 filas creadas en
+    // el mismo segundo). El lock serializa: el 2º espera, ve la fila del 1º y hace UPDATE.
+    // Se libera solo al cerrar la transacción. Es de asesoría (no bloquea otras filas).
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${organizationId}), hashtext(${externalId}))`;
     const existing = await tx.appointment.findFirst({ where: { provider: "CLARIVA", externalId } });
 
     // Servicio / profesional / sede / PACIENTE del payload (para filtros de trigger y
