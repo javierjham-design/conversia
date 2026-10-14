@@ -266,23 +266,32 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
         const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
         let slots = (await sched.getAvailableSlots({ ...query, from, to })).filter((s) => enFranja(s.start));
-        // Si el rango pedido era angosto y no hay horas (en la franja pedida), se
-        // ensancha a 14 días — pero solo como respaldo (y se AVISA en la respuesta).
+        // RESPALDOS para NO devolver un "sinCupos" pelado cuando SÍ hay horas reales cerca: el modelo
+        // interpretaba el vacío como "no hay nada" y escalaba/ negaba días que ni consultó (caso David
+        // y Maria Cecilia: negó el día y "los siguientes" habiendo cupos). Preferimos SIEMPRE devolver
+        // horas reales (ensanchando fechas y, si hace falta, soltando la franja) para que el bot ofrezca.
         let ensanchado = false;
-        if (!slots.length) {
-          const wide = plus(14);
-          if (wide > to) {
-            slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
-            ensanchado = slots.length > 0;
-          }
+        let franjaRelajada = false;
+        const wide = plus(28);
+        if (!slots.length && wide > to) {
+          // 1) ensanchar fechas manteniendo la franja pedida.
+          slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+          ensanchado = slots.length > 0;
+        }
+        if (!slots.length && input.franja) {
+          // 2) soltar la franja: ofrecer cualquier hora REAL del rango ancho (p. ej. tarde si no hay
+          // mañana). Así el bot propone la otra franja en vez de rendirse.
+          slots = await sched.getAvailableSlots({ ...query, from, to: wide });
+          franjaRelajada = slots.length > 0;
+          if (franjaRelajada) ensanchado = true;
         }
         if (!slots.length) {
-          // Vacío EXPLÍCITO con el rango consultado: el modelo solo puede afirmar que no
-          // hay cupos EN ESTE rango/franja — jamás "hasta" una fecha que no consultó.
+          // Vacío de verdad: NO hay NINGUNA hora con este profesional en ~28 días. Recién aquí el
+          // modelo puede afirmar que no hay disponibilidad y derivar a una persona.
           return {
             sinCupos: true,
-            rangoConsultado: { desde: from, hasta: to, ...(input.franja ? { franja: input.franja } : {}) },
-            nota: `No hay horas${input.franja ? ` de ${input.franja === "manana" ? "mañana" : "tarde"}` : ""} SOLO entre ${from} y ${to}. Ofrece la otra franja u otro rango (vuelve a consultar); NUNCA digas que no hay cupos "hasta" una fecha que no consultaste.`,
+            rangoConsultado: { desde: from, hasta: wide, ...(input.franja ? { franja: input.franja } : {}) },
+            nota: `No hay NINGUNA hora disponible con este profesional entre ${from} y ${wide} (ya revisé todo el rango y ambas franjas). Discúlpate y deriva a una persona con transferToHuman; no ofrezcas otro profesional.`,
           };
         }
         // Orden cronológico garantizado (ISO ordena por fecha/hora).
@@ -321,14 +330,19 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // y si se ensanchó el rango, debe decir la fecha de cada hora y no presentarlas
         // como si fueran del día pedido.
         const notas: string[] = [];
-        if (input.franja) {
+        if (franjaRelajada) {
+          // Se soltó la franja pedida: estas horas NO son todas de esa franja.
+          notas.push(
+            `No había cupos de ${input.franja === "manana" ? "mañana" : "tarde"} con este profesional, así que estas son las próximas horas REALES disponibles (de otra franja u otros días): di la FECHA y HORA exactas de cada una y ofrécelas al paciente. NO digas que no hay disponibilidad — estas existen.`,
+          );
+        } else if (input.franja) {
           notas.push(
             input.franja === "manana"
               ? "TODOS estos horarios SON de la franja MAÑANA según la política de la clínica (09:00–13:59): ofrécelos como horarios de mañana aunque alguno te parezca tarde (ej. 13:15 ES mañana). NO digas que no hay cupos de mañana si esta lista tiene horas."
               : "TODOS estos horarios SON de la franja TARDE según la política de la clínica (desde las 14:00): ofrécelos como horarios de tarde.",
           );
         }
-        if (ensanchado) {
+        if (ensanchado && !franjaRelajada) {
           notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una y aclara que en el día pedido no había.`);
         }
         return notas.length ? { nota: notas.join(" "), horas } : horas;
