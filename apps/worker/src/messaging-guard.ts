@@ -3,7 +3,7 @@ import { getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
 import { countConversationOnce } from "./conversation-quota";
-import { isWithinServiceFreeTier } from "./service-metering";
+import { isWithinServiceFreeTier, resolveServiceWindowTz } from "./service-metering";
 import { enqueueNotification } from "./notifications/queue";
 
 /**
@@ -444,7 +444,7 @@ export async function chargeServiceSend(
     // de Meta). Idempotente por messageId; sin saldo → bloquea. TuBot (sin el feature)
     // nunca entra aquí: su bolsa sigue siendo SOLO de plantillas.
     if (svc?.messageId && (await planDebitsService(organizationId))) {
-      const exempt = svc.phoneNumberId ? await isWithinServiceFreeTier(svc.phoneNumberId) : false;
+      const exempt = svc.phoneNumberId ? await isWithinServiceFreeTier(svc.phoneNumberId, await resolveServiceWindowTz(organizationId)) : false;
       if (!exempt) {
         const debit = await debitForMessage(organizationId, svc.messageId, "service");
         if (!debit.ok) {

@@ -45,9 +45,44 @@ export async function getServiceFreeTierLimit(): Promise<number> {
   return limit;
 }
 
-/** Mes UTC (YYYY-MM) para la ventana del contador. */
+/**
+ * Mes (YYYY-MM) de la ventana del contador EN UNA ZONA HORARIA dada. Meta resetea el
+ * free tier de servicio a las 00:00 en la zona de la WABA (NO UTC) — V2-0 alinea la
+ * ventana a esa zona. `en-CA` formatea YYYY-MM-DD; tomamos YYYY-MM. tz="UTC" reproduce
+ * el comportamiento previo (TuBot no cambia).
+ */
+export function monthKeyInTz(at: Date, tz: string): string {
+  try {
+    const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+    return ymd.slice(0, 7);
+  } catch {
+    return at.toISOString().slice(0, 7); // zona inválida → UTC (fail-safe)
+  }
+}
+
+/** Mes UTC (YYYY-MM) — compat (TuBot). */
 function monthKey(at: Date): string {
-  return at.toISOString().slice(0, 7);
+  return monthKeyInTz(at, "UTC");
+}
+
+/**
+ * Zona de la ventana del free tier para una org. Conversia usa la zona de la WABA
+ * (proxy: la zona de la organización, default America/Santiago). TuBot y cualquier otra
+ * marca mantienen UTC (byte-for-byte como antes — no hay regresión). Cacheada 5 min.
+ */
+const tzCache = new Map<string, { at: number; tz: string }>();
+export async function resolveServiceWindowTz(organizationId: string): Promise<string> {
+  const hit = tzCache.get(organizationId);
+  if (hit && Date.now() - hit.at < 300_000) return hit.tz;
+  let tz = "UTC";
+  try {
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true, timezone: true } });
+    if ((org?.brand ?? "tubot") === "conversia") tz = org?.timezone || "America/Santiago";
+  } catch {
+    /* default UTC */
+  }
+  tzCache.set(organizationId, { at: Date.now(), tz });
+  return tz;
 }
 
 /**
@@ -56,9 +91,9 @@ function monthKey(at: Date): string {
  * conservador: el caller cobra tarifa, no regala). La BD permite auditar/reconstruir
  * contando los asientos service_send del mes (no se crea tabla: E2 es sin migración).
  */
-async function bumpServiceCounter(phoneNumberId: string, at: Date): Promise<number | null> {
+async function bumpServiceCounter(phoneNumberId: string, at: Date, tz = "UTC"): Promise<number | null> {
   try {
-    const key = `svc:ft:${phoneNumberId}:${monthKey(at)}`;
+    const key = `svc:ft:${phoneNumberId}:${monthKeyInTz(at, tz)}`;
     const count = await conn().incr(key);
     if (count === 1) await conn().expire(key, 40 * 24 * 3600);
     return count;
@@ -74,12 +109,12 @@ async function bumpServiceCounter(phoneNumberId: string, at: Date): Promise<numb
  * aplica. Fail conservador: ante error, devuelve false (NO exime → se cobra).
  *
  * NOTA (hallazgo Meta): Meta resetea el free tier mensual en la ZONA HORARIA de la
- * WABA; este contador usa mes calendario UTC. El desfase (~3-4 h en Chile en el borde
- * del mes) se afina pasando la zona de la org — pendiente de F5-B parte 2.
+ * WABA; V2-0 alinea la ventana pasando `tz` (la zona de la org Conversia; UTC por
+ * defecto para TuBot). La verdad fiscal sigue en usage_events (webhook delivered).
  */
-export async function isWithinServiceFreeTier(phoneNumberId: string): Promise<boolean> {
+export async function isWithinServiceFreeTier(phoneNumberId: string, tz = "UTC"): Promise<boolean> {
   try {
-    const key = `svc:ft:${phoneNumberId}:${monthKey(new Date())}`;
+    const key = `svc:ft:${phoneNumberId}:${monthKeyInTz(new Date(), tz)}`;
     const current = Number(await conn().get(key)) || 0;
     const limit = await getServiceFreeTierLimit();
     return current < limit;
@@ -113,10 +148,11 @@ export async function recordServiceSend(
     if (prev) return;
 
     const at = new Date();
-    // Free tier POR NÚMERO (contador de este mes). Bajo el umbral → costo 0; sobre
-    // él → tarifa del schedule. Si Redis falla (count null) cobramos tarifa (no
-    // regalamos); la verdad fiscal la pone el webhook en usage_events.
-    const count = await bumpServiceCounter(phoneNumberId, at);
+    // Free tier POR NÚMERO (contador de este mes, en la zona de la WABA — V2-0). Bajo el
+    // umbral → costo 0; sobre él → tarifa del schedule. Si Redis falla (count null)
+    // cobramos tarifa (no regalamos); la verdad fiscal la pone el webhook en usage_events.
+    const tz = await resolveServiceWindowTz(organizationId);
+    const count = await bumpServiceCounter(phoneNumberId, at, tz);
     const limit = await getServiceFreeTierLimit();
     const withinFreeTier = count !== null && count <= limit;
 

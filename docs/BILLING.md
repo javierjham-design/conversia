@@ -265,6 +265,37 @@ SET settings = jsonb_set(
 WHERE id = '<org_id>';
 ```
 
+## Modelo V2 — cobro por CONVERSACIÓN (serie V2, detrás de `features.v2SelfServe`)
+
+Desde la serie V2 (ver `docs/CONVERSIA_V2.md` §2 y `docs/PROMPTS_V2.md`) el cobro de Conversia
+en planes V2 es **por conversación atendida**, no por mensaje. Convive con V1 sin romperlo:
+
+- **Unidad:** 1 crédito = 1 conversación atendida por el bot en la ventana de 24 h de Meta.
+  Absorbe los mensajes de servicio + la IA de esa conversación (la pyme cuenta "clientes
+  atendidos"). Se apoya en `countConversationOnce` (E3, idempotente por org+conversación+período).
+- **Convivencia V1/V2:** todo V2 va detrás de `plan.features.v2SelfServe` / `org.settings.lifecycle.mode="v2"`.
+  En planes V2: `conversationDebitsWallet=true` y `serviceDebitsWallet=false` — la CONVERSACIÓN
+  debita (no el mensaje de servicio). Los planes `conversia_funcionando/gestionado` actuales quedan
+  **grandfathered** intactos (siguen con `serviceDebitsWallet` por mensaje). TuBot: sin cambios.
+- **Catálogo V2 (sembrado INACTIVO hasta V2-9):** plan `conversia_v2_base` $18.900 CLP / USD 19
+  (incluye 100 conversaciones/mes) + packs tipo `conversation` en `message_packages`: 400/$84.900
+  (USD 89), 1.000/$199.900 (USD 209), recarga 100/$21.900 (USD 23). Precios ≥ ~$200/conv por el
+  cálculo a máximo uso (CONVERSIA_V2.md §2.1 — bajo eso el pack quedaba bajo el costo Meta).
+- **Rollover:** créditos del plan ruedan **2 meses**; comprados, **12 meses** (asientos con
+  `expiresAt`; se consume primero lo que expira antes; job de expiración auditable). *(V2-1.)*
+- **Gracia:** avisos al 75% y 90%; al llegar a 0, hasta **20 conversaciones en negativo** (se
+  descuentan de la próxima acreditación/recarga) + respuesta de respaldo + derivación. **El bot
+  JAMÁS queda mudo de golpe.** *(V2-1.)*
+- **Auto-recarga (V2-2):** umbral + pack + **TOPE mensual** elegido por el cliente; idempotente
+  (org+período+umbral+secuencia) + auditada + email por recarga (los 3 incidentes de Twilio).
+- **Guardrail económico (V2-1):** tope blando 12 respuestas/conversación/día (el bot pasa a modo
+  resumen, nunca se calla) + alerta a la cola de excepciones si el costo medio/conv > $180 CLP.
+- **30 conversaciones gratis** al registro sin tarjeta (modo prueba web/número NO debita).
+- **Free tier de servicio (ahorro NUESTRO):** los 1.000 mensajes de servicio gratis/mes por número
+  de Meta siguen siendo nuestro ahorro de costo (no un débito al cliente). La ventana del contador
+  se alinea a la **zona horaria de la WABA** (V2-0, `monthKeyInTz`; UTC para TuBot) y la verdad
+  fiscal la da `usage_events` (webhook delivered).
+
 ## Decisión de pasarela (pendiente de confirmar)
 
 Alineado con la estrategia de Cláriva: **CLP para Chile, USD para el resto**. Para USD, Stripe es el más directo (requiere entidad/LLC o Merchant of Record como Paddle/Lemon Squeezy para evitarla). Para CLP local: Flow/Transbank Webpay. La abstracción `PaymentProvider` permite conectar cualquiera sin tocar el resto del sistema.
