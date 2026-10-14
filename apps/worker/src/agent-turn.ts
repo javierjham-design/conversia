@@ -364,6 +364,33 @@ export async function runAgentTurn(opts: {
   // que se guarda en contact.attributes.profile). Saneado (sin saltos/llaves).
   const knownContactBlock = buildKnownContactBlock(conversation.contact);
 
+  // Cita próxima del contacto: si YA tiene hora, CUALQUIER agente (incluidos los de ventas)
+  // debe reconocerla y NO tratarlo como paciente nuevo (no pedir nombre, no mandar link de
+  // agendar). Caso Marcia/Pamela: pacientes CON hora que escribieron y el agente comercial las
+  // trató como leads nuevos ("necesito tu nombre" + link), generando confusión y reclamos.
+  const cidForAppt = conversation.contactId;
+  const upcomingAppointmentBlock = cidForAppt
+    ? await withTenant(organizationId, async (tx) => {
+        const appt = await tx.appointment.findFirst({
+          where: { contactId: cidForAppt, startsAt: { gte: new Date() }, status: { in: ["PENDING", "CONFIRMED", "RESCHEDULED"] } },
+          orderBy: { startsAt: "asc" },
+        });
+        if (!appt) return "";
+        const m = (appt.meta as Record<string, unknown> | null) ?? {};
+        const tz = appt.timezone || "America/Santiago";
+        const cuando = appt.startsAt.toLocaleString("es-CL", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: tz });
+        const prof = typeof m.professionalName === "string" ? ` con ${m.professionalName}` : "";
+        return (
+          `\n\n## ⚠️ Este paciente YA tiene una hora agendada\n` +
+          `Tiene una cita el ${cuando}${prof} (estado: ${String(appt.status).toLowerCase()}). ` +
+          `NO lo trates como paciente nuevo: no le pidas nombre ni datos ni le mandes un link para agendar. ` +
+          `Si escribe sobre su hora (confirmarla, cambiarla, reagendar o dice que no puede asistir), ayúdalo con ESA cita ` +
+          `(confírmala, o reagéndala con su MISMO profesional) o, si no manejas agenda, deriva al agente de Agendamiento. ` +
+          `Solo si pide EXPLÍCITAMENTE una cita ADICIONAL y distinta, procede a agendar una nueva.`
+        );
+      })
+    : "";
+
   // Montaje asistido: si este contacto YA vinculó su cuenta (grant activo 14 días), se
   // inyecta un bloque que le dice al agente que NO vuelva a pedir el código. Sin esto el
   // vínculo solo se veía dentro de una tool y el agente re-pedía el código en cada turno.
@@ -446,6 +473,7 @@ export async function runAgentTurn(opts: {
       humanHandoffNote +
       contactMemoryBlock +
       knownContactBlock +
+      upcomingAppointmentBlock +
       assistedSetupBlock +
       chargingBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
