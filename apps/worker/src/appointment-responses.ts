@@ -33,7 +33,11 @@ export function detectAppointmentResponse(text: string | null | undefined): Appt
   // vengan con acento compuesto o descompuesto, o sin acento. Evita falsos negativos.
   const t = (text ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   if (!t || t.length > 40) return null;
-  if (/^(si,?\s*(confirmo|ire|voy|asisto)|confirm(o|ar|ada|o mi cita)?|asistire|ahi\s+(estare|estoy|voy|nos vemos)|estare\s+(ahi|manana|presente|sin falta|puntual))\b/.test(t)) return "confirm";
+  // "confirmad[oa]s?" cubre confirmado/confirmada/confirmados/confirmadas (el participio, muy común),
+  // que antes NO matcheaba (solo confirmo/confirmar/confirmada). También "si asistire/confirmado".
+  // Prefijo de saludo opcional (hola/buenas/…) para cazar "hola si confirmo", "buenas, confirmado".
+  // Se mantiene el anclaje ^ tras el saludo: evita falsos positivos tipo "no voy a confirmar".
+  if (/^(?:(?:hola|buenas|buenos dias|buenas tardes|buen dia)[\s,.!]*)?(si,?\s*(confirmo|confirmad[oa]s?|ire|asistire|voy|asisto)|confirm(o|ar|ad[oa]s?|o mi cita)?|asistire|ahi\s+(estare|estoy|voy|nos vemos)|estare\s+(ahi|manana|presente|sin falta|puntual))\b/.test(t)) return "confirm";
   // Cancelar ANTES que reagendar: "cancelar y reagendar" es reagendar; "cancelar" solo es cancelar.
   if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|anula(r|me)?|dar de baja|no (podre|puedo|voy a|podria) (ir|asistir|llegar)|ya no (puedo|voy|podre))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (dia|horario))/.test(t)) return "cancel";
   if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|dia)|mover( la)? (cita|hora|dia)|otro (dia|horario))/.test(t)) return "reschedule";
