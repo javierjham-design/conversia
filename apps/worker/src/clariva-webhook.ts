@@ -153,7 +153,12 @@ export async function processClarivaWebhook(
 
     if (existing) {
       const upd: Record<string, unknown> = {};
-      if (mapped.status) upd.status = mapped.status;
+      // No DEGRADAR el estado: un appointment.created RE-ENVIADO por Cláriva (sync o reenvío manual
+      // "por el bot") trae status PENDING. Si la cita ya está resuelta (CONFIRMED/COMPLETED/CANCELLED/
+      // NO_SHOW) — p. ej. el paciente confirmó por WhatsApp — volver a PENDING borraría esa decisión.
+      // Por eso solo aplicamos el status entrante si NO es un downgrade a PENDING de un estado resuelto.
+      const resolved = new Set(["CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
+      if (mapped.status && !(mapped.status === "PENDING" && resolved.has(String(existing.status)))) upd.status = mapped.status;
       if (payload.start) upd.startsAt = new Date(payload.start);
       if (payload.end) upd.endsAt = new Date(payload.end);
       if (payload.notes !== undefined) upd.notes = payload.notes ?? null;
