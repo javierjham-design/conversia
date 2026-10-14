@@ -320,13 +320,32 @@ export async function processInbound(job: InboundJob): Promise<void> {
         // adjunta la identidad de WhatsApp — así el recordatorio (que salió por ese
         // contacto) y la respuesta del paciente quedan en el MISMO contacto/conversación,
         // en vez de fragmentarse en un contacto nuevo que cae a recepción.
-        const normPhone = geoFromPhone(msg.from).phone;
-        const byPhone = normPhone
-          ? await tx.contact.findFirst({ where: { organizationId, phone: normPhone, deletedAt: null }, orderBy: { createdAt: "asc" } })
+        const normPhone = geoFromPhone(msg.from).phone; // E.164 "+56912345678"
+        // Matcheo TOLERANTE al formato: el import histórico de pacientes guardó teléfonos
+        // SIN "+" ("56912345678") mientras WhatsApp entra como "+56912345678". Buscando solo
+        // por el formato exacto NO cruzaba → se creaba un contacto nuevo que caía a recepción
+        // (duplicado). Probamos las variantes equivalentes: con/sin "+" y el core de 9 dígitos.
+        const digits = normPhone.replace(/\D/g, ""); // "56912345678"
+        const candidates = new Set<string>();
+        if (normPhone) {
+          candidates.add(normPhone);
+          candidates.add(digits);
+          if (digits.startsWith("56") && digits.length === 11) {
+            const core9 = digits.slice(2); // "912345678"
+            candidates.add(core9);
+            candidates.add("+" + core9);
+          }
+        }
+        const byPhone = candidates.size
+          ? await tx.contact.findFirst({ where: { organizationId, phone: { in: [...candidates] }, deletedAt: null }, orderBy: { createdAt: "asc" } })
           : null;
         if (byPhone) {
           contact = byPhone;
-          await tx.contact.update({ where: { id: contact.id }, data: buildContactUpdate(contact, parsedContact, new Date()) });
+          const upd = buildContactUpdate(contact, parsedContact, new Date());
+          // Self-heal: normaliza el teléfono guardado a E.164 "+..." si estaba en otro
+          // formato, para que futuros cruces (y la BD) queden consistentes.
+          const data = normPhone && contact.phone !== normPhone ? { ...upd, phone: normPhone } : upd;
+          await tx.contact.update({ where: { id: contact.id }, data });
         } else {
           contact = await tx.contact.create({
             data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate(parsedContact, new Date()) },
