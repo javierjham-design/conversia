@@ -285,7 +285,32 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             nota: `No hay horas${input.franja ? ` de ${input.franja === "manana" ? "mañana" : "tarde"}` : ""} SOLO entre ${from} y ${to}. Ofrece la otra franja u otro rango (vuelve a consultar); NUNCA digas que no hay cupos "hasta" una fecha que no consultaste.`,
           };
         }
-        const top = slots.slice(0, 6).map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
+        // Orden cronológico garantizado (ISO ordena por fecha/hora).
+        slots.sort((a, b) => a.start.localeCompare(b.start));
+        // ABANICO POR DÍA: si hay cupos en VARIOS días, mostramos hasta 2 por día (8 en total)
+        // para que el paciente vea varias FECHAS. Antes tomábamos las 6 más cercanas y se
+        // apelotonaban en 1-2 días: el modelo concluía "no hay el viernes" cuando el viernes SÍ
+        // tenía cupos, solo que quedaban fuera de las 6 primeras (caso David: ofreció mié/jue y
+        // negó el viernes aunque había 4 horas). Si todos los cupos son del MISMO día (consulta
+        // de un día puntual), mostramos las 6 primeras de ese día.
+        const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+        const distinctDays = new Set(slots.map((s) => dayOf(s.start)));
+        let chosen: typeof slots;
+        if (distinctDays.size > 1) {
+          const perDay = new Map<string, number>();
+          chosen = [];
+          for (const s of slots) {
+            const d = dayOf(s.start);
+            const n = perDay.get(d) ?? 0;
+            if (n >= 2) continue;
+            perDay.set(d, n + 1);
+            chosen.push(s);
+            if (chosen.length >= 8) break;
+          }
+        } else {
+          chosen = slots.slice(0, 6);
+        }
+        const top = chosen.map((s) => ({ start: s.start, end: s.end, professionalId: s.professionalId, clinicId: s.clinicId, serviceId: s.serviceId }));
         const byId = putSlots(cacheKey(ctx), top);
         // Ids AUTODESCRIPTIVOS (h0409-1015 = 04-09 a las 10:15) + `cuando` legible. Para
         // agendar, pasa el id EXACTO del horario que eligió el paciente (la hora del id
