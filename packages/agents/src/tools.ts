@@ -254,7 +254,11 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const todayChile = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
         const from = input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
-        const to = input.toDate && input.toDate >= from ? input.toDate : plus(14);
+        // Ventana por defecto de 28 días (antes 14): si el profesional está copado las 2
+        // próximas semanas, con 14 getAvailability devolvía vacío y el agente escalaba a
+        // recepción. Con 28 encuentra el cupo más próximo (igual se devuelven solo las ~6
+        // opciones más cercanas). Si el modelo pide un toDate explícito, se respeta.
+        const to = input.toDate && input.toDate >= from ? input.toDate : plus(28);
         const sched = services(ctx).scheduling;
         const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
         // FRANJA (hora de Chile): sin este filtro, el tope de 6 opciones dejaba solo las
