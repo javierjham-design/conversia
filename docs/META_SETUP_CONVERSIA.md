@@ -5,8 +5,13 @@
 > configuración en Meta + 1 variable de entorno.** Sin esto, el popup de Meta falla con
 > "dominio no autorizado".
 
-**App de Meta:** CONVERSIA — App ID `2024917441656687`
+**App de Meta:** es la **MISMA app que ya usas** (tu app de *Tech Provider*, la de TuBot) — **App ID `2024917441656687`**. Conversia **NO tiene una app de Meta aparte**: ambas marcas corren sobre esta misma app. Por eso aquí solo **AGREGAS** las URLs de Conversia a lo que ya existe.
 **Dónde:** https://developers.facebook.com/apps/2024917441656687/
+
+> ⚠️ **Aditivo — no rompe TuBot.** Agregar los dominios de Conversia NO quita los de
+> `tubot.cl` ni toca la config de TuBot: solo **suma** entradas. TuBot sigue funcionando
+> igual. (Verificación: en `/public/meta-config` el `appId` es `2024917441656687`, o sea
+> la misma app; si algún día hubiera una app separada, ese id sería distinto.)
 
 ---
 
@@ -37,9 +42,10 @@ agregar los dominios de Conversia en **dos** lugares:
 
 El flujo usa una **configuración de Embedded Signup** (config_id). Hay dos opciones:
 
-- **Opción simple (ya funciona hoy):** no hacer nada. El sistema cae a la config existente
-  `997145850023471`. Si esa config pertenece a la app `2024917441656687` y tiene WhatsApp
-  Embedded Signup, el botón funciona una vez autorizados los dominios (paso 1).
+- **Opción simple (ya funciona hoy):** no hacer nada. El sistema **reutiliza la config de
+  Embedded Signup que ya tiene TuBot** (`997145850023471`, de la misma app). El flujo de
+  signup es idéntico para ambas marcas (cada cliente conecta SU propia WABA), así que
+  reusarla es válido: el botón funciona una vez autorizados los dominios (paso 1).
 - **Opción recomendada (config propia de Conversia):**
   1. Panel de la app → **Facebook Login for Business** → **Configurations** → **Create configuration**.
   2. Tipo: **WhatsApp Embedded Signup**. Login variation: **"General"** (permite crear o usar una WABA existente).
