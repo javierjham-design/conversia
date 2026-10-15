@@ -2205,6 +2205,35 @@ model ConversationQuotaCounter {
   @@map("conversation_quota_counters")
 }
 
+// V2-4 — "Pruébalo en TU WhatsApp": pool de números de prueba de la plataforma (WABA nuestra,
+// D3). Un mismo número atiende a varias orgs; el inbound con código corto vincula teléfono↔org.
+model TrialPoolNumber {
+  id            String   @id @default(cuid())
+  phoneNumberId String   @unique @map("phone_number_id") // id de Meta del número del pool
+  displayNumber String   @map("display_number") // número legible para el QR/wa.me
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("trial_pool_numbers")
+}
+
+// Vínculo teléfono del dueño ↔ org en modo prueba (7 días). Enruta cada chat del pool a su org.
+// SIN RLS por diseño operativo del pool (se consulta por phone antes de resolver tenant); por eso
+// el campo NO se llama organization_id (evita el RLS dinámico) sino `org_id_ref`.
+model TrialSession {
+  id            String   @id @default(cuid())
+  phoneNumberId String   @map("phone_number_id") // número del pool que recibió
+  contactPhone  String   @map("contact_phone") // teléfono del dueño que prueba
+  orgIdRef      String   @map("org_id_ref") // org vinculada (no activa RLS)
+  code          String // código corto CV-PRUEBA-XXXX usado para vincular
+  expiresAt     DateTime @map("expires_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([phoneNumberId, contactPhone])
+  @@index([code])
+  @@map("trial_sessions")
+}
+
 // Catálogo de paquetes adicionales — editable desde el Super Admin, sin redeploy.
 model MessagePackage {
   id       String  @id @default(cuid())
