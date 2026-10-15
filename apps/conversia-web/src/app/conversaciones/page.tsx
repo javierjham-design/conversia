@@ -238,6 +238,27 @@ export default function Conversaciones() {
     }
   }
 
+  // V2-5 copiloto: aprobar (opcional editar) o descartar una respuesta sugerida por el bot.
+  async function approveSuggestion(msgId: string, text?: string) {
+    if (!sel) return;
+    try {
+      await api(`/conversations/${sel}/suggestions/${msgId}/approve`, { method: "POST", body: JSON.stringify(text ? { text } : {}) });
+      await loadThread(sel);
+      loadList();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function discardSuggestion(msgId: string) {
+    if (!sel) return;
+    try {
+      await api(`/conversations/${sel}/suggestions/${msgId}/discard`, { method: "POST" });
+      await loadThread(sel);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   async function action(path: string) {
     if (!sel) return;
     setBusyAction(true);
@@ -464,8 +485,10 @@ export default function Conversaciones() {
                       .map((m) => {
                         const out = m.direction === "OUTBOUND";
                         const note = m.visibility === "INTERNAL";
+                        // V2-5 copiloto: respuesta SUGERIDA por el bot, pendiente de aprobación.
+                        const suggested = m.status === "SUGGESTED";
                         return (
-                          <div key={m.id} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "76%" }}>
+                          <div key={m.id} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "80%" }}>
                             <div
                               style={{
                                 padding: "9px 13px",
@@ -474,15 +497,22 @@ export default function Conversaciones() {
                                 lineHeight: 1.4,
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
-                                background: note ? "var(--warn)" : out ? "var(--acc)" : "var(--surface-solid)",
-                                color: note ? "#2a1c02" : out ? "var(--acc-ink)" : "var(--ink)",
-                                border: out || note ? "none" : "1px solid var(--hairline)",
+                                background: suggested ? "color-mix(in srgb, var(--acc) 12%, var(--surface-solid))" : note ? "var(--warn)" : out ? "var(--acc)" : "var(--surface-solid)",
+                                color: suggested ? "var(--ink)" : note ? "#2a1c02" : out ? "var(--acc-ink)" : "var(--ink)",
+                                border: suggested ? "1px dashed var(--acc)" : out || note ? "none" : "1px solid var(--hairline)",
                               }}
                             >
                               {m.body ?? (m.type !== "TEXT" ? `[${m.type.toLowerCase()}]` : "")}
                             </div>
+                            {suggested ? (
+                              <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
+                                <button onClick={() => approveSuggestion(m.id)} className="btn-accent" style={{ fontSize: 12, padding: "4px 12px" }}>Aprobar y enviar</button>
+                                <button onClick={() => { const t = prompt("Editar la respuesta antes de enviar:", m.body ?? ""); if (t && t.trim()) approveSuggestion(m.id, t.trim()); }} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "transparent", color: "var(--ink)", cursor: "pointer" }}>Editar</button>
+                                <button onClick={() => discardSuggestion(m.id)} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", cursor: "pointer" }}>Descartar</button>
+                              </div>
+                            ) : null}
                             <div className="text-dim" style={{ fontSize: 10, marginTop: 2, textAlign: out ? "right" : "left" }}>
-                              {m.authorType === "AGENT" ? "IA · " : ""}
+                              {suggested ? "Sugerencia del asistente · " : m.authorType === "AGENT" ? "IA · " : ""}
                               {note ? "Nota · " : ""}
                               {shortTime(m.createdAt)}
                               {out && m.status === "FAILED" ? " · no se envió" : ""}
