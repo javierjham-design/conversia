@@ -150,7 +150,12 @@ export default function Register() {
         <button className="btn-accent" type="submit" disabled={loading} style={{ width: "100%", marginTop: 20, opacity: loading ? 0.6 : 1 }}>
           {loading ? "Creando…" : "Crear cuenta"}
         </button>
-        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 16 }}>
+        <p className="text-dim" style={{ fontSize: 11.5, textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>
+          Al crear tu cuenta aceptas los{" "}
+          <a href="/legal/terminos" className="text-accent" style={{ textDecoration: "none" }}>Términos</a> y la{" "}
+          <a href="/legal/privacidad" className="text-accent" style={{ textDecoration: "none" }}>Política de Privacidad</a>.
+        </p>
+        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 14 }}>
           ¿Ya tienes cuenta? <a href="/login" className="text-accent" style={{ textDecoration: "none" }}>Entrar</a>
         </p>
       </form>
