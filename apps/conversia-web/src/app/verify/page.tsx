@@ -32,14 +32,14 @@ export default function Verify() {
             <p style={{ fontSize: 40, margin: 0 }}>✅</p>
             <h1 className="display" style={{ fontSize: 24, margin: "10px 0 6px" }}>Correo confirmado</h1>
             <p className="text-dim" style={{ fontSize: 14, margin: "0 0 20px" }}>Tu cuenta quedó verificada. Ya puedes usar Conversia con todo activo.</p>
-            <a className="btn-accent" href="/" style={{ textDecoration: "none", display: "inline-block" }}>Ir a mi panel</a>
+            <a className="btn-accent" href="/inicio" style={{ textDecoration: "none", display: "inline-block" }}>Ir a mi panel</a>
           </>
         ) : (
           <>
             <p style={{ fontSize: 40, margin: 0 }}>⚠️</p>
             <h1 className="display" style={{ fontSize: 22, margin: "10px 0 6px" }}>No se pudo verificar</h1>
             <p className="text-dim" style={{ fontSize: 14, margin: "0 0 20px" }}>{msg || "El enlace no es válido o venció."}</p>
-            <a className="btn-accent" href="/" style={{ textDecoration: "none", display: "inline-block" }}>Ir a mi panel</a>
+            <a className="btn-accent" href="/inicio" style={{ textDecoration: "none", display: "inline-block" }}>Ir a mi panel</a>
           </>
         )}
       </div>

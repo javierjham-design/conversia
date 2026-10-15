@@ -21,7 +21,7 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
       setToken(res.token);
-      router.replace("/");
+      router.replace("/inicio");
     } catch (err) {
       setError((err as Error).message);
     } finally {
