@@ -870,6 +870,160 @@ export class BillingController {
     return { items: rows };
   }
 
+  // ============================ V2-9 — ESTADO / ACTIVACIÓN / GRANDFATHERING ============================
+
+  /** Monto por conversación estimado para el simulador (recarga 100/$21.900 → ~$219/conv). */
+  private readonly V2_PER_CONV_CLP = 219;
+
+  /**
+   * Estado V2 del tenant para la UI (home + facturación): si está en el modelo por
+   * conversación, cuántas conversaciones gratis le quedan, el CTA de activación (precio
+   * base + packs) y, si es una org V1, si puede migrar (banner grandfathering). Solo lectura.
+   */
+  @Get("v2")
+  async v2Status() {
+    const ctx = requireContext();
+    const admin = this.prisma.admin;
+    const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true, settings: true, currency: true } });
+    const brand = brandOf(org).key;
+    const feats = await this.activePlanFeatures(ctx.organizationId);
+    const isV2 = feats.conversationDebitsWallet === true;
+    const lifecycle = ((org?.settings as any)?.conversia?.lifecycle as string | undefined) ?? null;
+    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
+    const packs = await admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: "conversation" }, orderBy: { order: "asc" } });
+    const activation = base
+      ? {
+          basePlanCode: base.code,
+          basePriceClp: Number(base.priceClp),
+          basePriceUsd: Number(base.priceUsd),
+          baseIncluded: Number((base.features as any)?.conversationsIncluded) || 100,
+          packs: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: Number(p.priceUsd) })),
+        }
+      : null;
+
+    // Modelo por conversación: saldo + si está en prueba (lifecycle v2_trial / incluido 0).
+    let trial: { active: boolean; freeRemaining: number; freeTotal: number } | null = null;
+    let wallet: { remaining: number; graceUsed: number } | null = null;
+    if (isV2) {
+      const sum = await this.conversationWalletSummary(ctx.organizationId, Number(feats.conversationsIncluded) || 0);
+      wallet = { remaining: sum.remaining, graceUsed: sum.graceUsed };
+      const inTrial = lifecycle === "v2_trial" || (Number(feats.conversationsIncluded) || 0) === 0;
+      if (inTrial) {
+        // En prueba el único saldo es el lote regalo (30). "Restantes" = saldo (acotado a 30).
+        trial = { active: true, freeRemaining: Math.max(0, Math.min(30, sum.remaining)), freeTotal: 30 };
+      }
+    }
+
+    // Grandfathering: org conversia V1 (plan conversia_* NO V2) → elegible a migrar.
+    let grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string } | null = null;
+    if (brand === "conversia" && !isV2) {
+      const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } });
+      const plan = sub?.planId ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { code: true, name: true, features: true } }) : null;
+      const migrationScheduled = (org?.settings as any)?.conversia?.v2MigrationScheduled ?? null;
+      if (plan && plan.code.startsWith("conversia_") && (plan.features as any)?.conversationDebitsWallet !== true) {
+        grandfather = { eligible: !migrationScheduled, v1PlanCode: plan.code, v1PlanName: plan.name };
+      }
+    }
+
+    return { isV2, lifecycle, trial, wallet, activation, grandfather };
+  }
+
+  /**
+   * Simulador personal del grandfathering: con el uso REAL de los ~2 últimos meses
+   * (usage_events), estima cuánto pagaría el tenant V1 en el modelo por conversación vs.
+   * su plan actual. Honesto: es una ESTIMACIÓN (proxy de conversaciones por actividad).
+   */
+  @Get("v2-simulator")
+  async v2Simulator() {
+    const ctx = requireContext();
+    const admin = this.prisma.admin;
+    const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { currency: true } });
+    const currency = org?.currency ?? "CLP";
+    const now = new Date();
+    const since = new Date(now.getTime() - 60 * 86_400_000);
+    // Proxy de conversaciones atendidas: mensajes de WhatsApp (verdad de Meta) / ~6 por
+    // conversación. Si la org registra "conversation" directamente, se usa ese.
+    const [convAgg, msgAgg] = await Promise.all([
+      admin.usageEvent.aggregate({ _sum: { quantity: true }, where: { organizationId: ctx.organizationId, type: "conversation", occurredAt: { gte: since } } }),
+      admin.usageEvent.aggregate({ _sum: { quantity: true }, where: { organizationId: ctx.organizationId, type: "whatsapp_message", occurredAt: { gte: since } } }),
+    ]);
+    const convDirect = Number(convAgg._sum.quantity ?? 0);
+    const msgs = Number(msgAgg._sum.quantity ?? 0);
+    const totalConvs = convDirect > 0 ? convDirect : Math.round(msgs / 6);
+    const monthlyConvs = Math.round(totalConvs / 2); // ~2 meses de ventana
+
+    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" }, select: { priceClp: true, priceUsd: true, features: true } });
+    const included = Number((base?.features as any)?.conversationsIncluded) || 100;
+    const basePrice = currency === "CLP" ? Number(base?.priceClp ?? 18900) : Number(base?.priceUsd ?? 19);
+    const extra = Math.max(0, monthlyConvs - included);
+    const perConv = currency === "CLP" ? this.V2_PER_CONV_CLP : 0.23;
+    const v2Estimated = Math.round(basePrice + extra * perConv);
+
+    // Precio actual del tenant (plan V1 vigente).
+    const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true, lockedPriceClp: true, lockedPriceUsd: true } });
+    const plan = sub?.planId ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { name: true, priceClp: true, priceUsd: true } }) : null;
+    const v1Current = currency === "CLP" ? Number(sub?.lockedPriceClp ?? plan?.priceClp ?? 0) : Number(sub?.lockedPriceUsd ?? plan?.priceUsd ?? 0);
+
+    return {
+      currency,
+      windowDays: 60,
+      monthlyConversations: monthlyConvs,
+      estimateBasis: convDirect > 0 ? "conversation_events" : "whatsapp_messages_proxy",
+      v1: { planName: plan?.name ?? "actual", monthlyPrice: v1Current },
+      v2: { basePlanCode: "conversia_v2_base", included, estimatedMonthly: v2Estimated, extraConversations: extra },
+      savesMoney: v1Current > 0 && v2Estimated < v1Current,
+    };
+  }
+
+  /**
+   * Migración 1-click al modelo por conversación (opt-in, sin fecha forzada): cambia el
+   * plan a conversia_v2_base (precio sellado), regala 100 conversaciones de cortesía del
+   * primer mes (lote 35 días) y marca el lifecycle. NO cobra ahora: el nuevo precio (más
+   * barato) se cobra en la próxima renovación. Idempotente (no re-migra si ya está en V2).
+   */
+  @Post("v2-migrate")
+  async v2Migrate() {
+    const ctx = requirePermission("billing:write");
+    const admin = this.prisma.admin;
+    const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true, settings: true } });
+    if (brandOf(org).key !== "conversia") throw new BadRequestException("La migración V2 es solo para cuentas Conversia.");
+    const feats = await this.activePlanFeatures(ctx.organizationId);
+    if (feats.conversationDebitsWallet === true) return { ok: true, already: true };
+    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
+    if (!base || !base.active) throw new BadRequestException("El modelo por conversación aún no está disponible.");
+
+    const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" } });
+    // Cambia el plan de la suscripción vigente a V2 (precio sellado V2). Mantiene periodEnd
+    // → se cobra el nuevo precio en la próxima renovación (más barato; sin cobro sorpresa hoy).
+    if (sub) {
+      await admin.subscription.update({ where: { id: sub.id }, data: { planId: base.id, lockedPriceClp: base.priceClp, lockedPriceUsd: base.priceUsd } });
+    } else {
+      const periodEnd = new Date(Date.now() + 30 * 86_400_000);
+      await admin.subscription.create({ data: { organizationId: ctx.organizationId, planId: base.id, status: "ACTIVE", interval: "monthly", periodStart: new Date(), periodEnd, lockedPriceClp: base.priceClp, lockedPriceUsd: base.priceUsd } });
+    }
+    await admin.organization.update({ where: { id: ctx.organizationId }, data: { planId: base.id } });
+
+    // 100 conversaciones de cortesía del primer mes (lote 35 días). Idempotente por refId.
+    const refId = `v2_migration:${ctx.organizationId}`;
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: ctx.organizationId, refType: "migration_courtesy", refId }, select: { id: true } });
+      if (dup) return;
+      const expiresAt = new Date(Date.now() + 35 * 86_400_000);
+      await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId }, update: {} });
+      await tx.conversationCreditLot.create({ data: { organizationId: ctx.organizationId, source: "bonus", amount: 100, remaining: 100, expiresAt, refType: "migration_courtesy", refId } });
+      await tx.conversationCreditLedger.create({ data: { organizationId: ctx.organizationId, delta: 100, reason: "admin_adjust", balanceAfter: 100, refType: "migration_courtesy", refId } });
+    });
+
+    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
+    const prevConversia = (prev.conversia as Record<string, unknown> | undefined) ?? {};
+    await admin.organization.update({
+      where: { id: ctx.organizationId },
+      data: { settings: { ...prev, conversia: { ...prevConversia, lifecycle: "v2", v2MigratedAt: new Date().toISOString() } } as object },
+    });
+    await admin.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.v2_migrate", entityType: "subscription", entityId: base.id, after: { courtesyCredits: 100 } as object } });
+    return { ok: true, migrated: true, courtesyCredits: 100 };
+  }
+
   /**
    * Activa/renueva la suscripción del tenant y emite la factura pagada. La usan
    * el mock (dev) y los webhooks de Stripe/Flow/Lemon Squeezy (prod). Cliente admin: es una
@@ -913,7 +1067,19 @@ export class BillingController {
     // lo bloquearía por "vigencia vencida" pese a haber pagado.
     const prevSettings = (org.settings as Record<string, unknown> | null) ?? {};
     const prevTrial = (prevSettings.trial as Record<string, unknown> | undefined) ?? {};
-    const nextSettings = { ...prevSettings, validUntil: periodEnd.toISOString(), trial: { ...prevTrial, state: "converted" } };
+    const nextSettings: Record<string, unknown> = { ...prevSettings, validUntil: periodEnd.toISOString(), trial: { ...prevTrial, state: "converted" } };
+    // V2-9 — si se activa un plan por conversación (Base), se DESPAUSA la prueba V2: se
+    // limpian graceStartedAt/paused/aiMode forzado y el aiKillSwitch que puso la pausa, y
+    // el lifecycle pasa a "v2". Así un tenant que estuvo en copiloto/pausa retoma al pagar.
+    const planFeats = (plan.features as Record<string, unknown> | null) ?? {};
+    if (planFeats.conversationDebitsWallet === true && (Number(planFeats.conversationsIncluded) || 0) > 0) {
+      const prevConversia = (prevSettings.conversia as Record<string, unknown> | undefined) ?? {};
+      const { graceStartedAt: _g, paused: _p, aiMode: _m, ...restConversia } = prevConversia;
+      nextSettings.conversia = { ...restConversia, lifecycle: "v2" };
+      const prevAi = (prevSettings.ai as Record<string, unknown> | undefined) ?? {};
+      const { aiKillSwitch: _k, ...restAi } = prevAi;
+      nextSettings.ai = restAi;
+    }
     await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { status: "ACTIVE", planId: plan.id, settings: nextSettings as object } });
 
     // Bolsa prepagada: el período pagado recarga el cupo del plan, acumulando el

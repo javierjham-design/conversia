@@ -865,8 +865,18 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       const admin = getAdminPrisma();
       const org = await admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } });
       const brand = (org?.brand ?? "tubot").toLowerCase();
-      const where = brand === "conversia" ? { brand: "conversia", active: true } : { brand: "tubot", isPublic: true, active: true };
-      const plans = await admin.plan.findMany({ where, orderBy: { order: "asc" } });
+      let plans;
+      if (brand === "conversia") {
+        // V2-9 — el bot comercial de conversia cotiza el modelo PÚBLICO vigente. El plan
+        // interno de PRUEBA (conversia_v2_trial) nunca se cotiza. Tras el go-live el único
+        // público es conversia_v2_base; antes del go-live (ninguno público aún) cae al
+        // catálogo activo conversia (comportamiento previo), igual sin el plan de prueba.
+        const noTrial = { brand: "conversia", active: true, code: { not: "conversia_v2_trial" } };
+        plans = await admin.plan.findMany({ where: { ...noTrial, isPublic: true }, orderBy: { order: "asc" } });
+        if (!plans.length) plans = await admin.plan.findMany({ where: noTrial, orderBy: { order: "asc" } });
+      } else {
+        plans = await admin.plan.findMany({ where: { brand: "tubot", isPublic: true, active: true }, orderBy: { order: "asc" } });
+      }
       return plans.map((p) => {
         const tm = (p.features as Record<string, unknown> | null)?.templateMessages;
         const lim = (p.limits as Record<string, unknown> | null) ?? {};

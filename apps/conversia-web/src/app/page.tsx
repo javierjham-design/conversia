@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Bell, CalendarPlus, ChevronRight, Moon, Sun } from "lucide-react";
+import { Bell, CalendarPlus, ChevronRight, Moon, Sun, Sparkles, Zap, ArrowRight } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 
@@ -193,6 +193,9 @@ export default function Home() {
           {firstName ? <span className="display-italic" style={{ color: "var(--acc-deep)" }}>, {firstName}</span> : null}
         </h1>
 
+        {/* V2-9 — prueba/activación (modelo por conversación) o migración grandfathering */}
+        <V2Banner />
+
         {/* 4 KPIs */}
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
           <Kpi label="Citas hoy" value={appts === null ? "…" : String(upcoming.length)} hint={appts === null ? "" : `${(appts ?? []).length} en total`} />
@@ -283,6 +286,115 @@ export default function Home() {
       </main>
     </AppShell>
   );
+}
+
+/* ---------- V2-9 — Banner de prueba/activación + migración grandfathering ---------- */
+type V2Status = {
+  isV2: boolean;
+  lifecycle: string | null;
+  trial: { active: boolean; freeRemaining: number; freeTotal: number } | null;
+  wallet: { remaining: number; graceUsed: number } | null;
+  activation: { basePlanCode: string; basePriceClp: number; basePriceUsd: number; baseIncluded: number } | null;
+  grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string } | null;
+};
+type V2Sim = {
+  currency: string;
+  monthlyConversations: number;
+  v1: { planName: string; monthlyPrice: number };
+  v2: { included: number; estimatedMonthly: number; extraConversations: number };
+  savesMoney: boolean;
+};
+
+function V2Banner() {
+  const [st, setSt] = useState<V2Status | null>(null);
+  const [sim, setSim] = useState<V2Sim | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!getToken()) return;
+    api<V2Status>("/billing/v2").then(setSt).catch(() => {});
+  }, []);
+
+  async function activate() {
+    setBusy(true); setMsg(null);
+    try {
+      const code = st?.activation?.basePlanCode ?? "conversia_v2_base";
+      const r = await api<{ url?: string; mock?: boolean }>("/billing/checkout", { method: "POST", body: JSON.stringify({ planCode: code }) });
+      if (r.url) window.location.href = r.url;
+      else if (r.mock) { await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode: code }) }); setMsg("¡Listo! Tu plan quedó activo."); }
+      else setMsg("Iniciamos el cobro. Revisa tu medio de pago.");
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+  async function loadSim() {
+    setBusy(true); setMsg(null);
+    try { setSim(await api<V2Sim>("/billing/v2-simulator")); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+  async function migrate() {
+    setBusy(true); setMsg(null);
+    try { await api("/billing/v2-migrate", { method: "POST", body: "{}" }); setMsg("¡Te cambiaste al plan por conversación! Te regalamos 100 conversaciones del primer mes."); setSt(null); }
+    catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+
+  if (!st) return null;
+  const clpN = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
+
+  // Caso A — org V1 elegible a migrar (grandfathering): banner + simulador.
+  if (st.grandfather?.eligible) {
+    return (
+      <div className="card" style={{ padding: 18, marginBottom: 18, borderColor: "var(--acc)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 11, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Sparkles size={19} /></span>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>Nuevo: paga solo por conversación</h2>
+            <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>Estás en el plan <b>{st.grandfather.v1PlanName}</b>. El modelo por conversación suele salir más barato — míralo con tu uso real. Sin apuro: tu plan sigue igual hasta que decidas.</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {!sim ? <button onClick={loadSim} disabled={busy} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>Ver mi ahorro</button> : null}
+            <button onClick={migrate} disabled={busy} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}>Cambiarme <ArrowRight size={15} /></button>
+          </div>
+        </div>
+        {sim ? (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--hairline)", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+            <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Tu uso (~2 meses)</p><p className="display" style={{ margin: 0, fontSize: 20 }}>{sim.monthlyConversations.toLocaleString("es-CL")} <span style={{ fontSize: 13 }} className="text-dim">conv/mes</span></p></div>
+            <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Hoy pagas</p><p className="display" style={{ margin: 0, fontSize: 20 }}>{clpN(sim.v1.monthlyPrice)}</p></div>
+            <ArrowRight size={18} className="text-dim" />
+            <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Por conversación</p><p className="display" style={{ margin: 0, fontSize: 20, color: sim.savesMoney ? "var(--ok)" : "var(--ink)" }}>{clpN(sim.v2.estimatedMonthly)}</p></div>
+            {sim.savesMoney ? <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ok)", border: "1px solid var(--ok)", borderRadius: 999, padding: "3px 10px" }}>Ahorras {clpN(sim.v1.monthlyPrice - sim.v2.estimatedMonthly)}/mes</span> : <span className="text-dim" style={{ fontSize: 12.5 }}>Estimación con tu uso reciente</span>}
+          </div>
+        ) : null}
+        {msg ? <p className="text-dim" style={{ margin: "10px 0 0", fontSize: 12.5 }}>{msg}</p> : null}
+      </div>
+    );
+  }
+
+  // Caso B — prueba V2 (30 gratis): contador + CTA de activación. Más urgente al agotarse.
+  if (st.trial?.active) {
+    const left = st.trial.freeRemaining;
+    const used = st.trial.freeTotal - left;
+    const urgent = left <= 5;
+    const price = st.activation ? clpN(st.activation.basePriceClp) : "$18.900";
+    const included = st.activation?.baseIncluded ?? 100;
+    return (
+      <div className="card" style={{ padding: 18, marginBottom: 18, borderColor: urgent ? "var(--warn)" : "var(--acc)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ width: 38, height: 38, borderRadius: 11, background: urgent ? "color-mix(in srgb, var(--warn) 18%, transparent)" : "var(--acc-dim)", color: urgent ? "var(--warn)" : "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Zap size={19} /></span>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>
+              {left > 0 ? <>Te quedan <span style={{ color: urgent ? "var(--warn)" : "var(--acc-deep)" }}>{left}</span> de {st.trial.freeTotal} conversaciones gratis</> : <>Usaste tus {st.trial.freeTotal} conversaciones gratis</>}
+            </h2>
+            <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>
+              {left > 0 ? `Tu asistente ya atendió ${used}. Actívalo cuando quieras para no cortarte: ${price}/mes incluye ${included} conversaciones.` : `Tu asistente atendió ${st.trial.freeTotal} conversaciones. Actívalo (${price}/mes, ${included} incluidas) para seguir atendiendo. Mientras, queda en modo copiloto por 7 días.`}
+            </p>
+          </div>
+          <button onClick={activate} disabled={busy} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13.5, padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>Activar · {price}<ArrowRight size={15} /></button>
+        </div>
+        {msg ? <p className="text-dim" style={{ margin: "10px 0 0", fontSize: 12.5 }}>{msg}</p> : null}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function Kpi({ label, value, hint, extra, tone }: { label: string; value: string; hint?: string; extra?: React.ReactNode; tone?: "warn" }) {

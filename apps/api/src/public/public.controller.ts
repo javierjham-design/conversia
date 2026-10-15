@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Param, Post, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Param, Post, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
@@ -19,9 +19,13 @@ export class PublicController {
   ) {}
 
   @Get("plans")
-  async plans() {
+  async plans(@Query("brand") brand?: string) {
+    // Precios SIEMPRE acotados por marca (default tubot = comportamiento previo de
+    // www.tubot.cl). Sin esto, el plan V2 público de conversia se filtraría a la web de
+    // TuBot. conversia-web pide ?brand=conversia.
+    const b = (brand ?? "tubot").toLowerCase();
     const plans = await this.prisma.admin.plan.findMany({
-      where: { isPublic: true, active: true },
+      where: { isPublic: true, active: true, brand: b },
       orderBy: { order: "asc" },
     });
     return plans.map((p) => ({
@@ -34,6 +38,21 @@ export class PublicController {
       limits: (p.limits ?? {}) as Record<string, number>,
       features: (p.features ?? {}) as Record<string, unknown>,
     }));
+  }
+
+  /**
+   * V2-9 — packs de CONVERSACIONES públicos de una marca (modelo por conversación).
+   * Acotado por marca (default conversia). Solo activos. Para la sección "recargas/packs"
+   * de la web de precios V2.
+   */
+  @Get("conversation-packs")
+  async conversationPacks(@Query("brand") brand?: string) {
+    const b = (brand ?? "conversia").toLowerCase();
+    const packs = await this.prisma.admin.messagePackage.findMany({
+      where: { active: true, brand: b, type: "conversation" },
+      orderBy: { order: "asc" },
+    });
+    return packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), order: p.order }));
   }
 
   /**

@@ -32,6 +32,22 @@ export class AuthService {
   ) {}
 
   /**
+   * V2-9 — ¿está encendido el autoservicio V2 para la marca? Lee el platformSetting
+   * `selfServeV2` (lo enciende scripts/v2-golive.mjs con OK del dueño). OFF por defecto:
+   * ante cualquier duda (setting ausente/ilegible) devuelve false → comportamiento previo.
+   */
+  async selfServeV2Enabled(brand: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.admin.platformSetting.findUnique({ where: { key: "selfServeV2" } });
+      if (!row) return false;
+      const val = JSON.parse(row.value) as Record<string, boolean>;
+      return val[brand.toLowerCase()] === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Registro self-service: crea usuario + organización + roles del sistema +
    * estados de lead por defecto. Corre con la conexión admin (crear una
    * organización es una operación de plataforma, fuera del RLS del tenant).
@@ -83,6 +99,15 @@ export class AuthService {
     // vigencia además del ciclo de prueba (ambos apuntan al mismo día → sin conflicto).
     const freePlan = await db.plan.findUnique({ where: { code: "free" } });
 
+    // V2-9 — switch de autoservicio por conversación (OFF por defecto; lo enciende
+    // scripts/v2-golive.mjs con OK del dueño). Con el switch ON (o si el registro viene
+    // del generador /crear, que ya es flujo V2) la cuenta conversia NACE en modo V2:
+    // plan de PRUEBA (debita de la bolsa, incluye 0) + 30 conversaciones gratis sin
+    // tarjeta. TuBot y los planes conversia V1 (grandfathered) no se tocan.
+    const selfServeV2On = isConversia && (await this.selfServeV2Enabled("conversia"));
+    const v2Mode = isConversia && (selfServeV2On || !!draftValid);
+    const v2TrialPlan = v2Mode ? await db.plan.findUnique({ where: { code: "conversia_v2_trial" } }) : null;
+
     const result = await db.$transaction(async (tx) => {
       // Marca derivada server-side (nunca del body); país del registro → moneda (CL=CLP,
       // resto=USD, misma estrategia que facturación). Default: tubot/CL/CLP = como hoy.
@@ -95,17 +120,36 @@ export class AuthService {
           brand: input.brand ?? "tubot",
           country,
           currency,
-          planId: freePlan?.id ?? null,
-          // Conversia: pendiente de implementación (sin trial/vigencia). TuBot: prueba 7 días.
-          settings: (isConversia ? { conversia: { lifecycle: "pending" } } : { trial, validUntil: endsAt }) as object,
+          // V2: plan de prueba por conversación. V1 conversia: Free (pendiente). TuBot: Free.
+          planId: (v2Mode ? v2TrialPlan?.id : freePlan?.id) ?? freePlan?.id ?? null,
+          // V2: lifecycle "v2_trial" (30 gratis, el ciclo arranca al activar/pagar).
+          // V1 conversia: pendiente de implementación. TuBot: prueba 7 días + vigencia.
+          settings: (v2Mode
+            ? { conversia: { lifecycle: "v2_trial", accent: accentForCountry(country) } }
+            : isConversia
+              ? { conversia: { lifecycle: "pending" } }
+              : { trial, validUntil: endsAt }) as object,
         },
       });
       // Habilita las políticas RLS para los inserts hijos de esta transacción.
       // (El INSERT en organizations requiere rol admin — ver docs/MULTITENANCY.md.)
       await tx.$queryRaw`SELECT set_config('app.org_id', ${org.id}, true)`;
-      // TuBot nace TRIALING (prueba). Conversia NO crea suscripción al registrarse: el ciclo de
-      // cobro arranca al marcar ENTREGADO (platform markDelivered la activa). Ver CICLO_VIDA_CLIENTE.
-      if (freePlan && !isConversia) {
+      // TuBot nace TRIALING (prueba). Conversia V1 NO crea suscripción al registrarse: el
+      // ciclo arranca al marcar ENTREGADO (markDelivered). Conversia V2 nace TRIALING al
+      // plan de PRUEBA (debita de la bolsa para que las 30 gratis cuenten; incluye 0 → no
+      // acredita créditos de plan). Al activar/pagar, la suscripción pasa a conversia_v2_base.
+      if (v2Mode && v2TrialPlan) {
+        await tx.subscription.create({
+          data: {
+            organizationId: org.id,
+            planId: v2TrialPlan.id,
+            status: "TRIALING",
+            interval: "monthly",
+            periodStart: now,
+            periodEnd: new Date(now.getTime() + 60 * 86_400_000),
+          },
+        });
+      } else if (freePlan && !isConversia) {
         await tx.subscription.create({
           data: {
             organizationId: org.id,
@@ -116,6 +160,12 @@ export class AuthService {
             periodEnd: new Date(endsAt),
           },
         });
+      }
+      // V2-9 — evento de funnel: registro (etapa 1). Best-effort, dentro de la tx con RLS.
+      if (v2Mode) {
+        await tx.integrationEvent
+          .create({ data: { organizationId: org.id, provider: "funnel", type: "registered", payload: { vertical: effectiveVertical ?? null, fromDraft: !!draftValid } as object } })
+          .catch(() => undefined);
       }
       const roles = await Promise.all(
         DEFAULT_ROLES.map((r) =>
@@ -180,19 +230,25 @@ export class AuthService {
       }
     }
 
-    // V2-3 — MATERIALIZAR el draft: 30 conversaciones de regalo (sin tarjeta) + destruir el draft.
-    // Solo marca conversia (modelo V2). El bot ya quedó con el rubro instalado arriba.
-    if (draftValid && brand === "conversia") {
+    // V2-3/V2-9 — 30 conversaciones de regalo (sin tarjeta) a TODA cuenta conversia en
+    // modo V2 (venga o no del generador /crear). El plan de prueba debita de la bolsa, así
+    // que estas 30 cuentan de verdad. Si vino de un draft, además se marca materializado.
+    if (v2Mode) {
       try {
         const expiresAt = new Date(Date.now() + 60 * 24 * 3600 * 1000); // regalo: 60 días
+        const refId = draftValid ? draft!.token : `signup:${result.org.id}`;
         await this.prisma.withTenant(result.org.id, async (tx) => {
           await tx.conversationWallet.upsert({ where: { organizationId: result.org.id }, create: { organizationId: result.org.id }, update: {} });
-          await tx.conversationCreditLot.create({ data: { organizationId: result.org.id, source: "bonus", amount: 30, remaining: 30, expiresAt, refType: "signup_gift", refId: draft!.token } });
-          await tx.conversationCreditLedger.create({ data: { organizationId: result.org.id, delta: 30, reason: "admin_adjust", balanceAfter: 30, refType: "signup_gift", refId: draft!.token } });
+          // Idempotente por refId (no duplica el regalo si se reintenta).
+          const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: result.org.id, refType: "signup_gift", refId }, select: { id: true } });
+          if (!dup) {
+            await tx.conversationCreditLot.create({ data: { organizationId: result.org.id, source: "bonus", amount: 30, remaining: 30, expiresAt, refType: "signup_gift", refId } });
+            await tx.conversationCreditLedger.create({ data: { organizationId: result.org.id, delta: 30, reason: "admin_adjust", balanceAfter: 30, refType: "signup_gift", refId } });
+          }
         });
-        await db.draftSession.update({ where: { id: draft!.id }, data: { status: "materialized", materializedOrgId: result.org.id } });
+        if (draftValid) await db.draftSession.update({ where: { id: draft!.id }, data: { status: "materialized", materializedOrgId: result.org.id } });
       } catch (e) {
-        console.error(`✖ No se pudo materializar el draft ${draft!.token}:`, (e as Error).message);
+        console.error(`✖ No se pudieron acreditar las 30 conversaciones de regalo en ${result.org.id}:`, (e as Error).message);
       }
     }
 

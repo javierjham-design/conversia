@@ -23,6 +23,13 @@ type Quality = {
   topFailingTenants: { organizationId: string; name: string; failed: number }[];
 };
 
+type Funnel = {
+  windowDays: number;
+  stages: { key: string; label: string; count: number; convFromPrev?: number }[];
+  trial: { exhausted: number; paused: number };
+  draftsMaterialized: number;
+};
+
 const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -40,6 +47,7 @@ const FULL_ROLES = new Set(["owner", "admin"]);
 export default function AdminDashboard() {
   const [m, setM] = useState<Metrics | null>(null);
   const [q, setQ] = useState<Quality | null>(null);
+  const [f, setF] = useState<Funnel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOperator, setIsOperator] = useState(false);
 
@@ -51,7 +59,7 @@ export default function AdminDashboard() {
         const full = FULL_ROLES.has(me.admin?.role ?? "owner");
         setIsOperator(!full);
         if (!full) return;
-        return Promise.all([padmin<Metrics>("/platform/metrics"), padmin<Quality>("/platform/quality")]).then(([mm, qq]) => { setM(mm); setQ(qq); });
+        return Promise.all([padmin<Metrics>("/platform/metrics"), padmin<Quality>("/platform/quality"), padmin<Funnel>("/platform/funnel").catch(() => null)]).then(([mm, qq, ff]) => { setM(mm); setQ(qq); if (ff) setF(ff); });
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -117,6 +125,29 @@ export default function AdminDashboard() {
                   ))}
                 </div>
               ) : null}
+            </>
+          ) : null}
+
+          {f ? (
+            <>
+              <h2 className="display" style={{ fontSize: 20, margin: "30px 0 12px" }}>Funnel de autoservicio · {f.windowDays}d</h2>
+              <div className="card" style={{ padding: 18 }}>
+                {(() => {
+                  const top = Math.max(1, ...f.stages.map((s) => s.count));
+                  return f.stages.map((s) => (
+                    <div key={s.key} style={{ padding: "9px 0", borderTop: s.key === "draft" ? "none" : "1px solid var(--hairline)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, marginBottom: 5 }}>
+                        <span>{s.label}{typeof s.convFromPrev === "number" ? <span className="text-dim" style={{ marginLeft: 8, fontSize: 12 }}>{s.convFromPrev}% del paso anterior</span> : null}</span>
+                        <b style={{ fontVariantNumeric: "tabular-nums" }}>{s.count.toLocaleString("es-CL")}</b>
+                      </div>
+                      <div style={{ height: 7, borderRadius: 4, background: "var(--line)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${Math.round((s.count / top) * 100)}%`, background: "var(--acc)", borderRadius: 4 }} />
+                      </div>
+                    </div>
+                  ));
+                })()}
+                <p className="text-dim" style={{ margin: "12px 0 0", fontSize: 12 }}>Prueba agotada: {f.trial.exhausted} · en pausa: {f.trial.paused} · borradores materializados: {f.draftsMaterialized}</p>
+              </div>
             </>
           ) : null}
         </>
