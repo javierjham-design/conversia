@@ -28,6 +28,10 @@ function buildComponents(spec: HsmSpec) {
 export async function createVerticalTemplates(organizationId: string): Promise<number> {
   const env = getEnv();
   let created = 0;
+  // SOLO marca conversia (V2 "se arma solo"). JAMÁS en WABAs de TuBot (regla de oro): el
+  // sync de plantillas corre para todas las orgs, pero la auto-creación es exclusiva de conversia.
+  const org = await withTenant(organizationId, (tx) => tx.organization.findUnique({ where: { id: organizationId }, select: { brand: true } })).catch(() => null);
+  if ((org?.brand ?? "tubot").toLowerCase() !== "conversia") return 0;
   const accounts = await withTenant(organizationId, (tx) => tx.whatsappAccount.findMany({ include: { phoneNumbers: true } }));
   for (const account of accounts) {
     const chIds = account.phoneNumbers.map((n) => n.channelConnectionId).filter(Boolean) as string[];
