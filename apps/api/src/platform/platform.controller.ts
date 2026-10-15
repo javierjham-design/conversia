@@ -288,6 +288,46 @@ export class PlatformController {
     };
   }
 
+  /**
+   * V2-9 — KPIs del FUNNEL de autoservicio (CONVERSIA_V2.md §4). Se computa del ESTADO
+   * (no de eventos frágiles): borrador → registro → canal conectado → 1.ª conversación →
+   * activación (pago de la Base). Acotado a la marca del super admin. Dormido para TuBot.
+   */
+  @Get("funnel")
+  async funnel(@Req() req: PlatformRequest) {
+    const db = this.prisma.admin;
+    const brand = this.reqBrand(req);
+    const orgIds = await this.brandOrgIds(req);
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const base = await db.plan.findUnique({ where: { code: "conversia_v2_base" }, select: { id: true } });
+    const [draftsCreated, draftsMaterialized, registered, channels, firstConv, activatedSubs, exhausted, paused] = await Promise.all([
+      db.draftSession.count({ where: { createdAt: { gte: since } } }),
+      db.draftSession.count({ where: { status: "materialized", createdAt: { gte: since } } }),
+      db.organization.count({ where: { brand, deletedAt: null } }),
+      db.channelConnection.findMany({ where: { organizationId: { in: orgIds }, status: "active" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+      db.conversationCreditLedger.findMany({ where: { organizationId: { in: orgIds }, reason: "conversation_debit" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+      base ? db.subscription.findMany({ where: { organizationId: { in: orgIds }, status: "ACTIVE", planId: base.id }, select: { organizationId: true }, distinct: ["organizationId"] }) : Promise.resolve([] as { organizationId: string }[]),
+      db.integrationEvent.findMany({ where: { organizationId: { in: orgIds }, provider: "funnel", type: "trial_exhausted" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+      db.integrationEvent.findMany({ where: { organizationId: { in: orgIds }, provider: "funnel", type: "trial_paused" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+    ]);
+    const channelConnected = channels.length;
+    const firstConversation = firstConv.length;
+    const activated = activatedSubs.length;
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+    return {
+      windowDays: 30,
+      stages: [
+        { key: "draft", label: "Crearon un borrador (/crear)", count: draftsCreated },
+        { key: "registered", label: "Se registraron", count: registered, convFromPrev: pct(draftsMaterialized, draftsCreated) },
+        { key: "channel", label: "Conectaron su WhatsApp", count: channelConnected, convFromPrev: pct(channelConnected, registered) },
+        { key: "first_conversation", label: "Atendieron su 1.ª conversación", count: firstConversation, convFromPrev: pct(firstConversation, channelConnected) },
+        { key: "activated", label: "Activaron (pagaron la Base)", count: activated, convFromPrev: pct(activated, firstConversation) },
+      ],
+      trial: { exhausted: exhausted.length, paused: paused.length },
+      draftsMaterialized,
+    };
+  }
+
   // ---------------------------- Organizaciones ----------------------------
 
   @Get("organizations")

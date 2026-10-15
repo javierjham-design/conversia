@@ -51,9 +51,10 @@ const PLANS = [
     features: { managed: true, whiteLabel: true, api: true, sso: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
   },
   // V2-0 — plan base del modelo "por conversación". Sembrado INACTIVO e invisible
-  // (active:false, isPublic:false): nada visible al público hasta el go-live V2-9.
-  // La CONVERSACIÓN absorbe servicio+IA → conversationDebitsWallet:true /
-  // serviceDebitsWallet:false. 100 conversaciones/mes incluidas. $18.900 CLP / USD 19.
+  // (active:false, isPublic:false): nada visible al público hasta el go-live V2-9
+  // (scripts/v2-golive.mjs lo activa y lo hace público). La CONVERSACIÓN absorbe
+  // servicio+IA → conversationDebitsWallet:true / serviceDebitsWallet:false.
+  // 100 conversaciones/mes incluidas. $18.900 CLP / USD 19.
   {
     code: "conversia_v2_base",
     name: "Base",
@@ -65,6 +66,24 @@ const PLANS = [
     active: false,
     limits: { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 },
     features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 100, conversationsPerPeriod: -1, conversationHardCap: false },
+  },
+  // V2-9 — plan de PRUEBA del modelo por conversación (30 gratis, sin tarjeta). Debita
+  // de la bolsa (conversationDebitsWallet:true) para que las 30 cuenten de verdad, pero
+  // conversationsIncluded:0 → NO acredita créditos de plan (el único saldo es el lote
+  // regalo de 30). Al ACTIVAR (pagar la Base) la suscripción pasa a conversia_v2_base y
+  // recién ahí acredita 100/período. active:true pero isPublic:false (interno, se asigna
+  // al registrarse en modo V2; jamás aparece en precios públicos). Precio 0.
+  {
+    code: "conversia_v2_trial",
+    name: "Prueba",
+    brand: "conversia",
+    priceClp: 0,
+    priceUsd: 0,
+    order: 8,
+    isPublic: false,
+    active: true,
+    limits: { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 0, conversationsPerPeriod: -1, conversationHardCap: false, trial: true },
   },
 ];
 
@@ -119,6 +138,16 @@ async function main() {
     await prisma.platformSetting.create({ data: { key: "trialPool", value: JSON.stringify({ enabled: false, maxConvPerDay: 20 }) } });
     console.log("✔ trialPool (OFF — P1: cargar número real para encender)");
   } else console.log("• trialPool ya existe (no se toca)");
+
+  // V2-9 — switch de autoservicio V2 por marca: OFF por defecto. Al encenderlo
+  // (scripts/v2-golive.mjs → {conversia:true}), /registro y /crear de conversia
+  // enrolan al flujo V2 (plan prueba + 30 conversaciones gratis sin tarjeta). NO pisa
+  // el valor si ya existe (para no apagar un go-live ya hecho por el dueño).
+  const existingSelfServe = await prisma.platformSetting.findUnique({ where: { key: "selfServeV2" } }).catch(() => null);
+  if (!existingSelfServe) {
+    await prisma.platformSetting.create({ data: { key: "selfServeV2", value: JSON.stringify({ conversia: false }) } });
+    console.log("✔ selfServeV2 (OFF — V2-9: v2-golive.mjs lo enciende)");
+  } else console.log("• selfServeV2 ya existe (no se toca)");
 
   const verticals = JSON.parse(readFileSync(join(here, "..", "seeds", "vertical-templates.json"), "utf-8"));
   for (const v of verticals) {
