@@ -1,3 +1,5 @@
+> **[2026-10-14] El modelo comercial de este documento (planes Funcionando/Gestionado + sobres) fue SUPERADO por el modelo V2 por conversación** — ver `CONVERSIA_V2.md` §2 y `PROMPTS_V2.md`. Los planes de aquí quedan vigentes solo para clientes grandfathered y para el add-on Gestionado. Los costos unitarios (§1) y guardrails (§7) siguen válidos.
+
 # CONVERSIA — MODELO DE COSTOS, CUOTAS Y PLANES
 
 **Fecha:** 2026-09-30

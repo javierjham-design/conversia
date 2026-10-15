@@ -50,24 +50,60 @@ const PLANS = [
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 },
     features: { managed: true, whiteLabel: true, api: true, sso: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
   },
+  // V2-0 — plan base del modelo "por conversación". Sembrado INACTIVO e invisible
+  // (active:false, isPublic:false): nada visible al público hasta el go-live V2-9.
+  // La CONVERSACIÓN absorbe servicio+IA → conversationDebitsWallet:true /
+  // serviceDebitsWallet:false. 100 conversaciones/mes incluidas. $18.900 CLP / USD 19.
+  {
+    code: "conversia_v2_base",
+    name: "Base",
+    brand: "conversia",
+    priceClp: 18900,
+    priceUsd: 19,
+    order: 9,
+    isPublic: false,
+    active: false,
+    limits: { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 100, conversationsPerPeriod: -1, conversationHardCap: false },
+  },
+];
+
+// V2-0 — packs de CONVERSACIONES (type "conversation"), por marca conversia. Precios
+// corregidos por el cálculo a máximo uso (CONVERSIA_V2.md §2.1): ≥ ~$200/conv para no
+// quedar bajo el costo Meta. Sembrados INACTIVOS (active:false) hasta el go-live V2-9.
+const CONV_PACKS = [
+  { code: "conversia-conv-400", name: "Pack 400 conversaciones", credits: 400, priceClp: 84900, priceUsd: 89, order: 20 },
+  { code: "conversia-conv-1000", name: "Pack 1.000 conversaciones", credits: 1000, priceClp: 199900, priceUsd: 209, order: 21 },
+  { code: "conversia-conv-100", name: "Recarga 100 conversaciones", credits: 100, priceClp: 21900, priceUsd: 23, order: 22 },
 ];
 
 async function main() {
   for (const p of PLANS) {
+    const active = p.active ?? true; // V2-0: el plan base V2 nace inactivo
     await prisma.plan.upsert({
       where: { code: p.code },
-      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic, brand: p.brand },
-      create: p,
+      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic, brand: p.brand, active },
+      create: { ...p, active },
     });
   }
-  console.log(`✔ ${PLANS.length} planes conversia_*`);
+  console.log(`✔ ${PLANS.length} planes conversia_* (conversia_v2_base INACTIVO)`);
 
   await prisma.messagePackage.upsert({
     where: { code: "conversia-sobre-500" },
-    update: { name: "Sobre 500 créditos", credits: 500, priceClp: 21900, priceUsd: 25, active: true, order: 10 },
-    create: { code: "conversia-sobre-500", name: "Sobre 500 créditos", credits: 500, priceClp: 21900, priceUsd: 25, active: true, order: 10 },
+    update: { name: "Sobre 500 créditos", credits: 500, priceClp: 21900, priceUsd: 25, active: true, order: 10, brand: "conversia" },
+    create: { code: "conversia-sobre-500", name: "Sobre 500 créditos", credits: 500, priceClp: 21900, priceUsd: 25, active: true, order: 10, brand: "conversia", type: "message" },
   });
   console.log("✔ sobre de 500 créditos");
+
+  // V2-0 — packs de conversaciones (type "conversation"), INACTIVOS hasta el go-live V2-9.
+  for (const p of CONV_PACKS) {
+    await prisma.messagePackage.upsert({
+      where: { code: p.code },
+      update: { name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: false, brand: "conversia", type: "conversation" },
+      create: { code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: false, brand: "conversia", type: "conversation" },
+    });
+  }
+  console.log(`✔ ${CONV_PACKS.length} packs de conversaciones V2 (INACTIVOS)`);
 
   await prisma.platformSetting.upsert({
     where: { key: "walletWeights:conversia" },

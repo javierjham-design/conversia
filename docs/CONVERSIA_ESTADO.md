@@ -45,3 +45,20 @@ Desde el **2026-10-01** rige la nueva forma de cobro de Meta por mensajes de ser
 | F9 | EN PROD | #425 | 2026-10-02 | recaudación y caja: libro append-only inmutable + cierre + conciliación (migración+RLS aplicadas a prod) |
 | F10 | EN PR | | 2026-10-02 | consola de operación: rol OPERADOR (denylist centralizada en el guard + MFA obligatorio + gestión de operadores) + buildClientContext para soporte (F7) + marcar ENTREGADO + semáforo de cartera + UI (Operadores, Alta guiada, badge, contexto en soporte). SIN migración (role ya existía). Brechas documentadas: CICLO_VIDA_CLIENTE (offboarding/permanencia/migración de marca/DTE) + INCIDENT bi-marca + SUPER_ADMIN_SECURITY §6. DIFERIDO: permisos finos por sub-acción, step-up TOTP en impersonación |
 | Auditoría pre-prod | pendiente | | | ejecutar cuando F10 esté mergeada (GO/NO-GO) |
+
+## Serie V2 — "se arma solo" + cobro por conversación (docs/PROMPTS_V2.md · docs/CONVERSIA_V2.md)
+
+Orden: V2-0 → V2-1 → V2-2 → V2-3 → V2-4 → V2-6 → V2-5 → V2-7 → V2-8 (V2-9 = parada, OK del dueño). Todo V2 detrás de `features.v2SelfServe` / `settings.lifecycle.mode="v2"`; planes conversia V1 grandfathered; TuBot intacto.
+
+| Etapa | Estado | PR | Fecha | Notas |
+|---|---|---|---|---|
+| V2-0 | EN PR | | 2026-10-14 | cimientos: docs V2 commiteados + filas ESTADO; migración `message_packages.type` (message\|conversation, aditiva, NO aplicada a prod = runbook dueño); seed INACTIVO del plan `conversia_v2_base` ($18.900/USD19, 100 conv, features v2SelfServe/conversationDebitsWallet/serviceDebitsWallet:false/aiPlus:false) + packs conversación 400/$84.900, 1.000/$199.900, recarga 100/$21.900 (USD 89/209/23); corrección free tier → ventana en zona de la WABA (`monthKeyInTz`, gateada a conversia; TuBot sigue UTC) + test de borde America/Santiago; BILLING.md modelo V2 |
+| V2-1 | pendiente | | | crédito-conversación: débito 1/conv (reusa countConversationOnce), rollover 2m/12m, gracia 20, avisos 75/90%, aiPlus x2, medidor, guardrail económico (tope 12 resp/día + alerta >$180) |
+| V2-2 | pendiente | | | auto-recarga con tope mensual, idempotente + auditada (Flow/Lemon) |
+| V2-3 | pendiente | | | landing /crear + draft_sessions (sin tenant) + construcción narrada + simulador WhatsApp + materializar org con 30 conv gratis |
+| V2-4 | pendiente | | | pool de números de prueba (P1: placeholder, flag off) + entrevista conversacional (tools F8) + checklist auto |
+| V2-6 | pendiente | | | auto-QA por vertical + autocorrección + auto-publicación + canario a copiloto |
+| V2-5 | pendiente | | | Coexistence QR (P2: vía a tras flag off) + número nuevo (vía b en sandbox) + modo copiloto suggest/auto |
+| V2-7 | pendiente | | | plantillas HSM creadas por Graph API + monitoreo de aprobación |
+| V2-8 | pendiente | | | checklist de activación event-driven + cola de excepciones en la consola |
+| V2-9 | PARADA | | | go-live: switch selfServeV2, migración V1 opt-in, textos públicos — REQUIERE OK EXPLÍCITO del dueño |

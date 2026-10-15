@@ -2165,6 +2165,9 @@ model MessagePackage {
   active   Boolean @default(true)
   order    Int     @default(0)
   brand    String  @default("tubot") // A4 — sobre/pack POR MARCA: una org solo ve los de su marca
+  // V2-0 — tipo de pack: "message" (sobres de plantillas, legacy) o "conversation"
+  // (packs de conversaciones del modelo V2). La UI/catálogo filtra por tipo según el plan.
+  type     String  @default("message")
 
   @@index([brand])
   @@map("message_packages")

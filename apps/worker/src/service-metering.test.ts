@@ -48,7 +48,7 @@ vi.mock("./cost-settings", () => ({
 
 vi.mock("./notifications/queue", () => ({ enqueueNotification: async () => undefined }));
 
-import { recordServiceSend } from "./service-metering";
+import { recordServiceSend, monthKeyInTz } from "./service-metering";
 import { normalizeCategory } from "./wallet";
 
 beforeEach(() => {
@@ -114,5 +114,27 @@ describe("recordServiceSend (medición, delta 0, idempotente, free tier)", () =>
     state.ledgerExisting = { id: "ya" }; // findFirst encuentra el asiento previo
     await recordServiceSend("org1", "m1", "conv1", "56912345678", "pn1");
     expect(state.created).toHaveLength(0);
+  });
+});
+
+describe("V2-0 — ventana del free tier en la zona de la WABA (no UTC)", () => {
+  // Instante que en America/Santiago (UTC-3 en verano) cae el 31-oct 23:30, pero en UTC
+  // ya es el 1-nov 02:30. El contador UTC rodaba de mes antes de tiempo (desfase ~3-4 h).
+  const borde = new Date("2026-11-01T02:30:00Z");
+  it("en la zona de la WABA sigue siendo octubre; en UTC sería noviembre (el bug)", () => {
+    expect(monthKeyInTz(borde, "America/Santiago")).toBe("2026-10");
+    expect(monthKeyInTz(borde, "UTC")).toBe("2026-11");
+  });
+  it("tras la medianoche local cambia de mes (00:30 del 1-nov Santiago)", () => {
+    const despues = new Date("2026-11-01T03:30:00Z"); // = 1-nov 00:30 en Santiago
+    expect(monthKeyInTz(despues, "America/Santiago")).toBe("2026-11");
+  });
+  it("zona inválida → UTC (fail-safe)", () => {
+    expect(monthKeyInTz(borde, "No/Existe")).toBe("2026-11");
+  });
+  it("a mitad de mes la zona no altera el mes", () => {
+    const mid = new Date("2026-10-15T12:00:00Z");
+    expect(monthKeyInTz(mid, "America/Santiago")).toBe("2026-10");
+    expect(monthKeyInTz(mid, "UTC")).toBe("2026-10");
   });
 });
