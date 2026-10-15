@@ -538,6 +538,7 @@ export async function runAgentTurn(opts: {
     brandName: brandOf(org).name,
     agentVersionId: version.id,
     ownerContext,
+    lastUserText,
     services: services as unknown as Record<string, unknown>,
   };
 

@@ -261,7 +261,20 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // Si vienen `diasSemana`, IGNORAMOS el fromDate del modelo y barremos la ventana completa,
         // filtrando por el día de semana REAL de cada cupo. Determinista, no depende del modelo.
         const WDMAP: Record<string, number> = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
-        const wantWD = input.diasSemana?.length ? new Set(input.diasSemana.map((d) => WDMAP[d]).filter((n) => n != null)) : null;
+        // Preferimos los días que pasó el modelo; si NO pasó ninguno, los EXTRAEMOS del último
+        // mensaje del paciente (ctx.lastUserText). gpt-4o-mini ignora el parámetro diasSemana y
+        // además calcula MAL la fecha del día (caso Susan: pidió jueves/viernes y el modelo consultó
+        // martes/miércoles). Extraer la palabra del texto es determinista y no depende del modelo.
+        const wdFromModel = input.diasSemana?.length ? input.diasSemana.map((d) => WDMAP[d]).filter((n) => n != null) : [];
+        const wdFromText = (): number[] => {
+          const t = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+          if (!t) return [];
+          const out: number[] = [];
+          for (const [name, n] of Object.entries(WDMAP)) if (new RegExp(`\\b${name}s?\\b`).test(t)) out.push(n);
+          return out;
+        };
+        const wdList = wdFromModel.length ? wdFromModel : wdFromText();
+        const wantWD = wdList.length ? new Set(wdList) : null;
         const from = wantWD ? todayChile : input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
         // Ventana por defecto de 28 días: si el profesional está copado las próximas 2 semanas, con
