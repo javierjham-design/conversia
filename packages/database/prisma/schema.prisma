@@ -2127,6 +2127,57 @@ model WalletLedger {
   @@map("wallet_ledger")
 }
 
+// ─────────────────────── V2-1: crédito-conversación ───────────────────────
+// Bolsa de CONVERSACIONES del modelo V2 (1 crédito = 1 conversación atendida).
+// SEPARADA de MessageWallet (plantillas de TuBot) para no tocar V1/TuBot. Se activa
+// solo en planes con features.conversationDebitsWallet.
+
+// Lote de créditos con expiración (rollover): plan rueda 2 meses, comprados 12 meses.
+// Se consume FIFO por expiresAt ascendente (primero lo que vence antes).
+model ConversationCreditLot {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  source         String // plan | purchase | bonus
+  amount         Int // crédito original del lote
+  remaining      Int // crédito disponible del lote (0..amount)
+  expiresAt      DateTime? @map("expires_at") // null = no expira
+  refType        String?   @map("ref_type") // subscription | package | admin
+  refId          String?   @map("ref_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([organizationId, remaining, expiresAt])
+  @@map("conversation_credit_lots")
+}
+
+// Estado por org de la bolsa de conversaciones: gracia usada (negativo hasta 20) +
+// estado de avisos del período (para no repetir el aviso 75/90/100).
+model ConversationWallet {
+  organizationId  String   @id @map("organization_id")
+  graceUsed       Int      @default(0) @map("grace_used") // conversaciones en gracia pendientes de descontar
+  lastNotifiedPct Int      @default(0) @map("last_notified_pct") // 0 | 75 | 90 | 100 del período actual
+  periodStart     DateTime @default(now()) @map("period_start")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("conversation_wallets")
+}
+
+// Auditoría append-only de la bolsa de conversaciones (dinero: todo auditado).
+model ConversationCreditLedger {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  delta          Int // − débito por conversación / + acreditación/recarga; expiry = −
+  reason         String // conversation_debit | plan_renewal | package_purchase | expiry | grace_repay | admin_adjust
+  balanceAfter   Int      @map("balance_after") // saldo (suma de lotes) tras el movimiento
+  costUsd        Decimal? @map("cost_usd") @db.Decimal(12, 6) // costo real de la conversación (margen/telemetría)
+  conversationId String?  @map("conversation_id")
+  refType        String?  @map("ref_type")
+  refId          String?  @map("ref_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@map("conversation_credit_ledger")
+}
+
 // Cupo de conversaciones por período (plan servicio-octubre-2026, E3). Cada
 // conversación cuenta UNA sola vez por período de facturación: la marca única
 // garantiza idempotencia entre workers; el counter lleva el agregado atómico.

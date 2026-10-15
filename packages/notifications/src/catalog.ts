@@ -229,6 +229,28 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/billing",
   },
   {
+    // V2-1 — crédito-conversación: aviso al 75% y 90% de las conversaciones del plan.
+    key: "credits.low",
+    title: "Te quedan pocas conversaciones",
+    body: "Llevas {used} de {included} conversaciones de tu plan ({pct}%). Recarga para no quedarte sin atención automática.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email", "whatsapp"],
+    defaultChannels: ["in_app", "whatsapp"],
+    link: "/facturacion",
+  },
+  {
+    // V2-1 — entraste en GRACIA (saldo 0): el bot sigue atendiendo hasta 20 conversaciones.
+    key: "credits.grace",
+    title: "Tu bolsa de conversaciones llegó a 0",
+    body: "Se acabaron tus conversaciones. Tu asistente sigue atendiendo {grace} conversaciones de cortesía; recarga para no interrumpir el servicio.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email", "whatsapp"],
+    defaultChannels: ["in_app", "whatsapp"],
+    link: "/facturacion",
+  },
+  {
     key: "ai.token_cap",
     title: "Tope de tokens de IA alcanzado",
     body: "Se alcanzó el tope diario de tokens de IA. La IA queda en pausa.",

@@ -151,10 +151,60 @@ export class BillingController {
    * consumo del mes por categoría, proyección simple (promedio diario × días restantes)
    * y si se cruzó el 80 %. Las alertas al 80 % las emite notifyWalletThresholds al debitar.
    */
+  /** Features del plan vigente (suscripción ACTIVE/TRIALING; free si no hay). */
+  private async activePlanFeatures(organizationId: string): Promise<Record<string, unknown>> {
+    const admin = this.prisma.admin;
+    const sub = await admin.subscription.findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } });
+    const plan = sub?.planId
+      ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { features: true } })
+      : await admin.plan.findUnique({ where: { code: "free" }, select: { features: true } });
+    return (plan?.features as Record<string, unknown> | undefined) ?? {};
+  }
+
+  /** V2-1 — medidor de la bolsa de CONVERSACIONES (solo lectura; la lógica vive en el worker). */
+  private async conversationWalletSummary(organizationId: string, included: number) {
+    const admin = this.prisma.admin;
+    const now = new Date();
+    const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const [lotsAgg, wallet, expAgg, debits] = await Promise.all([
+      admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+      admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true } }),
+      admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, expiresAt: { gt: now, lt: endOfMonth } } }),
+      admin.conversationCreditLedger.count({ where: { organizationId, reason: "conversation_debit", createdAt: { gte: since } } }),
+    ]);
+    const lots = lotsAgg._sum.remaining ?? 0;
+    const grace = wallet?.graceUsed ?? 0;
+    const consumed = Math.max(0, included - lots);
+    const dayOfMonth = now.getUTCDate();
+    const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const projected = Math.round(debits + (debits / Math.max(1, dayOfMonth)) * Math.max(0, daysInMonth - dayOfMonth));
+    const pctUsed = included > 0 ? Math.round((consumed / included) * 100) : 0;
+    return {
+      unit: "conversation" as const,
+      balance: lots - grace,
+      included,
+      consumed,
+      remaining: lots - grace,
+      graceUsed: grace,
+      graceLimit: 20,
+      expiringThisMonth: expAgg._sum.remaining ?? 0,
+      byCategory: {},
+      projected,
+      pctUsed,
+      over80: included > 0 && pctUsed >= 80,
+    };
+  }
+
   @Get("wallet/summary")
   async walletSummary() {
     const ctx = requireContext();
     const admin = this.prisma.admin;
+    // V2-1: planes por conversación (conversationDebitsWallet) → medidor de conversaciones.
+    const feats = await this.activePlanFeatures(ctx.organizationId);
+    if (feats.conversationDebitsWallet === true) {
+      return this.conversationWalletSummary(ctx.organizationId, Number(feats.conversationsIncluded) || 0);
+    }
     const wallet = await admin.messageWallet.findUnique({
       where: { organizationId: ctx.organizationId },
       select: { balance: true, includedPerPeriod: true },
