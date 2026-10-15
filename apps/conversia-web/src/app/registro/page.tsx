@@ -88,7 +88,7 @@ export default function Register() {
         body: JSON.stringify({ name, organizationName, email, password, country, vertical, ...(draftTokenRef.current ? { draftToken: draftTokenRef.current } : {}) }),
       });
       setToken(res.token);
-      router.replace("/");
+      router.replace("/inicio");
     } catch (err) {
       setError((err as Error).message);
     } finally {

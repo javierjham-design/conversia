@@ -13,7 +13,7 @@ import { SupportWidget } from "@/components/SupportWidget";
  * no con JS — un solo layout, dos presentaciones.
  */
 const NAV = [
-  { href: "/", label: "Hoy", Icon: Home },
+  { href: "/inicio", label: "Hoy", Icon: Home },
   { href: "/conversaciones", label: "Conversaciones", Icon: MessageCircle },
   { href: "/agenda", label: "Agenda", Icon: CalendarDays },
   { href: "/clientes", label: "Clientes", Icon: Users },
@@ -29,7 +29,7 @@ const PRIMARY = NAV.slice(0, 4);
 const OVERFLOW = NAV.slice(4);
 
 function isActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  return href === "/inicio" ? pathname === "/inicio" : pathname.startsWith(href);
 }
 
 /** Aviso de verificación de correo (D6): solo si el usuario aún no confirmó su correo. */
