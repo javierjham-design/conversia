@@ -20,16 +20,15 @@ type Pack = { code: string; name: string; credits: number; priceClp: number };
 
 export default function Landing() {
   const router = useRouter();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [base, setBase] = useState<Plan | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [menu, setMenu] = useState(false);
   const [faq, setFaq] = useState<number | null>(0);
 
-  // Con sesión → al panel. Sin sesión → landing. (null = aún sin decidir, no parpadea.)
+  // La landing SIEMPRE se renderiza (SSR → SEO + primer paint). Si el visitante YA tiene
+  // sesión, lo llevamos a su panel como efecto secundario (no bloquea el render del servidor).
   useEffect(() => {
-    if (getToken()) { router.replace("/inicio"); return; }
-    setAuthed(false);
+    if (getToken()) router.replace("/inicio");
   }, [router]);
 
   // Precios reales del catálogo público V2 (si el go-live está encendido).
@@ -37,8 +36,6 @@ export default function Landing() {
     api<Plan[]>("/public/plans?brand=conversia").then((p) => setBase(p.find((x) => x.code === "conversia_v2_base") ?? null)).catch(() => {});
     api<Pack[]>("/public/conversation-packs?brand=conversia").then(setPacks).catch(() => {});
   }, []);
-
-  if (authed === null) return null;
 
   const basePrice = base ? clp(base.priceClp) : "$18.900";
   const baseIncluded = base ? (Number(base.features?.conversationsIncluded) || 100) : 100;
