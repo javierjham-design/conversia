@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Post, Put, Req, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf } from "@conversia/config";
@@ -721,6 +721,9 @@ export class BillingController {
   private async creditPackage(organizationId: string, code: string, provider: string, providerRef?: string) {
     const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code } });
     if (!pkg || !pkg.active) return;
+    // V2-2 — packs de CONVERSACIONES (type "conversation") acreditan la bolsa V2 (lotes), no
+    // la de plantillas. Idempotente por providerRef (dedup del webhook / commerceOrder).
+    if (pkg.type === "conversation") return this.creditConversationPackage(organizationId, pkg, provider, providerRef);
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
@@ -751,6 +754,120 @@ export class BillingController {
         providerRef: providerRef ?? null,
       },
     });
+  }
+
+  /**
+   * V2-2 — acredita un pack de CONVERSACIONES a la bolsa V2 (lote que expira a 12 meses),
+   * paga primero la gracia pendiente, y emite factura. Idempotente por providerRef (el dedup
+   * del webhook ya evita reprocesar; aquí reforzamos con un chequeo del ledger por refId).
+   */
+  private async creditConversationPackage(organizationId: string, pkg: { code: string; name: string; credits: number; priceClp: number; priceUsd: unknown }, provider: string, providerRef?: string) {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
+    const currency = org?.currency ?? "CLP";
+    const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 12); // comprados: 12 meses
+    await this.prisma.withTenant(organizationId, async (tx) => {
+      // Idempotencia por pago (refId): no re-acreditar el mismo providerRef.
+      if (providerRef) {
+        const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId, reason: "package_purchase", refId: providerRef }, select: { id: true } });
+        if (dup) return;
+      }
+      const wallet = await tx.conversationWallet.upsert({ where: { organizationId }, create: { organizationId }, update: {} });
+      let credit = pkg.credits;
+      // Pagar gracia pendiente primero (los créditos nuevos cubren el negativo).
+      if (wallet.graceUsed > 0) {
+        const pay = Math.min(wallet.graceUsed, credit);
+        await tx.conversationWallet.update({ where: { organizationId }, data: { graceUsed: wallet.graceUsed - pay } });
+        credit -= pay;
+      }
+      if (credit > 0) {
+        await tx.conversationCreditLot.create({ data: { organizationId, source: "purchase", amount: credit, remaining: credit, expiresAt, refType: "package", refId: providerRef ?? pkg.code } });
+      }
+      const agg = await tx.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } });
+      const w2 = await tx.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true } });
+      const balanceAfter = (agg._sum.remaining ?? 0) - (w2?.graceUsed ?? 0);
+      await tx.conversationCreditLedger.create({ data: { organizationId, delta: pkg.credits, reason: "package_purchase", balanceAfter, refType: "package", refId: providerRef ?? pkg.code } });
+      const count = await tx.invoice.count();
+      await tx.invoice.create({
+        data: {
+          organizationId,
+          number: `CONV-${new Date().getFullYear()}-${String(count + 1).padStart(6, "0")}`,
+          status: "PAID",
+          currency,
+          amountDue: amount,
+          lines: [{ concept: `Pack ${pkg.name} (${pkg.credits.toLocaleString("es-CL")} conversaciones)`, amount }],
+          paidAt: new Date(),
+          provider,
+          providerRef: providerRef ?? null,
+        },
+      });
+    });
+  }
+
+  // ============================ AUTO-RECARGA (V2-2) ============================
+
+  /** Config de auto-recarga del tenant (settings.autoRecharge). OFF por defecto. */
+  @Get("auto-recharge")
+  async getAutoRecharge() {
+    const ctx = requireContext();
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const ar = (((org?.settings as Record<string, any> | null)?.autoRecharge ?? {}) as Record<string, any>);
+    const packs = await this.prisma.admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: "conversation" }, orderBy: { order: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } });
+    return {
+      enabled: ar.enabled === true,
+      thresholdRemaining: Number.isFinite(ar.thresholdRemaining) ? ar.thresholdRemaining : 20,
+      packCode: typeof ar.packCode === "string" ? ar.packCode : (packs[0]?.code ?? null),
+      monthlyCapClp: Number.isFinite(ar.monthlyCapClp) ? ar.monthlyCapClp : 40000,
+      packs: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp })),
+    };
+  }
+
+  @Put("auto-recharge")
+  async setAutoRecharge(@Body() body: unknown) {
+    const ctx = requirePermission("billing:write");
+    const parsed = z
+      .object({
+        enabled: z.boolean(),
+        thresholdRemaining: z.number().int().min(1).max(10000).optional(),
+        packCode: z.string().max(60).optional(),
+        monthlyCapClp: z.number().int().min(0).max(100000000).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Config de auto-recarga inválida");
+    const d = parsed.data;
+    // Si se activa, el tope mensual es OBLIGATORIO (patrón OpenAI/Lovable: sin tope no se activa).
+    if (d.enabled && !(typeof d.monthlyCapClp === "number" && d.monthlyCapClp > 0)) {
+      throw new BadRequestException("Para activar la auto-recarga debes fijar un tope mensual de gasto.");
+    }
+    if (d.enabled && d.packCode) {
+      const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: d.packCode } });
+      if (!pkg || !pkg.active || pkg.type !== "conversation") throw new BadRequestException("El pack de auto-recarga debe ser un pack de conversaciones válido");
+    }
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
+    const prevAr = (prev.autoRecharge as Record<string, any>) ?? {};
+    const nextAr = {
+      enabled: d.enabled,
+      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? 20,
+      packCode: d.packCode ?? prevAr.packCode ?? null,
+      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? 40000,
+    };
+    await this.prisma.admin.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...prev, autoRecharge: nextAr } as object } });
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.auto_recharge_config", entityType: "organization", entityId: ctx.organizationId, after: nextAr } }),
+    );
+    return { ok: true, ...nextAr };
+  }
+
+  /** V2-2 — historial de auto-recargas (asientos de compra de la bolsa de conversaciones). */
+  @Get("auto-recharge/history")
+  async autoRechargeHistory() {
+    const ctx = requireContext();
+    const rows = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.conversationCreditLedger.findMany({ where: { organizationId: ctx.organizationId, reason: "package_purchase" }, orderBy: { createdAt: "desc" }, take: 50, select: { delta: true, balanceAfter: true, refId: true, createdAt: true } }),
+    );
+    return { items: rows };
   }
 
   /**

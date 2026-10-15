@@ -1,6 +1,6 @@
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
-import { getAdminPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, withTenant, raiseException } from "@conversia/database";
 import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
 import { countConversationOnce } from "./conversation-quota";
 import { isWithinServiceFreeTier, resolveServiceWindowTz } from "./service-metering";
@@ -477,6 +477,8 @@ export async function chargeServiceSend(
       const debit = await debitConversation(organizationId, { conversationId, multiplier });
       if (!debit.ok) {
         await logServiceBlocked(organizationId, conversationId, quota).catch(() => undefined);
+        // V2-8: gracia agotada sin recarga → excepción para la cola de operación (dedup por mes).
+        await raiseException(getAdminPrisma(), { organizationId, type: "saldo_gracia_sin_recarga", severity: "critical", title: "Saldo en 0 y gracia agotada", detail: "El cliente consumió la gracia de conversaciones sin recargar; el bot está derivando a humano.", dedupeKey: new Date().toISOString().slice(0, 7) }).catch(() => undefined);
         return block("no_conversation_credits", await outOfConversationCreditsPhrase(organizationId));
       }
       // Avisos 75/90% + entrada en gracia (una vez por umbral/período), in-app + WhatsApp.
