@@ -2178,6 +2178,28 @@ model ConversationCreditLedger {
   @@map("conversation_credit_ledger")
 }
 
+// V2-3 — DRAFT efímero del generador público (/crear): se crea SIN cuenta (NO tiene
+// organization_id a propósito, para no entrar en RLS — vive antes de existir el tenant).
+// Guarda el rubro, lo scrapeado y la config generada; TTL 72h; se destruye al materializar.
+model DraftSession {
+  id                String   @id @default(cuid())
+  token             String   @unique
+  vertical          String // key del paquete vertical (rubro)
+  businessName      String   @map("business_name")
+  website           String?
+  scrape            Json? // lo leído de la web/IG (servicios/precios/horarios) o null
+  config            Json     @default("{}") // config generada (prompt + datos para el simulador)
+  messagesUsed      Int      @default(0) @map("messages_used") // tope del simulador (15)
+  ipHash            String?  @map("ip_hash")
+  status            String   @default("draft") // draft | materialized
+  materializedOrgId String?  @map("materialized_org_id") // set al crear la cuenta
+  createdAt         DateTime @default(now()) @map("created_at")
+  expiresAt         DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("draft_sessions")
+}
+
 // Cupo de conversaciones por período (plan servicio-octubre-2026, E3). Cada
 // conversación cuenta UNA sola vez por período de facturación: la marca única
 // garantiza idempotencia entre workers; el counter lleva el agregado atómico.

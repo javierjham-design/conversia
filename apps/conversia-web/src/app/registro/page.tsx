@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, setToken } from "@/lib/api";
 
@@ -36,6 +36,7 @@ export default function Register() {
   const [country, setCountry] = useState("CL");
   const [verticals, setVerticals] = useState<Vertical[]>(FALLBACK_VERTICALS);
   const [vertical, setVertical] = useState("dental");
+  const draftTokenRef = useRef<string | null>(null); // V2-3: materializar draft del generador
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -54,6 +55,9 @@ export default function Register() {
     const qs = new URLSearchParams(window.location.search);
     const v = qs.get("vertical");
     if (v) setVertical(v);
+    // V2-3: viene del generador /crear → materializa el draft (rubro + 30 conversaciones gratis).
+    const dt = qs.get("draftToken");
+    if (dt) draftTokenRef.current = dt;
     const c = qs.get("country")?.toUpperCase();
     if (c && COUNTRIES.some((x) => x.code === c)) {
       setCountry(c);
@@ -81,7 +85,7 @@ export default function Register() {
     try {
       const res = await api<{ token: string }>("/auth/register", {
         method: "POST",
-        body: JSON.stringify({ name, organizationName, email, password, country, vertical }),
+        body: JSON.stringify({ name, organizationName, email, password, country, vertical, ...(draftTokenRef.current ? { draftToken: draftTokenRef.current } : {}) }),
       });
       setToken(res.token);
       router.replace("/");

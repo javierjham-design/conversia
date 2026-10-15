@@ -36,9 +36,16 @@ export class AuthService {
    * estados de lead por defecto. Corre con la conexión admin (crear una
    * organización es una operación de plataforma, fuera del RLS del tenant).
    */
-  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string }) {
+  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string; draftToken?: string }) {
     const db = this.prisma.admin;
     const brand = input.brand ?? "tubot";
+    // V2-3 — si viene draftToken, cargamos el draft del generador /crear para materializarlo
+    // (su rubro manda si no vino `vertical`; al final se acreditan 30 conversaciones + se destruye).
+    const draft = input.draftToken
+      ? await db.draftSession.findUnique({ where: { token: input.draftToken } }).catch(() => null)
+      : null;
+    const draftValid = draft && draft.status === "draft" && draft.expiresAt > new Date();
+    const effectiveVertical = input.vertical ?? (draftValid ? draft!.vertical : undefined);
     // Cuentas POR MARCA (D8): el mismo correo puede existir en otra marca; se valida la
     // unicidad SOLO dentro de esta marca.
     const existing = await db.user.findUnique({ where: { email_brand: { email: input.email, brand } } });
@@ -165,11 +172,27 @@ export class AuthService {
     // Paquete vertical (F2): si el registro trae rubro y hay plantilla activa, se
     // instala tras crear la org (post-commit; tiene su propia transacción con RLS).
     // Best-effort: si falla, el usuario queda creado y puede instalarlo desde onboarding.
-    if (input.vertical) {
+    if (effectiveVertical) {
       try {
-        await this.vertical.install(result.org.id, input.vertical, { source: "registration" });
+        await this.vertical.install(result.org.id, effectiveVertical, { source: "registration" });
       } catch (e) {
-        console.error(`✖ No se pudo instalar el paquete vertical "${input.vertical}" en ${result.org.id}:`, (e as Error).message);
+        console.error(`✖ No se pudo instalar el paquete vertical "${effectiveVertical}" en ${result.org.id}:`, (e as Error).message);
+      }
+    }
+
+    // V2-3 — MATERIALIZAR el draft: 30 conversaciones de regalo (sin tarjeta) + destruir el draft.
+    // Solo marca conversia (modelo V2). El bot ya quedó con el rubro instalado arriba.
+    if (draftValid && brand === "conversia") {
+      try {
+        const expiresAt = new Date(Date.now() + 60 * 24 * 3600 * 1000); // regalo: 60 días
+        await this.prisma.withTenant(result.org.id, async (tx) => {
+          await tx.conversationWallet.upsert({ where: { organizationId: result.org.id }, create: { organizationId: result.org.id }, update: {} });
+          await tx.conversationCreditLot.create({ data: { organizationId: result.org.id, source: "bonus", amount: 30, remaining: 30, expiresAt, refType: "signup_gift", refId: draft!.token } });
+          await tx.conversationCreditLedger.create({ data: { organizationId: result.org.id, delta: 30, reason: "admin_adjust", balanceAfter: 30, refType: "signup_gift", refId: draft!.token } });
+        });
+        await db.draftSession.update({ where: { id: draft!.id }, data: { status: "materialized", materializedOrgId: result.org.id } });
+      } catch (e) {
+        console.error(`✖ No se pudo materializar el draft ${draft!.token}:`, (e as Error).message);
       }
     }
 
