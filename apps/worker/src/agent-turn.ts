@@ -662,16 +662,25 @@ export async function runAgentTurn(opts: {
     await publishRealtime(organizationId, { type: "message.created", conversationId });
   }
 
+  // V2-5 COPILOTO: en modo "suggest" el bot NO envía — deja la respuesta como BORRADOR
+  // (status SUGGESTED) para que el dueño la apruebe/edite/descarte en la bandeja. Default "auto"
+  // (envía, como siempre): ni TuBot ni las orgs existentes cambian salvo que activen suggest.
+  const suggestMode = persisted && ((orgSettings?.conversia as Record<string, any> | undefined)?.aiMode === "suggest");
+  if (suggestMode && persisted) {
+    await withTenant(organizationId, (tx) => tx.message.update({ where: { id: persisted.id }, data: { status: "SUGGESTED" } }));
+    await emitPlatformEvent(organizationId, "message.suggested", { conversationId, text: (persisted.body ?? "").slice(0, 200) }).catch(() => undefined);
+  }
+
   // 5. Enviar por el canal. Contactos SIN teléfono (Messenger/IG) van por la
   // mensajería de página; si el canal no es de redes, no hay a dónde enviar.
-  if (persisted && !conversation.contact.phone) {
+  if (persisted && !suggestMode && !conversation.contact.phone) {
     const { trySendMessagingReply } = await import("./messaging-send.js");
     await trySendMessagingReply(organizationId, conversationId, persisted.id, persisted.body ?? "").catch((err) =>
       console.error(`✖ Envío de mensajería (${conversationId}):`, (err as Error).message),
     );
   }
   // (token por-WABA del tenant; fallback al global)
-  if (persisted && conversation.contact.phone) {
+  if (persisted && !suggestMode && conversation.contact.phone) {
     const auth = await resolveChannelAuth(organizationId, { channelConnectionId: conversation.channelConnectionId });
     // Gate de servicio (E3): cuenta la conversación en su período y aplica cupo/topes/
     // fusible ANTES de enviar. Si bloquea (tope duro o fusible), el mensaje queda FAILED

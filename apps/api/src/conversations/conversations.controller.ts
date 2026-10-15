@@ -899,6 +899,65 @@ export class ConversationsController {
     return message;
   }
 
+  // ======================= V2-5 COPILOTO (suggest/auto) =======================
+
+  /** Cambia el modo IA de la org: "suggest" (el bot sugiere, el dueño aprueba) | "auto" (envía). */
+  @Post("ai-mode")
+  async setAiMode(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    const parsed = z.object({ mode: z.enum(["suggest", "auto"]) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("mode debe ser suggest o auto");
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
+    const conversia = (prev.conversia as Record<string, any>) ?? {};
+    await this.prisma.admin.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...prev, conversia: { ...conversia, aiMode: parsed.data.mode } } as object } });
+    return { ok: true, mode: parsed.data.mode };
+  }
+
+  /** Aprueba una respuesta SUGGESTED (opcionalmente editada) → se envía por el canal. */
+  @Post(":id/suggestions/:msgId/approve")
+  async approveSuggestion(@Param("id") id: string, @Param("msgId") msgId: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ text: z.string().max(4000).optional() }).safeParse(body ?? {});
+    const edited = parsed.success && typeof parsed.data.text === "string" && parsed.data.text.trim().length > 0;
+    const msg = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const m = await tx.message.findFirst({ where: { id: msgId, conversationId: id, status: "SUGGESTED" } });
+      if (!m) throw new NotFoundException("Sugerencia no encontrada o ya resuelta");
+      const newBody = edited ? parsed.data.text!.trim() : m.body;
+      await tx.message.update({ where: { id: msgId }, data: { status: "PENDING", body: newBody, authorUserId: ctx.userId } });
+      await tx.conversation.update({ where: { id }, data: { lastMessageAt: new Date(), lastMessagePreview: (newBody ?? "").slice(0, 120) } });
+      return { ...m, body: newBody };
+    });
+    await this.queues.outbound.add("send", { organizationId: ctx.organizationId, conversationId: id, messageId: msgId });
+    await this.realtime.publish(ctx.organizationId, { type: "message.updated", conversationId: id });
+    // "20 aprobadas sin editar → ofrecer autopiloto": contador liviano por org.
+    await this.bumpCopilotApprovals(ctx.organizationId, edited).catch(() => undefined);
+    return { ok: true, edited };
+  }
+
+  /** Descarta una sugerencia (no se envía). */
+  @Post(":id/suggestions/:msgId/discard")
+  async discardSuggestion(@Param("id") id: string, @Param("msgId") msgId: string) {
+    const ctx = requireContext();
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const m = await tx.message.findFirst({ where: { id: msgId, conversationId: id, status: "SUGGESTED" } });
+      if (!m) throw new NotFoundException("Sugerencia no encontrada o ya resuelta");
+      await tx.message.update({ where: { id: msgId }, data: { status: "FAILED", error: "Descartada por el equipo" } });
+    });
+    await this.realtime.publish(ctx.organizationId, { type: "message.updated", conversationId: id });
+    return { ok: true };
+  }
+
+  /** Cuenta aprobaciones sin edición; al llegar a 20 marca la oferta de pasar a autopiloto. */
+  private async bumpCopilotApprovals(organizationId: string, edited: boolean) {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
+    const conversia = (prev.conversia as Record<string, any>) ?? {};
+    const approved = edited ? 0 : (Number(conversia.copilotApproved) || 0) + 1; // una edición reinicia la racha
+    const offerAuto = approved >= 20;
+    await this.prisma.admin.organization.update({ where: { id: organizationId }, data: { settings: { ...prev, conversia: { ...conversia, copilotApproved: approved, ...(offerAuto ? { copilotOfferAuto: true } : {}) } } as object } });
+  }
+
   /**
    * Adjunto saliente (imagen/documento): sube el binario a Meta con el token
    * del canal y encola el envío. JSON base64 (tope 5 MB) — sin storage propio.

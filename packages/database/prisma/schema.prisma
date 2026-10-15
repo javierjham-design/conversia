@@ -77,6 +77,7 @@ enum MessageStatus {
   DELIVERED
   READ
   FAILED
+  SUGGESTED // V2-5 copiloto: respuesta del bot en borrador, pendiente de aprobación humana (no enviada)
 }
 
 enum MessageVisibility {
@@ -2176,6 +2177,30 @@ model ConversationCreditLedger {
 
   @@index([organizationId, createdAt])
   @@map("conversation_credit_ledger")
+}
+
+// V2-8 — COLA DE EXCEPCIONES: la consola opera por EXCEPCIÓN (nadie revisa fichas sanas).
+// La generan los módulos V2-1…V2-7 (qa_failed, saldo_gracia, recarga_fallida, numero_salud,
+// hsm_rechazada, coexistence_error, margen_negativo, abandono_alta, canario_degradado). Es
+// por-org (RLS la cubre); la consola lee cross-org con el cliente admin (filtra por marca).
+model PlatformException {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  type           String // qa_failed | canario_degradado | saldo_gracia_sin_recarga | recarga_fallida | numero_salud | hsm_rechazada | coexistence_error | margen_negativo | abandono_alta
+  severity       String    @default("warning") // info | warning | critical
+  title          String
+  detail         String?
+  dedupeKey      String?   @map("dedupe_key") // para no duplicar la misma excepción abierta
+  status         String    @default("open") // open | assigned | resolved
+  assignedToId   String?   @map("assigned_to_id") // platform admin/operador
+  resolution     String?
+  resolvedAt     DateTime? @map("resolved_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([organizationId, type, status])
+  @@map("platform_exceptions")
 }
 
 // Cupo de conversaciones por período (plan servicio-octubre-2026, E3). Cada
