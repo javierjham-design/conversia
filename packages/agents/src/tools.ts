@@ -244,46 +244,65 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         professionalId: z.string().optional(),
         fromDate: isoDate.optional(),
         toDate: isoDate.optional(),
+        diasSemana: z
+          .array(z.enum(["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]))
+          .optional()
+          .describe("Si el paciente nombra DÍAS DE LA SEMANA (ej. 'jueves o viernes'), pásalos AQUÍ como lista (['jueves','viernes']) EN VEZ de calcular tú la fecha: el sistema resuelve las fechas reales correctas. No calcules fromDate para días de semana."),
         franja: z.enum(["manana", "tarde"]).optional().describe("Filtro horario: manana = 09:00–13:59, tarde = desde las 14:00. Úsalo SIEMPRE que el paciente pida mañana/tarde."),
         durationMin: z.number().int().positive().max(480).optional().describe("Duración de la cita en minutos. Al REAGENDAR, pasa la duracionMin que te dio getPatientAppointments para conservar la duración original."),
       }),
-      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; franja?: "manana" | "tarde"; durationMin?: number }) {
+      async execute(ctx, input: { serviceCode?: string; professionalId?: string; fromDate?: string; toDate?: string; diasSemana?: string[]; franja?: "manana" | "tarde"; durationMin?: number }) {
         // Blindaje de fechas: el modelo a veces manda fechas pasadas (p.ej. "2023-…").
         // Se ancla el inicio desde HOY (Chile) y se RESPETA el rango que pidió el modelo
         // (si pide un día, se le dan las horas de ESE día, sin mezclar días lejanos).
         const todayChile = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-        const from = input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
+        // DÍAS DE SEMANA: el modelo ERRA al convertir "jueves/viernes" → fecha aunque tenga la tabla
+        // del calendario (caso Susan: pidió jueves/viernes y consultó martes 20 / miércoles 21).
+        // Si vienen `diasSemana`, IGNORAMOS el fromDate del modelo y barremos la ventana completa,
+        // filtrando por el día de semana REAL de cada cupo. Determinista, no depende del modelo.
+        const WDMAP: Record<string, number> = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
+        const wantWD = input.diasSemana?.length ? new Set(input.diasSemana.map((d) => WDMAP[d]).filter((n) => n != null)) : null;
+        const from = wantWD ? todayChile : input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
-        // Ventana por defecto de 28 días (antes 14): si el profesional está copado las 2
-        // próximas semanas, con 14 getAvailability devolvía vacío y el agente escalaba a
-        // recepción. Con 28 encuentra el cupo más próximo (igual se devuelven solo las ~6
-        // opciones más cercanas). Si el modelo pide un toDate explícito, se respeta.
-        const to = input.toDate && input.toDate >= from ? input.toDate : plus(28);
+        // Ventana por defecto de 28 días: si el profesional está copado las próximas 2 semanas, con
+        // 14 devolvía vacío y el agente escalaba. Con 28 encuentra el cupo más próximo.
+        const wide = plus(28);
+        const to = wantWD ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
         const sched = services(ctx).scheduling;
         const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
-        // FRANJA (hora de Chile): sin este filtro, el tope de 6 opciones dejaba solo las
-        // horas más tempranas (mañanas) y el modelo concluía "no hay tarde" aunque sí había.
+        // FRANJA (hora de Chile): sin este filtro, el tope de opciones dejaba solo las horas más
+        // tempranas y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
         const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
-        let slots = (await sched.getAvailableSlots({ ...query, from, to })).filter((s) => enFranja(s.start));
-        // RESPALDOS para NO devolver un "sinCupos" pelado cuando SÍ hay horas reales cerca: el modelo
-        // interpretaba el vacío como "no hay nada" y escalaba/ negaba días que ni consultó (caso David
-        // y Maria Cecilia: negó el día y "los siguientes" habiendo cupos). Preferimos SIEMPRE devolver
-        // horas reales (ensanchando fechas y, si hace falta, soltando la franja) para que el bot ofrezca.
+        const WDSHORT: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const wdChile = (iso: string) => WDSHORT[new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(iso))] ?? -1;
+        const enDia = (iso: string) => !wantWD || wantWD.has(wdChile(iso));
+        // Traemos la ventana ancha UNA vez y aplicamos filtros progresivamente más laxos (sin más
+        // llamadas al proveedor). RESPALDOS para NO devolver "sinCupos" si hay horas reales cerca:
+        // el modelo interpretaba el vacío como "no hay nada" y escalaba/negaba días que ni consultó.
+        const all = (await sched.getAvailableSlots({ ...query, from, to: wide })) ?? [];
+        let slots = all.filter((s) => enFranja(s.start) && enDia(s.start) && (wantWD || s.start.slice(0, 10) <= to));
         let ensanchado = false;
         let franjaRelajada = false;
-        const wide = plus(28);
-        if (!slots.length && wide > to) {
-          // 1) ensanchar fechas manteniendo la franja pedida.
-          slots = (await sched.getAvailableSlots({ ...query, from, to: wide })).filter((s) => enFranja(s.start));
+        let diaRelajado = false;
+        if (!slots.length) {
+          // 1) ensanchar fechas (toda la ventana), manteniendo franja + día.
+          slots = all.filter((s) => enFranja(s.start) && enDia(s.start));
           ensanchado = slots.length > 0;
         }
         if (!slots.length && input.franja) {
-          // 2) soltar la franja: ofrecer cualquier hora REAL del rango ancho (p. ej. tarde si no hay
-          // mañana). Así el bot propone la otra franja en vez de rendirse.
-          slots = await sched.getAvailableSlots({ ...query, from, to: wide });
+          // 2) soltar la franja, mantener el día pedido (p. ej. jueves por la mañana si no hay tarde).
+          slots = all.filter((s) => enDia(s.start));
           franjaRelajada = slots.length > 0;
-          if (franjaRelajada) ensanchado = true;
+        }
+        if (!slots.length && wantWD) {
+          // 3) soltar el día pedido (no había NADA ese día): ofrecer otros días reales (con franja si se pidió).
+          slots = all.filter((s) => enFranja(s.start));
+          diaRelajado = slots.length > 0;
+        }
+        if (!slots.length) {
+          // 4) soltar todo: cualquier hora real del rango.
+          slots = all;
         }
         if (!slots.length) {
           // Vacío de verdad: NO hay NINGUNA hora con este profesional en ~28 días. Recién aquí el
@@ -291,7 +310,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return {
             sinCupos: true,
             rangoConsultado: { desde: from, hasta: wide, ...(input.franja ? { franja: input.franja } : {}) },
-            nota: `No hay NINGUNA hora disponible con este profesional entre ${from} y ${wide} (ya revisé todo el rango y ambas franjas). Discúlpate y deriva a una persona con transferToHuman; no ofrezcas otro profesional.`,
+            nota: `No hay NINGUNA hora disponible con este profesional entre ${from} y ${wide} (ya revisé todo el rango, ambas franjas y todos los días). Discúlpate y deriva a una persona con transferToHuman; no ofrezcas otro profesional.`,
           };
         }
         // Orden cronológico garantizado (ISO ordena por fecha/hora).
@@ -330,7 +349,12 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // y si se ensanchó el rango, debe decir la fecha de cada hora y no presentarlas
         // como si fueran del día pedido.
         const notas: string[] = [];
-        if (franjaRelajada) {
+        if (diaRelajado) {
+          // No había NADA en los días de semana que pidió → se ofrecen OTROS días reales.
+          notas.push(
+            "No había cupos con este profesional en los días que pediste; estas son las próximas horas REALES disponibles (de OTROS días): di la FECHA y HORA exactas de cada una y ofrécelas. NO digas que no hay disponibilidad — estas existen.",
+          );
+        } else if (franjaRelajada) {
           // Se soltó la franja pedida: estas horas NO son todas de esa franja.
           notas.push(
             `No había cupos de ${input.franja === "manana" ? "mañana" : "tarde"} con este profesional, así que estas son las próximas horas REALES disponibles (de otra franja u otros días): di la FECHA y HORA exactas de cada una y ofrécelas al paciente. NO digas que no hay disponibilidad — estas existen.`,
@@ -342,7 +366,10 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
               : "TODOS estos horarios SON de la franja TARDE según la política de la clínica (desde las 14:00): ofrécelos como horarios de tarde.",
           );
         }
-        if (ensanchado && !franjaRelajada) {
+        if (wantWD && !diaRelajado) {
+          notas.push("Estas horas SON de los días de la semana que pidió el paciente (ya resueltos a su fecha real): ofrécelas indicando la fecha exacta de cada una.");
+        }
+        if (ensanchado && !franjaRelajada && !diaRelajado && !wantWD) {
           notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una y aclara que en el día pedido no había.`);
         }
         return notas.length ? { nota: notas.join(" "), horas } : horas;
