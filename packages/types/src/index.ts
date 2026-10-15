@@ -280,6 +280,10 @@ export interface ToolContext extends TenantContext {
    * agenda (ownerOnly). Default/undefined = cliente final (jamás ve esas tools).
    */
   ownerContext?: boolean;
+  /** Último mensaje del paciente (texto). Lo usan tools que necesitan el intent crudo —p. ej.
+   * getAvailability extrae de aquí los DÍAS DE LA SEMANA pedidos (jueves/viernes) sin depender
+   * de que el modelo los pase ni calcule la fecha (gpt-4o-mini erraba la fecha). */
+  lastUserText?: string;
   /** Dependencias inyectadas por el runtime (BD, agenda, canal, colas). */
   services: Record<string, unknown>;
 }

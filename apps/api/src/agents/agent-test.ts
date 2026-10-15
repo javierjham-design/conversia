@@ -177,6 +177,7 @@ export async function runAgentTest(prisma: PrismaService, orgId: string, agentId
     agentId: agent.id,
     agentName: agent.name,
     agentVersionId: "sandbox",
+    lastUserText: [...input.messages].reverse().find((m) => m.role === "user")?.content ?? "",
     services: services as unknown as Record<string, unknown>,
   };
 
