@@ -15,6 +15,8 @@ import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./ch
 import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { chargeServiceSend } from "./messaging-guard";
+import { planDebitsConversation } from "./conversation-credits";
+import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrail";
 import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
@@ -461,6 +463,10 @@ export async function runAgentTurn(opts: {
   // El modelo, el tope de tokens y las rondas de tools son de TODA la plataforma
   // del tenant y los fija el Super Admin (org.settings.ai). El tenant no los toca.
   const aiCfg = (orgSettings.ai ?? {}) as Record<string, any>;
+  // V2-1 — guardrail económico: solo en planes V2 (conversationDebitsWallet). Tras 12
+  // respuestas/conversación/día, inyecta modo conciso (no cambia TuBot/V1).
+  const isV2Credit = await planDebitsConversation(organizationId).catch(() => false);
+  const guardrailBlock = isV2Credit ? await guardrailInstruction(conversationId).catch(() => "") : "";
   const runtime: AgentRuntime = {
     agentId: agent.id,
     agentVersionId: version.id,
@@ -477,6 +483,7 @@ export async function runAgentTurn(opts: {
       upcomingAppointmentBlock +
       assistedSetupBlock +
       chargingBlock +
+      guardrailBlock +
       (opts.objective ? `\n\n## Objetivo inmediato para esta conversación\n${opts.objective}` : ""),
     // Modelo: override POR-AGENTE (config de la versión, lo fija el Super Admin
     // por agente) → modelo del tenant (org.settings.ai) → default de plataforma
@@ -670,11 +677,19 @@ export async function runAgentTurn(opts: {
     // fusible ANTES de enviar. Si bloquea (tope duro o fusible), el mensaje queda FAILED
     // y NO se llama a Graph ni se mide service_send.
     const svcGate = await chargeServiceSend(organizationId, conversationId, { messageId: persisted.id, phoneNumberId: auth.phoneNumberId });
-    if (svcGate.blocked) {
+    // V2-1: si se agotó la gracia de conversaciones, el bot NO queda mudo: envía la frase de
+    // respaldo (en lugar de la respuesta de IA) y deriva a un humano (abajo). Otros bloqueos
+    // (tope duro, fusible) sí dejan el mensaje FAILED como antes.
+    const graceFallback = svcGate.blocked && svcGate.reason === "no_conversation_credits";
+    if (svcGate.blocked && !graceFallback) {
       await withTenant(organizationId, (tx) =>
         tx.message.update({ where: { id: persisted.id }, data: { status: "FAILED", error: svcGate.userMessage } }),
       );
     } else {
+      if (graceFallback && svcGate.blocked) {
+        await withTenant(organizationId, (tx) => tx.message.update({ where: { id: persisted.id }, data: { body: svcGate.userMessage } }));
+        persisted.body = svcGate.userMessage;
+      }
     // Envío con REINTENTO ante fallos transitorios de Meta (red/5xx/429): un blip no
     // puede perder la respuesta ya generada. Los errores de config (auth) NO se
     // reintentan (no se arreglan solos). Antes: 1 intento → mensaje perdido.
@@ -710,6 +725,8 @@ export async function runAgentTurn(opts: {
       });
       // Medición del mensaje de servicio (E2): rastro + costo estimado. No frena nada.
       await recordServiceSend(organizationId, persisted.id, conversationId, conversation.contact.phone, auth.phoneNumberId);
+      // V2-1 — guardrail económico: cuenta esta respuesta del bot (día local) para el tope blando.
+      if (isV2Credit && !graceFallback) await bumpResponseGuardrail(conversationId).catch(() => undefined);
     } else {
       if (sendErr instanceof ChannelAuthError) {
         await markChannelAuthError(organizationId, auth.channelConnectionId, sendErr.message);
@@ -724,6 +741,19 @@ export async function runAgentTurn(opts: {
       // W-2 (F5-B): si el plan debitó un crédito de servicio por este mensaje, devuélvelo
       // (idempotente; no-op si no hubo débito, p. ej. TuBot).
       await refundForMessage(organizationId, persisted.id).catch(() => undefined);
+    }
+    // V2-1: gracia agotada → deriva a un humano (apaga la IA de la conversación + alerta),
+    // tras enviar la frase de respaldo. "El bot sugiere, el humano toma" hasta recargar.
+    if (graceFallback) {
+      await withTenant(organizationId, (tx) =>
+        tx.conversation.update({ where: { id: conversationId }, data: { aiEnabled: false } }),
+      ).catch(() => undefined);
+      const { enqueueNotification } = await import("./notifications/queue.js");
+      await enqueueNotification({
+        eventKey: "ai.escalation",
+        organizationId,
+        data: { conversationId, contactName: conversation.contact.phone ?? "cliente", reason: "Sin créditos de conversación (recarga para reanudar la IA)" },
+      }).catch(() => undefined);
     }
     } // fin del envío (gate de servicio no bloqueó)
   }

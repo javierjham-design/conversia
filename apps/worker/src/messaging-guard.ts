@@ -5,6 +5,7 @@ import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wal
 import { countConversationOnce } from "./conversation-quota";
 import { isWithinServiceFreeTier, resolveServiceWindowTz } from "./service-metering";
 import { enqueueNotification } from "./notifications/queue";
+import { planDebitsConversation, conversationCreditMultiplier, debitConversation, creditsNotifyDecision } from "./conversation-credits";
 
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
@@ -400,6 +401,18 @@ async function logServiceBlocked(
   }
 }
 
+/** V2-1 — frase de respaldo (configurable por org) cuando se agota la gracia de conversaciones. */
+async function outOfConversationCreditsPhrase(organizationId: string): Promise<string> {
+  const DEFAULT = "Por ahora no puedo responderte automáticamente, pero no te preocupes: un miembro del equipo te atenderá a la brevedad.";
+  try {
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const msg = (((org?.settings as Record<string, any> | null)?.messaging ?? {}) as Record<string, any>).outOfCreditsMessage;
+    return typeof msg === "string" && msg.trim() ? msg.trim() : DEFAULT;
+  } catch {
+    return DEFAULT;
+  }
+}
+
 /** ¿El plan vigente de la org debita el servicio de la bolsa (feature serviceDebitsWallet)? */
 async function planDebitsService(organizationId: string): Promise<boolean> {
   try {
@@ -452,6 +465,27 @@ export async function chargeServiceSend(
           return block("no_credits", "Se agotaron tus créditos de Conversia. Compra un sobre o sube de plan para reanudar las respuestas automáticas. Tus conversaciones abiertas no se pierden.");
         }
         if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
+      }
+    }
+
+    // V2-1: planes con conversationDebitsWallet (modelo V2) debitan 1 CRÉDITO al CONTAR la
+    // conversación por primera vez en el período (idempotente de origen: counted una sola vez).
+    // Asistente Plus = x2. La GRACIA (20) mantiene al bot vivo; superada, se devuelve el gate
+    // "no_conversation_credits" para que el caller envíe la frase de respaldo + derive (no se calla).
+    if (quota.counted && (await planDebitsConversation(organizationId))) {
+      const multiplier = await conversationCreditMultiplier(organizationId);
+      const debit = await debitConversation(organizationId, { conversationId, multiplier });
+      if (!debit.ok) {
+        await logServiceBlocked(organizationId, conversationId, quota).catch(() => undefined);
+        return block("no_conversation_credits", await outOfConversationCreditsPhrase(organizationId));
+      }
+      // Avisos 75/90% + entrada en gracia (una vez por umbral/período), in-app + WhatsApp.
+      const decision = await creditsNotifyDecision(organizationId).catch(() => null);
+      if (decision?.fire === "grace") {
+        await enqueueNotification({ eventKey: "credits.grace", organizationId, data: { grace: 20 } }).catch(() => undefined);
+      } else if (decision?.fire) {
+        const pct = decision.included > 0 ? Math.round((decision.used / decision.included) * 100) : 0;
+        await enqueueNotification({ eventKey: "credits.low", organizationId, data: { pct, used: decision.used, included: decision.included } }).catch(() => undefined);
       }
     }
 
