@@ -138,6 +138,10 @@ const envSchema = z.object({
   // Embedded Signup (onboarding self-service tipo Respond): app id + id de configuración
   META_APP_ID: z.string().optional().default(""),
   META_CONFIG_ID: z.string().optional().default(""),
+  // Configuración de Embedded Signup de la MARCA Conversia (otra config dentro de la
+  // misma app de Meta; el flujo de la segunda marca cotiza su propia config). Si está
+  // vacía, se cae a META_CONFIG_ID. La sirve GET /public/meta-config por marca.
+  META_ES_CONFIG_ID_CONVERSIA: z.string().optional().default(""),
   // featureType del Embedded Signup: "" = flujo completo (permite CREAR una WABA
   // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
   // compartir una WABA existente), "whatsapp_business_app_onboarding".

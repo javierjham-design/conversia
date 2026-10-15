@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import { TEMPLATE_FIELD_IDS } from "@conversia/types";
+import { raiseException } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
@@ -267,6 +268,27 @@ export class ChannelsController {
       graphVersion: env.META_GRAPH_VERSION,
       featureType: env.META_ES_FEATURE_TYPE,
     };
+  }
+
+  /**
+   * BLOQUE A — el cliente intentó conectar su WhatsApp y falló ≥2 veces. Levanta una
+   * excepción en la cola de operación (V2-8) con el detalle técnico para que el equipo
+   * lo vea SIN que el cliente tenga que reportar nada. Idempotente por org+día.
+   */
+  @Post("connect-report")
+  async connectReport(@Body() body: unknown) {
+    const ctx = requireContext();
+    const input = parse(z.object({ detail: z.string().max(2000), attempts: z.number().int().min(1).max(50).optional() }), body);
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { name: true } });
+    await raiseException(this.prisma.admin, {
+      organizationId: ctx.organizationId,
+      type: "canal_conexion_fallida",
+      title: `No logra conectar su WhatsApp — ${org?.name ?? ctx.organizationId}`,
+      severity: "warning",
+      detail: `${input.attempts ?? 2} intentos fallidos. Último error: ${input.detail}`.slice(0, 2000),
+      dedupeKey: `${ctx.organizationId}:${new Date().toISOString().slice(0, 10)}`,
+    });
+    return { ok: true };
   }
 
   /**
