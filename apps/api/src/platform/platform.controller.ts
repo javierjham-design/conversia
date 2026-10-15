@@ -23,6 +23,7 @@ import { computeWhatsappCostUsd } from "@conversia/agents";
 import { enforcePlanLimit } from "../common/plan-limits";
 // R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
+import { runQaBattery } from "../agents/agent-qa";
 import { raiseException } from "@conversia/database"; // V2-8 cola de excepciones
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
@@ -912,6 +913,15 @@ export class PlatformController {
     if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
     const result = await runAgentTest(this.prisma, id, agentId, parsed.data);
     await this.audit(req, "platform.agent.test", "agent", agentId, { organizationId: id, ok: (result as { ok?: boolean }).ok });
+    return result;
+  }
+
+  /** V2-6 — corre la batería de auto-QA contra el borrador; verde → publica solo (auditado). */
+  @Post("organizations/:id/agents/:agentId/auto-qa")
+  async agentAutoQa(@Param("id") id: string, @Param("agentId") agentId: string, @Req() req: PlatformRequest) {
+    await this.assertOrgBrand(req, id);
+    const result = await runQaBattery(this.prisma, id, agentId);
+    await this.audit(req, "platform.agent.auto_qa", "agent", agentId, { organizationId: id, passed: result.passed, published: result.published, corrected: result.corrected });
     return result;
   }
 
