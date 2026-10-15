@@ -2179,6 +2179,28 @@ model ConversationCreditLedger {
   @@map("conversation_credit_ledger")
 }
 
+// V2-3 — DRAFT efímero del generador público (/crear): se crea SIN cuenta (NO tiene
+// organization_id a propósito, para no entrar en RLS — vive antes de existir el tenant).
+// Guarda el rubro, lo scrapeado y la config generada; TTL 72h; se destruye al materializar.
+model DraftSession {
+  id                String   @id @default(cuid())
+  token             String   @unique
+  vertical          String // key del paquete vertical (rubro)
+  businessName      String   @map("business_name")
+  website           String?
+  scrape            Json? // lo leído de la web/IG (servicios/precios/horarios) o null
+  config            Json     @default("{}") // config generada (prompt + datos para el simulador)
+  messagesUsed      Int      @default(0) @map("messages_used") // tope del simulador (15)
+  ipHash            String?  @map("ip_hash")
+  status            String   @default("draft") // draft | materialized
+  materializedOrgId String?  @map("materialized_org_id") // set al crear la cuenta
+  createdAt         DateTime @default(now()) @map("created_at")
+  expiresAt         DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("draft_sessions")
+}
+
 // V2-8 — COLA DE EXCEPCIONES: la consola opera por EXCEPCIÓN (nadie revisa fichas sanas).
 // La generan los módulos V2-1…V2-7 (qa_failed, saldo_gracia, recarga_fallida, numero_salud,
 // hsm_rechazada, coexistence_error, margen_negativo, abandono_alta, canario_degradado). Es

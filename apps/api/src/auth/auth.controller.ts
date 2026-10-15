@@ -32,6 +32,9 @@ const registerSchema = z.object({
   country: z.string().trim().toUpperCase().pipe(z.string().regex(/^[A-Z]{2}$/, "País inválido (ISO-3166 alpha-2)")).default("CL"),
   // Rubro opcional (F2): si viene y hay paquete vertical activo, se instala al registrar.
   vertical: z.string().trim().min(2).max(40).optional(),
+  // V2-3: token del draft del generador /crear. Si viene, se MATERIALIZA (instala rubro del
+  // draft + 30 conversaciones de regalo + destruye el draft).
+  draftToken: z.string().trim().min(10).max(120).optional(),
 });
 
 // La derivación de marca por Origin vive en @conversia/config (compartida con el super
