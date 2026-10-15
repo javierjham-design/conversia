@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, 
 import type { Request } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandFromOrigin } from "@conversia/config";
 import { createAIRouter, fetchWebPageText } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
@@ -75,6 +75,28 @@ export class PublicController {
       out.push({ key: r.key, name: r.name, emoji: ui.emoji ?? "✨", tagline: ui.tagline ?? "", variant: r.variant });
     }
     return out;
+  }
+
+  /**
+   * BLOQUE A — config pública del SDK de Meta (Embedded Signup) POR MARCA. Sirve
+   * appId + config_id + versión para que /canales lance el popup sin hardcodear nada en
+   * el build (corregible sin redeploy). Son valores PÚBLICOS (viven en el browser); el
+   * secreto de la app jamás se expone. La marca se resuelve por ?brand= o por Origin.
+   */
+  @Get("meta-config")
+  metaConfig(@Query("brand") brand: string | undefined, @Req() req: Request) {
+    const env = getEnv();
+    const b = (brand ?? brandFromOrigin(req.headers.origin as string | undefined)).toLowerCase();
+    const configId = b === "conversia" ? env.META_ES_CONFIG_ID_CONVERSIA || env.META_CONFIG_ID : env.META_CONFIG_ID;
+    return {
+      brand: b,
+      appId: env.META_APP_ID,
+      configId,
+      graphVersion: env.META_GRAPH_VERSION,
+      featureType: env.META_ES_FEATURE_TYPE,
+      // true si la marca ya tiene config → el front habilita el botón "Conectar".
+      ready: Boolean(env.META_APP_ID && configId),
+    };
   }
 
   /** Solicitud de demo desde la web ("Empezar"/"Solicitar demo"). Rate-limited. */
