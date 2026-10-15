@@ -126,6 +126,18 @@ export function SupportWidget() {
             <div ref={bottomRef} />
           </div>
 
+          {/* Acciones sugeridas (al inicio de la conversación), según el modo. */}
+          {msgs.length <= 1 && !busy ? (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "0 12px 8px" }}>
+              {(ctx?.mode === "implementacion"
+                ? ["¿Qué me falta para activarlo?", "Ayúdame a conectar mi WhatsApp", "Cargar un servicio y su precio"]
+                : ["¿Cuánto saldo me queda?", "Cambiar el precio de un servicio", "Hablar con una persona"]
+              ).map((s) => (
+                <button key={s} onClick={() => void ask(s)} className="card" style={{ cursor: "pointer", fontSize: 12, padding: "6px 10px", borderRadius: 999 }}>{s}</button>
+              ))}
+            </div>
+          ) : null}
+
           {waLink ? <a href={waLink} target="_blank" rel="noreferrer" className="text-accent" style={{ fontSize: 12, textAlign: "center", padding: "6px 0", textDecoration: "none", borderTop: "1px solid var(--hairline)" }}>Prefiero hablar por WhatsApp →</a> : null}
 
           <form onSubmit={(e) => { e.preventDefault(); void ask(text); }} style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--hairline)" }}>

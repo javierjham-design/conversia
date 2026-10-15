@@ -85,12 +85,14 @@ export class AssistantService {
   private toolSpecs(owner: boolean): AIToolSpec[] {
     const read: AIToolSpec[] = [
       { name: "verEstado", description: "Devuelve el checklist de implementación, el siguiente paso pendiente y el saldo de conversaciones. Úsalo para liderar la implementación y responder '¿cuánto me queda?'.", inputJsonSchema: { type: "object", properties: {} } },
+      { name: "listarServicios", description: "Lista los servicios del negocio con su precio y duración. Úsalo antes de crear o cambiar precios para no duplicar.", inputJsonSchema: { type: "object", properties: {} } },
       { name: "ofrecerRecarga", description: "Devuelve los packs de conversaciones y el link para comprarlos. El asistente NUNCA cobra; solo entrega el link.", inputJsonSchema: { type: "object", properties: {} } },
       { name: "escalarAHumano", description: "Crea un ticket de soporte para que una persona del equipo siga el caso. Úsalo cuando el usuario lo pida o no puedas resolver.", inputJsonSchema: { type: "object", properties: { motivo: { type: "string", description: "Resumen del caso" } }, required: ["motivo"] } },
     ];
     if (!owner) return read;
     const write: AIToolSpec[] = [
-      { name: "configurarPrecioServicio", description: "Fija el PRECIO (y opcionalmente la duración en minutos) de un servicio existente, buscándolo por nombre. CONFIRMA con el usuario antes de llamar.", inputJsonSchema: { type: "object", properties: { servicio: { type: "string" }, precio: { type: "number" }, duracionMin: { type: "number" } }, required: ["servicio", "precio"] } },
+      { name: "crearServicio", description: "Crea un servicio nuevo del negocio (con precio y duración opcionales). Úsalo si el servicio no existe aún. CONFIRMA con el usuario antes de llamar.", inputJsonSchema: { type: "object", properties: { nombre: { type: "string" }, precio: { type: "number" }, duracionMin: { type: "number" } }, required: ["nombre"] } },
+      { name: "configurarPrecioServicio", description: "Fija el PRECIO (y opcionalmente la duración en minutos) de un servicio EXISTENTE, buscándolo por nombre. Si no existe, usa crearServicio. CONFIRMA antes de llamar.", inputJsonSchema: { type: "object", properties: { servicio: { type: "string" }, precio: { type: "number" }, duracionMin: { type: "number" } }, required: ["servicio", "precio"] } },
       { name: "configurarDatosNegocio", description: "Actualiza datos de texto del negocio (nombre, descripción o dirección) que el asistente usa al atender. CONFIRMA antes de llamar.", inputJsonSchema: { type: "object", properties: { campo: { type: "string", enum: ["nombre", "descripcion", "direccion"] }, valor: { type: "string" } }, required: ["campo", "valor"] } },
     ];
     return [...read, ...write];
@@ -101,6 +103,10 @@ export class AssistantService {
     if (name === "verEstado") {
       const c = await this.buildContext(ctx.organizationId);
       return { content: JSON.stringify({ checklistPct: c.checklistPct, siguientePaso: c.nextStep?.label ?? "todo listo", saldo: c.saldo ?? "no aplica", pasos: c.steps }) };
+    }
+    if (name === "listarServicios") {
+      const list = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.service.findMany({ where: { active: true }, orderBy: { name: "asc" }, take: 50, select: { name: true, price: true, durationMin: true } }));
+      return { content: JSON.stringify({ servicios: list.map((s) => ({ nombre: s.name, precio: s.price != null ? `$${Number(s.price).toLocaleString("es-CL")}` : "sin precio", duracionMin: s.durationMin })) }) };
     }
     if (name === "ofrecerRecarga") {
       const [base, packs] = await Promise.all([
@@ -121,6 +127,24 @@ export class AssistantService {
     }
     // ---- Escrituras (solo owner; el caller ya filtró specs, revalidamos por defensa) ----
     if (!isWebOwner(ctx.role)) return { content: "Esta acción solo la puede hacer el dueño o un administrador.", isError: true };
+    if (name === "crearServicio") {
+      const nombre = String(input?.nombre ?? "").trim().slice(0, 80);
+      if (!nombre) return { content: "Dime el nombre del servicio a crear.", isError: true };
+      const precio = input?.precio != null ? Math.round(Number(input.precio)) : null;
+      const dur = input?.duracionMin != null ? Math.round(Number(input.duracionMin)) : 30;
+      const slug = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "servicio";
+      return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const dup = await tx.service.findFirst({ where: { name: { equals: nombre, mode: "insensitive" } }, select: { id: true } });
+        if (dup) return { content: `Ya existe un servicio llamado "${nombre}". Si quieres cambiarle el precio, dímelo.`, isError: true };
+        let code = slug;
+        if (await tx.service.findUnique({ where: { organizationId_code: { organizationId: ctx.organizationId, code } }, select: { id: true } }).catch(() => null)) {
+          code = `${slug}-${Math.random().toString(36).slice(2, 5)}`;
+        }
+        const s = await tx.service.create({ data: { organizationId: ctx.organizationId, code, name: nombre, durationMin: dur, ...(precio != null && precio >= 0 ? { price: precio } : {}) } });
+        await tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId ?? "assistant", action: "assistant.create_service", entityType: "service", entityId: s.id, after: { name: nombre, price: precio, durationMin: dur } as object } });
+        return { content: `Creé el servicio "${nombre}"${precio != null ? ` a $${precio.toLocaleString("es-CL")}` : ""} · ${dur} min.`, didWrite: true };
+      });
+    }
     if (name === "configurarPrecioServicio") {
       const q = String(input?.servicio ?? "").trim();
       const precio = Math.round(Number(input?.precio));
@@ -174,7 +198,7 @@ REGLAS:
       ? `\n\nMODO IMPLEMENTACIÓN (avance < 100%): LIDERA. Saluda proponiendo el siguiente paso pendiente ("${ctx.nextStep?.label ?? ""}") y ofrécete a hacerlo juntos.`
       : `\n\nMODO ASISTENCIA (todo listo): resuelve dudas; si no puedes, escala a un humano.`;
     const ownerBlock = owner
-      ? `\n\nPuedes CONFIGURAR conversando: precios de servicios (configurarPrecioServicio) y datos del negocio (configurarDatosNegocio). CONFIRMA con el usuario antes de aplicar un cambio ("¿Dejo el corte en $12.000?") y recién entonces llama la herramienta.`
+      ? `\n\nPuedes CONFIGURAR conversando: crear servicios (crearServicio), fijar su precio/duración (configurarPrecioServicio), y datos del negocio (configurarDatosNegocio). Primero mira lo que hay con listarServicios si hace falta. CONFIRMA con el usuario antes de aplicar un cambio ("¿Dejo el corte en $12.000?") y recién entonces llama la herramienta.`
       : `\n\nEste usuario NO es dueño ni administrador: NO configures nada. Solo informa y, si hace falta, escala a un humano.`;
     return base + modeBlock + ownerBlock;
   }
