@@ -136,3 +136,27 @@ export async function resolveAgentByNameOrSlug(
 
 // Loaders de datos de rubro (F2): compartidos por el seed y el instalador de paquetes.
 export * from "./vertical-loaders.js";
+
+/**
+ * V2-8 — levanta una excepción en la cola de operación (idempotente por dedupeKey abierto).
+ * La usan los módulos V2-1…V2-7 (API y worker). `admin` = cliente sin RLS (getAdminPrisma()).
+ */
+export async function raiseException(
+  admin: PrismaClient,
+  input: { organizationId: string; type: string; title: string; severity?: "info" | "warning" | "critical"; detail?: string; dedupeKey?: string },
+): Promise<void> {
+  try {
+    if (input.dedupeKey) {
+      const open = await admin.platformException.findFirst({
+        where: { organizationId: input.organizationId, type: input.type, dedupeKey: input.dedupeKey, status: { in: ["open", "assigned"] } },
+        select: { id: true },
+      });
+      if (open) return; // ya hay una abierta igual
+    }
+    await admin.platformException.create({
+      data: { organizationId: input.organizationId, type: input.type, title: input.title, severity: input.severity ?? "warning", detail: input.detail ?? null, dedupeKey: input.dedupeKey ?? null },
+    });
+  } catch (e) {
+    console.error(`✖ raiseException (${input.type}/${input.organizationId}):`, (e as Error).message);
+  }
+}

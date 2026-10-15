@@ -24,6 +24,7 @@ import { enforcePlanLimit } from "../common/plan-limits";
 // R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
 import { runQaBattery } from "../agents/agent-qa";
+import { raiseException } from "@conversia/database"; // V2-8 cola de excepciones
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
@@ -144,6 +145,52 @@ export class PlatformController {
   private async brandOrgIds(req: PlatformRequest): Promise<string[]> {
     const rows = await this.prisma.admin.organization.findMany({ where: { brand: this.reqBrand(req) }, select: { id: true } });
     return rows.map((o) => o.id);
+  }
+
+  // ===================== V2-8 — COLA DE EXCEPCIONES =====================
+
+  /** Lista la cola de excepciones de la marca (abiertas/asignadas por defecto). */
+  @Get("exceptions")
+  async listExceptions(@Query("status") status: string | undefined, @Req() req: PlatformRequest) {
+    const orgIds = await this.brandOrgIds(req);
+    const where: Record<string, unknown> = { organizationId: { in: orgIds } };
+    where.status = status && status !== "all" ? status : { in: ["open", "assigned"] };
+    const rows = await this.prisma.admin.platformException.findMany({ where, orderBy: [{ severity: "desc" }, { createdAt: "desc" }], take: 200 });
+    const orgs = await this.prisma.admin.organization.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.organizationId))] } }, select: { id: true, name: true } });
+    const nameById = new Map(orgs.map((o) => [o.id, o.name]));
+    return rows.map((r) => ({ id: r.id, organizationId: r.organizationId, orgName: nameById.get(r.organizationId) ?? null, type: r.type, severity: r.severity, title: r.title, detail: r.detail, status: r.status, assignedToId: r.assignedToId, createdAt: r.createdAt }));
+  }
+
+  /** Conteo de excepciones abiertas (badge de la consola). */
+  @Get("exceptions/count")
+  async exceptionsCount(@Req() req: PlatformRequest) {
+    const orgIds = await this.brandOrgIds(req);
+    const open = await this.prisma.admin.platformException.count({ where: { organizationId: { in: orgIds }, status: { in: ["open", "assigned"] } } });
+    return { open };
+  }
+
+  private async assertExceptionBrand(req: PlatformRequest, id: string): Promise<string> {
+    const ex = await this.prisma.admin.platformException.findUnique({ where: { id }, select: { organizationId: true } });
+    if (!ex) throw new NotFoundException("Excepción no encontrada");
+    await this.assertOrgBrand(req, ex.organizationId);
+    return ex.organizationId;
+  }
+
+  @Post("exceptions/:id/assign")
+  async assignException(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertExceptionBrand(req, id);
+    await this.prisma.admin.platformException.update({ where: { id }, data: { status: "assigned", assignedToId: req.platformAdmin?.sub ?? null } });
+    await this.audit(req, "platform.exception.assign", "exception", id, {});
+    return { ok: true };
+  }
+
+  @Post("exceptions/:id/resolve")
+  async resolveException(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    await this.assertExceptionBrand(req, id);
+    const resolution = z.object({ resolution: z.string().max(500).optional() }).safeParse(body ?? {}).data?.resolution;
+    await this.prisma.admin.platformException.update({ where: { id }, data: { status: "resolved", resolution: resolution ?? null, resolvedAt: new Date() } });
+    await this.audit(req, "platform.exception.resolve", "exception", id, { resolution: resolution ?? null });
+    return { ok: true };
   }
 
   /** Asegura que la org pertenece a la marca del super admin; 404 si no (aísla marcas). */
