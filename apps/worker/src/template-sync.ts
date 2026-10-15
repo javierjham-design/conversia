@@ -17,6 +17,11 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
   const env = getEnv();
   let synced = 0;
 
+  // V2-7: crea (idempotente) las HSM estándar del rubro si faltan en la WABA. Best-effort:
+  // no bloquea el sync; solo hace algo cuando hay WABA + token (tras conectar el canal).
+  const { createVerticalTemplates } = await import("./template-create.js");
+  await createVerticalTemplates(organizationId).catch(() => undefined);
+
   const accounts = await withTenant(organizationId, (tx) =>
     tx.whatsappAccount.findMany({ include: { phoneNumbers: true } }),
   );
