@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Users, Wallet, X } from "lucide-react";
+import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 
@@ -143,6 +143,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span>{label}</span>
                 </a>
               ))}
+              {/* Asistente Conversia (B): abre la burbuja con el contexto actual. */}
+              <button
+                onClick={() => { setMoreOpen(false); try { window.dispatchEvent(new CustomEvent("conversia:assistant:open", { detail: { topic: "menu" } })); } catch { /* noop */ } }}
+                className="nav-item"
+                style={{ width: "100%", height: 46, justifyContent: "flex-start", gap: 10, padding: "0 12px", fontSize: 14, border: "none", background: "transparent", cursor: "pointer" }}
+              >
+                <Sparkles size={20} strokeWidth={2} />
+                <span>Asistente</span>
+              </button>
             </div>
           </div>
         </>

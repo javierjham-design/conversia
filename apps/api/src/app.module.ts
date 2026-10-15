@@ -30,6 +30,8 @@ import { OrganizationsController } from "./organizations/organizations.controlle
 import { OnboardingController } from "./organizations/onboarding.controller";
 import { VerticalService } from "./organizations/vertical.service";
 import { SupportController } from "./organizations/support.controller";
+import { AssistantController } from "./assistant/assistant.controller";
+import { AssistantService } from "./assistant/assistant.service";
 import { NotificationsController } from "./notifications/notifications.controller";
 import { SettingsController } from "./organizations/settings.controller";
 import { AssistedSetupController } from "./assisted-setup/assisted-setup.controller";
@@ -61,6 +63,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     OrganizationsController,
     OnboardingController, // checklist de activación del cliente nuevo
     SupportController, // soporte in-app: el tenant reporta, el Super Admin lo ve
+    AssistantController, // Asistente Conversia (B): implementación + asistencia in-app
     NotificationsController, // campana in-app + dispositivos Web Push + presencia
     SettingsController, // Centro de Configuración del tenant (/settings)
     AssistedSetupController, // montaje asistido: el cliente autoriza/revoca a TuBot
@@ -101,7 +104,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
+  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
