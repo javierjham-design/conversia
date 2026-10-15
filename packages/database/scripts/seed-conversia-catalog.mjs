@@ -112,6 +112,14 @@ async function main() {
   });
   console.log("✔ walletWeights:conversia (1/1/1·marketing 4)");
 
+  // V2-4 — pool de "Pruébalo en TU WhatsApp": OFF hasta que el dueño cargue número(s) reales (P1).
+  // NO pisa el valor si ya existe (para no apagar un pool ya encendido por el dueño).
+  const existingTrialPool = await prisma.platformSetting.findUnique({ where: { key: "trialPool" } }).catch(() => null);
+  if (!existingTrialPool) {
+    await prisma.platformSetting.create({ data: { key: "trialPool", value: JSON.stringify({ enabled: false, maxConvPerDay: 20 }) } });
+    console.log("✔ trialPool (OFF — P1: cargar número real para encender)");
+  } else console.log("• trialPool ya existe (no se toca)");
+
   const verticals = JSON.parse(readFileSync(join(here, "..", "seeds", "vertical-templates.json"), "utf-8"));
   for (const v of verticals) {
     const meta = { wave: v.wave ?? 1, status: v.status ?? "active", variant: v.variant ?? "citas", requiresFeature: v.requiresFeature ?? [] };
