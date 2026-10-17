@@ -1,5 +1,6 @@
 /** Cliente HTTP mínimo contra la MISMA API de la plataforma (un backend, dos frontends). */
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { apiBase } from "./api-base";
+const API = apiBase();
 
 const TOKEN_KEY = "conversia_token";
 

@@ -9,6 +9,17 @@ mostrarlas** (requiere `railway link` al proyecto `conversia`, ya hecho en esta 
 > Si el nombre difiere, verifica con `railway variables --service Postgres` (tabla
 > enmascarada) y ajusta la variable en los comandos.
 
+## 0. URGENTE — variable de build del panel (hallazgo prod 17-oct)
+
+El bundle desplegado de `conversia-web` se construyó **sin `NEXT_PUBLIC_API_URL`** y
+apunta a localhost: el panel/generador quedaba "Cargando…" para cualquier visitante.
+El PR #488 agrega una red de seguridad de runtime (el sitio en *.conversia.cl cae a la
+API pública), pero la config correcta es:
+
+Railway → servicio `conversia-web` → Variables:
+- `NEXT_PUBLIC_API_URL = https://${{api.RAILWAY_PUBLIC_DOMAIN}}`
+(guardar → redeploy automático; es build-arg, el valor queda inlined en el bundle).
+
 ## 1. HARDENING CRÍTICO — activar RLS en producción (rol `conversia_app`)
 
 Hoy `api` y `worker` conectan como `postgres` (superusuario → RLS NO aplica; la

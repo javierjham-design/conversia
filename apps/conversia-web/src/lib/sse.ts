@@ -1,6 +1,7 @@
 import { getToken } from "@/lib/api";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { apiBase } from "./api-base";
+const API = apiBase();
 
 export type RealtimeEvent = {
   type: "connected" | "message.created" | "message.updated" | "conversation.updated" | "counters.dirty";
