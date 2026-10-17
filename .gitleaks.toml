@@ -19,4 +19,7 @@ regexes = [
   '''0000000000000000000000000000000000000000000000000000000000000000''',
   '''conversia_app_dev_password''',
   '''secreto-de-prueba''',
+  # JWT forjado a propósito (firma="firma-invalida") del arnés de seguridad del sim:
+  # se usa para probar que un token inválido devuelve 401. NO es un secreto real.
+  '''firma-invalida''',
 ]

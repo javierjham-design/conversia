@@ -1,0 +1,40 @@
+# Stack AISLADO para la simulación de carga masiva (tools/sim/sim250.mjs).
+# NO es el stack de desarrollo ni el de producción: contenedores, volumen y
+# puertos propios (Postgres en 5433, no 5432) para no pisar nada.
+#   docker compose -f tools/sim/docker-compose.sim.yml up -d
+#   docker compose -f tools/sim/docker-compose.sim.yml down         # conserva datos
+#   docker compose -f tools/sim/docker-compose.sim.yml down -v      # borra el volumen
+name: conversia-sim
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: conversia-sim-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: conversia_sim
+    ports:
+      - "5433:5432"
+    volumes:
+      - simpgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d conversia_sim"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: conversia-sim-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  simpgdata:
+    name: conversia-sim-pgdata
