@@ -146,6 +146,14 @@ const envSchema = z.object({
   // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
   // compartir una WABA existente), "whatsapp_business_app_onboarding".
   META_ES_FEATURE_TYPE: z.string().optional().default(""),
+  // COEXISTENCIA (conectar el WhatsApp Business que el cliente YA usa en su teléfono,
+  // sin perder la app ni los chats): Embedded Signup con el featureType de onboarding de
+  // la app de negocio. config_id propio (puede ser otra config dentro de la misma app de
+  // Meta); si vacío cae a la config de Embedded Signup de la marca. La sirve
+  // GET /public/meta-config?mode=coexistence por marca. El valor "coexistence" del
+  // featureType fue retirado por Meta (may-2025) → el vigente es whatsapp_business_app_onboarding.
+  META_ES_COEX_CONFIG_ID_CONVERSIA: z.string().optional().default(""),
+  META_ES_COEX_FEATURE_TYPE: z.string().optional().default("whatsapp_business_app_onboarding"),
   // Línea de crédito compartida OBO (On Behalf Of): id de la línea de crédito
   // extendida de TuBot (Business Settings → Pagos, o GET /{business_id}/extendedcredits).
   // Si está seteada, al onboardear la WABA del cliente le adjuntamos NUESTRA línea de
