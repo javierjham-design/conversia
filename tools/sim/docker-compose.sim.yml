@@ -1,9 +1,10 @@
-# Stack AISLADO para la simulación de carga masiva (tools/sim/sim250.mjs).
-# NO es el stack de desarrollo ni el de producción: contenedores, volumen y
-# puertos propios (Postgres en 5433, no 5432) para no pisar nada.
-#   docker compose -f tools/sim/docker-compose.sim.yml up -d
-#   docker compose -f tools/sim/docker-compose.sim.yml down         # conserva datos
-#   docker compose -f tools/sim/docker-compose.sim.yml down -v      # borra el volumen
+# Stack AISLADO de SIMULACIÓN (M6 del encargo App Móvil/PWA + carga de tools/sim/sim250.mjs).
+# NO es desarrollo ni producción: contenedores, volumen y puertos propios (Postgres 5433).
+# Levanta TODO con un comando (postgres + redis + migración/seed + api + worker + conversia-web):
+#   bash tools/sim/up.sh          (o: pnpm sim:up)
+# Equivale a: docker compose -f tools/sim/docker-compose.sim.yml up -d --build
+# Parar:  docker compose -f tools/sim/docker-compose.sim.yml down        (conserva datos)
+#         docker compose -f tools/sim/docker-compose.sim.yml down -v     (borra el volumen)
 name: conversia-sim
 
 services:
@@ -34,6 +35,86 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  # Migración + rol/RLS + seed. CONSTRUYE la imagen api (tag conversia-sim-api) que api reusa.
+  # Corre una vez como ADMIN y termina; api/worker esperan a que acabe (sin ciclo de deps).
+  db-init:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    image: conversia-sim-api:latest
+    container_name: conversia-sim-db-init
+    env_file: .env.sim
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - >-
+        pnpm --filter @conversia/database db:deploy &&
+        pnpm --filter @conversia/database db:setup &&
+        pnpm --filter @conversia/database db:seed &&
+        echo "db-init OK"
+
+  api:
+    image: conversia-sim-api:latest # construida por db-init (misma imagen del monorepo)
+    container_name: conversia-sim-api
+    env_file: .env.sim
+    environment:
+      # api corre como conversia_app (RLS); DIRECT = admin para rutas que lo necesitan.
+      DATABASE_URL: postgresql://conversia_app:conversia_app_dev_password@postgres:5432/conversia_sim?connection_limit=10
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
+    ports:
+      - "4000:4000"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    image: conversia-sim-worker:latest
+    container_name: conversia-sim-worker
+    env_file: .env.sim
+    environment:
+      DATABASE_URL: postgresql://conversia_app:conversia_app_dev_password@postgres:5432/conversia_sim?connection_limit=10
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
+      WORKER_CONCURRENCY: "8"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  conversia-web:
+    build:
+      context: ../..
+      dockerfile: apps/conversia-web/Dockerfile
+      args:
+        # NEXT_PUBLIC_API_URL se inlinea en build; el navegador (host) pega a localhost:4000.
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+    image: conversia-sim-web:latest
+    container_name: conversia-sim-web
+    environment:
+      PORT: "3002"
+    ports:
+      - "3002:3002"
+    depends_on:
+      api:
+        condition: service_started
 
 volumes:
   simpgdata:

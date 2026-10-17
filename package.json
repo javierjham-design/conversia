@@ -13,7 +13,9 @@
     "db:generate": "pnpm --filter @conversia/database db:generate",
     "db:migrate": "pnpm --filter @conversia/database db:migrate",
     "db:setup": "pnpm --filter @conversia/database db:setup",
-    "db:seed": "pnpm --filter @conversia/database db:seed"
+    "db:seed": "pnpm --filter @conversia/database db:seed",
+    "sim:up": "bash tools/sim/up.sh",
+    "sim:down": "DOWN=1 bash tools/sim/up.sh"
   },
   "devDependencies": {
     "turbo": "^2.3.3",
