@@ -167,13 +167,22 @@ export class BillingController {
     const now = new Date();
     const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const [lotsAgg, wallet, expAgg, debits] = await Promise.all([
+    const [lotsAgg, wallet, expAgg, debits, sub] = await Promise.all([
       admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
-      admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true } }),
+      admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true, periodStart: true } }),
       admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, expiresAt: { gt: now, lt: endOfMonth } } }),
       admin.conversationCreditLedger.count({ where: { organizationId, reason: "conversation_debit", createdAt: { gte: since } } }),
+      admin.subscription.findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { periodStart: true } }),
     ]);
-    const lots = lotsAgg._sum.remaining ?? 0;
+    // Acreditación PENDIENTE del período (solo display): el lote real lo crea el worker
+    // (perezoso) al primer débito; sin esto, una org recién contratada vería
+    // "consumido 100 de 100" hasta su primera conversación. Compara por día UTC,
+    // igual que resolvePeriodStart del worker.
+    const floorDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const subPeriod = sub?.periodStart ? floorDay(sub.periodStart) : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const walletPeriod = wallet?.periodStart ? floorDay(wallet.periodStart) : 0;
+    const pendingAccrual = included > 0 && walletPeriod < subPeriod ? included : 0;
+    const lots = (lotsAgg._sum.remaining ?? 0) + pendingAccrual;
     const grace = wallet?.graceUsed ?? 0;
     const consumed = Math.max(0, included - lots);
     const dayOfMonth = now.getUTCDate();
@@ -773,7 +782,8 @@ export class BillingController {
         const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId, reason: "package_purchase", refId: providerRef }, select: { id: true } });
         if (dup) return;
       }
-      const wallet = await tx.conversationWallet.upsert({ where: { organizationId }, create: { organizationId }, update: {} });
+      // periodStart = época si la wallet no existía: "nunca acreditada" (ver auth.service).
+      const wallet = await tx.conversationWallet.upsert({ where: { organizationId }, create: { organizationId, periodStart: new Date(0) }, update: {} });
       let credit = pkg.credits;
       // Pagar gracia pendiente primero (los créditos nuevos cubren el negativo).
       if (wallet.graceUsed > 0) {
@@ -1009,7 +1019,7 @@ export class BillingController {
       const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: ctx.organizationId, refType: "migration_courtesy", refId }, select: { id: true } });
       if (dup) return;
       const expiresAt = new Date(Date.now() + 35 * 86_400_000);
-      await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId }, update: {} });
+      await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId, periodStart: new Date(0) }, update: {} });
       await tx.conversationCreditLot.create({ data: { organizationId: ctx.organizationId, source: "bonus", amount: 100, remaining: 100, expiresAt, refType: "migration_courtesy", refId } });
       await tx.conversationCreditLedger.create({ data: { organizationId: ctx.organizationId, delta: 100, reason: "admin_adjust", balanceAfter: 100, refType: "migration_courtesy", refId } });
     });

@@ -369,10 +369,13 @@ async function logServiceBlocked(
           conversationId,
           direction: "OUTBOUND",
           type: "SYSTEM",
+          // Nota PARA EL EQUIPO en la bandeja (nunca viaja al cliente final): INTERNAL,
+          // y sin status SENT (no hubo envío). Hallazgo de la simulación 2026-10-16:
+          // con PUBLIC+SENT se confundía con un mensaje realmente enviado al cliente.
           body: "⚠ Cupo de conversaciones alcanzado: el bot pausó las respuestas automáticas de esta conversación. Sube de plan o contáctanos para reanudarlas.",
           authorType: "SYSTEM",
-          status: "SENT",
-          visibility: "PUBLIC",
+          status: "DELIVERED",
+          visibility: "INTERNAL",
         },
       });
       await tx.integrationEvent.create({

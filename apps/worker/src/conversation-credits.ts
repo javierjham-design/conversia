@@ -57,10 +57,15 @@ async function balanceInTx(tx: Tx, organizationId: string, now: Date): Promise<{
   return { lots, grace, net: lots - grace };
 }
 
-async function ensureWallet(tx: Tx, organizationId: string, now: Date) {
+async function ensureWallet(tx: Tx, organizationId: string, _now: Date) {
+  // periodStart guarda el último período ACREDITADO. Una wallet recién creada debe
+  // nacer como "nunca acreditada" (época 0): si naciera con `now`, ensurePeriodAccrued
+  // vería walletPeriod >= periodStart de la suscripción y el PRIMER período jamás
+  // acreditaría los créditos del plan (bug cazado por la simulación del 2026-10-16:
+  // todo cliente base nuevo operaba contra la gracia y cortaba en 20).
   return tx.conversationWallet.upsert({
     where: { organizationId },
-    create: { organizationId, periodStart: now },
+    create: { organizationId, periodStart: new Date(0) },
     update: {},
   });
 }
@@ -215,6 +220,10 @@ export async function getConversationWalletSummary(organizationId: string): Prom
   return withTenant(organizationId, async (tx) => {
     const feats = await planFeatures(organizationId);
     const included = Number(feats.conversationsIncluded) || 0;
+    // Acredita el período ANTES de leer (mismo lock que el débito): sin esto, una org
+    // recién contratada vería "used = included / quedan 0" hasta su primer débito.
+    await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
+    await ensurePeriodAccrued(tx, organizationId, now);
     const bal = await balanceInTx(tx, organizationId, now);
     const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const expiring = await tx.conversationCreditLot.aggregate({
