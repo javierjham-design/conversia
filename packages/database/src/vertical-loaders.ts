@@ -178,6 +178,34 @@ export async function loadKnowledge(db: DbClient, orgId: string, items: any[] | 
   }
 }
 
+/**
+ * Campos personalizados del rubro (ficha del contacto): materia/urgencia en abogados,
+ * etc. Idempotente por (org, entity, key). Antes estos `customFields` de la plantilla
+ * eran letra muerta (hallazgo sim 200 del 2026-10-17: ningún loader los instalaba).
+ */
+export async function loadCustomFields(db: DbClient, orgId: string, items: any[] | undefined): Promise<void> {
+  let order = 0;
+  for (const f of items ?? []) {
+    if (!f?.key || !f?.label) continue;
+    await db.customFieldDefinition.upsert({
+      where: { organizationId_entity_key: { organizationId: orgId, entity: f.entity ?? "contact", key: f.key } },
+      update: { label: f.label, type: f.type ?? "text", options: (f.options ?? []) as object },
+      create: {
+        organizationId: orgId,
+        entity: f.entity ?? "contact",
+        key: f.key,
+        label: f.label,
+        type: f.type ?? "text",
+        options: (f.options ?? []) as object,
+        required: f.required ?? false,
+        order: f.order ?? order,
+        showInList: f.showInList ?? false,
+      },
+    });
+    order++;
+  }
+}
+
 export async function loadChannel(db: DbClient, orgId: string, channel: any | undefined, agentsBySlug: Record<string, string>): Promise<void> {
   if (!channel) return;
   const existing = await db.channelConnection.findFirst({ where: { organizationId: orgId, name: channel.name } });
@@ -221,5 +249,6 @@ export async function loadVerticalData(db: DbClient, orgId: string, orgMeta: Org
   const agentsBySlug = await loadAgents(db, orgId, data.agents, opts);
   await loadWorkflows(db, orgId, data.workflows, opts);
   await loadKnowledge(db, orgId, data.knowledge);
+  await loadCustomFields(db, orgId, data.customFields);
   await loadChannel(db, orgId, data.channel, agentsBySlug);
 }

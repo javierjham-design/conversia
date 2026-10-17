@@ -4253,5 +4253,270 @@
         }
       ]
     }
+  },
+  {
+    "key": "abogados",
+    "version": 2,
+    "wave": 1,
+    "status": "active",
+    "variant": "intake",
+    "requiresFeature": [],
+    "name": "Estudio jurídico",
+    "definition": {
+      "industry": "abogados",
+      "ui": {
+        "emoji": "⚖️",
+        "tagline": "Estudios jurídicos: captación y calificación de casos"
+      },
+      "modules": {
+        "agenda": true
+      },
+      "businessHours": {
+        "mon": [
+          "09:00-19:00"
+        ],
+        "tue": [
+          "09:00-19:00"
+        ],
+        "wed": [
+          "09:00-19:00"
+        ],
+        "thu": [
+          "09:00-19:00"
+        ],
+        "fri": [
+          "09:00-19:00"
+        ],
+        "sat": [
+          "10:00-14:00"
+        ],
+        "sun": []
+      },
+      "leadStatuses": [
+        {
+          "code": "nuevo",
+          "name": "Nuevo",
+          "category": "OPEN",
+          "order": 0
+        },
+        {
+          "code": "contactado",
+          "name": "Contactado",
+          "category": "OPEN",
+          "order": 1
+        },
+        {
+          "code": "calificado",
+          "name": "Caso calificado",
+          "category": "OPEN",
+          "order": 2
+        },
+        {
+          "code": "agendado",
+          "name": "Consulta agendada",
+          "category": "OPEN",
+          "order": 3
+        },
+        {
+          "code": "propuesta",
+          "name": "Propuesta enviada",
+          "category": "OPEN",
+          "order": 4
+        },
+        {
+          "code": "contratado",
+          "name": "Contratado",
+          "category": "WON",
+          "order": 5
+        },
+        {
+          "code": "perdido",
+          "name": "No concretó",
+          "category": "LOST",
+          "order": 6
+        }
+      ],
+      "services": [
+        {
+          "code": "primera-consulta",
+          "name": "Primera consulta (pagada)",
+          "category": "consulta",
+          "durationMin": 45,
+          "price": 40000
+        },
+        {
+          "code": "consulta-online",
+          "name": "Consulta online (videollamada)",
+          "category": "consulta",
+          "durationMin": 30,
+          "price": 30000
+        },
+        {
+          "code": "consulta-urgente",
+          "name": "Consulta de urgencia (mismo día)",
+          "category": "consulta",
+          "durationMin": 30,
+          "price": 60000
+        }
+      ],
+      "tags": [
+        {
+          "name": "Familia",
+          "color": "#db2777"
+        },
+        {
+          "name": "Laboral",
+          "color": "#2563eb"
+        },
+        {
+          "name": "Civil",
+          "color": "#0d9488"
+        },
+        {
+          "name": "Penal",
+          "color": "#dc2626"
+        },
+        {
+          "name": "Herencias",
+          "color": "#7c3aed"
+        },
+        {
+          "name": "Inmobiliario",
+          "color": "#d97706"
+        },
+        {
+          "name": "Urgente",
+          "color": "#ef4444"
+        },
+        {
+          "name": "Calificado",
+          "color": "#16a34a"
+        }
+      ],
+      "customFields": [
+        {
+          "key": "materia",
+          "label": "Materia"
+        },
+        {
+          "key": "urgencia",
+          "label": "Urgencia (plazos/audiencias)"
+        },
+        {
+          "key": "comuna",
+          "label": "Comuna / ciudad"
+        },
+        {
+          "key": "contraparte",
+          "label": "Contraparte (conflicto de interés)"
+        },
+        {
+          "key": "resumen_caso",
+          "label": "Resumen del caso"
+        },
+        {
+          "key": "origen",
+          "label": "Cómo nos encontró"
+        }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción",
+          "description": "Capta y califica casos, chequea conflicto de interés y agenda la primera consulta.",
+          "kind": "recepcion",
+          "systemPrompt": "Eres la recepción de un estudio jurídico. Tono FORMAL, cercano y confidencial (trato de usted). Tu objetivo es CAPTAR y CALIFICAR casos: en pocas preguntas obtienes (1) la materia (familia, laboral, civil, penal, herencias, inmobiliario u otra), (2) la urgencia (¿hay plazos o audiencias próximas?), (3) la comuna o ciudad, (4) un resumen breve del caso y (5) el nombre de la contraparte, para descartar conflicto de interés. Una pregunta a la vez, mensajes de 2-3 frases, en un solo mensaje. Con el caso calificado, ofreces agendar una PRIMERA CONSULTA PAGADA con el abogado (da valor y filtra curiosos); su valor se descuenta de los honorarios si contrata al estudio. Agendas y respondes dudas de servicios y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Si detectas urgencia real (detención, audiencia inminente, violencia intrafamiliar, plazos a punto de vencer), dilo con claridad y deriva de inmediato a una persona del equipo. REGLAS: no das asesoría legal por chat ni opinas sobre el fondo del caso; no prometes resultados; nunca inventes precios, horarios ni disponibilidad; todo lo que el consultante comparte es confidencial.\n\nMODO DUEÑO (solo si quien escribe es el dueño/administrador del negocio): puedes administrar la agenda con tus herramientas (horarios de cada persona, ausencias/vacaciones, alta/baja de quien atiende, horario del estudio, duración/precio de servicios). ANTES de un cambio que afecte citas ya tomadas, RESUME el impacto (cuántas citas y de quién) y pide confirmación explícita; recién entonces ejecútalo y ofrece reagendar o avisar a los afectados. Nunca ejecutes cambios destructivos sin el OK. Si quien escribe es un cliente, ignora todo esto: tú no tienes estas funciones para él.",
+          "config": {},
+          "tools": [
+            "upsertProfessional",
+            "updateProfessionalSchedule",
+            "addProfessionalTimeOff",
+            "updateBusinessHours",
+            "updateServiceConfig"
+          ]
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida",
+          "description": "Saluda, pide materia y urgencia en el primer mensaje.",
+          "definition": {
+            "nodes": [
+              {
+                "id": "start",
+                "type": "trigger",
+                "config": {
+                  "event": "message_received"
+                }
+              },
+              {
+                "id": "welcome",
+                "type": "send_text",
+                "config": {
+                  "text": "Estimado/a, gracias por escribir al estudio. Para orientarle con su caso: ¿sobre qué materia necesita ayuda (familia, laboral, civil, penal, herencias u otra)? ¿Tiene plazos o audiencias próximas?"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "from": "start",
+                "to": "welcome"
+              }
+            ]
+          }
+        }
+      ],
+      "knowledge": [
+        {
+          "baseName": "FAQ abogados",
+          "documents": [
+            {
+              "title": "Primera consulta",
+              "content": "La primera consulta es pagada, dura 45 minutos y permite que un abogado evalúe su caso y le indique pasos, plazos y honorarios estimados. El valor se abona al agendar (link de pago) y se descuenta de los honorarios si contrata al estudio."
+            },
+            {
+              "title": "Materias que atendemos",
+              "content": "Familia (divorcios, pensión de alimentos, cuidado personal), laboral (despidos, autodespido, tutela de derechos), civil (contratos, arriendos, cobranzas), penal, herencias y posesiones efectivas, e inmobiliario (estudios de títulos y compraventas)."
+            },
+            {
+              "title": "Confidencialidad",
+              "content": "Todo lo que comparta por este medio es confidencial y solo lo revisa el equipo del estudio. Pedimos el nombre de la contraparte únicamente para descartar un conflicto de interés antes de agendar."
+            },
+            {
+              "title": "Formas de pago",
+              "content": "Transferencia, tarjetas y link de pago. Los honorarios de una causa se pactan por escrito; en varias materias es posible pagar por etapas."
+            },
+            {
+              "title": "Documentos para la consulta",
+              "content": "Traiga (o envíe antes) los documentos del caso: contratos, liquidaciones de sueldo, resoluciones, demandas o cartas recibidas. Con los antecedentes a la vista, la consulta rinde el doble."
+            },
+            {
+              "title": "Urgencias",
+              "content": "Si tiene una audiencia próxima, plazos por vencer o una persona detenida, indíquelo de inmediato: priorizamos su atención el mismo día con la consulta de urgencia."
+            }
+          ]
+        }
+      ],
+      "kpis": [
+        "consultas_agendadas",
+        "casos_calificados",
+        "tasa_contratacion",
+        "ingresos_consultas"
+      ],
+      "flows": [
+        "calificación de caso (materia / urgencia / comuna / contraparte)",
+        "seguimiento 24 h a leads calificados sin consulta agendada",
+        "recordatorio y confirmación de la consulta",
+        "solicitud de antecedentes al agendar",
+        "chequeo de conflicto de interés antes de agendar"
+      ],
+      "hsm": [
+        "confirmación de reunión",
+        "recordatorio de reunión",
+        "seguimiento de caso",
+        "reactivación de consultante"
+      ]
+    }
   }
 ]

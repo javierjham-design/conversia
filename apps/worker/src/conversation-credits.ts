@@ -79,18 +79,32 @@ async function ensureWallet(tx: Tx, organizationId: string, _now: Date) {
 async function ensurePeriodAccrued(tx: Tx, organizationId: string, now: Date): Promise<void> {
   const prisma = getAdminPrisma();
   const sub = await prisma.subscription
-    .findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { periodStart: true } })
+    .findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { periodStart: true, planId: true } })
     .catch(() => null);
   const periodStart = resolvePeriodStart(sub?.periodStart ?? null, now);
   const wallet = await ensureWallet(tx, organizationId, now);
   const walletPeriod = resolvePeriodStart(wallet.periodStart, now);
-  if (walletPeriod.getTime() >= periodStart.getTime()) return; // ya acreditado este período
 
   const feats = await planFeatures(organizationId);
   const included = Number(feats.conversationsIncluded) || 0;
-  if (included > 0) {
-    await creditLotInTx(tx, organizationId, { source: "plan", amount: included, expiresAt: addMonths(periodStart, PLAN_ROLLOVER_MONTHS), refType: "subscription", now });
+  // Idempotencia por (PLAN, período) vía ledger, NO solo por fecha de la wallet: un
+  // upgrade dentro del mismo período (trial→base el mismo día, el funnel normal) debe
+  // acreditar el plan nuevo aunque la wallet ya haya "visto" el período con el plan
+  // anterior (hallazgo sim 200 del 2026-10-17: el cliente pagaba y recibía 0 créditos
+  // hasta el mes siguiente). El refId sella plan+período; reintentos no re-acreditan.
+  if (included > 0 && sub?.planId) {
+    const refId = `${sub.planId}:${periodStart.toISOString().slice(0, 10)}`;
+    const done = await tx.conversationCreditLedger.findFirst({
+      where: { organizationId, reason: "plan_renewal", refId },
+      select: { id: true },
+    });
+    if (!done) {
+      await creditLotInTx(tx, organizationId, { source: "plan", amount: included, expiresAt: addMonths(periodStart, PLAN_ROLLOVER_MONTHS), refType: "subscription", refId, now });
+      await tx.conversationWallet.update({ where: { organizationId }, data: { periodStart, lastNotifiedPct: 0 } });
+      return;
+    }
   }
+  if (walletPeriod.getTime() >= periodStart.getTime()) return; // ya acreditado este período
   await tx.conversationWallet.update({ where: { organizationId }, data: { periodStart, lastNotifiedPct: 0 } });
 }
 

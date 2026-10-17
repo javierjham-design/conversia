@@ -38,17 +38,22 @@ export class AssistantService {
     const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { name: true, settings: true, currency: true } });
 
     // Checklist de onboarding (pasos reales).
-    const [agents, channels, workflows, waNumbers, services] = await Promise.all([
+    const [agents, channels, workflows, waNumbers, services, paymentMethods, paidInvoices] = await Promise.all([
       admin.agent.count({ where: { organizationId, deletedAt: null } }),
       admin.channelConnection.count({ where: { organizationId, status: "active" } }),
       admin.workflow.count({ where: { organizationId, deletedAt: null } }),
       admin.whatsappPhoneNumber.count({ where: { organizationId } }).catch(() => 0),
       admin.service.count({ where: { organizationId } }).catch(() => 0),
+      admin.paymentMethod.count({ where: { organizationId } }).catch(() => 0),
+      admin.invoice.count({ where: { organizationId, status: "PAID" } }).catch(() => 0),
     ]);
     const steps = [
       { key: "agente", label: "Crea tu asistente", done: agents > 0 },
       { key: "servicios", label: "Carga tus servicios/precios", done: services > 0 },
       { key: "whatsapp", label: "Conecta tu WhatsApp", done: channels > 0 || waNumbers > 0 },
+      // Pedido del negocio (sim 200): la implementación debe dejar el método de pago
+      // cargado para que recargas/renovaciones no corten al bot por saldo.
+      { key: "pago", label: "Carga tu método de pago", done: paymentMethods > 0 || paidInvoices > 0 },
     ];
     const done = steps.filter((s) => s.done).length;
     const checklistPct = Math.round((done / steps.length) * 100);

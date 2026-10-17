@@ -31,7 +31,7 @@ export class OnboardingController {
   status() {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [org, whatsappNumbers, templates, publishedAgents, publishedWorkflows, activeMembers] =
+      const [org, whatsappNumbers, templates, publishedAgents, publishedWorkflows, activeMembers, paymentMethods, paidInvoices] =
         await Promise.all([
           tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
           tx.whatsappPhoneNumber.count({ where: { status: "active" } }),
@@ -39,6 +39,8 @@ export class OnboardingController {
           tx.agentVersion.count({ where: { status: "PUBLISHED" } }),
           tx.workflowVersion.count({ where: { status: "PUBLISHED" } }),
           tx.organizationUser.count({ where: { active: true } }),
+          tx.paymentMethod.count(),
+          tx.invoice.count({ where: { status: "PAID" } }),
         ]);
 
       const settings = (org?.settings ?? {}) as Record<string, any>;
@@ -66,6 +68,17 @@ export class OnboardingController {
           description: "Instala el paquete vertical (etapas, servicios, agentes y flujos base) para arrancar con todo listo para personalizar.",
           done: hasVertical,
           cta: { label: "Instalar paquete de rubro", href: "/onboarding" },
+        },
+        {
+          // Pedido del negocio (sim 200, 2026-10-17): el flujo de implementación debe
+          // pedir el método de pago ANTES de que se acaben los créditos del período,
+          // para que la recarga/renovación no corte al bot. Done = tarjeta guardada
+          // o al menos una factura pagada (ya demostró poder pagar).
+          key: "pago",
+          title: "Cargar tu método de pago",
+          description: "Registra una tarjeta (o paga tu primer período) para que tu plan y tus recargas se renueven solos y el bot nunca se detenga por saldo.",
+          done: paymentMethods > 0 || paidInvoices > 0,
+          cta: { label: "Agregar método de pago", href: "/billing" },
         },
         {
           key: "agent",
