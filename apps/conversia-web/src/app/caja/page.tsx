@@ -8,7 +8,8 @@ type Entry = { id: string; type: string; method: string; amount: number; status:
 type Summary = { net: number; conciliado: number; declarado: number; efectivo: number; byMethod: Record<string, number>; count: number };
 type Day = { from: string; to: string; summary: Summary; entries: Entry[]; closed: boolean; closure: { difference: number; declaredCash: number; calculatedCash: number } | null };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { apiBase } from "@/lib/api-base";
+const API = apiBase();
 const METHODS = [
   { v: "efectivo", l: "Efectivo" },
   { v: "transferencia", l: "Transferencia" },

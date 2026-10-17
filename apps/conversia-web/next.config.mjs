@@ -5,6 +5,9 @@
  * @type {import('next').NextConfig}
  */
 const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Red de seguridad (hallazgo prod 17-oct-2026): si el build salió sin la variable, el
+// runtime cae a la API pública (lib/api-base.ts) — la CSP debe permitirla SIEMPRE.
+const prodApiFallback = "https://api-production-cf8e.up.railway.app";
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -16,8 +19,9 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   // 'unsafe-eval' SOLO en dev: el runtime de react-refresh de Next lo exige y sin él
   // la página queda sin hidratar (botones muertos). En producción NO se emite.
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-  `connect-src 'self' ${api}`,
+  // cloudflareinsights: beacon que inyecta Cloudflare en el dominio (evita el error de consola).
+  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  `connect-src 'self' ${api} ${prodApiFallback} https://cloudflareinsights.com`,
 ].join("; ");
 
 const securityHeaders = [
