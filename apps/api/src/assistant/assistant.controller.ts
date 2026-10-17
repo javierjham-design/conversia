@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, NotFoundException, Post } from "@nestjs/common";
 import { z } from "zod";
 import type { AIChatMessage } from "@conversia/types";
 import { requireContext } from "../tenancy/context";
@@ -17,9 +17,19 @@ export class AssistantController {
     private rateLimit: RateLimitService,
   ) {}
 
+  /**
+   * El Asistente Conversia es exclusivo de la 2.ª marca: si una org de otra marca (p. ej.
+   * TuBot) llega aquí, respondemos 404 (su panel ni siquiera lo expone). Evita que un
+   * owner de TuBot reciba un asistente con copy de Conversia sobre su propia org.
+   */
+  private async assertConversia(organizationId: string) {
+    if ((await this.assistant.orgBrand(organizationId)) !== "conversia") throw new NotFoundException();
+  }
+
   @Get("context")
   async context() {
     const ctx = requireContext();
+    await this.assertConversia(ctx.organizationId);
     const c = await this.assistant.buildContext(ctx.organizationId);
     return { ...c, canConfigure: isWebOwner(ctx.roleCode) };
   }
@@ -27,6 +37,7 @@ export class AssistantController {
   @Post("message")
   async message(@Body() body: unknown) {
     const ctx = requireContext();
+    await this.assertConversia(ctx.organizationId);
     const parsed = z
       .object({
         message: z.string().trim().min(1).max(2000),
