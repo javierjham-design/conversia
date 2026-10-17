@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, QrCode, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 
@@ -10,10 +10,13 @@ import { api } from "@/lib/api";
  * (lista), GET /onboarding (checklist). Errores legibles + reporte a la cola de operación. */
 
 type Channel = { id: string; type: string; name: string; status: string; displayPhone: string | null; defaultAgentName: string | null };
-type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean };
+type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string };
+type ConnMode = "coexistence" | "embedded";
 
 /** Pasos que corre el backend al conectar (se animan mientras el POST está en vuelo). */
 const STEPS = ["Conectando con Meta…", "Registrando tu número…", "Compartiendo la línea de crédito…", "Creando tus plantillas…"];
+/** En coexistencia NO se registra el número (ya está activo en la app) ni hay línea de crédito. */
+const COEX_STEPS = ["Conectando con Meta…", "Vinculando el número que ya usas…", "Activando tu asistente…"];
 
 /** Abre el Asistente Conversia (Bloque B) con el contexto ya cargado. Si aún no está
  * montado el listener, es un no-op inofensivo. */
@@ -27,7 +30,7 @@ function mapConnectError(raw: string): { title: string; help: string } {
   if (/popup|bloque|blocked|ventana/.test(s)) return { title: "Tu navegador bloqueó la ventana de Meta", help: "Permite las ventanas emergentes para este sitio (o desactiva el bloqueador) y vuelve a intentarlo. La conexión abre una ventana de Facebook." };
   if (/dominio|domain|url.*(block|allow)|not allowed|sdk/.test(s)) return { title: "El dominio aún no está autorizado en Meta", help: "Falta habilitar este sitio en la app de Meta (dominios del SDK). Es un ajuste de configuración; pide ayuda al asistente y el equipo lo deja listo." };
   if (/business|portfolio|página|page|no.*cuenta/.test(s)) return { title: "Falta tu cuenta de Meta Business o una página de Facebook", help: "Para WhatsApp Business necesitas una cuenta de Meta Business y una página de Facebook. Créalas en business.facebook.com y reintenta." };
-  if (/already|en uso|in use|otra app|registered elsewhere/.test(s)) return { title: "Ese número ya está en uso en la app de WhatsApp", help: "El número está activo en la app normal de WhatsApp o en otra cuenta. Dalo de baja de la app para migrarlo, o usa otro número. (Pronto podrás mantener ambos con Coexistence.)" };
+  if (/already|en uso|in use|otra app|registered elsewhere/.test(s)) return { title: "Ese número ya está en uso en la app de WhatsApp", help: 'Si quieres SEGUIR usándolo en tu teléfono, usa "Conecta el WhatsApp que ya usas" (coexistencia): mantienes la app y tus chats. O usa un número nuevo dedicado.' };
   if (/133005|pin/.test(s)) return { title: "Tu número ya tenía un PIN de verificación", help: "Lo detectamos automáticamente. Si persiste, desactiva la verificación en dos pasos del número en WhatsApp Business y reintenta." };
   if (/cancel|denied|permiso|permission/.test(s)) return { title: "Se canceló o no se autorizó la conexión", help: "En la ventana de Meta hay que aceptar los permisos y elegir tu WhatsApp Business. Vuelve a intentarlo y completa todos los pasos." };
   if (/no devolvió|account|cuenta\/número|number/.test(s)) return { title: "Meta no devolvió la cuenta o el número", help: 'Reintenta y en la ventana elige "Editar configuración" para seleccionar tu WhatsApp Business (no "Reconectar").' };
@@ -37,6 +40,7 @@ function mapConnectError(raw: string): { title: string; help: string } {
 export default function Canales() {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [es, setEs] = useState<EsConfig | null>(null);
+  const [coex, setCoex] = useState<EsConfig | null>(null);
   const [fbReady, setFbReady] = useState(false);
   const [whatsappDone, setWhatsappDone] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<"idle" | "connecting" | "error">("idle");
@@ -44,6 +48,7 @@ export default function Canales() {
   const [err, setErr] = useState<{ title: string; help: string } | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string; businessId?: string }>({});
+  const modeRef = useRef<ConnMode>("coexistence");
   const attemptsRef = useRef(0);
 
   async function load() {
@@ -57,7 +62,9 @@ export default function Canales() {
   useEffect(() => { void load(); }, []);
 
   // Config del SDK por marca (sin hardcodear nada en el build) + listener del popup.
+  // Dos configs: coexistencia (recomendado) y número dedicado (Embedded Signup normal).
   useEffect(() => {
+    api<EsConfig>("/public/meta-config?brand=conversia&mode=coexistence").then(setCoex).catch(() => undefined);
     api<EsConfig>("/public/meta-config?brand=conversia").then(setEs).catch(() => undefined);
     function onMsg(event: MessageEvent) {
       if (typeof event.origin !== "string" || !event.origin.endsWith("facebook.com")) return;
@@ -74,19 +81,23 @@ export default function Canales() {
   }, []);
 
   // Carga el SDK de Facebook apenas haya config (para que FB.login sea SÍNCRONO en el click).
+  // Ambas vías comparten appId + versión (misma app de Meta); inicializa con la que esté lista.
   useEffect(() => {
-    if (!es?.ready) return;
+    const cfg = coex?.ready ? coex : es?.ready ? es : null;
+    if (!cfg) return;
     const w = window as any;
     if (w.FB) { setFbReady(true); return; }
-    w.fbAsyncInit = () => { w.FB.init({ appId: es.appId, autoLogAppEvents: true, xfbml: true, version: es.graphVersion }); setFbReady(true); };
+    w.fbAsyncInit = () => { w.FB.init({ appId: cfg.appId, autoLogAppEvents: true, xfbml: true, version: cfg.graphVersion }); setFbReady(true); };
     const sc = document.createElement("script");
     sc.async = true; sc.defer = true; sc.crossOrigin = "anonymous";
     sc.src = "https://connect.facebook.net/en_US/sdk.js";
     document.body.appendChild(sc);
-  }, [es]);
+  }, [es, coex]);
 
   async function reportFailure(detail: string) {
-    if (attemptsRef.current < 2) return;
+    // La vía coexistencia levanta su propia excepción en el backend; aquí solo reportamos
+    // la vía de número dedicado (el backend de coexistencia ya deja constancia).
+    if (attemptsRef.current < 2 || modeRef.current === "coexistence") return;
     await api("/channels/connect-report", { method: "POST", body: JSON.stringify({ detail, attempts: attemptsRef.current }) }).catch(() => undefined);
   }
 
@@ -97,19 +108,26 @@ export default function Canales() {
     void reportFailure(raw);
   }
 
-  async function finishEmbedded(code: string) {
+  async function finish(code: string) {
     if (!sessionRef.current.wabaId || !sessionRef.current.phoneNumberId) { fail("Meta no devolvió la cuenta/número."); return; }
+    const coexistence = modeRef.current === "coexistence";
+    const endpoint = coexistence ? "/channels/coexistence" : "/channels/embedded-signup";
     setPhase("connecting"); setStepIdx(0); setErr(null); setOkMsg(null);
-    const timer = setInterval(() => setStepIdx((i) => Math.min(i + 1, STEPS.length - 1)), 1600);
+    const steps = coexistence ? COEX_STEPS : STEPS;
+    const timer = setInterval(() => setStepIdx((i) => Math.min(i + 1, steps.length - 1)), 1600);
     try {
-      const r = await api<{ displayPhone: string; businessName?: string | null }>("/channels/embedded-signup", {
+      const r = await api<{ displayPhone: string; businessName?: string | null; coexistence?: boolean }>(endpoint, {
         method: "POST",
         body: JSON.stringify({ code, wabaId: sessionRef.current.wabaId, phoneNumberId: sessionRef.current.phoneNumberId, businessId: sessionRef.current.businessId }),
       });
       clearInterval(timer);
       attemptsRef.current = 0;
       setPhase("idle");
-      setOkMsg(`¡Listo! WhatsApp conectado: ${r.displayPhone}${r.businessName ? ` · ${r.businessName}` : ""}.`);
+      setOkMsg(
+        coexistence
+          ? `¡Listo! Conectamos el WhatsApp que ya usas: ${r.displayPhone}. Sigues respondiendo desde tu teléfono y tu asistente también.`
+          : `¡Listo! WhatsApp conectado: ${r.displayPhone}${r.businessName ? ` · ${r.businessName}` : ""}.`,
+      );
       await load();
     } catch (e) {
       clearInterval(timer);
@@ -117,9 +135,11 @@ export default function Canales() {
     }
   }
 
-  function connect() {
+  function connect(mode: ConnMode = "coexistence") {
     setErr(null); setOkMsg(null);
-    if (!es?.ready) { fail("El Embedded Signup aún no está configurado para esta marca en el servidor."); return; }
+    modeRef.current = mode;
+    const cfg = mode === "coexistence" ? coex : es;
+    if (!cfg?.ready) { fail("La conexión aún no está configurada para esta marca en el servidor."); return; }
     const w = window as any;
     if (!fbReady || !w.FB) { fail("No se pudo cargar el SDK de Facebook (¿bloqueador?) o el dominio aún no está autorizado en Meta."); return; }
     sessionRef.current = {};
@@ -127,14 +147,17 @@ export default function Canales() {
       (response: any) => {
         const code = response?.authResponse?.code;
         if (!code) { fail("Se canceló la conexión."); return; }
-        void finishEmbedded(code);
+        void finish(code);
       },
-      { config_id: es.configId, response_type: "code", override_default_response_type: true, extras: { setup: {}, featureType: es.featureType ?? "", sessionInfoVersion: "3" } },
+      { config_id: cfg.configId, response_type: "code", override_default_response_type: true, extras: { setup: {}, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" } },
     );
   }
 
   const waChannels = (channels ?? []).filter((c) => c.type === "WHATSAPP_CLOUD");
   const waActive = waChannels.find((c) => c.status === "active");
+  const activeSteps = modeRef.current === "coexistence" ? COEX_STEPS : STEPS;
+  // Al menos una vía disponible habilita el botón principal.
+  const canConnect = Boolean(coex?.ready || es?.ready);
 
   return (
     <AppShell>
@@ -165,7 +188,7 @@ export default function Canales() {
           {/* Estado: conectando (stepper animado) */}
           {phase === "connecting" ? (
             <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 9 }}>
-              {STEPS.map((label, i) => (
+              {activeSteps.map((label, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, opacity: i > stepIdx ? 0.4 : 1 }}>
                   {i < stepIdx ? <Check size={16} style={{ color: "var(--ok)" }} /> : i === stepIdx ? <Loader2 size={16} className="lp-spin" style={{ color: "var(--acc-deep)" }} /> : <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--line)" }} />}
                   <span style={{ color: i === stepIdx ? "var(--ink)" : "var(--ink-dim)" }}>{label}</span>
@@ -180,7 +203,7 @@ export default function Canales() {
               <p style={{ margin: 0, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} style={{ color: "var(--warn)", flexShrink: 0 }} /> {err.title}</p>
               <p className="text-dim" style={{ margin: "7px 0 12px", fontSize: 13, lineHeight: 1.5 }}>{err.help}</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={connect} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><RefreshCw size={14} /> Reintentar</button>
+                <button onClick={() => connect(modeRef.current)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><RefreshCw size={14} /> Reintentar</button>
                 <button onClick={() => pedirAyuda(`Error al conectar WhatsApp: ${err.title}. ${err.help}`)} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><HelpCircle size={14} /> Pedir ayuda al asistente</button>
               </div>
             </div>
@@ -188,20 +211,47 @@ export default function Canales() {
 
           {/* Acción primaria (si no está conectado y no estamos en medio de algo) */}
           {!waActive && phase === "idle" ? (
-            <div style={{ marginTop: 16 }}>
-              <button onClick={connect} disabled={es ? !es.ready : true} className="btn-accent" style={{ border: "none", cursor: es?.ready ? "pointer" : "not-allowed", fontSize: 14.5, padding: "11px 20px", display: "inline-flex", alignItems: "center", gap: 8, opacity: es?.ready ? 1 : 0.6 }}>
-                <MessageCircle size={17} /> Conectar mi WhatsApp <ArrowRight size={16} />
-              </button>
-              <p className="text-dim" style={{ margin: "10px 0 0", fontSize: 12 }}>
-                {es && !es.ready ? "La conexión directa se habilita en breve; mientras, pide ayuda al asistente y el equipo la deja lista." : "Se abre una ventana de Meta para elegir tu WhatsApp Business. Toma un par de minutos."}
-              </p>
+            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Vía 1 (recomendada): COEXISTENCIA — conecta el número que YA usa */}
+              <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <QrCode size={17} style={{ color: "var(--acc-deep)" }} />
+                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta el WhatsApp que ya usas</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
+                </div>
+                <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 13, lineHeight: 1.5 }}>
+                  Escanea o ingresa el código desde tu app y listo. Sigues respondiendo desde tu teléfono con tus chats de siempre, y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
+                </p>
+                <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
+                  <QrCode size={16} /> Conectar mi número <ArrowRight size={15} />
+                </button>
+              </div>
+
+              {/* Vía 2: número dedicado (Embedded Signup normal) */}
+              <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--line)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <MessageCircle size={16} style={{ color: "var(--ink-dim)" }} />
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>Prefiero un número nuevo dedicado</span>
+                </div>
+                <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 12.5, lineHeight: 1.5 }}>
+                  Te armamos un número aparte solo para el asistente, sin tocar el tuyo. Se abre una ventana de Meta.
+                </p>
+                <button onClick={() => connect("embedded")} disabled={es ? !es.ready : true} className="card" style={{ cursor: es?.ready ? "pointer" : "not-allowed", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: es?.ready ? 1 : 0.6 }}>
+                  <MessageCircle size={14} /> Usar un número nuevo
+                </button>
+              </div>
+
+              {!canConnect ? (
+                <p className="text-dim" style={{ margin: 0, fontSize: 12 }}>La conexión se habilita en breve; mientras, pide ayuda al asistente y el equipo la deja lista.</p>
+              ) : null}
             </div>
           ) : null}
 
           {/* Reconectar / agregar otro si ya hay uno */}
           {waActive && phase === "idle" ? (
-            <div style={{ marginTop: 14 }}>
-              <button onClick={connect} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><MessageCircle size={14} /> Conectar otro número</button>
+            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => connect("coexistence")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><QrCode size={14} /> Conectar el que ya uso</button>
+              <button onClick={() => connect("embedded")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><MessageCircle size={14} /> Conectar otro número</button>
             </div>
           ) : null}
         </div>

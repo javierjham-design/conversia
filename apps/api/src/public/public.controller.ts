@@ -84,16 +84,24 @@ export class PublicController {
    * secreto de la app jamás se expone. La marca se resuelve por ?brand= o por Origin.
    */
   @Get("meta-config")
-  metaConfig(@Query("brand") brand: string | undefined, @Req() req: Request) {
+  metaConfig(@Query("brand") brand: string | undefined, @Query("mode") mode: string | undefined, @Req() req: Request) {
     const env = getEnv();
     const b = (brand ?? brandFromOrigin(req.headers.origin as string | undefined)).toLowerCase();
-    const configId = b === "conversia" ? env.META_ES_CONFIG_ID_CONVERSIA || env.META_CONFIG_ID : env.META_CONFIG_ID;
+    // mode=coexistence → config del onboarding de la app WhatsApp Business (conectar el
+    // número que ya se usa). Cualquier otro valor = Embedded Signup normal (número dedicado).
+    const coex = (mode ?? "").toLowerCase() === "coexistence";
+    const esConfigId = b === "conversia" ? env.META_ES_CONFIG_ID_CONVERSIA || env.META_CONFIG_ID : env.META_CONFIG_ID;
+    // El config_id de coexistencia cae a la config de ES de la marca si no se definió uno propio.
+    const coexConfigId = b === "conversia" ? env.META_ES_COEX_CONFIG_ID_CONVERSIA || esConfigId : esConfigId;
+    const configId = coex ? coexConfigId : esConfigId;
+    const featureType = coex ? env.META_ES_COEX_FEATURE_TYPE : env.META_ES_FEATURE_TYPE;
     return {
       brand: b,
+      mode: coex ? "coexistence" : "embedded_signup",
       appId: env.META_APP_ID,
       configId,
       graphVersion: env.META_GRAPH_VERSION,
-      featureType: env.META_ES_FEATURE_TYPE,
+      featureType,
       // true si la marca ya tiene config → el front habilita el botón "Conectar".
       ready: Boolean(env.META_APP_ID && configId),
     };

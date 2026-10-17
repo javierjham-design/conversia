@@ -29,6 +29,21 @@ interface ParsedInbound {
   payload: unknown;
 }
 
+/**
+ * COEXISTENCIA — eco de un mensaje que el dueño del negocio envió A MANO desde su app
+ * WhatsApp Business (webhook `smb_message_echoes`). Es un mensaje SALIENTE: `from` es el
+ * número del negocio y `to` es el cliente. No existe en WABAs normales (TuBot no recibe
+ * este campo), por lo que este camino es inerte para la marca 1.
+ */
+interface ParsedEcho {
+  phoneNumberId: string;
+  externalId: string; // wamid
+  to: string; // número del cliente (con quien habla el dueño)
+  type: string;
+  text?: string;
+  payload: unknown;
+}
+
 interface ParsedStatus {
   phoneNumberId: string;
   externalId: string;
@@ -51,14 +66,30 @@ function metaStatusError(s: any): string | undefined {
 }
 
 /** Normaliza el payload del webhook de Meta (o del simulador, mismo formato). */
-function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedStatus[] } {
+export function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedStatus[]; echoes: ParsedEcho[] } {
   const messages: ParsedInbound[] = [];
   const statuses: ParsedStatus[] = [];
+  const echoes: ParsedEcho[] = [];
   for (const entry of raw?.entry ?? []) {
     for (const change of entry?.changes ?? []) {
       const value = change?.value;
       const phoneNumberId = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
+      // COEXISTENCIA: ecos de mensajes que el dueño mandó a mano desde su app. El campo
+      // de suscripción es `smb_message_echoes` pero el array interno es `message_echoes`.
+      if (change?.field === "smb_message_echoes") {
+        for (const m of value?.message_echoes ?? []) {
+          echoes.push({
+            phoneNumberId,
+            externalId: m.id,
+            to: m.to,
+            type: m.type ?? "unknown",
+            text: m.text?.body ?? m.button?.text ?? m.interactive?.button_reply?.title ?? m.image?.caption ?? m.document?.caption ?? m.video?.caption,
+            payload: m,
+          });
+        }
+        continue; // un change de ecos no trae messages/statuses normales
+      }
       const profileName = value?.contacts?.[0]?.profile?.name;
       for (const m of value?.messages ?? []) {
         messages.push({
@@ -87,7 +118,7 @@ function parseWebhook(raw: any): { messages: ParsedInbound[]; statuses: ParsedSt
       }
     }
   }
-  return { messages, statuses };
+  return { messages, statuses, echoes };
 }
 
 /**
@@ -149,7 +180,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
     }
   }
 
-  const { messages, statuses } = parseWebhook(job.raw);
+  const { messages, statuses, echoes } = parseWebhook(job.raw);
 
   for (const status of statuses) {
     const tenant = await resolveTenant(status.phoneNumberId);
@@ -578,5 +609,106 @@ export async function processInbound(job: InboundJob): Promise<void> {
       }
     }
 
+  }
+
+  // ---- COEXISTENCIA: ecos de mensajes que el DUEÑO respondió a mano desde su app ----
+  // Se pintan en la Bandeja como SALIENTES (humano), para que la conversación esté
+  // completa aunque no hayan salido por la API. No disparan al agente ni abren ventana.
+  // Camino inerte para TuBot (sus WABAs no envían `smb_message_echoes`).
+  for (const echo of echoes) {
+    const tenant = await resolveTenant(echo.phoneNumberId);
+    if (!tenant) {
+      console.warn(`⚠ Eco para número desconocido ${echo.phoneNumberId} — descartado`);
+      continue;
+    }
+    const { organizationId } = tenant;
+    const result = await withTenant(organizationId, async (tx) => {
+      // Idempotencia por wamid: si el bot ya envió ESTE mensaje por API (mismo wamid) o el
+      // eco ya se procesó, no se duplica. Reusa el unique (organizationId, externalId).
+      const dup = await tx.message.findUnique({
+        where: { organizationId_externalId: { organizationId, externalId: echo.externalId } },
+      });
+      if (dup) return null;
+
+      // El contacto es el CLIENTE (echo.to); el dueño (from) es el negocio.
+      let identity = await tx.contactIdentity.findUnique({
+        where: { organizationId_channelType_externalId: { organizationId, channelType: "WHATSAPP_CLOUD", externalId: echo.to } },
+        include: { contact: true },
+      });
+      let contact = identity?.contact ?? null;
+      if (!contact) {
+        const normPhone = geoFromPhone(echo.to).phone;
+        const digits = normPhone.replace(/\D/g, "");
+        const candidates = new Set<string>();
+        if (normPhone) {
+          candidates.add(normPhone);
+          candidates.add(digits);
+          if (digits.startsWith("56") && digits.length === 11) {
+            const core9 = digits.slice(2);
+            candidates.add(core9);
+            candidates.add("+" + core9);
+          }
+        }
+        const byPhone = candidates.size
+          ? await tx.contact.findFirst({ where: { organizationId, phone: { in: [...candidates] }, deletedAt: null }, orderBy: { createdAt: "asc" } })
+          : null;
+        contact = byPhone ?? (await tx.contact.create({
+          data: { organizationId, clinicId: tenant.clinicId, ...buildContactCreate({ waId: echo.to, profileName: null }, new Date()) },
+        }));
+        if (!identity) {
+          await tx.contactIdentity.create({
+            data: { organizationId, contactId: contact.id, channelType: "WHATSAPP_CLOUD", externalId: echo.to },
+          });
+        }
+      }
+
+      let conversation = await tx.conversation.findFirst({
+        where: { contactId: contact.id, status: { in: ["OPEN", "PENDING"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!conversation) {
+        conversation = await tx.conversation.create({
+          data: {
+            organizationId,
+            clinicId: tenant.clinicId,
+            contactId: contact.id,
+            channelConnectionId: tenant.channelConnectionId,
+            status: "OPEN",
+          },
+        });
+      }
+
+      await tx.message.create({
+        data: {
+          organizationId,
+          conversationId: conversation.id,
+          direction: "OUTBOUND",
+          type:
+            echo.type === "audio" || echo.type === "voice" ? "AUDIO"
+            : echo.type === "image" ? "IMAGE"
+            : echo.type === "document" ? "DOCUMENT"
+            : echo.type === "video" ? "VIDEO"
+            : "TEXT",
+          body: echo.text ?? `[${echo.type}]`,
+          // authorType USER + origin:"app" = respuesta HUMANA escrita desde la app del dueño
+          // (no la IA). No existe un AuthorType "APP" en el enum; se marca en el payload.
+          payload: { ...(echo.payload as object), origin: "app" } as object,
+          externalId: echo.externalId,
+          status: "DELIVERED",
+          authorType: "USER",
+          visibility: "PUBLIC",
+          sentAt: new Date(),
+        },
+      });
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date(), lastMessagePreview: (echo.text ?? `[${echo.type}]`).slice(0, 120) },
+      });
+      return { conversationId: conversation.id };
+    });
+    if (!result) continue; // duplicado
+    const { publishRealtime } = await import("./realtime.js");
+    await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
+    await publishRealtime(organizationId, { type: "counters.dirty" });
   }
 }
