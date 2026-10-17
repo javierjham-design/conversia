@@ -123,12 +123,32 @@ export default function Crear() {
         {stage === "form" ? (
           <div className="card" style={{ padding: 22 }}>
             <label style={{ fontSize: 13, color: "var(--ink-dim)" }}>¿Qué tipo de negocio tienes?</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "10px 0 18px" }}>
-              {verticals.map((v) => (
-                <button key={v.key} onClick={() => setVertical(v.key)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, cursor: "pointer", fontSize: 14, border: vertical === v.key ? "none" : "1px solid var(--line)", background: vertical === v.key ? "var(--acc)" : "transparent", color: vertical === v.key ? "var(--acc-ink)" : "var(--ink)" }}>
-                  <span>{v.emoji}</span> {v.name}
-                </button>
-              ))}
+            {/* Con pocos rubros: chips (lindos para marketing). Con el catálogo completo
+                (>8, hoy 14): lista desplegable — los chips desbordaban la tarjeta
+                (pedido de Javier, 17-oct-2026). */}
+            <div style={{ margin: "10px 0 18px" }}>
+              {verticals.length > 0 && verticals.length <= 8 ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {verticals.map((v) => (
+                    <button key={v.key} onClick={() => setVertical(v.key)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, cursor: "pointer", fontSize: 14, border: vertical === v.key ? "none" : "1px solid var(--line)", background: vertical === v.key ? "var(--acc)" : "transparent", color: vertical === v.key ? "var(--acc-ink)" : "var(--ink)" }}>
+                      <span>{v.emoji}</span> {v.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {verticals.length > 8 ? (
+                <select
+                  value={vertical}
+                  onChange={(e) => setVertical(e.target.value)}
+                  style={{ ...field, marginTop: 0, cursor: "pointer", appearance: "auto" as const }}
+                  aria-label="Elige tu rubro"
+                >
+                  <option value="" disabled>Elige tu rubro…</option>
+                  {verticals.map((v) => (
+                    <option key={v.key} value={v.key}>{v.emoji} {v.name} — {v.tagline}</option>
+                  ))}
+                </select>
+              ) : null}
               {verticals.length === 0 && !verticalsError ? <span className="text-dim" style={{ fontSize: 13 }}>Cargando rubros…</span> : null}
               {verticalsError ? (
                 <span style={{ fontSize: 13, color: "var(--danger)" }}>
