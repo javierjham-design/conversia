@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
+import { CalendarDays, CreditCard, Globe, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 
@@ -19,6 +19,7 @@ const NAV = [
   { href: "/clientes", label: "Clientes", Icon: Users },
   { href: "/caja", label: "Caja", Icon: Wallet },
   { href: "/canales", label: "Canales", Icon: Radio },
+  { href: "/mini-sitio", label: "Mi página", Icon: Globe },
   { href: "/cobros", label: "Cobros", Icon: CreditCard },
   { href: "/ajustes", label: "Ajustes", Icon: Settings },
 ];
