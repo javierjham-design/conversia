@@ -37,7 +37,21 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
   // CORS multi-marca: el panel de cada marca (TuBot y Conversia) debe poder llamar la API.
-  app.enableCors({ origin: [env.WEB_URL, env.WEB_URL_CONVERSIA].filter((u): u is string => !!u), credentials: true });
+  // Para cada WEB_URL se permiten también el APEX y www del mismo dominio (hallazgo prod
+  // 17-oct-2026: la landing/generador viven en conversia.cl y www.conversia.cl además de
+  // app.conversia.cl, y sus fetch públicos quedaban bloqueados por CORS en silencio).
+  const corsOrigins = new Set<string>();
+  for (const u of [env.WEB_URL, env.WEB_URL_CONVERSIA]) {
+    if (!u) continue;
+    corsOrigins.add(u.replace(/\/+$/, ""));
+    try {
+      const h = new URL(u);
+      const apex = h.hostname.replace(/^(app|www)\./, "");
+      corsOrigins.add(`${h.protocol}//${apex}`);
+      corsOrigins.add(`${h.protocol}//www.${apex}`);
+    } catch { /* URL inválida: se queda solo la literal */ }
+  }
+  app.enableCors({ origin: [...corsOrigins], credentials: true });
 
   // Railway/PaaS inyectan PORT; en local se usa API_PORT
   const port = Number(process.env.PORT ?? env.API_PORT);

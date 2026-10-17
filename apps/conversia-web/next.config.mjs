@@ -38,7 +38,18 @@ const nextConfig = {
   // valida con el linter; no bloqueamos el build de Next por ESLint (no instalado aquí).
   eslint: { ignoreDuringBuilds: true },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // HTML con TTL CORTO en el CDN (hallazgo prod 17-oct-2026): las páginas estáticas
+      // salían con s-maxage=31536000 y Cloudflare servía versiones VIEJAS por meses tras
+      // cada deploy. Los assets /_next/static quedan fuera (van versionados por hash y
+      // pueden cachearse un año). Complemento operativo: regla de caché en Cloudflare
+      // que haga bypass del HTML (ver RUNBOOK_GOLIVE_V2.md).
+      {
+        source: "/((?!_next/static|_next/image|favicon|.*\\.(?:png|jpg|svg|ico|woff2?)).*)",
+        headers: [{ key: "Cache-Control", value: "public, max-age=0, s-maxage=60, stale-while-revalidate=300" }],
+      },
+    ];
   },
   // El alta de autoservicio (D7) y el bot comercial usan /registro (ES). Mantener /register
   // como alias por compatibilidad.
