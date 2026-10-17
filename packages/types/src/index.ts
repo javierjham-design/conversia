@@ -175,6 +175,15 @@ export interface ChannelProvider {
   send(phoneNumberId: string, message: OutboundMessage, options?: ChannelSendOptions): Promise<ChannelSendResult>;
 }
 
+/**
+ * Cómo se conectó un canal de WhatsApp (se persiste en `channel_connection.config`):
+ *  - "embedded_signup": número dedicado vía Embedded Signup clásico (registra el número).
+ *  - "coexistence": el número que el cliente YA usa en su app WhatsApp Business, conectado
+ *    por código/QR; NO se registra (ya está activo) y los mensajes que el dueño envía a
+ *    mano desde su app llegan por el webhook `smb_message_echoes` (marcados origin:"app").
+ */
+export type ChannelConnectionMode = "embedded_signup" | "coexistence";
+
 /** Mensaje entrante normalizado (independiente del proveedor). */
 export interface InboundMessage {
   channelType: "WHATSAPP_CLOUD" | "MOCK";

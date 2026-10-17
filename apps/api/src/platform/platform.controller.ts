@@ -1125,10 +1125,17 @@ export class PlatformController {
   async orgChannels(@Param("id") id: string, @Req() req: PlatformRequest) {
     await this.assertOrgBrand(req, id);
     const db = this.prisma.admin;
-    const [org, connections] = await Promise.all([
+    const [org, rawConnections] = await Promise.all([
       db.organization.findUnique({ where: { id }, select: { settings: true } }),
-      db.channelConnection.findMany({ where: { organizationId: id }, select: { id: true, type: true, name: true, status: true } }),
+      db.channelConnection.findMany({ where: { organizationId: id }, select: { id: true, type: true, name: true, status: true, config: true } }),
     ]);
+    // Expone el flag de coexistencia (número del propio cliente conectado por QR/código)
+    // para que operación distinga de un canal con número dedicado.
+    const connections = rawConnections.map((c) => {
+      const cfg = (c.config as Record<string, unknown>) ?? {};
+      const { config: _omit, ...rest } = c;
+      return { ...rest, coexistence: cfg.coexistence === true, coexVerified: cfg.coexVerified === true };
+    });
     const intents = (((org?.settings as Record<string, any>) ?? {}).channels ?? []) as { type: string; status: string }[];
     return { connections, intents };
   }

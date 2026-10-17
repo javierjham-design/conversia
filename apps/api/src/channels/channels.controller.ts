@@ -474,6 +474,203 @@ export class ChannelsController {
     });
   }
 
+  /**
+   * PELDAÑO 1 — COEXISTENCIA. Conecta el WhatsApp Business que el cliente YA usa en su
+   * teléfono (sin perder la app ni los chats). Flujo gemelo del Embedded Signup pero:
+   *  - featureType de onboarding de la app de negocio (lo elige el config_id del popup),
+   *  - NO se registra el número (ya está registrado; la conexión por código/QR lo cubre),
+   *  - el canal queda marcado `config.coexistence = true`,
+   *  - los ecos de lo que el dueño responde A MANO desde su app llegan por el webhook
+   *    `smb_message_echoes` y el worker los pinta en la Bandeja (dedupe por wamid).
+   * Fail-soft: cualquier fallo levanta una excepción `coexistence_error` en la cola de
+   * operación (super admin) y responde 400 con mensaje accionable — nunca un 500.
+   */
+  @Post("coexistence")
+  async coexistence(@Body() body: unknown) {
+    const ctx = requirePermission("channels:write");
+    const env = getEnv();
+    const input = parse(
+      z.object({
+        code: z.string().min(5),
+        wabaId: z.string().min(3),
+        phoneNumberId: z.string().min(3),
+        businessId: z.string().optional(),
+        name: z.string().min(2).max(60).optional(),
+        defaultAgentId: z.string().nullable().optional(),
+      }),
+      body,
+    );
+    if (!env.META_APP_ID || !env.META_APP_SECRET) {
+      throw new BadRequestException("La conexión no está configurada en el servidor (META_APP_ID / META_APP_SECRET).");
+    }
+    const v = env.META_GRAPH_VERSION;
+    try {
+      // 1. code -> token del negocio.
+      const tokenRes = await fetch(
+        `https://graph.facebook.com/${v}/oauth/access_token?client_id=${encodeURIComponent(env.META_APP_ID)}&client_secret=${encodeURIComponent(env.META_APP_SECRET)}&code=${encodeURIComponent(input.code)}`,
+      );
+      const tokenJson: any = await tokenRes.json().catch(() => ({}));
+      const accessToken: string | undefined = tokenJson?.access_token;
+      if (!tokenRes.ok || !accessToken) {
+        throw new BadRequestException(`No se pudo obtener el token de Meta: ${tokenJson?.error?.message ?? tokenRes.status}`);
+      }
+
+      // 2. Suscribir la app al WABA (webhooks entrantes + ecos) y SALTAR el registro
+      //    (coexistencia: el número ya está registrado en la app del cliente).
+      const onboard = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, accessToken, fetch, { coexistence: true });
+
+      // 3. Nombre visible del número — best-effort.
+      let displayPhone = input.phoneNumberId;
+      let coexVerified = false;
+      try {
+        const numRes = await fetch(
+          withAppSecretProof(
+            `https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}?fields=display_phone_number,verified_name,is_on_biz_app,platform_type`,
+            accessToken,
+          ),
+          { headers: { authorization: `Bearer ${accessToken}` } },
+        );
+        const numJson: any = await numRes.json();
+        if (numRes.ok && numJson?.display_phone_number) displayPhone = numJson.display_phone_number;
+        // Señal de coexistencia de Meta: el número corre en la app Y en Cloud API.
+        coexVerified = numJson?.is_on_biz_app === true && String(numJson?.platform_type ?? "").toUpperCase() === "CLOUD_API";
+      } catch {
+        /* ignore */
+      }
+
+      // 3b. Nombre del negocio + id del usuario de Meta — best-effort.
+      let businessName: string | null = null;
+      if (input.businessId) {
+        try {
+          const bRes = await fetch(
+            withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.businessId)}?fields=name`, accessToken),
+            { headers: { authorization: `Bearer ${accessToken}` } },
+          );
+          const bJson: any = await bRes.json();
+          if (bRes.ok && bJson?.name) businessName = bJson.name;
+        } catch {
+          /* ignore */
+        }
+      }
+      let metaUserId: string | null = null;
+      try {
+        const meRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/me?fields=id`, accessToken), {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        const meJson: any = await meRes.json();
+        if (meRes.ok && meJson?.id) metaUserId = String(meJson.id);
+      } catch {
+        /* ignore */
+      }
+      const name = input.name ?? `WhatsApp ${displayPhone}`;
+      const config: Record<string, unknown> = { coexistence: true, coexVerified, ...(metaUserId ? { metaUserId } : {}) };
+
+      // 4. Persistir el canal coexistente.
+      const result = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        const existing = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId } });
+        if (existing) {
+          const credential = await tx.integrationCredential.create({
+            data: {
+              organizationId: ctx.organizationId,
+              provider: "whatsapp",
+              label: `Token coexistencia ${name} (reconexión)`,
+              ciphertext: encryptSecret(accessToken),
+            },
+          });
+          await tx.whatsappAccount.updateMany({
+            where: { organizationId: ctx.organizationId, wabaId: input.wabaId },
+            data: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
+          });
+          if (existing.channelConnectionId) {
+            const cc = await tx.channelConnection.findUnique({ where: { id: existing.channelConnectionId }, select: { config: true } });
+            await tx.channelConnection.update({
+              where: { id: existing.channelConnectionId },
+              data: {
+                status: "active",
+                ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}),
+                config: { ...((cc?.config as Record<string, unknown>) ?? {}), ...config } as object,
+              },
+            });
+          }
+          await tx.auditLog.create({
+            data: {
+              organizationId: ctx.organizationId,
+              actorType: "user",
+              actorId: ctx.userId,
+              action: "channel.coexistence_reconnect",
+              entityType: "channel_connection",
+              entityId: existing.channelConnectionId ?? existing.id,
+              after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexVerified },
+            },
+          });
+          return { ok: true, id: existing.channelConnectionId, name, displayPhone, businessName, coexistence: true, coexVerified, reconnected: true, warnings: onboard.warnings };
+        }
+
+        await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
+        const channel = await tx.channelConnection.create({
+          data: {
+            organizationId: ctx.organizationId,
+            type: "WHATSAPP_CLOUD",
+            name,
+            defaultAgentId: input.defaultAgentId ?? null,
+            status: "active",
+            config: config as object,
+          },
+        });
+        const credential = await tx.integrationCredential.create({
+          data: {
+            organizationId: ctx.organizationId,
+            provider: "whatsapp",
+            label: `Token coexistencia ${name}`,
+            ciphertext: encryptSecret(accessToken),
+          },
+        });
+        const account = await tx.whatsappAccount.upsert({
+          where: { organizationId_wabaId: { organizationId: ctx.organizationId, wabaId: input.wabaId } },
+          update: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
+          create: { organizationId: ctx.organizationId, wabaId: input.wabaId, businessId: input.businessId ?? null, name, credentialId: credential.id },
+        });
+        await tx.whatsappPhoneNumber.create({
+          data: {
+            organizationId: ctx.organizationId,
+            accountId: account.id,
+            channelConnectionId: channel.id,
+            phoneNumberId: input.phoneNumberId,
+            displayPhone,
+            status: "active",
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "channel.coexistence_connect",
+            entityType: "channel_connection",
+            entityId: channel.id,
+            after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexVerified },
+          },
+        });
+        return { ok: true, id: channel.id, name, displayPhone, businessName, coexistence: true, coexVerified, warnings: onboard.warnings };
+      });
+      return result;
+    } catch (e) {
+      // Fail-soft: deja constancia en la cola de operación y responde accionable (no 500).
+      const detail = e instanceof BadRequestException ? e.message : (e as Error).message;
+      const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { name: true } }).catch(() => null);
+      await raiseException(this.prisma.admin, {
+        organizationId: ctx.organizationId,
+        type: "coexistence_error",
+        title: `No logró conectar por coexistencia — ${org?.name ?? ctx.organizationId}`,
+        severity: "warning",
+        detail: `Coexistencia QR/código. Error: ${detail}`.slice(0, 2000),
+        dedupeKey: `${ctx.organizationId}:coex:${new Date().toISOString().slice(0, 10)}`,
+      }).catch(() => undefined);
+      if (e instanceof BadRequestException) throw e;
+      throw new BadRequestException(`No se pudo conectar tu WhatsApp por coexistencia: ${detail}`);
+    }
+  }
+
   @Patch(":id")
   async update(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("channels:write");

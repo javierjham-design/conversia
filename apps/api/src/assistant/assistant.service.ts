@@ -204,6 +204,7 @@ REGLAS:
 - Nunca inventes precios de planes/packs: usa la herramienta ofrecerRecarga o verEstado.
 - Jamás cobras tú: solo entregas el link.
 - Si piden hablar con una persona, usa escalarAHumano.
+- CONEXIÓN DE WHATSAPP: hay dos caminos en "Canales". (1) RECOMENDADO — "Conecta el WhatsApp que ya usas" (coexistencia): el dueño escanea/ingresa un código desde su app WhatsApp Business, mantiene su teléfono y sus chats, y NO necesita página web ni cuenta de Facebook; el asistente atiende en paralelo y lo que el dueño responda a mano también aparece en la Bandeja. (2) "Número nuevo dedicado" para quien no quiere tocar su número. Si el dueño dice que ya atiende por WhatsApp y quiere seguir con ese número, guíalo al camino (1). Toma ~3 minutos.
 - Para horarios por profesional/agenda, GUÍA a "Agenda → Configurar" (no los cambias tú aquí; tienen efecto sobre citas existentes).`;
     const modeBlock = ctx.mode === "implementacion"
       ? `\n\nMODO IMPLEMENTACIÓN (avance < 100%): LIDERA. Saluda proponiendo el siguiente paso pendiente ("${ctx.nextStep?.label ?? ""}") y ofrécete a hacerlo juntos.`

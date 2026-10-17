@@ -34,6 +34,7 @@ export async function subscribeAndRegisterWhatsapp(
   phoneNumberId: string,
   accessToken: string,
   fetchImpl: typeof fetch = fetch,
+  opts: { coexistence?: boolean } = {},
 ): Promise<OnboardResult> {
   const v = getEnv().META_GRAPH_VERSION;
   const warnings: string[] = [];
@@ -62,6 +63,16 @@ export async function subscribeAndRegisterWhatsapp(
   }
 
   // 2) Registrar el número para Cloud API (necesario para ENVIAR; ver #133010).
+  // En COEXISTENCIA el número YA está registrado (la conexión por código/QR lo cubre);
+  // Meta pide explícitamente SALTAR el registro → no llamamos a /register ni usamos PIN.
+  if (opts.coexistence) {
+    steps.push({
+      step: "register",
+      ok: true,
+      detail: "Coexistencia: el número ya está registrado en tu app de WhatsApp — no requiere registro por API.",
+    });
+    return { warnings, steps };
+  }
   const pin = String(Math.floor(100000 + Math.random() * 900000));
   try {
     const res = await fetchImpl(
