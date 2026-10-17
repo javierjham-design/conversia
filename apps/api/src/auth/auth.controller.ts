@@ -372,6 +372,33 @@ export class AuthController {
   }
 
   /**
+   * M1 (PWA) — el usuario instaló la app en su dispositivo (evento `appinstalled`).
+   * Se registra en auditoría para medir adopción. Best-effort; no afecta el flujo.
+   */
+  @Post("pwa-installed")
+  async pwaInstalled(@Body() body: unknown) {
+    const ctx = requireContext();
+    const parsed = z.object({ platform: z.string().max(120).optional() }).safeParse(body);
+    const platform = parsed.success ? parsed.data.platform ?? null : null;
+    await this.prisma
+      .withTenant(ctx.organizationId, (tx) =>
+        tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "pwa.installed",
+            entityType: "user",
+            entityId: ctx.userId,
+            after: { platform },
+          },
+        }),
+      )
+      .catch(() => undefined);
+    return { ok: true };
+  }
+
+  /**
    * Cambio de contraseña propio: exige la contraseña ACTUAL. Requisitos de la
    * nueva: mínimo 8 caracteres con al menos una letra y un número.
    */

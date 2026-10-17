@@ -2,7 +2,7 @@
   "name": "Conversia",
   "short_name": "Conversia",
   "description": "Tu negocio, atendido. Atención por WhatsApp con IA.",
-  "start_url": "/",
+  "start_url": "/inicio",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
@@ -11,12 +11,14 @@
   "lang": "es",
   "dir": "ltr",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Hoy", "short_name": "Hoy", "url": "/" },
-    { "name": "Conversaciones", "short_name": "Chats", "url": "/conversaciones" },
-    { "name": "Agenda", "short_name": "Agenda", "url": "/agenda" }
+    { "name": "Bandeja", "short_name": "Bandeja", "url": "/conversaciones", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Agenda", "short_name": "Agenda", "url": "/agenda", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Cobros", "short_name": "Cobros", "url": "/cobros", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
   ]
 }

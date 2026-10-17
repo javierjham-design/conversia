@@ -13,7 +13,14 @@ export const metadata: Metadata = {
   description: "Tu negocio, atendido. Conversia — atención por WhatsApp con IA.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "Conversia", statusBarStyle: "black-translucent" },
-  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = { themeColor: "#0f2027" };
