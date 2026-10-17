@@ -1,0 +1,23 @@
+name: smoke-prod
+
+# Humo contra PRODUCCIÓN REAL (solo lectura). Se corre:
+#  - a mano tras cada deploy (workflow_dispatch) → el job post-deploy del runbook,
+#  - y como canario diario para detectar regresiones de entorno (bundle/CORS/caché/version).
+# NO corre en pull_request: apunta a prod (dominios públicos, sin secretos) y no debe
+# bloquear el merge; es verificación de despliegue, no de código.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * *" # 13:00 UTC diario
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # smoke-prod.mjs no tiene dependencias (fetch nativo) → sin install.
+      - name: Smoke contra producción
+        run: node tools/sim/smoke-prod.mjs

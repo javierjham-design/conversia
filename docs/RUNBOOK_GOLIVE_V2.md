@@ -96,6 +96,35 @@ railway run --service Postgres -- bash -lc 'psql "$DATABASE_PUBLIC_URL" -c "INSE
    ("pasarela real configurada") — si responde 200, revisar paso 6.
 4. Borrar la cuenta de prueba desde el super admin.
 
+## 8. Humo automatizado contra prod (`smoke-prod.mjs`)
+
+Tras cada deploy, correr el humo de solo-lectura (Node 22, sin dependencias):
+
+```
+node tools/sim/smoke-prod.mjs
+```
+
+Verifica, contra los dominios públicos reales: dominios arriba + TLS, **bundle sin
+`localhost`** (regresión del build sin `NEXT_PUBLIC_API_URL`), **CORS por dominio** (apex +
+www + app), funnel completo (`/public/verticals` ≥ 14 rubros, 3 packs, planes), headers y
+caché del HTML, mismo `buildId` en ambos dominios, enlaces internos y bordes de seguridad
+(webhook/mock/API key). Sale con código 1 si algo falla. También corre solo como canario
+diario (`.github/workflows/smoke-prod.yml`); **no** corre en PRs (apunta a prod).
+
+### Caché del HTML (regla de borde, NO código)
+
+El HTML debe servirse con `s-maxage` ≤ 300. El código (`conversia-web/next.config.mjs`) ya lo
+hace (`s-maxage=60`). Si el humo marca `s-maxage=31536000` en `/`, `/crear`, `/registro` o
+`/login`, es una **Cache Rule del borde (Cloudflare/Railway)** que fija Edge TTL de 1 año →
+hay que ponerla en *bypass* o TTL ≤ 300 s para no servir versiones viejas tras un deploy.
+(El `31536000` del HSTS sí es correcto; no tocarlo.)
+
+### Checklist de variables por servicio
+
+La tabla completa de env esperado por servicio (crítico/opcional) y la verificación de que
+`NEXT_PUBLIC_API_URL` esté como **variable de BUILD** en `conversia-web` están en
+`docs/QA_PRODUCCION_RESULTADOS.md` §5.
+
 ## Recordatorios
 
 - Redis de producción ≥ 6.2 (BullMQ lo advierte con 5.x).
