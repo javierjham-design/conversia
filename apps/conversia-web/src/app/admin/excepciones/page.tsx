@@ -15,6 +15,8 @@ const TYPE_LABEL: Record<string, string> = {
   numero_salud: "Salud del número",
   hsm_rechazada: "Plantilla rechazada",
   coexistence_error: "Error de Coexistence",
+  canal_conexion_fallida: "No conecta su WhatsApp",
+  verificacion_negocio: "Verificación de negocio (Meta)",
   margen_negativo: "Margen negativo",
   abandono_alta: "Alta abandonada",
 };
