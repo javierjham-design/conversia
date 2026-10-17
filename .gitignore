@@ -16,3 +16,4 @@ Thumbs.db
 # Artefactos de sesion de desarrollo
 .commitmsg.txt
 .prbody.txt
+tools/sim/out/

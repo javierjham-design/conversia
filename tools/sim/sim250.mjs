@@ -4,7 +4,7 @@
  *  cross-brand, JWT forjado, rate limits). Fases: w1 registro · w2 compras · w3 tráfico ·
  *  w4 bordes · w5 montaje×14 · w6 SEGURIDAD · w7 validación global. */
 import { execFileSync } from "node:child_process";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, appendFileSync } from "node:fs";
 
 // Todo parametrizable por env (defaults = entorno local típico). El harness corre
 // SIEMPRE contra un stack AISLADO (BD/Redis propios + providers mock) — jamás producción.
@@ -451,6 +451,379 @@ async function w7() {
   for (const f of findings.filter((x) => x.sev !== "ERROR")) console.log(`  - [${f.sev}] ${f.area}: ${f.msg}`);
 }
 
+// ============ W8: CARGA MASIVA (ramp-up · sostenido · ráfaga · soak · panel) ============
+// Fase de resistencia bajo carga. Reusa las 250 orgs registradas por w1/w2 (cargadas desde
+// tools/sim/out/sims250.json en MAIN). Generador con concurrencia controlada (token-bucket +
+// limiter) y paso Poisson por tick: NADA de sleep fijo que serialice el throughput — el ritmo
+// de llegada se pacea, pero los envíos (fire-and-forget al webhook) se solapan vía el limiter.
+
+// --- Perillas de W8 (TODO override por env para poder escalar en un laptop) ---
+const W8_SCALE = Number(process.env.SIM_W8_SCALE ?? "1");          // multiplica TODAS las tasas
+const W8_FAST = (process.env.SIM_W8_FAST ?? "0") === "1";          // encoge TODAS las duraciones a ~1 min
+const W8_FAST_MIN = Number(process.env.SIM_W8_FAST_MIN ?? "1");    // minutos por fase cuando FAST=1
+const w8DurMin = (key, def) => (W8_FAST ? W8_FAST_MIN : Number(process.env[key] ?? def));
+const w8Rate = (key, def) => Math.max(0, Number(process.env[key] ?? def) * W8_SCALE);
+const w8MinToMs = (m) => Math.max(1, Math.round(m * 60_000));
+
+const W8_RAMP_MIN = w8DurMin("SIM_W8_RAMP_MIN", 5);
+const W8_SUSTAIN_MIN = w8DurMin("SIM_W8_SUSTAIN_MIN", 15);
+const W8_BURST_MIN = w8DurMin("SIM_W8_BURST_MIN", 2);
+const W8_SOAK_MIN = w8DurMin("SIM_W8_SOAK_MIN", 20);
+const W8_SUSTAIN_RATE = w8Rate("SIM_W8_RATE", 50);                 // msg/s sostenido
+const W8_BURST_RATE = w8Rate("SIM_W8_BURST_RATE", 150);            // msg/s ráfaga
+const W8_SOAK_RATE = w8Rate("SIM_W8_SOAK_RATE", 20);              // msg/s soak
+const W8_RAMP_PEAK_RATE = w8Rate("SIM_W8_RAMP_PEAK_RATE", Number(process.env.SIM_W8_RATE ?? 50)); // pico al final del ramp
+const W8_CONC_MIN = Math.max(1, Number(process.env.SIM_W8_CONC_MIN ?? "10"));   // concurrencia al inicio del ramp
+const W8_CONC_MAX = Math.max(W8_CONC_MIN, Number(process.env.SIM_W8_CONC_MAX ?? "100")); // concurrencia pico
+const W8_PER_ORG = Math.max(1, Number(process.env.SIM_W8_CONTACTS_PER_ORG ?? "4")); // contactos activos por org (4×250=1.000)
+const W8_CONV_MIN = Math.max(1, Number(process.env.SIM_W8_CONV_MIN ?? "2"));   // mensajes mín. por conversación
+const W8_CONV_MAX = Math.max(W8_CONV_MIN, Number(process.env.SIM_W8_CONV_MAX ?? "5")); // mensajes máx. por conversación
+const W8_BURST_ORGS = Math.max(1, Number(process.env.SIM_W8_BURST_ORGS ?? "30")); // orgs "virales" de la ráfaga
+const W8_PANEL_SESSIONS = Math.max(0, Number(process.env.SIM_W8_PANEL_SESSIONS ?? "50")); // logins de panel bajo carga
+const W8_PANEL_INTERVAL_MS = Math.max(1000, Number(process.env.SIM_W8_PANEL_INTERVAL_MS ?? "10000")); // cadencia de navegación
+const W8_PANEL_CONC = Math.max(1, Number(process.env.SIM_W8_PANEL_CONC ?? "25")); // concurrencia de requests del panel
+const W8_TICK_MS = Math.max(20, Number(process.env.SIM_W8_TICK_MS ?? "100"));  // granularidad del scheduler
+const W8_REQ_TIMEOUT_MS = Math.max(1000, Number(process.env.SIM_W8_REQ_TIMEOUT_MS ?? "15000")); // timeout por request (no bloquear slots)
+const W8_FLUSH_MS = Math.max(500, Number(process.env.SIM_W8_FLUSH_MS ?? "3000")); // flush del log de enviados a disco
+const W8_DRAIN_MS = Math.max(10000, Number(process.env.SIM_W8_DRAIN_MS ?? "600000")); // techo de espera para drenar colas y reconciliar
+const W8_INCLUDE_TUBOT = (process.env.SIM_W8_INCLUDE_TUBOT ?? "0") === "1"; // por defecto NO cargamos tráfico a orgs TuBot
+const W8_PHASES = (process.env.SIM_W8_PHASES ?? "ramp,sustain,burst,soak").split(",").map((s) => s.trim()).filter(Boolean);
+const W8_BURST_CAP = process.env.SIM_W8_BURST_CAP ?? ""; // opcional: baja messagingCapSvcPerTenantDay antes de la ráfaga (cache 65s); vacío = no tocar
+const W8_MOCK_TOKEN = process.env.MOCK_INBOUND_TOKEN ?? "dev-mock-inbound-token"; // header x-conversia-mock-token
+
+// Frases de la conversación (español): la 1.ª "abre", el resto "continúan".
+const W8_OPENERS = ["Hola, quiero información y precios", "Buenas, ¿tienen horas disponibles?", "Hola, necesito una consulta", "Hola, ¿me ayudan con una cotización?"];
+const W8_FOLLOWUPS = ["¿Tienen hora esta semana?", "¿Cuánto sale?", "Perfecto, ¿cómo agendo?", "¿Atienden los sábados?", "Gracias, lo voy a pensar"];
+
+// --- Limiter estilo p-limit: capa la concurrencia de requests en vuelo (max ajustable en caliente) ---
+function w8Limiter(max) {
+  let active = 0;
+  const q = [];
+  const pump = () => {
+    while (active < max && q.length) {
+      const job = q.shift();
+      active++;
+      Promise.resolve().then(job).catch(() => {}).finally(() => { active--; pump(); });
+    }
+  };
+  return {
+    submit(job) { q.push(job); pump(); },
+    setMax(n) { max = Math.max(1, n); pump(); },
+    get active() { return active; },
+    get pending() { return q.length; },
+    async drain() { while (active > 0 || q.length) await sleep(50); },
+  };
+}
+
+// Muestra Gaussiana (Box-Muller) y Poisson (Knuth para λ chico, aproximación normal para λ grande).
+function w8Gaussian() {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function w8Poisson(lambda) {
+  if (lambda <= 0) return 0;
+  if (lambda > 30) { const n = Math.round(lambda + Math.sqrt(lambda) * w8Gaussian()); return n < 0 ? 0 : n; }
+  const L = Math.exp(-lambda);
+  let k = 0, p = 1;
+  do { k++; p *= Math.random(); } while (p > L);
+  return k - 1;
+}
+function w8Pct(arr, p) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
+}
+
+// Teléfono namespaced para W8 (7.º dígito = '8') → no colisiona con los de w3/w4/w6, así la
+// reconciliación de pérdidas (enviados vs filas INBOUND) queda limpia.
+const w8Phone = (orgIdx, slot) => `569${String(orgIdx).padStart(3, "0")}8${String(slot).padStart(4, "0")}`;
+
+// --- Envíos mínimos con timeout (1 intento): no reintentan para no retener slots del limiter ---
+async function w8Send(slug, phone, text, wamid, token) {
+  try {
+    const res = await fetch(`${API}/webhooks/whatsapp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-conversia-mock-token": token },
+      body: JSON.stringify(inboundPayload(slug, phone, text, wamid)),
+      signal: AbortSignal.timeout(W8_REQ_TIMEOUT_MS),
+    });
+    return res.status;
+  } catch { return 0; } // 0 = error de red / timeout (contado como rechazo)
+}
+async function w8Get(path, token, origin) {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`${API}${path}`, { headers: { "content-type": "application/json", Origin: origin, authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(W8_REQ_TIMEOUT_MS) });
+    try { await res.json(); } catch {}
+    return { status: res.status, ms: Date.now() - t0 };
+  } catch { return { status: 0, ms: Date.now() - t0 }; }
+}
+async function w8Login(email, pass, origin) {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`${API}/auth/login`, { method: "POST", headers: { "content-type": "application/json", Origin: origin }, body: JSON.stringify({ email, password: pass }), signal: AbortSignal.timeout(W8_REQ_TIMEOUT_MS) });
+    let data = null; try { data = await res.json(); } catch {}
+    return { status: res.status, ms: Date.now() - t0, token: data?.token };
+  } catch { return { status: 0, ms: Date.now() - t0 }; }
+}
+
+// --- Pool de conversaciones: perOrg contactos por org, intercalados por slot para que el ramp
+//     active contactos repartidos entre TODAS las orgs (primero slot0 de todas, luego slot1…). ---
+function w8BuildPool(orgs, perOrg, convMin, convMax) {
+  const contacts = [];
+  for (let s = 0; s < perOrg; s++) {
+    for (const o of orgs) {
+      contacts.push({ i: o.i, slug: o.slug, phone: w8Phone(o.i, s), step: 0, target: convMin + Math.floor(Math.random() * (convMax - convMin + 1)) });
+    }
+  }
+  return {
+    size: contacts.length,
+    // next(frac): elige al azar un contacto dentro de la ventana activa (frac del pool) y avanza
+    // su paso de conversación; al llegar a su target reinicia (contacto reutilizado = nueva charla).
+    next(frac = 1) {
+      if (!contacts.length) return null;
+      const activeCount = Math.min(contacts.length, Math.max(1, Math.ceil(contacts.length * frac)));
+      const c = contacts[Math.floor(Math.random() * activeCount)];
+      const snap = { i: c.i, slug: c.slug, phone: c.phone, step: c.step };
+      c.step++;
+      if (c.step >= c.target) { c.step = 0; c.target = convMin + Math.floor(Math.random() * (convMax - convMin + 1)); }
+      return snap;
+    },
+  };
+}
+
+// Buffer de "lo enviado" → se vuelca a JSONL periódicamente (memoria acotada; permite que la
+// observabilidad reconcilie EN VIVO y que la verificación de pérdidas cuadre por wamid).
+let w8FlushBuf = [];
+let w8Seq = 0;
+function w8Flush() {
+  if (!w8FlushBuf.length) return;
+  const chunk = w8FlushBuf; w8FlushBuf = [];
+  try { appendFileSync(OUT("w8-sent.jsonl"), chunk.join("\n") + "\n"); } catch { /* no romper la corrida por I/O */ }
+}
+// Fábrica de "jobs": cada llamada elige el próximo contacto y devuelve una función async que
+// envía 1 inbound y registra el resultado (status + wamid) sin bloquear al scheduler.
+function w8MakeSender(phase, pool, counters, activeFracFn) {
+  return (frac) => {
+    const c = pool.next(activeFracFn(frac));
+    if (!c) return null;
+    const text = c.step === 0 ? W8_OPENERS[Math.floor(Math.random() * W8_OPENERS.length)] : W8_FOLLOWUPS[(c.step - 1) % W8_FOLLOWUPS.length];
+    const wamid = `wamid.w8.${phase}.${w8Seq++}.${Math.random().toString(36).slice(2, 8)}`;
+    const ts = Date.now();
+    return async () => {
+      const status = await w8Send(c.slug, c.phone, text, wamid, W8_MOCK_TOKEN);
+      const ok = status >= 200 && status < 300;
+      if (ok) counters.accepted++; else counters.rejected++;
+      counters.byStatus[status] = (counters.byStatus[status] ?? 0) + 1;
+      w8FlushBuf.push(JSON.stringify({ ts, phase, org: c.i, slug: c.slug, phone: c.phone, wamid, status, step: c.step }));
+    };
+  };
+}
+
+// --- Panel bajo carga: N logins + navegación por API cada intervalo, concurrente con el sostenido ---
+function w8StartPanel(orgs) {
+  const sessions = [];
+  const nav = [];
+  const navByPath = {};
+  const logins = { ok: 0, fail: 0, ms: [] };
+  let stop = false;
+  const paths = ["/auth/me", "/billing/wallet/summary", "/conversations", "/onboarding"];
+  const lim = w8Limiter(W8_PANEL_CONC);
+  const done = (async () => {
+    // 1) Logins iniciales (mide latencia de /auth/login).
+    await Promise.all(orgs.map((o) => new Promise((res) => lim.submit(async () => {
+      const origin = o.brand === "tubot" ? ORIGIN_TB : ORIGIN_CV;
+      const r = await w8Login(o.email, o.pass, origin);
+      logins.ms.push(r.ms);
+      if (r.status >= 200 && r.status < 300 && r.token) { logins.ok++; sessions.push({ token: r.token, origin }); }
+      else logins.fail++;
+      res();
+    }))));
+    console.log(`  [panel] logins ${logins.ok}/${orgs.length} ok (fail ${logins.fail}), login p95=${w8Pct(logins.ms, 95)}ms`);
+    // 2) Navegación periódica (GET /auth/me · /billing/wallet/summary · /conversations · /onboarding).
+    while (!stop) {
+      const cycleT0 = Date.now();
+      await Promise.all(sessions.map((s) => new Promise((res) => lim.submit(async () => {
+        for (const p of paths) { const g = await w8Get(p, s.token, s.origin); nav.push(g.ms); (navByPath[p] ??= []).push(g.ms); }
+        res();
+      }))));
+      const wait = W8_PANEL_INTERVAL_MS - (Date.now() - cycleT0);
+      if (wait > 0 && !stop) await sleep(wait);
+    }
+  })();
+  return { stop: () => { stop = true; }, done, logins, nav, navByPath };
+}
+
+async function w8() {
+  console.log("\n== W8 CARGA MASIVA ==");
+  const pool0 = ORGS.filter((o) => o.token && o.orgId && o.slug && (W8_INCLUDE_TUBOT || o.brand !== "tubot"));
+  if (!pool0.length) {
+    F("CRITICO", "w8-orgs", "no hay orgs cargadas (corre w1/w2 o 'all' primero; falta tools/sim/out/sims250.json con token/orgId/slug)");
+    return;
+  }
+  const burstOrgs = pool0.slice(0, Math.min(W8_BURST_ORGS, pool0.length));
+  const panelOrgs = pool0.slice(0, Math.min(W8_PANEL_SESSIONS, pool0.length));
+  const mainPool = w8BuildPool(pool0, W8_PER_ORG, W8_CONV_MIN, W8_CONV_MAX);
+  const burstPool = w8BuildPool(burstOrgs, W8_PER_ORG, W8_CONV_MIN, W8_CONV_MAX);
+
+  // Perfil efectivo (imprime lo que REALMENTE se va a correr tras SCALE/FAST).
+  const profile = {
+    orgs: pool0.length, includeTuBot: W8_INCLUDE_TUBOT, contactsPerOrg: W8_PER_ORG, activeContacts: mainPool.size,
+    scale: W8_SCALE, fast: W8_FAST, phases: W8_PHASES, mockToken: W8_MOCK_TOKEN === "dev-mock-inbound-token" ? "(default)" : "(custom)",
+    ramp: { min: W8_RAMP_MIN, peakRate: W8_RAMP_PEAK_RATE, conc: `${W8_CONC_MIN}→${W8_CONC_MAX}` },
+    sustain: { min: W8_SUSTAIN_MIN, rate: W8_SUSTAIN_RATE, conc: W8_CONC_MAX, panelSessions: panelOrgs.length, panelEveryMs: W8_PANEL_INTERVAL_MS },
+    burst: { min: W8_BURST_MIN, rate: W8_BURST_RATE, orgs: burstOrgs.length, cap: W8_BURST_CAP || "(no tocar)" },
+    soak: { min: W8_SOAK_MIN, rate: W8_SOAK_RATE, conc: W8_CONC_MAX },
+    tickMs: W8_TICK_MS, reqTimeoutMs: W8_REQ_TIMEOUT_MS,
+  };
+  console.log("  PERFIL EFECTIVO:", JSON.stringify(profile));
+
+  const w8Start = Date.now();
+  writeFileSync(OUT("w8-sent.jsonl"), ""); // trunca el log de enviados al inicio
+  const flushTimer = setInterval(w8Flush, W8_FLUSH_MS);
+  const limiter = w8Limiter(W8_CONC_MAX);
+  const phaseStats = [];
+
+  // Motor de una fase: paso Poisson por tick; despacha N jobs/tick al limiter sin esperar su fin.
+  async function runLoadPhase(name, { durationMs, rateAt, concAt, pool, activeFracFn }) {
+    const c = { phase: name, dispatched: 0, accepted: 0, rejected: 0, byStatus: {}, startedAt: Date.now() };
+    const sender = w8MakeSender(name, pool, c, activeFracFn);
+    limiter.setMax(concAt ? Math.round(concAt(0)) : W8_CONC_MAX);
+    let maxPending = 0;
+    const t0 = Date.now();
+    let nextAt = t0;
+    while (Date.now() - t0 < durationMs) {
+      const frac = Math.min(1, (Date.now() - t0) / durationMs);
+      if (concAt) limiter.setMax(Math.max(1, Math.round(concAt(frac))));
+      const n = w8Poisson(Math.max(0, rateAt(frac)) * (W8_TICK_MS / 1000));
+      for (let k = 0; k < n; k++) { const job = sender(frac); if (!job) break; c.dispatched++; limiter.submit(job); }
+      if (limiter.pending > maxPending) maxPending = limiter.pending;
+      nextAt += W8_TICK_MS;
+      const wait = nextAt - Date.now();
+      if (wait > 0) await sleep(wait); else nextAt = Date.now(); // sin acumular deuda si vamos atrasados
+    }
+    await limiter.drain(); // deja asentar los jobs en vuelo antes de medir
+    c.endedAt = Date.now();
+    c.durationSec = (c.endedAt - c.startedAt) / 1000;
+    c.targetRate = Math.max(0, rateAt(1));
+    c.achievedRate = c.accepted / Math.max(0.001, c.durationSec);
+    c.maxPending = maxPending;
+    c.concMax = concAt ? Math.round(concAt(1)) : W8_CONC_MAX;
+    phaseStats.push(c);
+    console.log(`  [${name}] dispatched=${c.dispatched} accepted=${c.accepted} rejected=${c.rejected} achieved=${c.achievedRate.toFixed(1)}/s (target ${c.targetRate.toFixed(1)}/s) maxPending=${maxPending} dur=${c.durationSec.toFixed(0)}s status=${JSON.stringify(c.byStatus)}`);
+    return c;
+  }
+
+  let panel = null;
+  try {
+    // 1) RAMP-UP: tasa 0→pico, concurrencia MIN→MAX, contactos activos 0→1.000 (frac del pool).
+    if (W8_PHASES.includes("ramp")) {
+      await runLoadPhase("ramp", {
+        durationMs: w8MinToMs(W8_RAMP_MIN),
+        rateAt: (f) => W8_RAMP_PEAK_RATE * f,
+        concAt: (f) => W8_CONC_MIN + (W8_CONC_MAX - W8_CONC_MIN) * f,
+        pool: mainPool,
+        activeFracFn: (f) => f,
+      });
+    }
+    // 2) SOSTENIDO: ~RATE msg/s repartido en todas las orgs (Poisson) + PANEL bajo carga en paralelo.
+    if (W8_PHASES.includes("sustain")) {
+      if (W8_PANEL_SESSIONS > 0 && panelOrgs.length) panel = w8StartPanel(panelOrgs);
+      await runLoadPhase("sustain", {
+        durationMs: w8MinToMs(W8_SUSTAIN_MIN),
+        rateAt: () => W8_SUSTAIN_RATE,
+        concAt: null,
+        pool: mainPool,
+        activeFracFn: () => 1,
+      });
+      if (panel) { panel.stop(); await panel.done; }
+    }
+    // 3) RÁFAGA: pico concentrado en W8_BURST_ORGS orgs (campaña viral) → los fusibles por tenant
+    //    deben cortar al abusador sin degradar al resto. Opcional: bajar el techo svc (cache 65s).
+    if (W8_PHASES.includes("burst")) {
+      let prevCap = null;
+      if (W8_BURST_CAP) {
+        prevCap = psql(`SELECT value FROM platform_settings WHERE key='messagingCapSvcPerTenantDay';`) || "3000";
+        psql(`INSERT INTO platform_settings (key, value, updated_at) VALUES ('messagingCapSvcPerTenantDay','${W8_BURST_CAP}', now()) ON CONFLICT (key) DO UPDATE SET value='${W8_BURST_CAP}', updated_at=now();`);
+        console.log(`  (fusible ráfaga: techo svc=${W8_BURST_CAP}; esperando 65s de cache…)`);
+        await sleep(65000);
+      }
+      try {
+        await runLoadPhase("burst", {
+          durationMs: w8MinToMs(W8_BURST_MIN),
+          rateAt: () => W8_BURST_RATE,
+          concAt: null,
+          pool: burstPool,
+          activeFracFn: () => 1,
+        });
+      } finally {
+        if (prevCap !== null) {
+          psql(`UPDATE platform_settings SET value='${prevCap}', updated_at=now() WHERE key='messagingCapSvcPerTenantDay';`);
+          console.log(`  (restaurando techo svc=${prevCap}; esperando 65s de cache…)`);
+          await sleep(65000);
+        }
+      }
+    }
+    // 4) SOAK: tasa baja y constante para cazar fugas de memoria/conexiones.
+    if (W8_PHASES.includes("soak")) {
+      await runLoadPhase("soak", {
+        durationMs: w8MinToMs(W8_SOAK_MIN),
+        rateAt: () => W8_SOAK_RATE,
+        concAt: null,
+        pool: mainPool,
+        activeFracFn: () => 1,
+      });
+    }
+  } finally {
+    if (panel) { panel.stop(); try { await panel.done; } catch {} }
+    clearInterval(flushTimer);
+    w8Flush();
+  }
+
+  // Panel: percentiles de latencia de navegación (criterio: <2s p95 en los GET).
+  let panelStats = null;
+  if (panel) {
+    const byPath = {};
+    for (const [p, arr] of Object.entries(panel.navByPath)) byPath[p] = { n: arr.length, p50: w8Pct(arr, 50), p95: w8Pct(arr, 95), p99: w8Pct(arr, 99) };
+    panelStats = {
+      logins: { ok: panel.logins.ok, fail: panel.logins.fail, p50: w8Pct(panel.logins.ms, 50), p95: w8Pct(panel.logins.ms, 95) },
+      nav: { n: panel.nav.length, p50: w8Pct(panel.nav, 50), p95: w8Pct(panel.nav, 95), p99: w8Pct(panel.nav, 99) },
+      byPath,
+    };
+    console.log(`  [panel] nav p50=${panelStats.nav.p50}ms p95=${panelStats.nav.p95}ms p99=${panelStats.nav.p99}ms (n=${panelStats.nav.n})`);
+    CHECK(panelStats.nav.p95 < 2000, "ALTO", "w8-panel-p95", `panel p95=${panelStats.nav.p95}ms (>2000ms bajo carga)`, `panel p95=${panelStats.nav.p95}ms (<2s)`);
+  }
+
+  // Reconciliación de pérdidas: enviados 2xx vs filas INBOUND creadas desde el inicio de W8
+  // (unicidad de wamid → 1:1; dedupe no colapsa nada porque cada wamid es único).
+  console.log("  drenando colas para reconciliación…");
+  await drain("w8", W8_DRAIN_MS);
+  const since = new Date(w8Start).toISOString();
+  const inboundRows = Number(psql(`SELECT count(*) FROM messages WHERE direction='INBOUND' AND created_at >= '${since}';`));
+  const totalDispatched = phaseStats.reduce((a, c) => a + c.dispatched, 0);
+  const totalAccepted = phaseStats.reduce((a, c) => a + c.accepted, 0);
+  const totalRejected = phaseStats.reduce((a, c) => a + c.rejected, 0);
+  const loss = totalAccepted - inboundRows;
+  CHECK(loss <= 0 || totalAccepted === 0 || loss / totalAccepted < 0.001, "ALTO", "w8-perdidas",
+    `enviados(2xx)=${totalAccepted} vs filas INBOUND=${inboundRows} (delta ${loss})`,
+    `sin pérdida: enviados(2xx)=${totalAccepted} == INBOUND=${inboundRows}`);
+
+  const summary = {
+    profile, startedAt: new Date(w8Start).toISOString(), finishedAt: new Date().toISOString(),
+    totals: { dispatched: totalDispatched, accepted: totalAccepted, rejected: totalRejected, inboundRows, loss },
+    phases: phaseStats, panel: panelStats,
+    sentLog: OUT("w8-sent.jsonl"),
+  };
+  writeFileSync(OUT("w8-summary.json"), JSON.stringify(summary, null, 1));
+  metrics.w8 = summary.totals;
+  console.log("\n===== RESUMEN W8 =====");
+  console.log(`  despachados=${totalDispatched} aceptados(2xx)=${totalAccepted} rechazados=${totalRejected} · INBOUND en BD=${inboundRows} · pérdida=${loss}`);
+  for (const c of phaseStats) console.log(`  ${c.phase}: ${c.achievedRate.toFixed(1)}/s (target ${c.targetRate.toFixed(1)}/s) maxPending=${c.maxPending}`);
+  console.log(`  artefactos: ${OUT("w8-summary.json")} · ${OUT("w8-sent.jsonl")}`);
+}
+
 // ============ MAIN ============
 const phase = process.argv[2] ?? "all";
 const saved = existsSync(OUT("sims250.json")) ? JSON.parse(readFileSync(OUT("sims250.json"), "utf8")) : null;
@@ -463,6 +836,7 @@ try {
   if (phase === "all" || phase === "w5") await w5();
   if (phase === "all" || phase === "w6") await w6();
   if (phase === "all" || phase === "w7") await w7();
+  if (phase === "w8") await w8(); // carga masiva: corrida aparte (no entra en 'all' por su duración ~42 min)
 } finally {
   writeFileSync(OUT("sims250.json"), JSON.stringify(ORGS, null, 1));
   writeFileSync(OUT("sim250-findings.json"), JSON.stringify({ metrics, findings }, null, 1));
