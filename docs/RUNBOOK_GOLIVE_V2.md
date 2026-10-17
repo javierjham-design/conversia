@@ -20,6 +20,22 @@ Railway → servicio `conversia-web` → Variables:
 - `NEXT_PUBLIC_API_URL = https://${{api.RAILWAY_PUBLIC_DOMAIN}}`
 (guardar → redeploy automático; es build-arg, el valor queda inlined en el bundle).
 
+## 0b. CLOUDFLARE — purga + regla de caché (hallazgo prod 17-oct, "sigo viendo lo viejo")
+
+Las páginas HTML salían con `s-maxage=31536000` (1 año) y Cloudflare servía versiones
+VIEJAS después de cada deploy (así se vio dos veces el "Cargando rubros…" ya corregido).
+El código ya baja el TTL del HTML a 60 s, pero además, en el dashboard de Cloudflare
+(dominio conversia.cl):
+
+1. **Ahora**: Caching → Configuration → **Purge Everything** (una vez, limpia lo viejo).
+2. **Permanente**: Caching → Cache Rules → nueva regla "Bypass HTML":
+   - Cuando: `Hostname contiene conversia.cl` AND `URI Path no empieza con /_next/static`
+   - Entonces: **Bypass cache**.
+   (Los assets /_next/static siguen cacheados: van versionados por hash.)
+
+Mientras no se purgue, un visitante con el POP "sucio" puede seguir viendo lo anterior;
+tras la purga + regla, cada deploy se ve al instante.
+
 ## 1. HARDENING CRÍTICO — activar RLS en producción (rol `conversia_app`)
 
 Hoy `api` y `worker` conectan como `postgres` (superusuario → RLS NO aplica; la
