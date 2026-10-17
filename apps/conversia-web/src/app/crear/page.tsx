@@ -1,12 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Send, Sparkles } from "lucide-react";
 
 // V2-3 — Generador público (/crear): el producto en la portada. Rubro + nombre + web/IG →
 // construcción narrada → simulador de WhatsApp jugable (sin cuenta) → registro para GUARDAR.
 // Público (sin auth): habla directo a la API con fetch.
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { apiBase } from "@/lib/api-base";
+const API = apiBase();
 
 type Vertical = { key: string; name: string; emoji: string; tagline: string };
 type Msg = { role: "user" | "assistant"; content: string };
@@ -31,9 +32,17 @@ export default function Crear() {
   const [limit, setLimit] = useState(15);
   const bottom = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetch(`${API}/public/verticals`).then((r) => r.json()).then((v) => setVerticals(Array.isArray(v) ? v : [])).catch(() => {});
+  // Carga de rubros con ERROR VISIBLE y reintento (antes un fallo dejaba
+  // "Cargando rubros…" para siempre — hallazgo prod 17-oct-2026).
+  const [verticalsError, setVerticalsError] = useState(false);
+  const loadVerticals = useCallback(() => {
+    setVerticalsError(false);
+    fetch(`${API}/public/verticals`)
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then((v) => { if (Array.isArray(v) && v.length) setVerticals(v); else setVerticalsError(true); })
+      .catch(() => setVerticalsError(true));
   }, []);
+  useEffect(() => { loadVerticals(); }, [loadVerticals]);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
   // Animación de construcción narrada → arranca el simulador con el saludo del bot.
@@ -120,7 +129,13 @@ export default function Crear() {
                   <span>{v.emoji}</span> {v.name}
                 </button>
               ))}
-              {verticals.length === 0 ? <span className="text-dim" style={{ fontSize: 13 }}>Cargando rubros…</span> : null}
+              {verticals.length === 0 && !verticalsError ? <span className="text-dim" style={{ fontSize: 13 }}>Cargando rubros…</span> : null}
+              {verticalsError ? (
+                <span style={{ fontSize: 13, color: "var(--danger)" }}>
+                  No pudimos cargar los rubros.{" "}
+                  <button onClick={loadVerticals} style={{ background: "none", border: "none", color: "var(--acc)", cursor: "pointer", fontSize: 13, padding: 0, textDecoration: "underline" }}>Reintentar</button>
+                </span>
+              ) : null}
             </div>
             <label style={{ fontSize: 13, color: "var(--ink-dim)", display: "block" }}>Nombre de tu negocio
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Barbería Estilo" style={field} />

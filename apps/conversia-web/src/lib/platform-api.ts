@@ -4,7 +4,8 @@
  * deriva la marca del Origin (D8) y el token de plataforma lleva `brand=conversia`, así
  * este panel solo ve y opera los tenants de Conversia. Token SEPARADO del de tenant.
  */
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import { apiBase } from "./api-base";
+const API = apiBase();
 
 const TOKEN_KEY = "conversia_platform_token";
 
