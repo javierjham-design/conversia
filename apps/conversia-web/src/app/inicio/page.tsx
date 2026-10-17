@@ -49,7 +49,7 @@ function ago(iso: string | null): string {
 
 /* ---------- Tipos de las respuestas ---------- */
 type Me = { user?: { name?: string }; organization?: { timezone?: string; name?: string } };
-type Wallet = { balance: number; included: number; consumed: number; pctUsed: number; projected: number; over80: boolean };
+type Wallet = { unit?: string; balance: number; included: number; consumed: number; pctUsed: number; projected: number; over80: boolean };
 type Appt = { id: string; status: string; startsAt: string; endsAt: string; professionalName: string | null; serviceName: string | null; contact: { name: string } };
 type ApptResp = { appointments: Appt[] };
 type CashDay = { summary: { net: number } };
@@ -148,12 +148,17 @@ export default function Home() {
   // Re-render cada minuto para la línea "AHORA" y el reloj.
   useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(t); }, []);
 
+  // El tema se lee DESPUÉS de montar (estado, no document en render): leerlo en el
+  // render rompía la hidratación (SSR pinta Luna, el cliente oscuro pinta Sol →
+  // React regeneraba el árbol completo con flash). Hallazgo smoke UI sim 250.
+  const [isDark, setIsDark] = useState(false);
+  useEffect(() => { setIsDark(document.documentElement.getAttribute("data-theme") === "dark"); }, []);
   function toggleTheme() {
     const r = document.documentElement;
     const next = r.getAttribute("data-theme") === "dark" ? "light" : "dark";
     r.setAttribute("data-theme", next);
     try { localStorage.setItem("conversia_theme", next); } catch { /* ignore */ }
-    setTick((n) => n + 1);
+    setIsDark(next === "dark");
   }
 
   const parts = nowParts(tz);
@@ -178,7 +183,7 @@ export default function Home() {
           </div>
           <a href="/agenda" className="btn-accent" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none", height: 38, padding: "0 16px" }}><CalendarPlus size={16} /> Nueva cita</a>
           <button onClick={toggleTheme} aria-label="Modo claro/oscuro" className="card" style={{ width: 38, height: 38, display: "grid", placeItems: "center", cursor: "pointer", borderRadius: 11 }}>
-            {typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            {isDark ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <button aria-label="Notificaciones" className="card" style={{ width: 38, height: 38, display: "grid", placeItems: "center", cursor: "pointer", borderRadius: 11, position: "relative" }}>
             <Bell size={17} />
@@ -271,10 +276,23 @@ export default function Home() {
                 <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                   <CreditRing pct={wallet.included > 0 ? wallet.pctUsed : 0} />
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ margin: 0, fontSize: 14 }}><b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.consumed.toLocaleString("es-CL")}</b> de {wallet.included.toLocaleString("es-CL")} usados</p>
-                    <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5 }}>Proyección fin de mes: {wallet.projected.toLocaleString("es-CL")}{wallet.projected > wallet.included ? " ⚠" : ""}</p>
-                    <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Saldo: {wallet.balance.toLocaleString("es-CL")}</p>
-                    <a href="/cobros" className="btn-accent" style={{ display: "inline-block", textDecoration: "none", fontSize: 13, padding: "8px 14px" }}>Comprar sobre +500 · $21.900</a>
+                    {/* Prueba (included 0): nada de "0 de 0" — se muestra el saldo del regalo.
+                        El CTA depende de la UNIDAD: V2 recarga conversaciones; V1 compra el sobre. */}
+                    {wallet.included > 0 ? (
+                      <>
+                        <p style={{ margin: 0, fontSize: 14 }}><b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.consumed.toLocaleString("es-CL")}</b> de {wallet.included.toLocaleString("es-CL")} usadas este mes</p>
+                        <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5 }}>Proyección fin de mes: {wallet.projected.toLocaleString("es-CL")}{wallet.projected > wallet.included ? " ⚠" : ""}</p>
+                        <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Saldo total: {wallet.balance.toLocaleString("es-CL")}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ margin: 0, fontSize: 14 }}>Te quedan <b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.balance.toLocaleString("es-CL")}</b> {wallet.unit === "conversation" ? "conversaciones" : "créditos"} de prueba</p>
+                        <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Al activar tu plan tendrás 100 al mes y recargas cuando quieras.</p>
+                      </>
+                    )}
+                    <a href="/cobros" className="btn-accent" style={{ display: "inline-block", textDecoration: "none", fontSize: 13, padding: "8px 14px" }}>
+                      {wallet.unit === "conversation" ? "Recargar +100 conversaciones · $21.900" : "Comprar sobre +500 · $21.900"}
+                    </a>
                   </div>
                 </div>
               ) : (

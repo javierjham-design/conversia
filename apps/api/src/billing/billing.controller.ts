@@ -399,9 +399,14 @@ export class BillingController {
     // A4 — solo los sobres de la MARCA del tenant (sin filtro = fuga de packs/pricing de la otra marca).
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
     const brand = brandOf(org).key;
+    // Y solo los del MODELO de la cuenta (auditoría sim 250): a una cuenta V2 (debita
+    // conversaciones) se le ofrecían también los sobres de MENSAJES al mismo precio —
+    // compraba el producto equivocado hacia una bolsa que su plan no consume.
+    const feats = await this.activePlanFeatures(ctx.organizationId);
+    const type = feats.conversationDebitsWallet === true ? "conversation" : "message";
     const [wallet, packages] = await Promise.all([
       this.prisma.withTenant(ctx.organizationId, (tx) => tx.messageWallet.findUnique({ where: { organizationId: ctx.organizationId } })),
-      this.prisma.admin.messagePackage.findMany({ where: { active: true, brand }, orderBy: { order: "asc" } }),
+      this.prisma.admin.messagePackage.findMany({ where: { active: true, brand, type }, orderBy: { order: "asc" } }),
     ]);
     const balance = wallet?.balance ?? 0;
     const included = wallet?.includedPerPeriod ?? 0;
@@ -482,6 +487,10 @@ export class BillingController {
     const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: parsed.data.code } });
     if (!pkg || !pkg.active) throw new BadRequestException("Paquete no disponible");
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
+    // Catálogo por MARCA (auditoría sim 250): un pack con marca solo lo compra una org de
+    // esa marca (una org Conversia no debe ver/comprar packs TuBot ni viceversa). Un pack
+    // sin marca es común a ambas (compat con el catálogo actual de TuBot).
+    if (pkg.brand && pkg.brand !== brandOf(org).key) throw new BadRequestException("Paquete no disponible");
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });

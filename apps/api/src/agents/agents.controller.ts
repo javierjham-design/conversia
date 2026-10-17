@@ -1,10 +1,11 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, NotFoundException, Param, Post, Put } from "@nestjs/common";
 import { z } from "zod";
 import { buildCoreTools } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { enforcePlanLimit } from "../common/plan-limits";
+import { RateLimitService } from "../common/rate-limit";
 // Lógica/schemas compartidos con la consola de plataforma (una sola fuente de verdad).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify, runAgentTest } from "./agent-test";
 
@@ -18,7 +19,10 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 @Controller("agents")
 export class AgentsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private rateLimit: RateLimitService,
+  ) {}
 
   /** Catálogo de herramientas disponibles para habilitar por agente. */
   @Get("meta/tools")
@@ -186,6 +190,10 @@ export class AgentsController {
   @Post(":id/test")
   async test(@Param("id") id: string, @Body() body: unknown) {
     const ctx = requirePermission("agents:write");
+    // Antiabuso (auditoría sim 250): la prueba consume tokens REALES del proveedor y no
+    // tenía tope → quema de dinero por loop/script. Mismo criterio que el asistente.
+    const rl = await this.rateLimit.custom(`rl:agent-test:${ctx.userId ?? ctx.organizationId}`, 30, 300);
+    if (!rl.allowed) throw new HttpException("Demasiadas pruebas seguidas. Espera unos segundos.", HttpStatus.TOO_MANY_REQUESTS);
     const input = parse(testSchema, body);
     return runAgentTest(this.prisma, ctx.organizationId, id, input);
   }

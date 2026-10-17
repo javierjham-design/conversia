@@ -47,6 +47,13 @@ export class WhatsappController {
     // exigen el token del simulador — nadie puede inyectar mensajes a un
     // tenant ajeno conociendo solo su slug.
     if (rawText.includes('"mock:')) {
+      // SEGURIDAD (auditoría sim 250, 2026-10-17): en producción con proveedor real la
+      // ruta mock queda CERRADA aunque el token coincida — el default del token viene
+      // en .env.example (público) y bastaba el slug del tenant para inyectarle mensajes
+      // (quemar sus créditos/IA). El simulador solo existe con WHATSAPP_PROVIDER=mock.
+      if (env.NODE_ENV === "production" && env.WHATSAPP_PROVIDER !== "mock") {
+        throw new ForbiddenException("Canal de simulación deshabilitado en producción");
+      }
       const mockToken = req.headers["x-conversia-mock-token"];
       if (mockToken !== env.MOCK_INBOUND_TOKEN) {
         throw new ForbiddenException("Token de simulación inválido");
@@ -57,6 +64,10 @@ export class WhatsappController {
       if (!verifyMetaSignature(raw, signature, env.META_APP_SECRET)) {
         throw new ForbiddenException("Firma de webhook inválida");
       }
+    } else if (env.NODE_ENV === "production") {
+      // SEGURIDAD: en producción SIN app secret configurado el webhook real queda
+      // fail-closed (antes pasaba sin validación alguna). Configurar META_APP_SECRET.
+      throw new ForbiddenException("Webhook sin verificación de firma configurada");
     }
 
     // Reintentos en la RUTA CRÍTICA de ingreso: un fallo transitorio (DB/Redis/latencia)

@@ -248,10 +248,13 @@ async function main() {
   }
 
   // Sobre de créditos Conversia (comprable por API, patrón pkg:). F5 TAREA 3.
+  // brand EXPLÍCITA (auditoría sim 250): sin ella el default del schema lo dejaba
+  // como pack TuBot → el catálogo por marca lo mostraba al tenant equivocado y el
+  // check de marca de buy-package se lo negaba a las orgs Conversia V1.
   await prisma.messagePackage.upsert({
     where: { code: "conversia-sobre-500" },
-    update: { name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10 },
-    create: { code: "conversia-sobre-500", name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10 },
+    update: { name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10, brand: "conversia" },
+    create: { code: "conversia-sobre-500", name: "Sobre 500 créditos", credits: 500, priceClp: 21_900, priceUsd: 25, active: true, order: 10, brand: "conversia" },
   });
 
   // Pesos de bolsa POR MARCA para Conversia (H2): key SEPARADA para NO cambiar los

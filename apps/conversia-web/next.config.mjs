@@ -14,7 +14,9 @@ const csp = [
   "img-src 'self' data: blob: https://graph.facebook.com https://*.fbcdn.net https://*.cdninstagram.com",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
-  "script-src 'self' 'unsafe-inline'",
+  // 'unsafe-eval' SOLO en dev: el runtime de react-refresh de Next lo exige y sin él
+  // la página queda sin hidratar (botones muertos). En producción NO se emite.
+  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
   `connect-src 'self' ${api}`,
 ].join("; ");
 

@@ -106,7 +106,11 @@ async function resolveTenant(
     const channel = await prisma.channelConnection.findFirst({
       where: { organizationId: org.id, type: "MOCK" },
     });
-    return { organizationId: org.id, channelConnectionId: channel?.id ?? null, clinicId: channel?.clinicId ?? null };
+    // SEGURIDAD (auditoría sim 250): sin canal MOCK el mensaje se DESCARTA. Antes
+    // bastaba el slug para enrutar a cualquier org (defensa en profundidad del fix
+    // del webhook: aunque algo pase el borde, sin canal de simulación no entra).
+    if (!channel) return null;
+    return { organizationId: org.id, channelConnectionId: channel.id, clinicId: channel.clinicId ?? null };
   }
   const number = await prisma.whatsappPhoneNumber.findUnique({ where: { phoneNumberId } });
   if (!number) return null;
