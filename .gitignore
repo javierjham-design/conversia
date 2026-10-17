@@ -16,3 +16,6 @@ Thumbs.db
 # Artefactos de sesion de desarrollo
 .commitmsg.txt
 .prbody.txt
+
+# Salidas de simulacion/humo (pueden contener JWTs de cuentas de prueba)
+tools/sim/out/
