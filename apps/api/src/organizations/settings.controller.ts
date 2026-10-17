@@ -122,6 +122,88 @@ export class SettingsController {
     });
   }
 
+  // ------------------------- Mini-sitio público (Peldaño 3: conexión simple) -------------------------
+
+  /**
+   * Página pública del negocio hosteada por Conversia (conversia.cl/n/<slug>): para el
+   * cliente SIN web. Se arma sola con los datos del negocio + servicios + el número de
+   * WhatsApp conectado; el dueño solo edita unos textos y la publica. SOLO expone lo
+   * marcado como público (jamás datos del CRM). Guardado en organization.settings.miniSite.
+   */
+  @Get("mini-site")
+  miniSite() {
+    const ctx = requireContext();
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { name: true, slug: true, settings: true } });
+      const settings = (org?.settings ?? {}) as Record<string, any>;
+      const ms = (settings.miniSite ?? {}) as Record<string, any>;
+      const general = (settings.general ?? {}) as Record<string, any>;
+      // Derivados (preview para el editor; no se persisten aquí).
+      const waNum = await tx.whatsappPhoneNumber.findFirst({ where: { status: "active" }, select: { displayPhone: true } }).catch(() => null);
+      const serviceCount = await tx.service.count({ where: { active: true } }).catch(() => 0);
+      return {
+        enabled: ms.enabled === true,
+        slug: org?.slug ?? "",
+        tagline: String(ms.tagline ?? ""),
+        about: String(ms.about ?? ""),
+        hours: String(ms.hours ?? ""),
+        address: String(ms.address ?? ""),
+        instagram: String(ms.instagram ?? ""),
+        whatsapp: String(ms.whatsapp ?? ""),
+        waText: String(ms.waText ?? ""),
+        showServices: ms.showServices !== false,
+        derived: { name: org?.name ?? "", whatsappConnected: waNum?.displayPhone ?? null, serviceCount, industry: general.industry ?? "" },
+      };
+    });
+  }
+
+  @Put("mini-site")
+  updateMiniSite(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    const parsed = z
+      .object({
+        enabled: z.boolean().optional(),
+        tagline: z.string().max(140).optional(),
+        about: z.string().max(1200).optional(),
+        hours: z.string().max(400).optional(),
+        address: z.string().max(200).optional(),
+        instagram: z.string().max(120).optional(),
+        whatsapp: z.string().max(30).optional(), // override; vacío = usa el número conectado
+        waText: z.string().max(300).optional(), // texto pre-cargado del botón wa.me
+        showServices: z.boolean().optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? "Datos inválidos");
+    const input = parsed.data;
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({ where: { id: ctx.organizationId } });
+      if (!org) throw new BadRequestException("Organización no encontrada");
+      const settings = (org.settings ?? {}) as Record<string, any>;
+      const miniSite = { ...((settings.miniSite ?? {}) as object) } as Record<string, any>;
+      for (const key of ["tagline", "about", "hours", "address", "instagram", "whatsapp", "waText"] as const) {
+        if (input[key] !== undefined) miniSite[key] = input[key];
+      }
+      if (input.showServices !== undefined) miniSite.showServices = input.showServices;
+      if (input.enabled !== undefined) {
+        miniSite.enabled = input.enabled;
+        if (input.enabled && !miniSite.publishedAt) miniSite.publishedAt = new Date().toISOString();
+      }
+      await tx.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...settings, miniSite } as object } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "settings.mini_site_update",
+          entityType: "organization",
+          entityId: ctx.organizationId,
+          after: { enabled: miniSite.enabled === true },
+        },
+      });
+      return { ok: true, enabled: miniSite.enabled === true, slug: org.slug };
+    });
+  }
+
   // ------------------------- Conversaciones (reglas de la bandeja) -------------------------
 
   /** Reglas: auto-cierre por inactividad, retoma del bot y objetivo de 1.ª respuesta. */

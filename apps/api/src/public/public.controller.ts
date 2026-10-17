@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, Param, Post, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, NotFoundException, Param, Post, Query, Req } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
@@ -6,6 +6,7 @@ import { getEnv, brandFromOrigin } from "@conversia/config";
 import { createAIRouter, fetchWebPageText } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
+import { INDUSTRIES } from "../common/industries";
 
 /**
  * API PÚBLICA para la web (www.tubot.cl). Sin auth. Precios públicos + captura de
@@ -104,6 +105,65 @@ export class PublicController {
       featureType,
       // true si la marca ya tiene config → el front habilita el botón "Conectar".
       ready: Boolean(env.META_APP_ID && configId),
+    };
+  }
+
+  /**
+   * PELDAÑO 3 — mini-sitio público del negocio (conversia.cl/n/<slug>): para el cliente
+   * SIN página web. Datos PÚBLICOS armados solos (nombre, rubro, servicios activos con
+   * precio, horarios, botón de WhatsApp al número conectado, contacto). Sin auth. Expone
+   * SOLO lo que el dueño publicó (miniSite.enabled) y NADA del CRM. Gateado a marca conversia.
+   */
+  @Get("n/:slug")
+  async miniSite(@Param("slug") slug: string) {
+    const admin = this.prisma.admin;
+    const org = await admin.organization.findUnique({
+      where: { slug },
+      select: { id: true, name: true, brand: true, settings: true },
+    });
+    const settings = (org?.settings ?? {}) as Record<string, any>;
+    const ms = (settings.miniSite ?? {}) as Record<string, any>;
+    // 404 si no existe, no es de Conversia, o el dueño no la publicó.
+    if (!org || org.brand !== "conversia" || ms.enabled !== true) {
+      throw new NotFoundException("Esta página no existe o no está publicada.");
+    }
+    const general = (settings.general ?? {}) as Record<string, any>;
+    const rubro = INDUSTRIES.find((i) => i.code === general.industry)?.label ?? null;
+
+    // Número de WhatsApp: override del mini-sitio o el número conectado (primero activo).
+    let waNumber: string | null = ms.whatsapp ? String(ms.whatsapp) : null;
+    if (!waNumber) {
+      const num = await admin.whatsappPhoneNumber.findFirst({ where: { organizationId: org.id, status: "active" }, select: { displayPhone: true } }).catch(() => null);
+      waNumber = num?.displayPhone ?? null;
+    }
+    const waDigits = waNumber ? waNumber.replace(/\D/g, "") : null;
+    const waLink = waDigits ? `https://wa.me/${waDigits}${ms.waText ? `?text=${encodeURIComponent(String(ms.waText))}` : ""}` : null;
+
+    // Servicios activos (público). Jamás contactos/conversaciones/datos del CRM.
+    let services: { name: string; price: number | null; currency: string; description: string | null }[] = [];
+    if (ms.showServices !== false) {
+      const rows = await admin.service
+        .findMany({ where: { organizationId: org.id, active: true }, select: { name: true, price: true, currency: true, description: true }, orderBy: { name: "asc" }, take: 60 })
+        .catch(() => []);
+      services = rows.map((r) => ({ name: r.name, price: r.price != null ? Number(r.price) : null, currency: r.currency, description: r.description ?? null }));
+    }
+
+    return {
+      slug,
+      name: org.name,
+      rubro,
+      tagline: ms.tagline ? String(ms.tagline) : null,
+      about: ms.about ? String(ms.about) : null,
+      whatsapp: waLink ? { number: waNumber, link: waLink } : null,
+      services,
+      hours: ms.hours ? String(ms.hours) : null,
+      contact: {
+        address: ms.address ? String(ms.address) : null,
+        instagram: ms.instagram ? String(ms.instagram) : null,
+        email: general.contactEmail ? String(general.contactEmail) : null,
+        phone: ms.whatsapp ? null : general.contactPhone ? String(general.contactPhone) : null,
+      },
+      accent: general.accent ? String(general.accent) : null,
     };
   }
 
