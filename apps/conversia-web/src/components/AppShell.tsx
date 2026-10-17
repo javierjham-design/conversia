@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { CalendarDays, CreditCard, Globe, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
+import { PwaManager } from "@/components/PwaManager";
 
 /**
  * NAVEGACIÓN UNIFICADA de Conversia (misma en TODAS las pantallas):
@@ -126,6 +127,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <SupportWidget />
+      <PwaManager />
 
 
       {/* M9 — hoja "Más" (overflow) para móvil */}

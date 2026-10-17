@@ -2,9 +2,10 @@
  * ARMAZÓN y estáticos en caché; la API vive en otro dominio (NEXT_PUBLIC_API_URL) y NUNCA
  * se cachea (datos siempre frescos). Página offline decente. Sin skipWaiting automático.
  */
-const CACHE = "conversia-shell-v1";
+const CACHE = "conversia-shell-v2";
 const OFFLINE_URL = "/offline.html";
-const PRECACHE = [OFFLINE_URL, "/icon.svg", "/manifest.webmanifest"];
+const PRECACHE = [OFFLINE_URL, "/icon.svg", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
+const STATIC_FILES = new Set(["/icon.svg", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).catch(() => undefined));
@@ -25,7 +26,7 @@ self.addEventListener("message", (event) => {
 });
 
 function isStatic(url) {
-  return url.pathname.startsWith("/_next/static") || url.pathname === "/icon.svg" || url.pathname === "/manifest.webmanifest";
+  return url.pathname.startsWith("/_next/static") || STATIC_FILES.has(url.pathname);
 }
 
 self.addEventListener("fetch", (event) => {
