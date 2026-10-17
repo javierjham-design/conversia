@@ -32,6 +32,12 @@ type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string }
 export class AssistantService {
   constructor(private prisma: PrismaService) {}
 
+  /** Marca de la org (para gatear el asistente a conversia). Fail-safe a "tubot". */
+  async orgBrand(organizationId: string): Promise<string> {
+    const o = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } }).catch(() => null);
+    return (o?.brand ?? "tubot").toLowerCase();
+  }
+
   /** Contexto server-side: checklist, saldo, último error de canal, datos del negocio. */
   async buildContext(organizationId: string) {
     const admin = this.prisma.admin;
