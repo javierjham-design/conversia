@@ -1,0 +1,3 @@
+# Los scripts de shell SIEMPRE con LF (CRLF rompe bash en Linux/CI/Docker).
+*.sh text eol=lf
+tools/sim/up.sh text eol=lf

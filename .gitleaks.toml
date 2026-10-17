@@ -9,6 +9,8 @@ paths = [
   '''\.env\.example$''',
   '''docs/.*\.md$''',
   '''.*\.example$''',
+  # Env del stack de SIMULACIÓN Docker: secretos/VAPID de PRUEBA, documentados, nunca prod.
+  '''tools/sim/\.env\.sim$''',
 ]
 regexes = [
   '''change-me-in-real-env''',
