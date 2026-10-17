@@ -125,6 +125,33 @@ La tabla completa de env esperado por servicio (crítico/opcional) y la verifica
 `NEXT_PUBLIC_API_URL` esté como **variable de BUILD** en `conversia-web` están en
 `docs/QA_PRODUCCION_RESULTADOS.md` §5.
 
+## 9. Conexión simple de WhatsApp (coexistencia + mini-landing)
+
+Variables de Meta para el camino de **coexistencia** (conectar el número que el cliente ya
+usa, vía `GET /public/meta-config?mode=coexistence`):
+
+- `META_ES_COEX_FEATURE_TYPE` — default `whatsapp_business_app_onboarding` (el valor viejo
+  `coexistence` fue retirado por Meta; NO usarlo).
+- `META_ES_COEX_CONFIG_ID_CONVERSIA` — `config_id` del popup de coexistencia para Conversia.
+  Si se deja vacío, cae al `config_id` de Embedded Signup de la marca.
+
+En el **App Dashboard de Meta** (app CONVERSIA), suscribir estos campos de webhook del WABA
+(además de `messages`), o la coexistencia no entrega los ecos/historial:
+
+- `smb_message_echoes` — lo que el dueño responde a mano desde su app (lo pinta la Bandeja).
+- `history`, `smb_app_state_sync` — historial y contactos (opcionales).
+- `account_update` — desconexión/reconexión desde la app.
+
+Autorizar los dominios `app.conversia.cl` / `conversia.cl` en la app de Meta (sin esto el
+popup no abre). Validar la elegibilidad de **Chile (+56)** y si la UI es QR o código en un
+**sandbox** con un número real que corra la app WhatsApp Business.
+
+**Mini-landing** (`conversia.cl/n/<slug>`): la ruta vive en `conversia-web`, así que
+`app.conversia.cl/n/<slug>` ya responde. Para servirla en el apex, mapear `conversia.cl/n/*`
+al servicio `conversia-web` (DNS/routing). No requiere variables nuevas.
+
+Estado y criterios de aceptación: `docs/CONEXION_SIMPLE_RESULTADOS.md`.
+
 ## Recordatorios
 
 - Redis de producción ≥ 6.2 (BullMQ lo advierte con 5.x).
