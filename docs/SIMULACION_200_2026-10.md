@@ -76,13 +76,14 @@ Con esa escalera el cliente SIEMPRE tiene bot vivo (1), conecta su número real 
 
 ## 5. Decisiones pendientes (Javier)
 
-- [ ] **Ola 2 / gimnasio**: el gate bloquea `gimnasio` porque exige la feature
-      `groupClasses` (clases con cupos) que aún no existe — ni el registro ni el tenant
-      pueden instalarlo. Opciones: ocultarlo del selector de rubros hasta construir la
-      feature, o publicar una variante reducida sin clases grupales. Los demás de ola 2
-      (taller, veterinaria, kinesiología, medspa, psicología, servicios a domicilio) solo
-      requieren subirlos a ola 1 si quieres venderlos en el registro.
-- [ ] **Coexistencia QR**: ok para priorizar su implementación (punto 4.2).
+- [x] **Ola 2 / gimnasio** — RESUELTO (2026-10-17, decisión Javier): la ola 2 completa
+      se promovió a ola 1 (taller, veterinaria, kinesiología, medspa, psicología,
+      servicios a domicilio) y se creó **gimnasio v2** sin `groupClasses` (captación de
+      socios + clase de prueba 1-a-1 + membresías; los cupos grupales quedan para una v3
+      cuando exista la feature). E2E verde (fase Q9): los 7 instalan al registrarse y el
+      bot del gimnasio atiende y debita. Catálogo vendible: **14 rubros**.
+- [ ] **Coexistencia QR**: ok para priorizar su implementación (punto 4.2) — prompt de
+      desarrollo en docs/PROMPT_COEXISTENCIA_QR.md.
 - [ ] Checklist pre-lanzamiento del informe anterior sigue vigente
       (SIMULACION_PROD_2026-10.md §4): `whatsappRateSchedule` en PROD, `db:seed` +
       `v2-golive`, Redis ≥ 6.2, antiabuso de registro.
