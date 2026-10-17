@@ -29,6 +29,7 @@ function mapConnectError(raw: string): { title: string; help: string } {
   const s = (raw || "").toLowerCase();
   if (/popup|bloque|blocked|ventana/.test(s)) return { title: "Tu navegador bloqueó la ventana de Meta", help: "Permite las ventanas emergentes para este sitio (o desactiva el bloqueador) y vuelve a intentarlo. La conexión abre una ventana de Facebook." };
   if (/dominio|domain|url.*(block|allow)|not allowed|sdk/.test(s)) return { title: "El dominio aún no está autorizado en Meta", help: "Falta habilitar este sitio en la app de Meta (dominios del SDK). Es un ajuste de configuración; pide ayuda al asistente y el equipo lo deja listo." };
+  if (/verif|elegib|not eligible|unverified|no verificad/.test(s)) return { title: "Meta necesita verificar tu negocio", help: "Es un trámite único de Meta para confirmar que tu negocio existe. Te acompañamos a dejarlo listo hoy; o conecta el WhatsApp que ya usas, que normalmente no lo requiere." };
   if (/business|portfolio|página|page|no.*cuenta/.test(s)) return { title: "Falta tu cuenta de Meta Business o una página de Facebook", help: "Para WhatsApp Business necesitas una cuenta de Meta Business y una página de Facebook. Créalas en business.facebook.com y reintenta." };
   if (/already|en uso|in use|otra app|registered elsewhere/.test(s)) return { title: "Ese número ya está en uso en la app de WhatsApp", help: 'Si quieres SEGUIR usándolo en tu teléfono, usa "Conecta el WhatsApp que ya usas" (coexistencia): mantienes la app y tus chats. O usa un número nuevo dedicado.' };
   if (/133005|pin/.test(s)) return { title: "Tu número ya tenía un PIN de verificación", help: "Lo detectamos automáticamente. Si persiste, desactiva la verificación en dos pasos del número en WhatsApp Business y reintenta." };
@@ -47,6 +48,7 @@ export default function Canales() {
   const [stepIdx, setStepIdx] = useState(0);
   const [err, setErr] = useState<{ title: string; help: string } | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [needsVerif, setNeedsVerif] = useState(false);
   const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string; businessId?: string }>({});
   const modeRef = useRef<ConnMode>("coexistence");
   const attemptsRef = useRef(0);
@@ -98,12 +100,20 @@ export default function Canales() {
     // La vía coexistencia levanta su propia excepción en el backend; aquí solo reportamos
     // la vía de número dedicado (el backend de coexistencia ya deja constancia).
     if (attemptsRef.current < 2 || modeRef.current === "coexistence") return;
-    await api("/channels/connect-report", { method: "POST", body: JSON.stringify({ detail, attempts: attemptsRef.current }) }).catch(() => undefined);
+    // PELDAÑO 2: el backend clasifica si el fallo es por VERIFICACIÓN DE NEGOCIO de Meta
+    // (excepción de mayor toque; operación acompaña hoy) y nos lo devuelve para explicarlo.
+    const r = await api<{ needsVerification?: boolean }>("/channels/connect-report", {
+      method: "POST",
+      body: JSON.stringify({ detail, attempts: attemptsRef.current }),
+    }).catch(() => null);
+    if (r?.needsVerification) setNeedsVerif(true);
   }
 
   function fail(raw: string) {
     attemptsRef.current += 1;
     setPhase("error");
+    // Detección temprana en cliente (antes de que vuelva el reporte) para el copy correcto.
+    if (/verif|elegib|not eligible|unverified/i.test(raw)) setNeedsVerif(true);
     setErr(mapConnectError(raw));
     void reportFailure(raw);
   }
@@ -136,7 +146,7 @@ export default function Canales() {
   }
 
   function connect(mode: ConnMode = "coexistence") {
-    setErr(null); setOkMsg(null);
+    setErr(null); setOkMsg(null); setNeedsVerif(false);
     modeRef.current = mode;
     const cfg = mode === "coexistence" ? coex : es;
     if (!cfg?.ready) { fail("La conexión aún no está configurada para esta marca en el servidor."); return; }
@@ -202,9 +212,20 @@ export default function Canales() {
             <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "color-mix(in srgb, var(--warn) 9%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)" }}>
               <p style={{ margin: 0, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} style={{ color: "var(--warn)", flexShrink: 0 }} /> {err.title}</p>
               <p className="text-dim" style={{ margin: "7px 0 12px", fontSize: 13, lineHeight: 1.5 }}>{err.help}</p>
+              {needsVerif ? (
+                <div style={{ margin: "0 0 12px", padding: 12, borderRadius: 10, background: "var(--acc-dim)" }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Meta pide verificar tu negocio</p>
+                  <p className="text-dim" style={{ margin: "5px 0 0", fontSize: 12.5, lineHeight: 1.5 }}>
+                    Es un trámite de Meta para confirmar que tu negocio existe (una sola vez). Nosotros te acompañamos hoy para dejarlo listo. Si solo quieres empezar ya, conectar el WhatsApp <strong>que ya usas</strong> normalmente no lo necesita.
+                  </p>
+                </div>
+              ) : null}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button onClick={() => connect(modeRef.current)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><RefreshCw size={14} /> Reintentar</button>
-                <button onClick={() => pedirAyuda(`Error al conectar WhatsApp: ${err.title}. ${err.help}`)} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><HelpCircle size={14} /> Pedir ayuda al asistente</button>
+                {needsVerif ? (
+                  <button onClick={() => connect("coexistence")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><QrCode size={14} /> Usar el que ya tengo</button>
+                ) : null}
+                <button onClick={() => pedirAyuda(needsVerif ? `Me piden verificación de negocio en Meta al conectar un número nuevo. Quiero que una persona me acompañe hoy. (${err.title})` : `Error al conectar WhatsApp: ${err.title}. ${err.help}`)} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><HelpCircle size={14} /> {needsVerif ? "Que me acompañe una persona" : "Pedir ayuda al asistente"}</button>
               </div>
             </div>
           ) : null}

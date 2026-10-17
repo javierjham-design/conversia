@@ -280,15 +280,22 @@ export class ChannelsController {
     const ctx = requireContext();
     const input = parse(z.object({ detail: z.string().max(2000), attempts: z.number().int().min(1).max(50).optional() }), body);
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { name: true } });
+    // PELDAÑO 2 — "número nuevo llave en mano": cuando Meta exige VERIFICACIÓN DEL NEGOCIO
+    // (o el número no es elegible para subir de nivel), lo tratamos como una excepción
+    // DISTINTA y de mayor toque: operación acompaña al cliente ese mismo día. El resto de
+    // fallos siguen como "canal_conexion_fallida".
+    const needsVerification = /verif|business verification|not eligible|no elegible|elegib|unverified|no verificad/i.test(input.detail);
     await raiseException(this.prisma.admin, {
       organizationId: ctx.organizationId,
-      type: "canal_conexion_fallida",
-      title: `No logra conectar su WhatsApp — ${org?.name ?? ctx.organizationId}`,
+      type: needsVerification ? "verificacion_negocio" : "canal_conexion_fallida",
+      title: needsVerification
+        ? `Necesita verificación de negocio en Meta — ${org?.name ?? ctx.organizationId}`
+        : `No logra conectar su WhatsApp — ${org?.name ?? ctx.organizationId}`,
       severity: "warning",
       detail: `${input.attempts ?? 2} intentos fallidos. Último error: ${input.detail}`.slice(0, 2000),
-      dedupeKey: `${ctx.organizationId}:${new Date().toISOString().slice(0, 10)}`,
+      dedupeKey: `${ctx.organizationId}:${needsVerification ? "verif" : "conn"}:${new Date().toISOString().slice(0, 10)}`,
     });
-    return { ok: true };
+    return { ok: true, needsVerification };
   }
 
   /**
