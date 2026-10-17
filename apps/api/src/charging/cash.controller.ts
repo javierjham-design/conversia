@@ -99,7 +99,10 @@ export class CashController {
     const parsed = z.object({ entryId: z.string().min(1), reason: z.string().max(200).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("entryId requerido");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const orig = await tx.cashLedger.findFirst({ where: { id: parsed.data.entryId } });
+      // organizationId EXPLÍCITO (defensa en profundidad, auditoría sim 250): mientras
+      // prod conecte como rol admin (hardening #3 pendiente), RLS no filtra — sin esto
+      // se podía reversar el asiento de OTRA org conociendo su id (IDOR de dinero).
+      const orig = await tx.cashLedger.findFirst({ where: { id: parsed.data.entryId, organizationId: ctx.organizationId } });
       if (!orig) throw new NotFoundException("Asiento no encontrado");
       const idem = `reversa:${orig.id}`;
       const existing = await tx.cashLedger.findUnique({ where: { organizationId_idempotencyKey: { organizationId: ctx.organizationId, idempotencyKey: idem } } });
@@ -132,9 +135,10 @@ export class CashController {
     const ctx = requirePermission("cash:report");
     const { from, to } = dayRange(date);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      // organizationId explícito en TODAS las lecturas de caja (ver nota en reverse()).
       const [entries, closure] = await Promise.all([
-        tx.cashLedger.findMany({ where: { createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "desc" } }),
-        tx.cashClosure.findFirst({ where: { fromAt: from }, orderBy: { createdAt: "desc" } }),
+        tx.cashLedger.findMany({ where: { organizationId: ctx.organizationId, createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "desc" } }),
+        tx.cashClosure.findFirst({ where: { organizationId: ctx.organizationId, fromAt: from }, orderBy: { createdAt: "desc" } }),
       ]);
       return { from, to, summary: summarize(entries as Entry[]), entries, closed: !!closure, closure };
     });
@@ -147,7 +151,7 @@ export class CashController {
     const r = range === "week" || range === "month" ? range : "day";
     const { from, to } = rangeFor(r, date);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const entries = (await tx.cashLedger.findMany({ where: { createdAt: { gte: from, lt: to } } })) as Entry[];
+      const entries = (await tx.cashLedger.findMany({ where: { organizationId: ctx.organizationId, createdAt: { gte: from, lt: to } } })) as Entry[];
       return { range: r, from, to, ...summarize(entries) };
     });
   }
@@ -158,7 +162,7 @@ export class CashController {
     const ctx = requirePermission("cash:report");
     const r = range === "week" || range === "month" ? range : "day";
     const { from, to } = rangeFor(r, date);
-    const rows = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.cashLedger.findMany({ where: { createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "asc" } }));
+    const rows = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.cashLedger.findMany({ where: { organizationId: ctx.organizationId, createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "asc" } }));
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const header = ["fecha", "tipo", "metodo", "monto", "moneda", "estado", "concepto", "refType", "refId", "origen"].join(",");
     const lines = (rows as Entry[]).map((e) => [e.createdAt.toISOString(), e.type, e.method, e.amount, e.currency, e.status, e.concept ?? "", e.refType ?? "", e.refId ?? "", e.origin].map(esc).join(","));
@@ -175,7 +179,7 @@ export class CashController {
     if (!parsed.success) throw new BadRequestException("declaredCash (efectivo contado) requerido");
     const { from, to } = dayRange(parsed.data.date);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const entries = (await tx.cashLedger.findMany({ where: { createdAt: { gte: from, lt: to } } })) as Entry[];
+      const entries = (await tx.cashLedger.findMany({ where: { organizationId: ctx.organizationId, createdAt: { gte: from, lt: to } } })) as Entry[];
       const s = summarize(entries);
       const difference = parsed.data.declaredCash - s.efectivo;
       const closure = await tx.cashClosure.create({
@@ -201,7 +205,7 @@ export class CashController {
   @Get("closures")
   async closures() {
     const ctx = requirePermission("cash:report");
-    return this.prisma.withTenant(ctx.organizationId, (tx) => tx.cashClosure.findMany({ orderBy: { createdAt: "desc" }, take: 60 }));
+    return this.prisma.withTenant(ctx.organizationId, (tx) => tx.cashClosure.findMany({ where: { organizationId: ctx.organizationId }, orderBy: { createdAt: "desc" }, take: 60 }));
   }
 }
 
