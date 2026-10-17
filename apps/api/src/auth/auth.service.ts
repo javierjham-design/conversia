@@ -238,7 +238,10 @@ export class AuthService {
         const expiresAt = new Date(Date.now() + 60 * 24 * 3600 * 1000); // regalo: 60 días
         const refId = draftValid ? draft!.token : `signup:${result.org.id}`;
         await this.prisma.withTenant(result.org.id, async (tx) => {
-          await tx.conversationWallet.upsert({ where: { organizationId: result.org.id }, create: { organizationId: result.org.id }, update: {} });
+          // periodStart = época: la wallet nace "nunca acreditada" para que el PRIMER período
+          // del plan acredite sus créditos (el default now() del schema marcaba el período
+          // actual como ya acreditado y el primer lote del plan jamás se creaba).
+          await tx.conversationWallet.upsert({ where: { organizationId: result.org.id }, create: { organizationId: result.org.id, periodStart: new Date(0) }, update: {} });
           // Idempotente por refId (no duplica el regalo si se reintenta).
           const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: result.org.id, refType: "signup_gift", refId }, select: { id: true } });
           if (!dup) {

@@ -6,6 +6,7 @@ const store = {
   wallet: null as any,
   ledger: [] as any[],
   planFeatures: { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 100 } as Record<string, unknown>,
+  planId: "p1", // conmutable: simula upgrade de plan dentro del mismo período
   seq: 0,
 };
 
@@ -69,7 +70,7 @@ const tx = {
 vi.mock("@conversia/database", () => ({
   withTenant: async (_org: string, fn: any) => fn(tx),
   getAdminPrisma: () => ({
-    subscription: { findFirst: async () => ({ planId: "p1", periodStart: new Date() }) },
+    subscription: { findFirst: async () => ({ planId: store.planId, periodStart: new Date() }) },
     plan: { findUnique: async () => ({ features: store.planFeatures }) },
     conversationCreditLot: { findMany: async () => [] },
   }),
@@ -82,16 +83,19 @@ beforeEach(() => {
   store.wallet = null;
   store.ledger = [];
   store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 100 };
+  store.planId = "p1";
   store.seq = 0;
 });
 
 describe("V2-1 — débito de crédito-conversación", () => {
   it("debita 1 crédito de un lote vigente", async () => {
+    // included=0 para aislar el consumo del lote (la acreditación del plan se prueba aparte).
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
     store.lots.push({ id: "A", organizationId: "o", source: "plan", amount: 10, remaining: 10, expiresAt: new Date(Date.now() + 86400000), createdAt: 1 });
     const r = await debitConversation("o", { conversationId: "c1" });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.balanceAfter).toBe(9);
-    expect(store.lots[0].remaining).toBe(9);
+    expect(store.lots.find((l) => l.id === "A")!.remaining).toBe(9);
   });
 
   it("FIFO: consume primero el lote que expira ANTES", async () => {
@@ -112,8 +116,52 @@ describe("V2-1 — débito de crédito-conversación", () => {
     expect(store.lots[0].remaining).toBe(8);
   });
 
-  it("gracia: sin lotes, debita en negativo hasta el límite y luego BLOQUEA", async () => {
-    // Sin lotes → cada débito usa gracia. Hasta GRACE_LIMIT pasa; el siguiente bloquea.
+  it("FIX sim-2026-10-16: el PRIMER débito acredita el período del plan (lote de 100) antes de debitar", async () => {
+    // Bug cazado en la simulación: la wallet nacía con periodStart=now y el primer
+    // período jamás acreditaba → todo caía a gracia. Ahora: sin lotes previos, el
+    // primer débito debe crear el lote del plan (included=100) y debitar de AHÍ.
+    const r = await debitConversation("o", { conversationId: "c-first" });
+    expect(r.ok).toBe(true);
+    const planLots = store.lots.filter((l) => l.source === "plan");
+    expect(planLots).toHaveLength(1);
+    expect(planLots[0].amount).toBe(100);
+    expect(planLots[0].remaining).toBe(99);
+    expect(store.wallet.graceUsed ?? 0).toBe(0); // nada de gracia en el camino feliz
+    // Idempotencia del período: un segundo débito NO re-acredita otro lote.
+    await debitConversation("o", { conversationId: "c-second" });
+    expect(store.lots.filter((l) => l.source === "plan")).toHaveLength(1);
+    expect(planLots[0].remaining).toBe(98);
+  });
+
+  it("FIX sim-2026-10-17: UPGRADE dentro del mismo período (trial→base el mismo día) acredita el plan nuevo", async () => {
+    // Funnel normal: nace trial (included 0), conversa (gracia), paga base el MISMO día.
+    // Antes: la wallet ya había "visto" el período con el trial y el lote de 100 jamás
+    // se creaba (el cliente pagaba y quedaba bloqueado al agotar la gracia). Ahora la
+    // acreditación es idempotente por (plan, período) vía ledger.
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
+    store.planId = "plan_trial";
+    for (let i = 0; i < 3; i++) await debitConversation("o", { conversationId: `t${i}` });
+    expect(store.wallet.graceUsed).toBe(3);
+    expect(store.lots.filter((l) => l.source === "plan")).toHaveLength(0);
+    // Upgrade: ahora el plan vigente es base (100 incluidas), mismo período.
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 100 };
+    store.planId = "plan_base";
+    const r = await debitConversation("o", { conversationId: "post-upgrade" });
+    expect(r.ok).toBe(true);
+    const planLots = store.lots.filter((l) => l.source === "plan");
+    expect(planLots).toHaveLength(1);
+    // 100 acreditadas: 3 pagan la gracia pendiente → lote de 97; el débito deja 96.
+    expect(store.wallet.graceUsed).toBe(0);
+    expect(planLots[0].remaining).toBe(96);
+    // Reintento (otro débito, mismo plan y período): NO re-acredita otro lote.
+    await debitConversation("o", { conversationId: "post-upgrade-2" });
+    expect(store.lots.filter((l) => l.source === "plan")).toHaveLength(1);
+  });
+
+  it("gracia: sin lotes NI créditos de plan (trial included=0), debita en negativo hasta el límite y luego BLOQUEA", async () => {
+    // El plan de prueba V2 incluye 0 → la acreditación del período no crea lote y el
+    // flujo cae a gracia (sus 30 de regalo llegan por lote bonus aparte, no por plan).
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
     for (let i = 0; i < GRACE_LIMIT; i++) {
       const r = await debitConversation("o", { conversationId: `c${i}` });
       expect(r.ok).toBe(true);
@@ -137,7 +185,8 @@ describe("V2-1 — débito de crédito-conversación", () => {
   });
 
   it("la compra paga primero la gracia pendiente", async () => {
-    // Genera 3 de gracia, luego compra 10 → paga 3 de gracia y deja un lote de 7.
+    // Genera 3 de gracia (trial: included=0), luego compra 10 → paga 3 y deja lote de 7.
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
     for (let i = 0; i < 3; i++) await debitConversation("o", { conversationId: `g${i}` });
     expect(store.wallet.graceUsed).toBe(3);
     await creditPurchasedConversations("o", 10, { refType: "package", refId: "pay2" });

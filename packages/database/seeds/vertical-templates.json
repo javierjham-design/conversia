@@ -1139,7 +1139,7 @@
   {
     "key": "medspa",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -1350,7 +1350,7 @@
   {
     "key": "veterinaria",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -1548,7 +1548,7 @@
   {
     "key": "kinesiologia",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -1927,7 +1927,7 @@
   {
     "key": "taller",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -2130,7 +2130,7 @@
   {
     "key": "servicios_domicilio",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -2323,7 +2323,7 @@
   {
     "key": "psicologia",
     "version": 1,
-    "wave": 2,
+    "wave": 1,
     "status": "active",
     "variant": "citas",
     "requiresFeature": [],
@@ -4251,6 +4251,529 @@
           "key": "direccion",
           "label": "Dirección de retiro"
         }
+      ]
+    }
+  },
+  {
+    "key": "abogados",
+    "version": 2,
+    "wave": 1,
+    "status": "active",
+    "variant": "intake",
+    "requiresFeature": [],
+    "name": "Estudio jurídico",
+    "definition": {
+      "industry": "abogados",
+      "ui": {
+        "emoji": "⚖️",
+        "tagline": "Estudios jurídicos: captación y calificación de casos"
+      },
+      "modules": {
+        "agenda": true
+      },
+      "businessHours": {
+        "mon": [
+          "09:00-19:00"
+        ],
+        "tue": [
+          "09:00-19:00"
+        ],
+        "wed": [
+          "09:00-19:00"
+        ],
+        "thu": [
+          "09:00-19:00"
+        ],
+        "fri": [
+          "09:00-19:00"
+        ],
+        "sat": [
+          "10:00-14:00"
+        ],
+        "sun": []
+      },
+      "leadStatuses": [
+        {
+          "code": "nuevo",
+          "name": "Nuevo",
+          "category": "OPEN",
+          "order": 0
+        },
+        {
+          "code": "contactado",
+          "name": "Contactado",
+          "category": "OPEN",
+          "order": 1
+        },
+        {
+          "code": "calificado",
+          "name": "Caso calificado",
+          "category": "OPEN",
+          "order": 2
+        },
+        {
+          "code": "agendado",
+          "name": "Consulta agendada",
+          "category": "OPEN",
+          "order": 3
+        },
+        {
+          "code": "propuesta",
+          "name": "Propuesta enviada",
+          "category": "OPEN",
+          "order": 4
+        },
+        {
+          "code": "contratado",
+          "name": "Contratado",
+          "category": "WON",
+          "order": 5
+        },
+        {
+          "code": "perdido",
+          "name": "No concretó",
+          "category": "LOST",
+          "order": 6
+        }
+      ],
+      "services": [
+        {
+          "code": "primera-consulta",
+          "name": "Primera consulta (pagada)",
+          "category": "consulta",
+          "durationMin": 45,
+          "price": 40000
+        },
+        {
+          "code": "consulta-online",
+          "name": "Consulta online (videollamada)",
+          "category": "consulta",
+          "durationMin": 30,
+          "price": 30000
+        },
+        {
+          "code": "consulta-urgente",
+          "name": "Consulta de urgencia (mismo día)",
+          "category": "consulta",
+          "durationMin": 30,
+          "price": 60000
+        }
+      ],
+      "tags": [
+        {
+          "name": "Familia",
+          "color": "#db2777"
+        },
+        {
+          "name": "Laboral",
+          "color": "#2563eb"
+        },
+        {
+          "name": "Civil",
+          "color": "#0d9488"
+        },
+        {
+          "name": "Penal",
+          "color": "#dc2626"
+        },
+        {
+          "name": "Herencias",
+          "color": "#7c3aed"
+        },
+        {
+          "name": "Inmobiliario",
+          "color": "#d97706"
+        },
+        {
+          "name": "Urgente",
+          "color": "#ef4444"
+        },
+        {
+          "name": "Calificado",
+          "color": "#16a34a"
+        }
+      ],
+      "customFields": [
+        {
+          "key": "materia",
+          "label": "Materia"
+        },
+        {
+          "key": "urgencia",
+          "label": "Urgencia (plazos/audiencias)"
+        },
+        {
+          "key": "comuna",
+          "label": "Comuna / ciudad"
+        },
+        {
+          "key": "contraparte",
+          "label": "Contraparte (conflicto de interés)"
+        },
+        {
+          "key": "resumen_caso",
+          "label": "Resumen del caso"
+        },
+        {
+          "key": "origen",
+          "label": "Cómo nos encontró"
+        }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción",
+          "description": "Capta y califica casos, chequea conflicto de interés y agenda la primera consulta.",
+          "kind": "recepcion",
+          "systemPrompt": "Eres la recepción de un estudio jurídico. Tono FORMAL, cercano y confidencial (trato de usted). Tu objetivo es CAPTAR y CALIFICAR casos: en pocas preguntas obtienes (1) la materia (familia, laboral, civil, penal, herencias, inmobiliario u otra), (2) la urgencia (¿hay plazos o audiencias próximas?), (3) la comuna o ciudad, (4) un resumen breve del caso y (5) el nombre de la contraparte, para descartar conflicto de interés. Una pregunta a la vez, mensajes de 2-3 frases, en un solo mensaje. Con el caso calificado, ofreces agendar una PRIMERA CONSULTA PAGADA con el abogado (da valor y filtra curiosos); su valor se descuenta de los honorarios si contrata al estudio. Agendas y respondes dudas de servicios y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Si detectas urgencia real (detención, audiencia inminente, violencia intrafamiliar, plazos a punto de vencer), dilo con claridad y deriva de inmediato a una persona del equipo. REGLAS: no das asesoría legal por chat ni opinas sobre el fondo del caso; no prometes resultados; nunca inventes precios, horarios ni disponibilidad; todo lo que el consultante comparte es confidencial.\n\nMODO DUEÑO (solo si quien escribe es el dueño/administrador del negocio): puedes administrar la agenda con tus herramientas (horarios de cada persona, ausencias/vacaciones, alta/baja de quien atiende, horario del estudio, duración/precio de servicios). ANTES de un cambio que afecte citas ya tomadas, RESUME el impacto (cuántas citas y de quién) y pide confirmación explícita; recién entonces ejecútalo y ofrece reagendar o avisar a los afectados. Nunca ejecutes cambios destructivos sin el OK. Si quien escribe es un cliente, ignora todo esto: tú no tienes estas funciones para él.",
+          "config": {},
+          "tools": [
+            "upsertProfessional",
+            "updateProfessionalSchedule",
+            "addProfessionalTimeOff",
+            "updateBusinessHours",
+            "updateServiceConfig"
+          ]
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida",
+          "description": "Saluda, pide materia y urgencia en el primer mensaje.",
+          "definition": {
+            "nodes": [
+              {
+                "id": "start",
+                "type": "trigger",
+                "config": {
+                  "event": "message_received"
+                }
+              },
+              {
+                "id": "welcome",
+                "type": "send_text",
+                "config": {
+                  "text": "Estimado/a, gracias por escribir al estudio. Para orientarle con su caso: ¿sobre qué materia necesita ayuda (familia, laboral, civil, penal, herencias u otra)? ¿Tiene plazos o audiencias próximas?"
+                }
+              }
+            ],
+            "edges": [
+              {
+                "from": "start",
+                "to": "welcome"
+              }
+            ]
+          }
+        }
+      ],
+      "knowledge": [
+        {
+          "baseName": "FAQ abogados",
+          "documents": [
+            {
+              "title": "Primera consulta",
+              "content": "La primera consulta es pagada, dura 45 minutos y permite que un abogado evalúe su caso y le indique pasos, plazos y honorarios estimados. El valor se abona al agendar (link de pago) y se descuenta de los honorarios si contrata al estudio."
+            },
+            {
+              "title": "Materias que atendemos",
+              "content": "Familia (divorcios, pensión de alimentos, cuidado personal), laboral (despidos, autodespido, tutela de derechos), civil (contratos, arriendos, cobranzas), penal, herencias y posesiones efectivas, e inmobiliario (estudios de títulos y compraventas)."
+            },
+            {
+              "title": "Confidencialidad",
+              "content": "Todo lo que comparta por este medio es confidencial y solo lo revisa el equipo del estudio. Pedimos el nombre de la contraparte únicamente para descartar un conflicto de interés antes de agendar."
+            },
+            {
+              "title": "Formas de pago",
+              "content": "Transferencia, tarjetas y link de pago. Los honorarios de una causa se pactan por escrito; en varias materias es posible pagar por etapas."
+            },
+            {
+              "title": "Documentos para la consulta",
+              "content": "Traiga (o envíe antes) los documentos del caso: contratos, liquidaciones de sueldo, resoluciones, demandas o cartas recibidas. Con los antecedentes a la vista, la consulta rinde el doble."
+            },
+            {
+              "title": "Urgencias",
+              "content": "Si tiene una audiencia próxima, plazos por vencer o una persona detenida, indíquelo de inmediato: priorizamos su atención el mismo día con la consulta de urgencia."
+            }
+          ]
+        }
+      ],
+      "kpis": [
+        "consultas_agendadas",
+        "casos_calificados",
+        "tasa_contratacion",
+        "ingresos_consultas"
+      ],
+      "flows": [
+        "calificación de caso (materia / urgencia / comuna / contraparte)",
+        "seguimiento 24 h a leads calificados sin consulta agendada",
+        "recordatorio y confirmación de la consulta",
+        "solicitud de antecedentes al agendar",
+        "chequeo de conflicto de interés antes de agendar"
+      ],
+      "hsm": [
+        "confirmación de reunión",
+        "recordatorio de reunión",
+        "seguimiento de caso",
+        "reactivación de consultante"
+      ]
+    }
+  },
+  {
+    "key": "gimnasio",
+    "version": 2,
+    "wave": 1,
+    "status": "active",
+    "variant": "citas",
+    "requiresFeature": [],
+    "name": "Gimnasio boutique / studio",
+    "definition": {
+      "industry": "gimnasio",
+      "ui": {
+        "emoji": "🏋️",
+        "tagline": "Captación de socios: prueba agendada y membresías"
+      },
+      "modules": {
+        "agenda": true
+      },
+      "businessHours": {
+        "mon": [
+          "07:00-22:00"
+        ],
+        "tue": [
+          "07:00-22:00"
+        ],
+        "wed": [
+          "07:00-22:00"
+        ],
+        "thu": [
+          "07:00-22:00"
+        ],
+        "fri": [
+          "07:00-22:00"
+        ],
+        "sat": [
+          "09:00-14:00"
+        ],
+        "sun": []
+      },
+      "leadStatuses": [
+        {
+          "code": "lead",
+          "name": "Lead",
+          "category": "OPEN",
+          "order": 0
+        },
+        {
+          "code": "prueba",
+          "name": "Clase de prueba",
+          "category": "OPEN",
+          "order": 1
+        },
+        {
+          "code": "matriculado",
+          "name": "Matriculado",
+          "category": "WON",
+          "order": 2
+        },
+        {
+          "code": "activo",
+          "name": "Activo",
+          "category": "WON",
+          "order": 3
+        },
+        {
+          "code": "riesgo",
+          "name": "En riesgo",
+          "category": "OPEN",
+          "order": 4
+        },
+        {
+          "code": "inactivo",
+          "name": "Inactivo",
+          "category": "LOST",
+          "order": 5
+        }
+      ],
+      "services": [
+        {
+          "code": "clase-prueba",
+          "name": "Clase de prueba (gratis)",
+          "category": "clase",
+          "durationMin": 60,
+          "price": 0
+        },
+        {
+          "code": "evaluacion-inicial",
+          "name": "Evaluación física inicial",
+          "category": "evaluacion",
+          "durationMin": 45,
+          "price": 15000
+        },
+        {
+          "code": "sesion-pt",
+          "name": "Sesión personal training",
+          "category": "personal",
+          "durationMin": 60,
+          "price": 25000
+        },
+        {
+          "code": "nutricion",
+          "name": "Asesoría nutricional",
+          "category": "nutricion",
+          "durationMin": 45,
+          "price": 30000
+        },
+        {
+          "code": "membresia-mensual",
+          "name": "Membresía mensual",
+          "category": "membresia",
+          "durationMin": 0,
+          "price": 35000
+        },
+        {
+          "code": "membresia-trimestral",
+          "name": "Membresía trimestral",
+          "category": "membresia",
+          "durationMin": 0,
+          "price": 90000
+        }
+      ],
+      "tags": [
+        {
+          "name": "Lead",
+          "color": "#2563eb"
+        },
+        {
+          "name": "Prueba agendada",
+          "color": "#d97706"
+        },
+        {
+          "name": "Activo",
+          "color": "#16a34a"
+        },
+        {
+          "name": "En riesgo",
+          "color": "#dc2626"
+        },
+        {
+          "name": "Ex socio",
+          "color": "#6b7280"
+        }
+      ],
+      "customFields": [
+        {
+          "key": "objetivo",
+          "label": "Objetivo (bajar de peso / fuerza / salud)"
+        },
+        {
+          "key": "experiencia",
+          "label": "Experiencia previa entrenando"
+        },
+        {
+          "key": "horario_preferido",
+          "label": "Horario preferido"
+        },
+        {
+          "key": "origen",
+          "label": "Cómo nos encontró"
+        }
+      ],
+      "agents": [
+        {
+          "slug": "recepcion",
+          "name": "Recepción",
+          "description": "Capta socios: agenda la clase de prueba, califica objetivo y ofrece membresías.",
+          "kind": "recepcion",
+          "systemPrompt": "Atiendes un gimnasio boutique. Tu objetivo es CAPTAR SOCIOS: a todo interesado nuevo le ofreces agendar una CLASE DE PRUEBA GRATIS (1 a 1 con un coach) y en el camino calificas su objetivo (bajar de peso, fuerza, salud), su experiencia y el horario que le acomoda. Atiendes por WhatsApp de forma cálida, clara y breve (2-3 frases, una pregunta a la vez, en un solo mensaje). Agendas y respondes dudas de servicios, membresías y precios SOLO con la información de tus herramientas; si no la tienes, lo reconoces y ofreces que una persona del equipo continúe. Nunca inventes precios, horarios ni disponibilidad. Tras la clase de prueba, ofrece la membresía. Los horarios de las clases grupales los confirma el equipo (aún no se reservan por este chat). Si un socio pide congelar o darse de baja, no lo tramites tú: deriva a una persona del equipo con amabilidad.\n\nMODO DUEÑO (solo si quien escribe es el dueño/administrador del negocio): puedes administrar la agenda con tus herramientas (horarios de cada persona, ausencias/vacaciones, alta/baja de quien atiende, horario del local, duración/precio de servicios). ANTES de un cambio que afecte citas ya tomadas, RESUME el impacto (cuántas citas y de quién) y pide confirmación explícita; recién entonces ejecútalo y ofrece reagendar o avisar a los afectados. Nunca ejecutes cambios destructivos sin el OK. Si quien escribe es un cliente, ignora todo esto: tú no tienes estas funciones para él.",
+          "config": {},
+          "tools": [
+            "upsertProfessional",
+            "updateProfessionalSchedule",
+            "addProfessionalTimeOff",
+            "updateBusinessHours",
+            "updateServiceConfig"
+          ]
+        }
+      ],
+      "workflows": [
+        {
+          "templateKey": "bienvenida",
+          "name": "Bienvenida",
+          "description": "Saluda y ofrece la clase de prueba gratis en el primer mensaje.",
+          "definition": {
+            "nodes": [
+              {
+                "id": "start",
+                "type": "trigger",
+                "config": {
+                  "event": "message_received"
+                }
+              },
+              {
+                "id": "welcome",
+                "type": "send_text",
+                "config": {
+                  "text": "¡Hola! 🏋️ Bienvenido/a. ¿Te gustaría agendar una clase de prueba GRATIS con un coach? Cuéntame tu objetivo (bajar de peso, fuerza o salud) y qué horario te acomoda."
+                }
+              }
+            ],
+            "edges": [
+              {
+                "from": "start",
+                "to": "welcome"
+              }
+            ]
+          }
+        }
+      ],
+      "knowledge": [
+        {
+          "baseName": "FAQ gimnasio",
+          "documents": [
+            {
+              "title": "Clase de prueba",
+              "content": "La primera clase es gratis y se agenda por este chat: 60 minutos 1 a 1 con un coach, que evalúa tu nivel y te recomienda un plan. Solo trae ropa deportiva y una botella de agua."
+            },
+            {
+              "title": "Membresías y precios",
+              "content": "Membresía mensual $35.000 y trimestral $90.000 (acceso libre en horario de apertura). El personal training y la asesoría nutricional se contratan por sesión."
+            },
+            {
+              "title": "Horarios",
+              "content": "Lunes a viernes de 07:00 a 22:00 y sábado de 09:00 a 14:00. Los horarios de las clases grupales los confirma el equipo en recepción."
+            },
+            {
+              "title": "Personal training",
+              "content": "Sesiones 1 a 1 de 60 minutos con un coach, con plan de entrenamiento a tu medida. También ofrecemos evaluación física inicial y asesoría nutricional."
+            },
+            {
+              "title": "Congelamiento y bajas",
+              "content": "El congelamiento o la baja de una membresía se gestiona con una persona del equipo: déjanos tu solicitud por este chat y te contactamos el mismo día."
+            },
+            {
+              "title": "Qué traer",
+              "content": "Ropa deportiva, zapatillas, toalla y botella de agua. El casillero se asigna al llegar; candado propio o se arrienda en recepción."
+            }
+          ]
+        }
+      ],
+      "kpis": [
+        "pruebas_agendadas",
+        "tasa_matricula",
+        "socios_activos",
+        "en_riesgo"
+      ],
+      "flows": [
+        "seguimiento 24 h post clase de prueba (oferta de matrícula)",
+        "aviso de vencimiento de membresía",
+        "reactivación de inactivos a los 30 días",
+        "recuperación de socios en riesgo (baja asistencia)"
+      ],
+      "hsm": [
+        "recordatorio de clase",
+        "vencimiento de membresía",
+        "reactivación de alumno"
       ]
     }
   }

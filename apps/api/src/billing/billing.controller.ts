@@ -167,13 +167,26 @@ export class BillingController {
     const now = new Date();
     const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const [lotsAgg, wallet, expAgg, debits] = await Promise.all([
+    const [lotsAgg, wallet, expAgg, debits, sub] = await Promise.all([
       admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
-      admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true } }),
+      admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true, periodStart: true } }),
       admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, expiresAt: { gt: now, lt: endOfMonth } } }),
       admin.conversationCreditLedger.count({ where: { organizationId, reason: "conversation_debit", createdAt: { gte: since } } }),
+      admin.subscription.findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { periodStart: true, planId: true } }),
     ]);
-    const lots = lotsAgg._sum.remaining ?? 0;
+    // Acreditación PENDIENTE del período (solo display): el lote real lo crea el worker
+    // (perezoso) al primer débito; sin esto, una org recién contratada (o recién
+    // UPGRADEADA) vería "consumido 100 de 100" hasta su primera conversación. Mismo
+    // criterio que el worker: ¿existe ya el asiento plan_renewal de (plan, período)?
+    const floorDay = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const subPeriod = sub?.periodStart ? floorDay(sub.periodStart) : Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    // ¿Ya se creó el lote del plan DE ESTE período? (cubre también acreditaciones
+    // previas a este cambio, que no llevaban refId). Si no, se muestra como pendiente.
+    const accrued = included > 0
+      ? await admin.conversationCreditLot.findFirst({ where: { organizationId, source: "plan", createdAt: { gte: new Date(subPeriod) } }, select: { id: true } })
+      : null;
+    const pendingAccrual = included > 0 && !accrued ? included : 0;
+    const lots = (lotsAgg._sum.remaining ?? 0) + pendingAccrual;
     const grace = wallet?.graceUsed ?? 0;
     const consumed = Math.max(0, included - lots);
     const dayOfMonth = now.getUTCDate();
@@ -531,10 +544,21 @@ export class BillingController {
     const ctx = requireContext();
     const parsed = z.object({ planCode: z.string(), billingInterval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
-    if (getEnv().NODE_ENV === "production" && getEnv().STRIPE_SECRET_KEY) {
-      throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
+    // SEGURIDAD (hallazgo sim 200, 2026-10-17): el guard solo miraba Stripe. En una
+    // producción con Flow o Lemon Squeezy (sin STRIPE_SECRET_KEY) este endpoint quedaba
+    // ABIERTO y cualquier tenant activaba planes/packs gratis. Ahora: en producción se
+    // bloquea si hay CUALQUIER pasarela real configurada (env o platform_settings).
+    if (getEnv().NODE_ENV === "production") {
+      const gw = await this.paymentSettings.get();
+      if (getEnv().STRIPE_SECRET_KEY || gw.flow || gw.lemonSqueezy) {
+        throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
+      }
     }
-    await this.activateOrCredit(ctx.organizationId, parsed.data.planCode, "mock", undefined, parsed.data.billingInterval ?? "monthly");
+    // providerRef determinístico por día: el dedup de creditPackage descansa en el ref
+    // (los webhooks reales siempre traen uno). Sin esto, dos clics en "ya pagué" (mock)
+    // acreditaban el pack DOS veces (hallazgo sim 200: lotes=2/800 tras doble confirm).
+    const mockRef = `mock:${ctx.organizationId}:${parsed.data.planCode}:${new Date().toISOString().slice(0, 10)}`;
+    await this.activateOrCredit(ctx.organizationId, parsed.data.planCode, "mock", mockRef, parsed.data.billingInterval ?? "monthly");
     return { ok: true, planCode: parsed.data.planCode, note: "Pago simulado (dev). En producción lo confirma el webhook de la pasarela." };
   }
 
@@ -773,7 +797,8 @@ export class BillingController {
         const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId, reason: "package_purchase", refId: providerRef }, select: { id: true } });
         if (dup) return;
       }
-      const wallet = await tx.conversationWallet.upsert({ where: { organizationId }, create: { organizationId }, update: {} });
+      // periodStart = época si la wallet no existía: "nunca acreditada" (ver auth.service).
+      const wallet = await tx.conversationWallet.upsert({ where: { organizationId }, create: { organizationId, periodStart: new Date(0) }, update: {} });
       let credit = pkg.credits;
       // Pagar gracia pendiente primero (los créditos nuevos cubren el negativo).
       if (wallet.graceUsed > 0) {
@@ -1009,7 +1034,7 @@ export class BillingController {
       const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: ctx.organizationId, refType: "migration_courtesy", refId }, select: { id: true } });
       if (dup) return;
       const expiresAt = new Date(Date.now() + 35 * 86_400_000);
-      await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId }, update: {} });
+      await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId, periodStart: new Date(0) }, update: {} });
       await tx.conversationCreditLot.create({ data: { organizationId: ctx.organizationId, source: "bonus", amount: 100, remaining: 100, expiresAt, refType: "migration_courtesy", refId } });
       await tx.conversationCreditLedger.create({ data: { organizationId: ctx.organizationId, delta: 100, reason: "admin_adjust", balanceAfter: 100, refType: "migration_courtesy", refId } });
     });

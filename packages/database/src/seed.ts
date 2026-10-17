@@ -189,6 +189,42 @@ const PLANS = [
     limits: { users: 0, clinics: 0, channels: 0, agents: 0, workflows: 0, aiTokensDaily: 0 }, // 0 = a medida
     features: { managed: true, whiteLabel: true, api: true, sso: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
   },
+  // --- Planes CONVERSIA V2 (modelo por conversación; V2-0/V2-9). INACTIVOS por
+  // defecto: los enciende scripts/v2-golive.mjs con OK del dueño. Hallazgo de la
+  // simulación 2026-10-16: sin estos seeds, un entorno nuevo (o un restore de DR)
+  // quedaba SIN catálogo V2 y el registro autoservicio fallaba en silencio. ---
+  {
+    code: "conversia_v2_trial",
+    name: "Prueba Conversia",
+    brand: "conversia",
+    priceClp: 0,
+    priceUsd: 0,
+    order: 20,
+    isPublic: false,
+    active: false,
+    limits: { users: 3, clinics: 1, channels: 1, agents: 2, workflows: 5, aiTokensDaily: 500_000 },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, conversationsIncluded: 0, aiPlus: false, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
+  },
+  {
+    code: "conversia_v2_base",
+    name: "Conversia Base",
+    brand: "conversia",
+    priceClp: 18_900,
+    priceUsd: 19,
+    order: 21,
+    isPublic: false,
+    active: false,
+    limits: { users: 5, clinics: 1, channels: 2, agents: 3, workflows: 10, aiTokensDaily: 1_000_000 },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, conversationsIncluded: 100, aiPlus: false, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
+  },
+];
+
+// Packs de CONVERSACIONES V2 (type "conversation", brand conversia). Inactivos por
+// defecto; los enciende v2-golive.mjs. Precios CONVERSIA_V2.md §2 (corregidos §2.1).
+const V2_CONVERSATION_PACKS = [
+  { code: "conv-recarga-100", name: "Recarga 100 conversaciones", credits: 100, priceClp: 21_900, priceUsd: 23, order: 20 },
+  { code: "conv-pack-400", name: "Pack 400 conversaciones", credits: 400, priceClp: 84_900, priceUsd: 89, order: 21 },
+  { code: "conv-pack-1000", name: "Pack 1.000 conversaciones", credits: 1000, priceClp: 199_900, priceUsd: 209, order: 22 },
 ];
 
 async function main() {
@@ -198,6 +234,16 @@ async function main() {
       where: { code: p.code },
       update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic ?? true, brand: (p as any).brand ?? "tubot" },
       create: p as any,
+    });
+  }
+
+  // Packs de conversaciones V2 (inactivos; v2-golive los enciende). No pisa `active`
+  // en update para respetar el estado que haya fijado el go-live.
+  for (const pk of V2_CONVERSATION_PACKS) {
+    await prisma.messagePackage.upsert({
+      where: { code: pk.code },
+      update: { name: pk.name, credits: pk.credits, priceClp: pk.priceClp, priceUsd: pk.priceUsd, order: pk.order, type: "conversation", brand: "conversia" },
+      create: { ...pk, type: "conversation", brand: "conversia", active: false },
     });
   }
 

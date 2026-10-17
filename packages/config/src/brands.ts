@@ -70,7 +70,11 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
  */
 export function brandFromOrigin(origin: string | undefined): string {
   const env = getEnv();
-  if (origin && env.WEB_URL_CONVERSIA && origin === env.WEB_URL_CONVERSIA) return "conversia";
+  // Comparación NORMALIZADA (hallazgo simulación 2026-10-16: el match exacto de string
+  // fallaba por una barra final o diferencia de mayúsculas en el host, y el registro
+  // Conversia caía en silencio a tubot). Normaliza: minúsculas + sin "/" final.
+  const norm = (u: string) => u.trim().toLowerCase().replace(/\/+$/, "");
+  if (origin && env.WEB_URL_CONVERSIA && norm(origin) === norm(env.WEB_URL_CONVERSIA)) return "conversia";
   return "tubot";
 }
 

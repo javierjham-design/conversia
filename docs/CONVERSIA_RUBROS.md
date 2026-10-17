@@ -4,6 +4,14 @@
 **Para qué:** alimentar directamente `industries.ts` y las `vertical_templates` (etapas F2/F6 de PROMPTS_CONVERSIA.md). Los rubros de olas 2–3 se cargan como plantillas desde ya aunque su marketing se active después.
 **En desarrollo (ola 1, definida por Javier):** barbería, peluquería, centro de estética, centro médico, clínica dental + módulo genérico.
 
+> **Actualización 2026-10-17 (decisión Javier):** la ola 2 completa se PROMOVIÓ a ola 1
+> (vendible en el registro): taller, veterinaria, kinesiología, medspa, psicología,
+> servicios a domicilio, **gimnasio** (v2 sin clases grupales con cupos: captación de
+> socios + clase de prueba 1-a-1 + membresías; los cupos grupales llegan en una v3
+> cuando exista la feature `groupClasses`) y **abogados/estudio jurídico** (v2, intake
+> de casos con conflicto de interés). Catálogo vendible: **14 rubros**. E2E verificado
+> en la simulación de 200 clientes (docs/SIMULACION_200_2026-10.md).
+
 ---
 
 ## 0. CONCLUSIONES DEL CRUCE (Chile/LATAM × evidencia mundial)
