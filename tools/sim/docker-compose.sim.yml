@@ -59,7 +59,9 @@ services:
         pnpm --filter @conversia/database db:deploy &&
         pnpm --filter @conversia/database db:setup &&
         pnpm --filter @conversia/database db:seed &&
-        echo "db-init OK"
+        node packages/database/scripts/v2-golive.mjs &&
+        node packages/database/scripts/seed-wa-rate-schedule.mjs &&
+        echo "db-init OK (migrate+setup+seed+golive+rate)"
 
   api:
     image: conversia-sim-api:latest # construida por db-init (misma imagen del monorepo)
