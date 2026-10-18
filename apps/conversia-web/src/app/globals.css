@@ -254,20 +254,24 @@ body::after {
   display: none;
 }
 
-@media (max-width: 619px) {
+/* M3 — móvil/tablet (< 768px): riel oculto, barra de pestañas inferior fija con safe-area iOS. */
+@media (max-width: 767px) {
   .shell-rail {
     display: none;
   }
   .shell-body {
     margin-left: 0;
-    padding-bottom: 68px;
+    /* Deja espacio para la tab bar + el home indicator de iOS. */
+    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   }
   .shell-tabs {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 62px;
+    min-height: 62px;
+    /* El área táctil respeta el inset inferior de iOS (no queda bajo el home indicator). */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     display: flex;
     justify-content: space-around;
     align-items: center;
@@ -281,11 +285,15 @@ body::after {
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 2px;
     font-size: 10px;
     color: var(--ink-dim);
     text-decoration: none;
-    padding: 4px 8px;
+    /* Objetivo táctil ≥ 44px (guía de accesibilidad móvil). */
+    min-width: 44px;
+    min-height: 44px;
+    padding: 6px 8px;
   }
   .tab-item.active {
     color: var(--acc-deep);
