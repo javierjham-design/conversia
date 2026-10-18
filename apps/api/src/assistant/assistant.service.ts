@@ -228,18 +228,30 @@ REGLAS:
     let reply = "";
     let wrote = false;
 
-    for (let round = 0; round < 4; round++) {
-      const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route), messages, tools: specs, maxTokens: 700, toolTranscript });
-      if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
-      const results: AIToolResult[] = [];
-      for (const call of resp.toolCalls as AIToolCall[]) {
-        const out = await this.executeTool(ctx, call.name, call.input).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false }));
-        if (out.didWrite) wrote = true;
-        results.push({ toolCallId: call.id, content: out.content, isError: out.isError });
+    // ROBUSTEZ (F4.4): si el proveedor de IA está caído/lento, el asistente NUNCA queda mudo
+    // ni rompe la página — responde un fallback claro (CERO SILENCIOS), nunca un 500.
+    try {
+      for (let round = 0; round < 4; round++) {
+        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route), messages, tools: specs, maxTokens: 700, toolTranscript });
+        if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
+        const results: AIToolResult[] = [];
+        for (const call of resp.toolCalls as AIToolCall[]) {
+          const out = await this.executeTool(ctx, call.name, call.input).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false }));
+          if (out.didWrite) wrote = true;
+          results.push({ toolCallId: call.id, content: out.content, isError: out.isError });
+        }
+        if (resp.text?.trim()) reply = resp.text;
+        toolTranscript.push({ kind: "assistant_tool_calls", text: resp.text ?? undefined, calls: resp.toolCalls });
+        toolTranscript.push({ kind: "tool_results", results });
       }
-      if (resp.text?.trim()) reply = resp.text;
-      toolTranscript.push({ kind: "assistant_tool_calls", text: resp.text ?? undefined, calls: resp.toolCalls });
-      toolTranscript.push({ kind: "tool_results", results });
+    } catch (e) {
+      console.error(`✖ Asistente: proveedor de IA no disponible (${(e as Error).message?.slice(0, 120)})`);
+      if (!reply) {
+        reply =
+          "Estoy teniendo un problema para responder en este momento 🙏. Reintenta en unos segundos, por favor. " +
+          (context.nextStep ? `Mientras tanto, tu siguiente paso es: ${context.nextStep.label}. ` : "") +
+          "Si sigue sin funcionar, escríbele a soporte y lo vemos.";
+      }
     }
 
     // Tras un cambio de configuración, corre el auto-QA (V2-6) best-effort y cuéntalo.
