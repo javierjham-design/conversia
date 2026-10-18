@@ -1,8 +1,8 @@
 import { createHmac } from "node:crypto";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { getEnv } from "@conversia/config";
-import { withTenant } from "@conversia/database";
+import { brandOf, getEnv } from "@conversia/config";
+import { getAdminPrisma, withTenant } from "@conversia/database";
 import { QUEUE_NAMES, validateOutboundUrl, type WebhookDeliveryJob } from "@conversia/types";
 
 /** Backoff de reintentos: 1m, 5m, 30m, 2h, 6h… */
@@ -52,6 +52,10 @@ export async function processWebhookDelivery(job: WebhookDeliveryJob): Promise<v
 
   const body = JSON.stringify({ id: delivery.id, ...(delivery.payload as object) });
   const signature = createHmac("sha256", endpoint.secret).update(body).digest("hex");
+  // User-Agent por MARCA (auditoría frontera de marcas 17-oct-2026): los webhooks van a
+  // los servidores de integraciones del TENANT — un cliente Conversia veía "TuBot-Webhooks".
+  const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } }).catch(() => null);
+  const userAgent = `${brandOf(org).userAgent.replace("/1.0", "")}-Webhooks/1.0`;
   const attempt = delivery.attempts + 1;
   const started = Date.now();
 
@@ -64,7 +68,7 @@ export async function processWebhookDelivery(job: WebhookDeliveryJob): Promise<v
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "user-agent": "TuBot-Webhooks/1.0",
+        "user-agent": userAgent,
         "x-conversia-signature": `sha256=${signature}`,
         "x-conversia-event": delivery.event,
         "x-conversia-delivery": delivery.id,

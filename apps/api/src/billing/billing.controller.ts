@@ -277,6 +277,7 @@ export class BillingController {
     if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
     // FUSIBLE anti-prueba-eterna (mismo criterio que checkout): sin planes costo 0.
     if (this.isFreePlan(plan)) throw new BadRequestException("Ese plan no es contratable — elige un plan de pago");
+    await this.assertPlanBrand(ctx.organizationId, plan);
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true, name: true } });
     const cfg = await this.flowCfg();
@@ -430,6 +431,7 @@ export class BillingController {
     // FUSIBLE anti-prueba-eterna: contratar un plan costo 0 activaría la org sin
     // pago (escapando del ciclo de 7 días). El free solo existe en el registro.
     if (this.isFreePlan(plan)) throw new BadRequestException("Ese plan no es contratable — elige un plan de pago");
+    await this.assertPlanBrand(ctx.organizationId, plan);
 
     const org = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.organization.findUnique({ where: { id: ctx.organizationId } }));
     const currency = org?.currency ?? "CLP";
@@ -562,6 +564,19 @@ export class BillingController {
       if (getEnv().STRIPE_SECRET_KEY || gw.flow || gw.lemonSqueezy) {
         throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
       }
+    }
+    // FRONTERA DE MARCAS (auditoría 17-oct-2026): mock-confirm toma el código del
+    // cliente y saltaba los checks de checkout/buy-package → validar aquí también.
+    const code = parsed.data.planCode;
+    if (code.startsWith("pkg:")) {
+      const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: code.slice(4) } });
+      if (!pkg || !pkg.active) throw new BadRequestException("Paquete no disponible");
+      const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+      if (pkg.brand && pkg.brand !== brandOf(org).key) throw new BadRequestException("Paquete no disponible");
+    } else if (!code.startsWith("setup:")) {
+      const plan = await this.prisma.admin.plan.findUnique({ where: { code } });
+      if (!plan || !plan.active) throw new BadRequestException("Plan no disponible");
+      await this.assertPlanBrand(ctx.organizationId, plan);
     }
     // providerRef determinístico por día: el dedup de creditPackage descansa en el ref
     // (los webhooks reales siempre traen uno). Sin esto, dos clics en "ya pagué" (mock)
@@ -734,6 +749,18 @@ export class BillingController {
     await this.prisma.admin.auditLog.create({
       data: { organizationId, actorType: "system", action: "conversia.setup_paid", entityType: "organization", entityId: organizationId, after: { vertical: vertical || null, provider, providerRef: providerRef ?? null } },
     });
+  }
+
+  /**
+   * FRONTERA DE MARCAS (auditoría 17-oct-2026): un plan solo es contratable por una org
+   * de SU marca. Sin esto, cualquier tenant con el código podía contratar el plan de la
+   * otra marca (TuBot → conversia_v2_base y viceversa), cruzando modelo de cobro,
+   * débitos y catálogo. Un plan sin marca cuenta como tubot (default del schema).
+   */
+  private async assertPlanBrand(organizationId: string, plan: { brand?: string | null; code: string }): Promise<void> {
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+    const planBrand = plan.brand ?? "tubot";
+    if (planBrand !== brandOf(org).key) throw new BadRequestException("Plan no disponible");
   }
 
   /** Facturables a medida del tenant (settings.billables): se suman a la base del plan. */
