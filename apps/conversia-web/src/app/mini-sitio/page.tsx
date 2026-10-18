@@ -77,9 +77,9 @@ export default function MiniSitio() {
           <div className="card" style={{ padding: 13, marginBottom: 16, fontSize: 14, color: "var(--warn)" }}>{err}</div>
         ) : null}
 
-        {!cfg ? (
+        {!cfg && !err ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--ink-dim)" }}><Loader2 size={16} className="lp-spin" /> Cargando…</div>
-        ) : (
+        ) : !cfg ? null : (
           <>
             {/* Estado + enlace */}
             <div className="card" style={{ padding: 18, marginBottom: 16 }}>

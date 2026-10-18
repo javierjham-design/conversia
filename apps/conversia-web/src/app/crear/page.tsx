@@ -115,7 +115,7 @@ export default function Crear() {
           <span className="text-dim" style={{ fontSize: 13, letterSpacing: 0.3 }}>Conversia</span>
         </div>
         <h1 className="display" style={{ fontSize: 30, textAlign: "center", margin: "0 0 8px", lineHeight: 1.15 }}>
-          Tu recepcionista IA, <span style={{ color: "var(--acc)" }}>armado solo</span>
+          Tu recepcionista IA, <span style={{ color: "var(--acc-deep)" }}>armado solo</span>
         </h1>
         <p className="text-dim" style={{ textAlign: "center", fontSize: 15, margin: "0 0 24px" }}>Pruébalo en 60 segundos. Sin cuenta, sin tarjeta.</p>
 
