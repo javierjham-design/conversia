@@ -182,6 +182,8 @@ async function main() {
   for (const c of targets) {
     const { org, members, ownerEmail } = c;
     try {
+      // timeout alto: contra prod vía proxy la latencia por consulta es mayor y la transacción
+      // interactiva (varias consultas) supera los 5s por defecto de Prisma → "Transaction not found".
       await prisma.$transaction(async (tx) => {
         // 4) users.brand → conversia (sin esto el login desde conversia-web no encuentra la cuenta).
         //    Detecta colisión con un usuario conversia ya existente del mismo email.
@@ -240,7 +242,7 @@ async function main() {
             after: { brand: "conversia", planId: trialPlan.id, lifecycle: "v2_trial", giftGranted: !dup },
           },
         });
-      });
+      }, { maxWait: 15_000, timeout: 60_000 });
       summary.repaired += 1;
       console.log(`  ${C.green("✓")} ${org.id}  ${ownerEmail}  reparada → conversia + v2_trial + 30`);
     } catch (e) {
