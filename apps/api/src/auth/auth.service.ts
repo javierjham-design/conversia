@@ -222,7 +222,10 @@ export class AuthService {
     // Paquete vertical (F2): si el registro trae rubro y hay plantilla activa, se
     // instala tras crear la org (post-commit; tiene su propia transacción con RLS).
     // Best-effort: si falla, el usuario queda creado y puede instalarlo desde onboarding.
-    if (effectiveVertical) {
+    // SOLO marca conversia (auditoría frontera de marcas 17-oct-2026): el endpoint es
+    // público y un register TuBot con `vertical` en el body inyectaba contenido de
+    // plantillas Conversia (servicios/agentes/etapas) en una org TuBot.
+    if (effectiveVertical && isConversia) {
       try {
         await this.vertical.install(result.org.id, effectiveVertical, { source: "registration" });
       } catch (e) {

@@ -205,7 +205,7 @@ async function tripFuse(date: string, count: number, cap: number): Promise<void>
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            summary: "TuBot: fusible de mensajería cortado",
+            summary: "Fusible de mensajería cortado",
             description: `Se superó el techo global diario de plantillas (${count} > ${cap}). Envíos de plantilla en pausa para todos los tenants hasta revisión.`,
             severity: "critical",
           }),
@@ -334,7 +334,7 @@ async function tripSvcFuse(date: string, count: number, cap: number): Promise<vo
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            summary: "TuBot: fusible de mensajes de servicio cortado",
+            summary: "Fusible de mensajes de servicio cortado",
             description: `Se superó el techo global diario de servicio (${count} > ${cap}). Respuestas automáticas en pausa para todos los tenants hasta revisión.`,
             severity: "critical",
           }),
