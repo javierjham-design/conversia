@@ -415,7 +415,7 @@ async function w6() {
     CHECK(got429 >= 3, "ALTO", "sec-ratelimit-agente-test", `35 pruebas seguidas sin 429 (${got429})`, `${got429} bloqueadas con 429`);
   }
   // s12 — RLS directo + aislamiento con los scripts del repo
-  const leak = execFileSync(PSQL, ["-h", "localhost", "-p", "5433", "-U", "conversia_app", "-d", "conversia_sim", "-t", "-A", "-c", "SELECT count(*) FROM conversations;"], { env: { ...process.env, PGPASSWORD: process.env.SIM_APP_ROLE_PASSWORD ?? "conversia_app_dev_password" }, encoding: "utf8" }).trim();
+  const leak = execFileSync(PSQL, ["-h", process.env.SIM_PG_HOST ?? "localhost", "-p", process.env.SIM_PG_PORT ?? "5433", "-U", "conversia_app", "-d", process.env.SIM_PG_DB ?? "conversia_sim", "-t", "-A", "-c", "SELECT count(*) FROM conversations;"], { env: { ...process.env, PGPASSWORD: process.env.SIM_APP_ROLE_PASSWORD ?? "conversia_app_dev_password" }, encoding: "utf8" }).trim();
   CHECK(Number(leak) === 0, "CRITICO", "sec-rls-directo", `rol app sin contexto ve ${leak} filas`, "0 filas sin contexto");
   console.log("== W6 FIN ==");
 }
@@ -447,7 +447,7 @@ async function w7() {
     const m = Number(psql(`SELECT count(*) FROM conversation_quota_marks WHERE organization_id='${oA.orgId}';`));
     CHECK(d === m * 2, "ALTO", "aiplus-x2", `débitos=${d} marks=${m}`, `${m}→${d} (×2)`);
   }
-  metrics.notifs = psql(`SELECT type||':'||count(*) FROM notifications GROUP BY type ORDER BY 2 DESC;`).replaceAll("\n", " · ");
+  metrics.notifs = psql(`SELECT type||':'||count(*) FROM notifications GROUP BY type ORDER BY count(*) DESC;`).replaceAll("\n", " · ");
   metrics.exceptions = psql(`SELECT type||':'||count(*) FROM platform_exceptions GROUP BY type;`).replaceAll("\n", " · ");
   writeFileSync(OUT("sim250-results.json"), JSON.stringify({ metrics, findings }, null, 1));
   console.log("\n===== RESUMEN 250 =====");
