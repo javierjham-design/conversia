@@ -1,0 +1,77 @@
+name: e2e "como el dueño"
+
+# Suite browser-real contra el STACK DOCKER (pnpm sim:up): el navegador hace lo que hace el
+# dueño, jornadas A–D. Subconjunto CRÍTICO (A viaje + B + D) en PRs que tocan el producto;
+# la suite COMPLETA (14 rubros + C + todos los dispositivos) de noche. Nunca contra producción.
+
+on:
+  pull_request:
+    paths:
+      - "apps/conversia-web/**"
+      - "apps/api/**"
+      - "apps/worker/**"
+      - "packages/**"
+      - "tools/sim/**"
+      - ".github/workflows/e2e-dueno.yml"
+  schedule:
+    - cron: "0 7 * * *" # ~03:00 CLT (nightly) — suite completa
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dueno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Stack Docker completo (postgres + redis + migración/seed + golive + api + worker + web).
+      # up.sh construye las 3 imágenes y ESPERA a que api(/health) y web respondan (gate).
+      - name: Levantar el stack de simulación
+        run: pnpm sim:up
+
+      - run: pnpm --filter @conversia/conversia-web exec playwright install --with-deps chromium
+
+      # En PR → subconjunto CRÍTICO (A viaje completo + B + D) en móvil+escritorio.
+      # Nightly / manual → suite COMPLETA (todos los proyectos, 14 rubros, C incluido).
+      # workers=2 + 1 retry: el sim es un solo contenedor; evita falsos rojos por sobrecarga.
+      - name: e2e como el dueño (crítico A+B+D)
+        if: github.event_name == 'pull_request'
+        env:
+          RUN_DUENO: "1"
+          BASE: http://localhost:3002
+          SIM_API: http://localhost:4000
+        run: >-
+          pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
+          --grep "viaje completo|me cuida|marca ajena"
+          --project=desktop --project=iphone
+          --workers=2 --retries=1
+
+      - name: e2e como el dueño (suite completa)
+        if: github.event_name != 'pull_request'
+        env:
+          RUN_DUENO: "1"
+          BASE: http://localhost:3002
+          SIM_API: http://localhost:4000
+        run: >-
+          pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
+          --workers=2 --retries=1
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: dueno-e2e-report
+          path: apps/conversia-web/playwright-report
+          retention-days: 7
+
+      - name: Bajar el stack
+        if: always()
+        run: DOWN=1 bash tools/sim/up.sh
