@@ -54,3 +54,37 @@ jobs:
           kill $SERVER_PID 2>/dev/null || true
           exit $STATUS
 
+  # M5 — e2e de la PWA de conversia-web (instalable + SW + offline + sin scroll horizontal),
+  # móvil y escritorio, claro y oscuro. Subconjunto SIN backend (corre contra `next start`);
+  # los flujos con API (RUN_FLOWS=1) se corren contra el stack Docker local, no en CI.
+  e2e-conversia:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @conversia/database db:generate
+      - run: pnpm --filter @conversia/conversia-web build
+      - run: pnpm --filter @conversia/conversia-web exec playwright install --with-deps chromium
+      - name: e2e PWA (móvil + escritorio)
+        run: |
+          PORT=3002 pnpm --filter @conversia/conversia-web start &
+          SERVER_PID=$!
+          for i in $(seq 1 40); do curl -sf http://localhost:3002/login >/dev/null 2>&1 && break; sleep 2; done
+          set +e
+          BASE=http://localhost:3002 pnpm --filter @conversia/conversia-web test:e2e:pwa
+          STATUS=$?
+          set -e
+          kill $SERVER_PID 2>/dev/null || true
+          exit $STATUS
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: conversia-e2e-report
+          path: apps/conversia-web/playwright-report
+          retention-days: 7
+

@@ -19,3 +19,9 @@ Thumbs.db
 
 # Salidas de simulacion/humo (pueden contener JWTs de cuentas de prueba)
 tools/sim/out/
+
+# Playwright (e2e conversia-web)
+apps/conversia-web/test-results/
+apps/conversia-web/playwright-report/
+apps/conversia-web/blob-report/
+apps/conversia-web/.playwright/
