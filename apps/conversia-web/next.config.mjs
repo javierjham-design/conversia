@@ -20,8 +20,14 @@ const csp = [
   // 'unsafe-eval' SOLO en dev: el runtime de react-refresh de Next lo exige y sin él
   // la página queda sin hidratar (botones muertos). En producción NO se emite.
   // cloudflareinsights: beacon que inyecta Cloudflare en el dominio (evita el error de consola).
-  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-  `connect-src 'self' ${api} ${prodApiFallback} https://cloudflareinsights.com`,
+  // connect.facebook.net: SDK del Embedded Signup de WhatsApp — sin él, /canales no
+  // puede abrir la ventana de Meta y la UI lo confundía con "popup bloqueado"
+  // (hallazgo prod 18-oct-2026, con pantallazo de Javier; espeja la CSP de apps/web).
+  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://connect.facebook.net${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  // frame-src: iframes internos del SDK de Facebook (login/status). frame-ancestors
+  // sigue en 'none': nadie puede embeber NUESTRO panel.
+  "frame-src 'self' https://www.facebook.com https://web.facebook.com https://staticxx.facebook.com",
+  `connect-src 'self' ${api} ${prodApiFallback} https://cloudflareinsights.com https://graph.facebook.com https://www.facebook.com`,
 ].join("; ");
 
 const securityHeaders = [
