@@ -101,7 +101,7 @@ export default function Caja() {
                 <span key={m} className="text-dim" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)" }}>{METHOD_LABEL[m] ?? m}: {clp(v)}</span>
               ))}
             </div>
-            <p className="text-dim" style={{ fontSize: 12, marginTop: 10 }}>Conciliado (webhook): {clp(s.conciliado)} · Declarado (manual): {clp(s.declarado)} · Efectivo: {clp(s.efectivo)}{day?.closed ? " · 🔒 caja cerrada" : ""}</p>
+            <p className="text-dim" style={{ fontSize: 12, marginTop: 10 }}>Conciliado (automático): {clp(s.conciliado)} · Declarado (manual): {clp(s.declarado)} · Efectivo: {clp(s.efectivo)}{day?.closed ? " · 🔒 caja cerrada" : ""}</p>
           </div>
         ) : null}
 

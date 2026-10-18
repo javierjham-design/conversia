@@ -21,11 +21,17 @@ export default function ConfigurarAgenda() {
   const [editingSvc, setEditingSvc] = useState<Svc | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cfgMsg, setCfgMsg] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false); // evita el falso "Sin recursos/servicios" mientras carga
 
   function loadAll() {
-    api<Pro[]>("/agenda/professionals").then(setPros).catch((e) => setError((e as Error).message));
-    api<Svc[]>("/agenda/services").then(setSvcs).catch(() => {});
-    api<Config>("/agenda/config").then(setCfg).catch(() => {});
+    Promise.allSettled([
+      api<Pro[]>("/agenda/professionals").then(setPros),
+      api<Svc[]>("/agenda/services").then(setSvcs),
+      api<Config>("/agenda/config").then(setCfg),
+    ]).then(([p]) => {
+      if (p.status === "rejected") setError(String((p.reason as Error)?.message ?? "No se pudo cargar"));
+      setLoaded(true);
+    });
   }
   useEffect(loadAll, []);
 
@@ -87,7 +93,7 @@ export default function ConfigurarAgenda() {
           <button className="btn-accent" onClick={() => setEditingPro("new")} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={16} /> Agregar</button>
         </div>
         {pros.length === 0 ? (
-          <div className="card" style={{ padding: 20 }}><p className="text-dim" style={{ margin: 0, fontSize: 14 }}>Sin recursos. Agrega personas (dentista, barbero…) o recursos (box, sillón) con sus horarios.</p></div>
+          <div className="card" style={{ padding: 20 }}><p className="text-dim" style={{ margin: 0, fontSize: 14 }}>{loaded ? "Sin recursos. Agrega personas (dentista, barbero…) o recursos (box, sillón) con sus horarios." : "Cargando…"}</p></div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {pros.map((p) => (
@@ -111,7 +117,7 @@ export default function ConfigurarAgenda() {
           <button className="btn-accent" onClick={() => setEditingSvc("new")} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={16} /> Agregar</button>
         </div>
         {svcs.length === 0 ? (
-          <div className="card" style={{ padding: 20 }}><p className="text-dim" style={{ margin: 0, fontSize: 14 }}>Sin servicios. Agrega los que ofreces (consulta, corte…) con su duración.</p></div>
+          <div className="card" style={{ padding: 20 }}><p className="text-dim" style={{ margin: 0, fontSize: 14 }}>{loaded ? "Sin servicios. Agrega los que ofreces (consulta, corte…) con su duración." : "Cargando…"}</p></div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {svcs.map((sv) => (

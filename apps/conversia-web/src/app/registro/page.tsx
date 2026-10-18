@@ -18,12 +18,22 @@ const COUNTRIES = [
 type Vertical = { key: string; emoji: string; label: string; desc: string };
 // Fallback (si el endpoint público no responde). La fuente real es GET /public/verticals
 // (solo ola 1 active); así el Super Admin activa rubros por dato sin deploy.
+// Fallback = los 14 rubros de ola 1 (mismo conjunto que sirve /public/verticals). Igualar el
+// tamaño evita que la grilla "crezca" cuando llega el fetch bajo 4G (era el elemento LCP tardío).
 const FALLBACK_VERTICALS: Vertical[] = [
   { key: "dental", emoji: "🦷", label: "Clínica dental", desc: "Odontología y consultas dentales" },
   { key: "centro_medico", emoji: "🩺", label: "Centro médico", desc: "Consultas y especialidades médicas" },
   { key: "estetica", emoji: "🌿", label: "Centro de estética", desc: "Faciales, corporales y depilación" },
+  { key: "medspa", emoji: "💆", label: "Medspa", desc: "Estética médica y tratamientos" },
   { key: "barberia", emoji: "💈", label: "Barbería", desc: "Cortes, barba y combos" },
   { key: "peluqueria", emoji: "✂️", label: "Peluquería", desc: "Corte, color, peinado y tratamientos" },
+  { key: "gimnasio", emoji: "🏋️", label: "Gimnasio", desc: "Planes, clases y membresías" },
+  { key: "kinesiologia", emoji: "🤸", label: "Kinesiología", desc: "Rehabilitación y sesiones" },
+  { key: "psicologia", emoji: "🧠", label: "Psicología", desc: "Terapia y consultas" },
+  { key: "veterinaria", emoji: "🐾", label: "Veterinaria", desc: "Consultas y controles de mascotas" },
+  { key: "abogados", emoji: "⚖️", label: "Estudio jurídico", desc: "Asesorías y consultas legales" },
+  { key: "taller", emoji: "🔧", label: "Taller", desc: "Mantención y reparaciones" },
+  { key: "servicios_domicilio", emoji: "🚚", label: "Servicios a domicilio", desc: "Agenda y visitas a terreno" },
   { key: "generico", emoji: "✨", label: "Otro rubro", desc: "Configuración general lista para adaptar" },
 ];
 
