@@ -191,3 +191,20 @@ destructivo**: no borra datos. Verificación post-apply: con la cuenta reparada,
 - Antiabuso de registro ~10/IP por ventana: subirlo si la campaña comparte IPs (CGNAT).
 - Los tenants demo del seed (Digital Dent / Clínica Demo) tienen canal MOCK: con el fix
   del webhook ya no son inyectables en prod; aún así no publicar sus slugs.
+
+## 11. Pendientes del App Dashboard de Meta (anotados 18-oct, revisar con calma)
+
+- **Línea de crédito / Configuración de pagos**: el dashboard la pide para "socios de
+  soluciones" (Solution Partners). Operamos como TECH PROVIDER: cada cliente paga a
+  Meta directo con su medio de pago y la línea compartida normalmente NO aplica.
+  Confirmar: si los tenants TuBot ya envían plantillas pagadas sin línea compartida,
+  queda confirmado y este punto se cierra.
+- **"Create a system user token" / "Números preverificados"** aparecen sin marcar en el
+  checklist de Registro insertado: es guía genérica del dashboard, no el estado real
+  (el system user token ya existe si la plataforma opera). Revisar que el token vigente
+  esté guardado/rotado como corresponde y documentado.
+- **Coexistencia**: pendiente de Meta o del formato nuevo post-deprecación v2/v3
+  (15-oct-2026). Fuente de verdad: panel WhatsApp → Registro insertado → selectores
+  "Funciones" y "Tipo de función" + la URL alojada que generan. Si los selectores no
+  ofrecen el onboarding de la app → ticket por Direct Support, tipo
+  "Embedded Signup - Coexistence Onboarding".
