@@ -70,11 +70,20 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
  */
 export function brandFromOrigin(origin: string | undefined): string {
   const env = getEnv();
-  // Comparación NORMALIZADA (hallazgo simulación 2026-10-16: el match exacto de string
-  // fallaba por una barra final o diferencia de mayúsculas en el host, y el registro
-  // Conversia caía en silencio a tubot). Normaliza: minúsculas + sin "/" final.
-  const norm = (u: string) => u.trim().toLowerCase().replace(/\/+$/, "");
-  if (origin && env.WEB_URL_CONVERSIA && norm(origin) === norm(env.WEB_URL_CONVERSIA)) return "conversia";
+  // Comparación por FAMILIA DE DOMINIO (hallazgo prod 17-oct-2026): la marca Conversia
+  // sirve en app.conversia.cl, conversia.cl y www.conversia.cl (el fix de CORS habilitó
+  // el apex/www), pero esta función solo reconocía el valor exacto de WEB_URL_CONVERSIA
+  // → registrarse desde conversia.cl creaba la cuenta con marca TUBOT (catálogo, trial
+  // y asistente equivocados). Ahora: mismo dominio base (sin app./www.) → conversia.
+  // Cualquier otro origen (tubot.cl incluido) sigue cayendo a tubot, como siempre.
+  if (origin && env.WEB_URL_CONVERSIA) {
+    const baseHost = (u: string): string | null => {
+      try { return new URL(u.trim().toLowerCase()).hostname.replace(/^(app|www)\./, ""); } catch { return null; }
+    };
+    const o = baseHost(origin);
+    const c = baseHost(env.WEB_URL_CONVERSIA);
+    if (o && c && o === c) return "conversia";
+  }
   return "tubot";
 }
 

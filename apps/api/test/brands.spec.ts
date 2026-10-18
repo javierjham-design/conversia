@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// El env se fija ANTES de que @conversia/config cachee getEnv (vi.hoisted corre
+// previo a los imports): habilita probar la familia de dominios conversia.
+vi.hoisted(() => {
+  process.env.WEB_URL_CONVERSIA = "https://app.conversia.cl";
+});
+
 import { brandOf } from "@conversia/config";
 import { brandFromOrigin } from "../src/auth/auth.controller";
 
@@ -31,8 +38,19 @@ describe("brandFromOrigin (marca server-side por Origin, no por el body)", () =>
   it("sin Origin o Origin desconocido → tubot (default seguro)", () => {
     expect(brandFromOrigin(undefined)).toBe("tubot");
     expect(brandFromOrigin("https://app.tubot.cl")).toBe("tubot");
+    expect(brandFromOrigin("https://tubot.cl")).toBe("tubot");
     expect(brandFromOrigin("https://evil.example.com")).toBe("tubot");
+    // Un dominio que CONTIENE conversia.cl pero no ES la familia → tubot (no sufijos).
+    expect(brandFromOrigin("https://evil-conversia.cl.example.com")).toBe("tubot");
   });
-  // Nota: el caso conversia depende de WEB_URL_CONVERSIA en el entorno; aquí se valida
-  // la regla de default-seguro (un Origin cualquiera NUNCA da conversia).
+
+  it("FIX prod 2026-10-17: TODA la familia del dominio Conversia da conversia (apex/www/app)", () => {
+    // Antes solo el valor exacto de WEB_URL_CONVERSIA: registrarse desde conversia.cl
+    // (habilitado por el fix de CORS) creaba la cuenta TUBOT — catálogo de precios,
+    // trial y asistente equivocados (reporte de Javier con pantallazo de Cobros).
+    expect(brandFromOrigin("https://app.conversia.cl")).toBe("conversia");
+    expect(brandFromOrigin("https://conversia.cl")).toBe("conversia");
+    expect(brandFromOrigin("https://www.conversia.cl")).toBe("conversia");
+    expect(brandFromOrigin("https://App.Conversia.CL/")).toBe("conversia"); // case + barra
+  });
 });
