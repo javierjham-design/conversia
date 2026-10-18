@@ -19,24 +19,39 @@ export function SupportWidget() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState<Ctx>(null);
+  // Elegibilidad: null = aún no sabemos; true = esta cuenta es de Conversia (mostrar burbuja);
+  // false = el asistente NO aplica a esta cuenta (p. ej. una cuenta de otra marca que entró por
+  // error a conversia-web) → NO mostramos la burbuja ni intentamos conversar. El 404/403 del gate
+  // (`assertConversia`) jamás debe llegar al dueño como un "(Not Found)" crudo.
+  const [eligible, setEligible] = useState<boolean | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pulse, setPulse] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const seededRef = useRef(false);
+  // Espejo de `eligible` para leerlo dentro de listeners sin re-suscribir el efecto.
+  const eligibleRef = useRef<boolean | null>(null);
+  useEffect(() => { eligibleRef.current = eligible; }, [eligible]);
 
   // Contexto al montar (para el saludo líder + el pulso proactivo). Barato.
   useEffect(() => {
     api<NonNullable<Ctx>>("/assistant/context")
       .then((c) => {
+        setEligible(true);
         setCtx(c);
         if (c.mode === "implementacion" && typeof sessionStorage !== "undefined" && !sessionStorage.getItem("cv_asst_nudged")) {
           setPulse(true);
           sessionStorage.setItem("cv_asst_nudged", "1");
         }
       })
-      .catch(() => {});
+      .catch((e) => {
+        const status = (e as { status?: number }).status;
+        // 404/403 = el asistente no aplica a esta cuenta → ocultar la burbuja.
+        // Cualquier otro fallo (red, 5xx transitorio) deja la burbuja: es una cuenta Conversia
+        // con un bache momentáneo, no una cuenta inelegible.
+        setEligible(status === 404 || status === 403 ? false : true);
+      });
   }, []);
 
   const ask = useCallback(async (userText: string) => {
@@ -55,7 +70,16 @@ export function SupportWidget() {
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
       setMsgs((m) => [...m, { role: "assistant", content: reply }]);
     } catch (e) {
-      setMsgs((m) => [...m, { role: "assistant", content: `No pude responder ahora (${(e as Error).message}). Intenta de nuevo en un momento.` }]);
+      // NUNCA mostrar el error técnico crudo al dueño (jamás un "(Not Found)"). Mensaje humano
+      // y accionable; si hay WhatsApp de soporte lo ofrecemos como salida.
+      const status = (e as { status?: number }).status;
+      const human =
+        status === 429
+          ? "Vamos un poco rápido 🙏. Espera unos segundos y escríbeme de nuevo."
+          : status === 404 || status === 403
+            ? "El asistente no está disponible en esta cuenta." + (SUPPORT_WA ? " Escríbele a soporte por WhatsApp y te ayudamos 💬." : " Escríbele a soporte y te ayudamos 💬.")
+            : "No pude responder en este momento 🙏. Reintenta en unos segundos; si sigue, escríbele a soporte y lo vemos contigo.";
+      setMsgs((m) => [...m, { role: "assistant", content: human }]);
     } finally {
       setBusy(false);
     }
@@ -77,6 +101,11 @@ export function SupportWidget() {
   // Bloque A y CTAs del checklist disparan este evento con el contexto ya cargado.
   useEffect(() => {
     function onOpen(e: Event) {
+      // Handshake: si esta cuenta NO es elegible, no tomamos el evento → el disparador
+      // (botón "Pedir ayuda") cae a su enlace de soporte. Con null (contexto aún cargando)
+      // abrimos optimista: casi siempre es una cuenta Conversia.
+      if (eligibleRef.current === false) return;
+      e.preventDefault();
       const detail = (e as CustomEvent).detail as { topic?: string; context?: string } | undefined;
       setOpen(true);
       setPulse(false);
@@ -89,6 +118,10 @@ export function SupportWidget() {
   useEffect(() => { if (open) setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "auto" }), 60); }, [open, msgs]);
 
   const waLink = SUPPORT_WA ? `https://wa.me/${SUPPORT_WA}?text=${encodeURIComponent("Vengo del panel de Conversia y necesito ayuda")}` : null;
+
+  // Cuenta inelegible (otra marca entró por error a conversia-web): no mostramos la burbuja.
+  // Así el dueño nunca ve el asistente que su cuenta no puede usar ni un error crudo del gate.
+  if (eligible === false) return null;
 
   return (
     <>

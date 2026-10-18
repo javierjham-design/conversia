@@ -5,6 +5,7 @@ import { CalendarDays, CreditCard, Globe, Home, MailWarning, MessageCircle, More
 import { api, getToken } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
+import { openAssistant } from "@/lib/assistant";
 
 /**
  * NAVEGACIÓN UNIFICADA de Conversia (misma en TODAS las pantallas):
@@ -148,7 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               ))}
               {/* Asistente Conversia (B): abre la burbuja con el contexto actual. */}
               <button
-                onClick={() => { setMoreOpen(false); try { window.dispatchEvent(new CustomEvent("conversia:assistant:open", { detail: { topic: "menu" } })); } catch { /* noop */ } }}
+                onClick={() => { setMoreOpen(false); openAssistant({ topic: "menu" }); }}
                 className="nav-item"
                 style={{ width: "100%", height: 46, justifyContent: "flex-start", gap: 10, padding: "0 12px", fontSize: 14, border: "none", background: "transparent", cursor: "pointer" }}
               >
