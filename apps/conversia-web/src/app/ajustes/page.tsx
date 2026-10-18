@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Check, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { NotificationsSettings } from "@/components/NotificationsSettings";
 import { api } from "@/lib/api";
 
 // Hex canónicos de CONVERSIA_DISENO.md §3 (deben coincidir con --acc de globals.css).
@@ -125,6 +126,8 @@ export default function Ajustes() {
             ))}
           </div>
         </div>
+
+        <NotificationsSettings />
 
         <form onSubmit={saveName} className="card" style={{ padding: 20 }}>
           <h2 className="display" style={{ fontSize: 18, margin: "0 0 14px" }}>Perfil</h2>
