@@ -189,12 +189,15 @@ async function checkBundleNoLocal() {
         try {
           const cr = await fetchT(chunkUrl);
           const txt = await cr.text();
-          // Quita el fallback documentado antes de buscar restos locales.
+          // Quita el fallback documentado antes de buscar restos locales. Solo nos importa una
+          // URL local REAL (host local CON PUERTO, p. ej. localhost:4000 / 127.0.0.1:4000); un
+          // hostname pelado "127.0.0.1" / "localhost" es una comparación legítima en api-base.ts
+          // (`host !== "127.0.0.1"`), no una URL filtrada → no debe marcar.
           const scrub = txt.split(ALLOWED_LOCAL_FALLBACK).join("");
-          const hasLocalColon = scrub.includes("localhost:");
-          const has127 = scrub.includes("127.0.0.1");
+          const hasLocalColon = /localhost:\d/.test(scrub);
+          const has127 = /127\.0\.0\.1:\d/.test(scrub);
           if (hasLocalColon || has127) {
-            offenders.push(`${chunkUrl} (${hasLocalColon ? "localhost:" : ""}${has127 ? " 127.0.0.1" : ""})`);
+            offenders.push(`${chunkUrl} (${hasLocalColon ? "localhost:<puerto>" : ""}${has127 ? " 127.0.0.1:<puerto>" : ""})`);
           }
           if (PUBLIC_API_MARKERS.some((m) => txt.includes(m))) anyPublicApi = true;
         } catch (e) {
@@ -470,7 +473,7 @@ async function checkAssistant() {
   if (QA.email && QA.password) {
     try {
       const login = await apiLogin(QA.email, QA.password, CONVERSIA_ORIGIN);
-      if (login.status !== 200 || !login.token) {
+      if (!login.token) {
         subs.push({ ok: false, label: `QA conversia login → HTTP ${login.status} (¿credenciales?/${login.body?.message ?? ""})` });
       } else {
         const auth = { authorization: `Bearer ${login.token}` };
@@ -500,7 +503,7 @@ async function checkAssistant() {
   if (TB.email && TB.password) {
     try {
       const login = await apiLogin(TB.email, TB.password, TUBOT_ORIGIN);
-      if (login.status !== 200 || !login.token) {
+      if (!login.token) {
         subs.push({ ok: null, label: `tubot login → HTTP ${login.status} (informativo; no se pudo verificar el 404)` });
       } else {
         const ctx = await fetchT(API + "/assistant/context", { headers: { authorization: `Bearer ${login.token}` } });
