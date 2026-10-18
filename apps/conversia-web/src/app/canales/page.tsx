@@ -160,7 +160,12 @@ export default function Canales() {
         if (!code) { fail("Se canceló la conexión."); return; }
         void finish(code);
       },
-      { config_id: cfg.configId, response_type: "code", override_default_response_type: true, extras: { setup: {}, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" } },
+      // extras.version "v4" EXPLÍCITO (hallazgo del panel "Registro insertado" del App
+      // Dashboard, 18-oct-2026): la página de lanzamiento alojada por Meta manda
+      // {"version":"v4"} en los extras y su verificador trata `version` como clave del
+      // launch config. Sin ella, el lanzamiento puede caer al comportamiento v2/v3
+      // (deprecado el 15-oct-2026) donde el featureType de coexistencia no corre.
+      { config_id: cfg.configId, response_type: "code", override_default_response_type: true, extras: { version: "v4", setup: {}, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" } },
     );
   }
 
