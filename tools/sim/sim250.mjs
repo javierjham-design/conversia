@@ -362,6 +362,15 @@ async function w6() {
   const xb1 = await http("POST", "/billing/buy-package", { token: oB.token, body: { code: "msgs_1000" } });
   const xb2 = await http("POST", "/billing/buy-package", { token: oTB.token, origin: ORIGIN_TB, body: { code: "conv-pack-400" } });
   CHECK(xb1.status === 400 && xb2.status === 400, "ALTO", "sec-cross-brand-pack", `conversia→pack tubot=${xb1.status} · tubot→pack conversia=${xb2.status}`, "400/400 (catálogo por marca)");
+  // s5b — cross-brand en CONTRATACIÓN (auditoría frontera de marcas): checkout,
+  // subscription/start y mock-confirm deben rechazar planes de la otra marca.
+  const xc1 = await http("POST", "/billing/checkout", { token: oTB.token, origin: ORIGIN_TB, body: { planCode: "conversia_v2_base" } });
+  const xc2 = await http("POST", "/billing/checkout", { token: oB.token, body: { planCode: "pro" } });
+  const xc3 = await http("POST", "/billing/mock-confirm", { token: oTB.token, origin: ORIGIN_TB, body: { planCode: "conversia_v2_base" } });
+  const xc4 = await http("POST", "/billing/mock-confirm", { token: oTB.token, origin: ORIGIN_TB, body: { planCode: "pkg:conv-pack-400" } });
+  CHECK(xc1.status === 400 && xc2.status === 400 && xc3.status === 400 && xc4.status === 400, "CRITICO", "sec-cross-brand-plan",
+    `tubot→base=${xc1.status} conversia→pro=${xc2.status} mock-plan=${xc3.status} mock-pack=${xc4.status} (esperado 400×4)`,
+    "contratación cruzada bloqueada en checkout y mock-confirm");
   // s6 — v2-migrate desde TuBot
   const mig = await http("POST", "/billing/v2-migrate", { token: oTB.token, origin: ORIGIN_TB });
   CHECK(mig.status === 400, "ALTO", "sec-migrate-tubot", `TuBot pudo migrar a V2: ${mig.status}`, "400");

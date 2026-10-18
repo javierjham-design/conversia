@@ -251,7 +251,7 @@ export function startDailyDigests(): () => void {
             organizationId: conn.organizationId,
             kind: "daily_summary",
             to: dsRecipients,
-            subject: `Resumen diario — ${org?.name ?? "TuBot"}`,
+            subject: `Resumen diario — ${org?.name ?? "tu negocio"}`,
             html: `<h3>Últimas 24 horas</h3><ul><li><b>${conversations}</b> conversaciones activas</li><li><b>${contacts}</b> contactos nuevos</li><li><b>${leads}</b> leads nuevos</li><li><b>${appointments}</b> citas creadas</li></ul>`,
           },
           { attempts: 4, backoff: { type: "exponential", delay: 60_000 }, removeOnComplete: 100, removeOnFail: 500 },
