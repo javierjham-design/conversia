@@ -346,7 +346,7 @@ function LandingStyles() {
 .lp-accent { color: var(--acc-deep); }
 
 /* NAV */
-.lp-nav { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 20px; padding: 14px clamp(16px,4vw,40px); backdrop-filter: blur(12px); background: color-mix(in srgb, var(--bg,var(--surface-solid)) 78%, transparent); border-bottom: 1px solid var(--hairline); }
+.lp-nav { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 20px; padding: 14px clamp(16px,4vw,40px); backdrop-filter: blur(12px); background: color-mix(in srgb, var(--surface-solid) 82%, transparent); border-bottom: 1px solid var(--hairline); }
 .lp-logo { font-size: 22px; text-decoration: none; color: var(--ink); }
 .lp-links { display: flex; gap: 22px; margin-left: 18px; }
 .lp-links a { font-size: 14px; text-decoration: none; color: var(--ink-dim); }

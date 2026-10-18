@@ -11,7 +11,7 @@ export default function Verify() {
     const token = new URLSearchParams(window.location.search).get("token");
     if (!token) {
       setState("error");
-      setMsg("Falta el token del enlace.");
+      setMsg("El enlace de verificación está incompleto. Ábrelo de nuevo desde tu correo.");
       return;
     }
     api("/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) })

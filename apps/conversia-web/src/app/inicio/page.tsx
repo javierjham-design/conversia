@@ -104,14 +104,20 @@ export default function Home() {
   const [pending, setPending] = useState<Conv[]>([]);
   const [assistantOn, setAssistantOn] = useState<boolean | null>(null);
   const [, setTick] = useState(0);
+  const [walletErr, setWalletErr] = useState(false);
 
   const tz = me?.organization?.timezone;
   const firstName = me?.user?.name?.split(" ")[0] ?? "";
 
+  const loadWallet = useCallback(() => {
+    setWalletErr(false);
+    api<Wallet>("/billing/wallet/summary").then(setWallet).catch(() => setWalletErr(true));
+  }, []);
+
   useEffect(() => {
     if (!getToken()) return;
     api<Me>("/auth/me").then(setMe).catch(() => {});
-    api<Wallet>("/billing/wallet/summary").then(setWallet).catch(() => {});
+    loadWallet();
     // Asistente activo = ≥1 agente publicado && ≥1 canal conectado.
     Promise.all([
       api<{ active?: boolean; publishedVersion?: unknown }[]>("/agents").catch(() => []),
@@ -175,7 +181,7 @@ export default function Home() {
         {/* Topbar */}
         <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p className="text-dim" style={{ margin: 0, fontSize: 12.5 }}>{parts.date} · {parts.time}</p>
+            <p className="text-dim" suppressHydrationWarning style={{ margin: 0, fontSize: 12.5 }}>{parts.date} · {parts.time}</p>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 3, fontSize: 12.5, color: assistantOn ? "var(--ok)" : "var(--warn)" }}>
               <Pulse on={assistantOn === true} />
               {assistantOn === null ? "Comprobando asistente…" : assistantOn ? "Asistente activo" : "Asistente en preparación"}
@@ -193,7 +199,7 @@ export default function Home() {
         </header>
 
         {/* Saludo (Fraunces cursiva en el acento) */}
-        <h1 className="display" style={{ fontSize: 32, margin: "0 0 20px", fontWeight: 600 }}>
+        <h1 className="display" suppressHydrationWarning style={{ fontSize: 32, margin: "0 0 20px", fontWeight: 600 }}>
           {greeting(tz)}
           {firstName ? <span className="display-italic" style={{ color: "var(--acc-deep)" }}>, {firstName}</span> : null}
         </h1>
@@ -270,7 +276,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="card" style={{ padding: 18 }}>
+            <div className="card" style={{ padding: 18, minHeight: 150 }}>
               <h2 className="display" style={{ fontSize: 17, margin: "0 0 10px" }}>Créditos</h2>
               {wallet ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -294,6 +300,11 @@ export default function Home() {
                       {wallet.unit === "conversation" ? "Recargar +100 conversaciones · $21.900" : "Comprar sobre +500 · $21.900"}
                     </a>
                   </div>
+                </div>
+              ) : walletErr ? (
+                <div style={{ fontSize: 14 }}>
+                  <p className="text-dim" style={{ margin: "0 0 8px" }}>No pudimos cargar tu saldo.</p>
+                  <button onClick={loadWallet} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "7px 14px" }}>Reintentar</button>
                 </div>
               ) : (
                 <p className="text-dim" style={{ fontSize: 14 }}>Cargando saldo…</p>

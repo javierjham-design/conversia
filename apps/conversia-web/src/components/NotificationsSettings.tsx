@@ -128,7 +128,7 @@ export function NotificationsSettings() {
           </div>
 
           {!vapidOk ? (
-            <p className="text-dim" style={{ fontSize: 12, margin: "10px 0 0" }}>El servidor aún no tiene las claves de notificaciones configuradas (VAPID). El equipo lo deja listo.</p>
+            <p className="text-dim" style={{ fontSize: 12, margin: "10px 0 0" }}>Las notificaciones push aún no están habilitadas en el servidor. El equipo lo deja listo.</p>
           ) : null}
 
           {/* Preferencias por tipo */}

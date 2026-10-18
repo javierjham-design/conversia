@@ -3,6 +3,18 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 
+// Estado de suscripción en español (es-CL), sin anglicismos técnicos.
+const SUB_ESTADO: Record<string, string> = {
+  active: "activa",
+  trialing: "en prueba",
+  past_due: "pago pendiente",
+  paused: "en pausa",
+  canceled: "cancelada",
+  cancelled: "cancelada",
+  incomplete: "incompleta",
+  unpaid: "impaga",
+};
+
 type Summary = { balance: number; included: number; consumed: number; byCategory: Record<string, number>; projected: number; pctUsed: number; over80: boolean };
 type Me = {
   organization: { currency: string };
@@ -168,7 +180,7 @@ export default function Cobros() {
             </div>
             {me?.subscription ? (
               <p className="text-dim" style={{ fontSize: 12, margin: "12px 0 0" }}>
-                Suscripción: {me.subscription.status}{me.subscription.periodEnd ? ` · próximo período ${new Date(me.subscription.periodEnd).toLocaleDateString("es-CL")}` : ""}
+                Suscripción: {SUB_ESTADO[me.subscription.status] ?? me.subscription.status}{me.subscription.periodEnd ? ` · próximo período ${new Date(me.subscription.periodEnd).toLocaleDateString("es-CL")}` : ""}
               </p>
             ) : null}
             <p className="text-dim" style={{ fontSize: 12, margin: "6px 0 0" }}>Pagas con {currency === "CLP" ? "Flow (tarjetas chilenas)" : "tarjeta internacional"}. Al confirmar te llevamos a la pasarela.</p>
