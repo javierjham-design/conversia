@@ -44,8 +44,21 @@ RUN_DUENO=1 BASE=http://localhost:3002 SIM_API=http://localhost:4000 \
 RUN_DUENO=1 ... pnpm ... exec playwright test como-el-dueno --project=desktop --grep "tubot"
 ```
 
-Sin `RUN_DUENO=1` la suite se SALTA (necesita API real). En CI: el subconjunto crítico
-(Jornadas A+B) en cada PR; la suite completa en el job nightly.
+Sin `RUN_DUENO=1` la suite se SALTA (necesita API real).
+
+## CI (`.github/workflows/e2e-dueno.yml`)
+
+Levanta el stack Docker (`pnpm sim:up`) y corre con `--workers=2 --retries=1` (el sim es un
+solo contenedor; así no hay falsos rojos por sobrecarga):
+- **En cada PR** que toca el producto (conversia-web / api / worker / packages / tools/sim):
+  subconjunto **crítico** = Jornada A (viaje completo) + Jornada B + Jornada D, en
+  desktop+iphone (`--grep "viaje completo|me cuida|marca ajena"`).
+- **Nightly** (cron) y manual (`workflow_dispatch`): la suite **completa** (14 rubros,
+  Jornada C y todos los dispositivos).
+
+> Nota de verificación local: correr los 5 proyectos a la vez satura el único contenedor del
+> sim (falsos rojos por timeout). Verifícalo por proyecto (`--project=desktop`, luego
+> `--project=iphone`), que es como está probado. El CI usa `--workers=2 --retries=1`.
 
 ## Fixtures (`_fixtures.ts`)
 
