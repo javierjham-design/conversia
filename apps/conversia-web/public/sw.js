@@ -25,6 +25,58 @@ self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
 
+// ---- Web Push (M2) ----
+// El payload lo arma el worker (canal web_push): {title, body, link, tag, eventKey}.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = { title: "Conversia", body: event.data ? event.data.text() : "" };
+  }
+  const options = {
+    body: data.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: data.tag || undefined,
+    renotify: Boolean(data.tag),
+    data: { link: data.link || "/conversaciones", eventKey: data.eventKey || null },
+  };
+  event.waitUntil(self.registration.showNotification(data.title || "Conversia", options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = (event.notification.data && event.notification.data.link) || "/conversaciones";
+  event.waitUntil(
+    (async () => {
+      const clientsArr = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // Ventana abierta: enfocarla y AVISARLE a dónde ir por mensaje (en iOS client.navigate
+      // no funciona; por eso la app navega sola al recibir el mensaje "navigate").
+      for (const client of clientsArr) {
+        try {
+          if (new URL(client.url).origin !== self.location.origin) continue;
+        } catch (_) {
+          continue;
+        }
+        try {
+          client.postMessage({ type: "navigate", link });
+        } catch (_) {
+          /* noop */
+        }
+        try {
+          await client.focus();
+        } catch (_) {
+          /* noop */
+        }
+        client.navigate?.(link);
+        return;
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(link);
+    })(),
+  );
+});
+
 function isStatic(url) {
   return url.pathname.startsWith("/_next/static") || STATIC_FILES.has(url.pathname);
 }

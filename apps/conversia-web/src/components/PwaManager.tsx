@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Download, RefreshCw, Share, X } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -20,10 +21,30 @@ function isStandalone(): boolean {
 }
 
 export function PwaManager() {
+  const router = useRouter();
   const [installEvt, setInstallEvt] = useState<any>(null);
   const [showIosHint, setShowIosHint] = useState(false);
   const [updateReg, setUpdateReg] = useState<ServiceWorkerRegistration | null>(null);
   const [dismissed, setDismissed] = useState(true);
+
+  // M2 — al tocar una notificación push, el SW manda {type:"navigate",link}; navegamos
+  // dentro de la app (imprescindible en iOS, donde el SW no puede navegar el cliente).
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data;
+      if (d && d.type === "navigate" && typeof d.link === "string") {
+        try {
+          const url = new URL(d.link, window.location.origin);
+          if (url.origin === window.location.origin) router.push(url.pathname + url.search);
+        } catch {
+          /* noop */
+        }
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, [router]);
 
   useEffect(() => {
     try {
