@@ -152,6 +152,39 @@ al servicio `conversia-web` (DNS/routing). No requiere variables nuevas.
 
 Estado y criterios de aceptación: `docs/CONEXION_SIMPLE_RESULTADOS.md`.
 
+## 10. Reparar orgs mal nacidas con marca `tubot` (bug pre-#506)
+
+Antes del fix #506, registrarse desde `conversia.cl` (apex) creaba la cuenta con marca
+**tubot** (catálogo, plan y asistente equivocados; el asistente respondía "(Not Found)"). El
+script `tools/ops/reparar-marca.mjs` las detecta y corrige: `brand→conversia`, plan de prueba
+`conversia_v2_trial`, `settings.conversia.lifecycle=v2_trial`, **`users.brand→conversia`** (sin
+esto el dueño no puede entrar desde conversia-web: el login resuelve por correo+marca), una
+suscripción TRIALING (+60 d) y el **regalo de 30 conversaciones** (idempotente). Deja asiento en
+`audit_logs` (`organization.brand_repair`). **No toca las orgs TuBot reales** (la heurística
+excluye `digital-dent`/`clinica-demo`).
+
+**Siempre primero DRY-RUN** (solo lista, no muta):
+
+```
+railway run -s Postgres -- bash -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" node tools/ops/reparar-marca.mjs'
+```
+
+Revisa la lista. Luego `--apply` **solo con la lista revisada** (exige `--ids`/`--emails` o
+`--all`):
+
+```
+# Subconjunto revisado (recomendado — p. ej. las cuentas qa+ de prueba):
+railway run -s Postgres -- bash -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" node tools/ops/reparar-marca.mjs --apply --ids=org_a,org_b'
+# o por correo:  --apply --emails=qa+...@conversia.cl
+# o todas las candidatas tras revisar:  --apply --all
+```
+
+Reversible (volver a `tubot` el `brand` de org y usuarios si hiciera falta). Es **corrector, no
+destructivo**: no borra datos. Verificación post-apply: con la cuenta reparada, login desde
+`app.conversia.cl` → `GET /assistant/context` responde **200** (ya no 404) y el saldo muestra
+**30** conversaciones. (Probado end-to-end contra el stack Docker; ver
+`docs/PRUEBA_REAL_RESULTADOS.md`.)
+
 ## Recordatorios
 
 - Redis de producción ≥ 6.2 (BullMQ lo advierte con 5.x).
