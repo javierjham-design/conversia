@@ -497,12 +497,12 @@ export default function Conversaciones() {
                                 lineHeight: 1.4,
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
-                                background: suggested ? "color-mix(in srgb, var(--acc) 12%, var(--surface-solid))" : note ? "var(--warn)" : out ? "var(--acc)" : "var(--surface-solid)",
-                                color: suggested ? "var(--ink)" : note ? "#2a1c02" : out ? "var(--acc-ink)" : "var(--ink)",
+                                background: suggested ? "color-mix(in srgb, var(--acc) 12%, var(--surface-solid))" : note ? "color-mix(in srgb, var(--warn) 16%, var(--surface-solid))" : out ? "var(--acc)" : "var(--surface-solid)",
+                                color: suggested ? "var(--ink)" : note ? "var(--ink)" : out ? "var(--acc-ink)" : "var(--ink)",
                                 border: suggested ? "1px dashed var(--acc)" : out || note ? "none" : "1px solid var(--hairline)",
                               }}
                             >
-                              {m.body ?? (m.type !== "TEXT" ? `[${m.type.toLowerCase()}]` : "")}
+                              {m.body ?? (m.type !== "TEXT" ? (({ IMAGE: "[imagen]", DOCUMENT: "[documento]", AUDIO: "[audio de voz]", VIDEO: "[video]" } as Record<string, string>)[m.type] ?? "[adjunto]") : "")}
                             </div>
                             {suggested ? (
                               <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
