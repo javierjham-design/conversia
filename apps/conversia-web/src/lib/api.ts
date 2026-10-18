@@ -27,7 +27,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message ?? `Error ${res.status}`);
+    // Adjunta el código HTTP al error → la UI puede distinguir 404/403 (p. ej. ocultar la
+    // burbuja del asistente en una cuenta que no es de la marca) de un fallo transitorio.
+    const err = new Error(body.message ?? `Error ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }

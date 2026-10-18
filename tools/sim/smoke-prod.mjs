@@ -440,6 +440,82 @@ async function checkSecurityEdges() {
   return rollup(subs);
 }
 
+// 10. Asistente de Conversia (OPT-IN, post-deploy): burbuja útil para una cuenta conversia y
+//     ausente (404) para una cuenta de otra marca. Requiere credenciales QA por env para NO
+//     mutar prod por defecto (sin ellas → SKIP). La marca se fija por el Origin (D8).
+//     Env:  SMOKE_QA_EMAIL / SMOKE_QA_PASSWORD        (cuenta conversia QA del flujo documentado)
+//           SMOKE_TUBOT_EMAIL / SMOKE_TUBOT_PASSWORD  (cuenta tubot; opcional — verifica el 404)
+const QA = { email: process.env.SMOKE_QA_EMAIL, password: process.env.SMOKE_QA_PASSWORD };
+const TB = { email: process.env.SMOKE_TUBOT_EMAIL, password: process.env.SMOKE_TUBOT_PASSWORD };
+const CONVERSIA_ORIGIN = "https://app.conversia.cl";
+const TUBOT_ORIGIN = "https://tubot.cl";
+
+async function apiLogin(email, password, origin) {
+  const r = await fetchT(API + "/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = await r.json().catch(() => ({}));
+  return { status: r.status, token: body?.token ?? null, body };
+}
+
+async function checkAssistant() {
+  if (!QA.email && !TB.email) {
+    return { status: "SKIP", detail: "Sin credenciales QA (SMOKE_QA_EMAIL/…). Verificación del asistente post-deploy omitida.", extra: null };
+  }
+  const subs = [];
+
+  // Cuenta conversia: contexto 200 + respuesta útil (menciona ventanas/popup) a la pregunta del popup.
+  if (QA.email && QA.password) {
+    try {
+      const login = await apiLogin(QA.email, QA.password, CONVERSIA_ORIGIN);
+      if (login.status !== 200 || !login.token) {
+        subs.push({ ok: false, label: `QA conversia login → HTTP ${login.status} (¿credenciales?/${login.body?.message ?? ""})` });
+      } else {
+        const auth = { authorization: `Bearer ${login.token}` };
+        const ctx = await fetchT(API + "/assistant/context", { headers: auth });
+        subs.push({ ok: ctx.status === 200, label: `QA conversia /assistant/context → HTTP ${ctx.status} (esperado 200: la burbuja se muestra)` });
+        const mr = await fetchT(API + "/assistant/message", {
+          method: "POST",
+          headers: { "content-type": "application/json", ...auth },
+          body: JSON.stringify({ message: "Al conectar WhatsApp me dice que se bloqueó la ventana de Meta. ¿Qué hago?", route: "/canales" }),
+        });
+        const mbody = await mr.json().catch(() => ({}));
+        const reply = String(mbody?.reply ?? "");
+        const menciona = /ventana|emergente|popup|pop-up|bloque/i.test(reply);
+        const esFallback = /problema para responder|reintenta|soporte/i.test(reply) && !menciona;
+        subs.push({ ok: mr.status < 300 && reply.length > 0, label: `QA conversia /assistant/message → HTTP ${mr.status}, ${reply.length} chars` });
+        // Calidad: útil (menciona ventanas) = PASS; fallback de IA caída = neutral (WARN, no rompe el gate).
+        subs.push({ ok: menciona ? true : esFallback ? null : false, label: menciona ? `respuesta ESPECÍFICA sobre ventanas emergentes ✓` : esFallback ? `respuesta de respaldo (¿IA no configurada en prod? AI_PROVIDER/ANTHROPIC_API_KEY)` : `respuesta genérica (no menciona ventanas): "${reply.slice(0, 90)}…"` });
+      }
+    } catch (e) {
+      subs.push({ ok: false, label: `QA conversia → ERROR ${e.message}` });
+    }
+  } else {
+    subs.push({ ok: null, label: "SMOKE_QA_EMAIL/PASSWORD no provistos → no se verifica la cuenta conversia" });
+  }
+
+  // Cuenta tubot: el gate debe RECHAZAR el asistente (404 → la burbuja no aparece).
+  if (TB.email && TB.password) {
+    try {
+      const login = await apiLogin(TB.email, TB.password, TUBOT_ORIGIN);
+      if (login.status !== 200 || !login.token) {
+        subs.push({ ok: null, label: `tubot login → HTTP ${login.status} (informativo; no se pudo verificar el 404)` });
+      } else {
+        const ctx = await fetchT(API + "/assistant/context", { headers: { authorization: `Bearer ${login.token}` } });
+        subs.push({ ok: ctx.status === 404, label: `tubot /assistant/context → HTTP ${ctx.status} (esperado 404: la burbuja NO se muestra)` });
+      }
+    } catch (e) {
+      subs.push({ ok: false, label: `tubot → ERROR ${e.message}` });
+    }
+  } else {
+    subs.push({ ok: null, label: "SMOKE_TUBOT_EMAIL/PASSWORD no provistos → no se verifica el 404 de marca ajena (informativo)" });
+  }
+
+  return rollup(subs);
+}
+
 // ───────────────────────────── Runner ─────────────────────────────
 
 async function main() {
@@ -456,6 +532,7 @@ async function main() {
   await runCheck("7-links", "Enlaces internos de la landing (sin 404)", checkInternalLinks);
   await runCheck("8-console", "Consola limpia (navegador headless)", checkConsoleClean);
   await runCheck("9-security", "Seguridad de borde (rechazos esperados, no destructivo)", checkSecurityEdges);
+  await runCheck("10-assistant", "Asistente: burbuja útil en conversia + 404 en marca ajena (opt-in QA)", checkAssistant);
 
   // Resumen legible.
   const icon = { PASS: C.green("PASS"), FAIL: C.red("FAIL"), WARN: C.yellow("WARN"), SKIP: C.gray("SKIP") };

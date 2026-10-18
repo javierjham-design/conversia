@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, QrCode, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { openAssistant } from "@/lib/assistant";
 
 /* BLOQUE A — Conexión de WhatsApp AUTOSERVICIO desde el panel del cliente (Embedded
  * Signup de Meta). Reusa el backend existente: GET /public/meta-config (config del SDK
@@ -18,10 +19,10 @@ const STEPS = ["Conectando con Meta…", "Registrando tu número…", "Compartie
 /** En coexistencia NO se registra el número (ya está activo en la app) ni hay línea de crédito. */
 const COEX_STEPS = ["Conectando con Meta…", "Vinculando el número que ya usas…", "Activando tu asistente…"];
 
-/** Abre el Asistente Conversia (Bloque B) con el contexto ya cargado. Si aún no está
- * montado el listener, es un no-op inofensivo. */
+/** Abre el Asistente Conversia (Bloque B) con el contexto ya cargado. Si la cuenta no tiene
+ * asistente (otra marca), cae a un enlace de soporte: nunca un botón muerto ni un error crudo. */
 function pedirAyuda(context: string, topic = "canal") {
-  try { window.dispatchEvent(new CustomEvent("conversia:assistant:open", { detail: { topic, context } })); } catch { /* noop */ }
+  openAssistant({ topic, context });
 }
 
 /** Traduce el fallo técnico a un mensaje ACCIONABLE (qué pasó + qué hacer). */
