@@ -114,6 +114,14 @@ export async function handleAppointmentResponse(
   const kind = detectAppointmentResponse(text);
   if (!kind || !contactId) return false;
 
+  // Si un HUMANO tomó la conversación (aiEnabled=false), NO auto-confirmar/cancelar/reagendar ni cerrar
+  // por debajo de él: el equipo está coordinando a mano y un "sí confirmo"/"lo cancelo" del paciente no
+  // debe disparar acciones automáticas ni cerrar la conversación. Dejamos que el humano la maneje.
+  const conv = await withTenant(orgId, (tx) =>
+    tx.conversation.findUnique({ where: { id: conversationId }, select: { aiEnabled: true } }),
+  ).catch(() => null);
+  if (conv && conv.aiEnabled === false) return false;
+
   const now = new Date();
   const appt = await withTenant(orgId, (tx) =>
     tx.appointment.findFirst({
