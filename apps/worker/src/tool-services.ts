@@ -508,51 +508,62 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
     },
 
     async recordAppointment(appt: SchedAppointment) {
-      const created = await withTenant(orgId, async (tx) => {
+      const provider = scheduling.kind === "clariva" ? "CLARIVA" : scheduling.kind === "custom" ? "CUSTOM" : scheduling.kind === "dentalink" ? "DENTALINK" : "MOCK";
+      const STATUS_MAP = { pending: "PENDING", confirmed: "CONFIRMED", cancelled: "CANCELLED", rescheduled: "RESCHEDULED", completed: "COMPLETED", no_show: "NO_SHOW" } as const;
+      const incoming = (STATUS_MAP as Record<string, string>)[appt.status] ?? "PENDING";
+      const resolved = new Set(["CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
+      const result = await withTenant(orgId, async (tx) => {
+        // UPSERT por (provider, externalId): sin esto, al CONFIRMAR o re-registrar una cita YA existente
+        // (p. ej. confirmAppointment vía texto libre) se creaba una fila DUPLICADA a la misma hora en
+        // estado PENDING — la confirmación nunca se reflejaba y la agenda local mostraba la cita doble.
+        // Appointment no tiene índice único por externalId, así que se deduplica aquí a mano.
+        const existing = await tx.appointment.findFirst({ where: { provider: provider as any, externalId: appt.id } });
+        if (existing) {
+          const mergedMeta = { ...((existing.meta as Record<string, any> | null) ?? {}) };
+          const incMeta: Record<string, unknown> = { professionalExternalId: appt.professionalId, serviceExternalId: appt.serviceId ?? null };
+          for (const [k, v] of Object.entries(incMeta)) if (v != null && mergedMeta[k] == null) mergedMeta[k] = v;
+          // No DEGRADAR un estado ya resuelto a PENDING (un registro tardío no debe borrar una confirmación).
+          const nextStatus = incoming === "PENDING" && resolved.has(String(existing.status)) ? existing.status : (incoming as typeof existing.status);
+          const row = await tx.appointment.update({
+            where: { id: existing.id },
+            data: { status: nextStatus, startsAt: new Date(appt.start), endsAt: new Date(appt.end), meta: mergedMeta as object },
+          });
+          await tx.auditLog.create({ data: { organizationId: orgId, actorType: "agent", action: "appointment.update", entityType: "appointment", entityId: appt.id, after: appt as object } });
+          return { row, created: false };
+        }
         const row = await tx.appointment.create({
           data: {
             organizationId: orgId,
             clinicId: t.clinicId ?? null,
             contactId: t.contactId,
             serviceId: null,
-            provider:
-              scheduling.kind === "clariva" ? "CLARIVA" : scheduling.kind === "custom" ? "CUSTOM" : scheduling.kind === "dentalink" ? "DENTALINK" : "MOCK",
+            provider: provider as any,
             externalId: appt.id,
-            status: "PENDING",
+            status: incoming as any,
             startsAt: new Date(appt.start),
             endsAt: new Date(appt.end),
             conversationId: t.conversationId,
             meta: { professionalExternalId: appt.professionalId, serviceExternalId: appt.serviceId ?? null },
           },
         });
-        await tx.auditLog.create({
-          data: {
-            organizationId: orgId,
-            actorType: "agent",
-            action: "appointment.create",
-            entityType: "appointment",
-            entityId: appt.id,
-            after: appt as object,
-          },
+        await tx.auditLog.create({ data: { organizationId: orgId, actorType: "agent", action: "appointment.create", entityType: "appointment", entityId: appt.id, after: appt as object } });
+        return { row, created: true };
+      });
+      await enqueueCalendarSync(orgId, result.row.id, "upsert");
+      // Solo para citas NUEVAS: evento de creación + workflow "Cita creada" + recordatorios. En un
+      // UPDATE (p. ej. una confirmación) NO se re-dispara nada (antes se re-emitía por cada registro).
+      if (result.created) {
+        await emitPlatformEvent(orgId, "appointment.created", { externalId: appt.id, start: appt.start, conversationId: t.conversationId });
+        await dispatchEvent({
+          organizationId: orgId,
+          type: "appointment_created",
+          conversationId: t.conversationId,
+          contactId: t.contactId,
+          data: { externalId: appt.id, startsAt: appt.start },
+          occurredAt: new Date().toISOString(),
         });
-        return row;
-      });
-      await enqueueCalendarSync(orgId, created.id, "upsert");
-      await emitPlatformEvent(orgId, "appointment.created", {
-        externalId: appt.id,
-        start: appt.start,
-        conversationId: t.conversationId,
-      });
-      // Dispara workflows "Cita creada" y programa los recordatorios configurados.
-      await dispatchEvent({
-        organizationId: orgId,
-        type: "appointment_created",
-        conversationId: t.conversationId,
-        contactId: t.contactId,
-        data: { externalId: appt.id, startsAt: appt.start },
-        occurredAt: new Date().toISOString(),
-      });
-      await scheduleAppointmentReminders(orgId, { id: appt.id, start: appt.start }, { conversationId: t.conversationId, contactId: t.contactId });
+        await scheduleAppointmentReminders(orgId, { id: appt.id, start: appt.start }, { conversationId: t.conversationId, contactId: t.contactId });
+      }
     },
 
     async listLeadStatuses() {
