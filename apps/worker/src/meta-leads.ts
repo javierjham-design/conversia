@@ -1,5 +1,6 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
+import { geoFromPhone } from "./phone-geo";
 import { pageToken } from "./messaging-send";
 import { resolveMetaLeadToken } from "./meta-token";
 import { dispatchEvent } from "./workflow-runtime";
@@ -170,7 +171,10 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       if (["firstName", "lastName", "phone", "email"].includes(m.target)) contactData[m.target] = value;
       else custom[m.target] = value;
     }
-    const phone = (contactData.phone ?? "").replace(/[^\d+]/g, "").replace(/^\+/, "");
+    // Teléfono del lead a E.164 ("+56…"). Antes se GUARDABA sin "+" (replace(/^\+/,"")) y se matcheaba
+    // exacto → los leads de campaña quedaban como "56…" y se DUPLICABAN contra el "+56…" de WhatsApp
+    // (2010 contactos rotos + 718 duplicados en prod). geoFromPhone normaliza igual que el inbound (#462).
+    const phone = contactData.phone ? geoFromPhone(contactData.phone).phone : "";
 
     // Atribución estructurada del formulario (alimenta CAPI lead_id + filtros CRM)
     const metaLead = {
@@ -180,8 +184,18 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       ...(adId ? { adId } : {}),
       ...custom,
     };
-    // Contacto: dedupe por teléfono
-    let contact = phone ? await tx.contact.findFirst({ where: { phone } }) : null;
+    // Contacto: dedupe por teléfono TOLERANTE al formato (con/sin "+", core de 9 dígitos chileno),
+    // para cruzar con contactos ya creados por WhatsApp/Cláriva aunque el formato difiera (como el inbound).
+    const cands: string[] = [];
+    if (phone) {
+      const digits = phone.replace(/\D/g, "");
+      cands.push(phone, digits);
+      if (digits.startsWith("56") && digits.length === 11) {
+        const c9 = digits.slice(2);
+        cands.push(c9, "+" + c9);
+      }
+    }
+    let contact = cands.length ? await tx.contact.findFirst({ where: { phone: { in: cands }, deletedAt: null }, orderBy: { createdAt: "asc" } }) : null;
     if (!contact) {
       contact = await tx.contact.create({
         data: {
