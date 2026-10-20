@@ -287,6 +287,36 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // tempranas y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
         const enFranja = (iso: string) => !input.franja || (input.franja === "manana" ? hourChile(iso) < 14 : hourChile(iso) >= 14);
+        // HORA LÍMITE pedida por el paciente ("después de las 18", "más tarde de las 10", "antes de las
+        // 12"): la FRANJA (mañana<14/tarde>=14) es demasiado gruesa para esto y el modelo la pasa mal
+        // (caso Sandra: pidió "más tarde de las 10" y el bot le dijo "solo las 09:15" habiendo muchas
+        // después de las 10). Extraemos la hora del TEXTO del paciente — determinista — y MANDA sobre la
+        // franja. Así "después de las 18" devuelve TODO lo de 18:00 en adelante, sin importar la franja.
+        const htext = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+        // Ajuste 12h→24h: "las 6 de la tarde/noche" = 18:00 (no 6:00).
+        const adjHora = (numStr: string, tail: string): number => {
+          let h = parseInt(numStr, 10);
+          if (h < 12 && /\b(tarde|noche)\b/.test(tail)) h += 12;
+          return Math.max(0, Math.min(24, h));
+        };
+        let minHora: number | null = null;
+        let maxHora: number | null = null;
+        let mMin = htext.match(/(?:despues|mas tarde|a partir|desde|pasad[ao]s?|como|tipo|a eso)\s+(?:de\s+)?las?\s+(\d{1,2})(?:[:.]\d{2})?\s*(de la (?:tarde|noche|manana)|pm|am)?/);
+        if (!mMin) mMin = htext.match(/las?\s+(\d{1,2})(?:[:.]\d{2})?\s*(de la (?:tarde|noche|manana))?\s+(?:hrs?\.?\s+)?en adelante/);
+        if (mMin) minHora = adjHora(mMin[1], mMin[2] ?? "");
+        const mMax = htext.match(/(?:antes|hasta)\s+(?:de\s+)?las?\s+(\d{1,2})(?:[:.]\d{2})?\s*(de la (?:tarde|noche|manana)|pm|am)?/);
+        if (mMax) maxHora = adjHora(mMax[1], mMax[2] ?? "");
+        const hasHora = minHora != null || maxHora != null;
+        const enHora = (iso: string) => {
+          const h = hourChile(iso);
+          if (minHora != null && h < minHora) return false;
+          if (maxHora != null && h >= maxHora) return false;
+          return true;
+        };
+        // Predicado de "hora del día": si el paciente dio hora Y franja, deben cumplirse AMBAS
+        // ("mañana después de las 10" = 10:00–13:59). Si solo dio hora, manda la hora; si solo franja,
+        // la franja; si nada, todo pasa.
+        const enTramo = (iso: string) => (!hasHora || enHora(iso)) && enFranja(iso);
         const WDSHORT: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
         const wdChile = (iso: string) => WDSHORT[new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(iso))] ?? -1;
         const enDia = (iso: string) => !wantWD || wantWD.has(wdChile(iso));
@@ -294,23 +324,23 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // llamadas al proveedor). RESPALDOS para NO devolver "sinCupos" si hay horas reales cerca:
         // el modelo interpretaba el vacío como "no hay nada" y escalaba/negaba días que ni consultó.
         const all = (await sched.getAvailableSlots({ ...query, from, to: wide })) ?? [];
-        let slots = all.filter((s) => enFranja(s.start) && enDia(s.start) && (wantWD || s.start.slice(0, 10) <= to));
+        let slots = all.filter((s) => enTramo(s.start) && enDia(s.start) && (wantWD || s.start.slice(0, 10) <= to));
         let ensanchado = false;
-        let franjaRelajada = false;
+        let tramoRelajado = false;
         let diaRelajado = false;
         if (!slots.length) {
-          // 1) ensanchar fechas (toda la ventana), manteniendo franja + día.
-          slots = all.filter((s) => enFranja(s.start) && enDia(s.start));
+          // 1) ensanchar fechas (toda la ventana), manteniendo tramo horario + día.
+          slots = all.filter((s) => enTramo(s.start) && enDia(s.start));
           ensanchado = slots.length > 0;
         }
-        if (!slots.length && input.franja) {
-          // 2) soltar la franja, mantener el día pedido (p. ej. jueves por la mañana si no hay tarde).
+        if (!slots.length && (hasHora || input.franja)) {
+          // 2) soltar el tramo horario (franja/hora), mantener el día pedido.
           slots = all.filter((s) => enDia(s.start));
-          franjaRelajada = slots.length > 0;
+          tramoRelajado = slots.length > 0;
         }
         if (!slots.length && wantWD) {
-          // 3) soltar el día pedido (no había NADA ese día): ofrecer otros días reales (con franja si se pidió).
-          slots = all.filter((s) => enFranja(s.start));
+          // 3) soltar el día pedido (no había NADA ese día): ofrecer otros días reales (con tramo si se pidió).
+          slots = all.filter((s) => enTramo(s.start));
           diaRelajado = slots.length > 0;
         }
         if (!slots.length) {
@@ -318,12 +348,12 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           slots = all;
         }
         if (!slots.length) {
-          // Vacío de verdad: NO hay NINGUNA hora con este profesional en ~28 días. Recién aquí el
-          // modelo puede afirmar que no hay disponibilidad y derivar a una persona.
+          // Vacío de verdad: NO hay NINGUNA hora en ~28 días. Recién aquí el modelo puede afirmar que
+          // no hay disponibilidad y derivar a una persona.
           return {
             sinCupos: true,
             rangoConsultado: { desde: from, hasta: wide, ...(input.franja ? { franja: input.franja } : {}) },
-            nota: `No hay NINGUNA hora disponible con este profesional entre ${from} y ${wide} (ya revisé todo el rango, ambas franjas y todos los días). Discúlpate y deriva a una persona con transferToHuman; no ofrezcas otro profesional.`,
+            nota: `No hay NINGUNA hora disponible entre ${from} y ${wide} (ya revisé todo el rango, horarios y días). Discúlpate con calidez y deriva a una persona con transferToHuman para coordinar.`,
           };
         }
         // Orden cronológico garantizado (ISO ordena por fecha/hora).
@@ -362,30 +392,32 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // y si se ensanchó el rango, debe decir la fecha de cada hora y no presentarlas
         // como si fueran del día pedido.
         const notas: string[] = [];
+        // POSITIVIDAD (obligatoria): estas horas son REALES y disponibles AHORA. Ofrécelas TODAS con
+        // entusiasmo. PROHIBIDO decir "solo tengo las 09:15" o "no hay disponibilidad" si esta lista
+        // trae horas — nombra todas las que trae. Tu objetivo es ayudar a reservar, nunca cerrar puertas.
+        notas.push("Estas son horas REALES disponibles: ofrécelas TODAS al paciente de forma positiva. NUNCA digas 'solo tengo una' ni 'no hay disponibilidad' si esta lista tiene horas; nombra las que aparecen.");
+        if (hasHora && !tramoRelajado) {
+          const cond = minHora != null && maxHora != null ? `entre las ${minHora}:00 y las ${maxHora}:00` : minHora != null ? `desde las ${minHora}:00 en adelante` : `antes de las ${maxHora}:00`;
+          notas.push(`Estas horas cumplen lo que pidió el paciente (${cond}): ofrécelas indicando la fecha y hora exactas.`);
+        }
         if (diaRelajado) {
-          // No había NADA en los días de semana que pidió → se ofrecen OTROS días reales.
-          notas.push(
-            "No había cupos con este profesional en los días que pediste; estas son las próximas horas REALES disponibles (de OTROS días): di la FECHA y HORA exactas de cada una y ofrécelas. NO digas que no hay disponibilidad — estas existen.",
-          );
-        } else if (franjaRelajada) {
-          // Se soltó la franja pedida: estas horas NO son todas de esa franja.
-          notas.push(
-            `No había cupos de ${input.franja === "manana" ? "mañana" : "tarde"} con este profesional, así que estas son las próximas horas REALES disponibles (de otra franja u otros días): di la FECHA y HORA exactas de cada una y ofrécelas al paciente. NO digas que no hay disponibilidad — estas existen.`,
-          );
-        } else if (input.franja) {
+          notas.push("No había cupos en los días que pediste; estas son las próximas horas REALES disponibles (de OTROS días): di la FECHA y HORA exactas de cada una y ofrécelas.");
+        } else if (tramoRelajado) {
+          notas.push("No había cupos exactamente en el horario que pidió, así que estas son las próximas horas REALES disponibles (otro horario u otros días): di la FECHA y HORA exactas de cada una y ofrécelas con una alternativa positiva.");
+        } else if (input.franja && !hasHora) {
           notas.push(
             input.franja === "manana"
-              ? "TODOS estos horarios SON de la franja MAÑANA según la política de la clínica (09:00–13:59): ofrécelos como horarios de mañana aunque alguno te parezca tarde (ej. 13:15 ES mañana). NO digas que no hay cupos de mañana si esta lista tiene horas."
+              ? "TODOS estos horarios SON de la franja MAÑANA según la política de la clínica (09:00–13:59): ofrécelos como horarios de mañana aunque alguno te parezca tarde (ej. 13:15 ES mañana)."
               : "TODOS estos horarios SON de la franja TARDE según la política de la clínica (desde las 14:00): ofrécelos como horarios de tarde.",
           );
         }
         if (wantWD && !diaRelajado) {
           notas.push("Estas horas SON de los días de la semana que pidió el paciente (ya resueltos a su fecha real): ofrécelas indicando la fecha exacta de cada una.");
         }
-        if (ensanchado && !franjaRelajada && !diaRelajado && !wantWD) {
-          notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una y aclara que en el día pedido no había.`);
+        if (ensanchado && !tramoRelajado && !diaRelajado && !wantWD) {
+          notas.push(`OJO: no había cupos entre ${from} y ${to}; estas horas son de DÍAS SIGUIENTES — di la fecha exacta de cada una.`);
         }
-        return notas.length ? { nota: notas.join(" "), horas } : horas;
+        return { nota: notas.join(" "), horas };
       },
     },
     {
