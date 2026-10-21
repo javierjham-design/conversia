@@ -1,6 +1,7 @@
 import { getEnv } from "@conversia/config";
-import { withTenant } from "@conversia/database";
+import { getAdminPrisma, raiseException, resolveException, withTenant } from "@conversia/database";
 import { decryptCredential } from "./credentials";
+import { opsAlert } from "./ops-alert.js";
 
 /**
  * Resolución de autenticación de envío POR CANAL: cada WABA conectada tiene su
@@ -24,9 +25,19 @@ export interface ChannelAuth {
   tokenSource?: "channel" | "global-no-account" | "global-no-credential" | "global-decrypt-failed" | "none";
 }
 
+/** Mensaje claro (ops) para un token de WhatsApp inválido: qué pasó + qué hacer. */
+export const TOKEN_INVALID_FAIL_TEXT =
+  "Token de WhatsApp inválido (Meta 190) — reemplaza el token en Railway (api y worker) y reautoriza en Canales.";
+
 /** Error de autenticación del canal (token vencido/revocado — Meta code 190/401). */
 export class ChannelAuthError extends Error {
   readonly kind = "channel_auth";
+  /** Texto claro para marcar el mensaje FAILED (en vez del error crudo de Meta). */
+  readonly userMessage: string;
+  constructor(message: string, userMessage?: string) {
+    super(message);
+    this.userMessage = userMessage ?? TOKEN_INVALID_FAIL_TEXT;
+  }
 }
 
 /**
@@ -146,18 +157,24 @@ export async function resolveChannelAuth(
 }
 
 /**
- * Marca el canal en estado "error" tras un fallo de autenticación con Meta y lo
- * registra en la actividad. El panel muestra el banner "Reautorizar". No lanza
- * (se llama desde bloques catch) y no se reintenta en bucle: el mensaje queda
- * FAILED y el equipo repara el token.
+ * HANDLER ÚNICO de "token de WhatsApp muerto" (Meta 190/401), tanto desde el ENVÍO (fail-fast)
+ * como desde el CHEQUEO ACTIVO periódico. Hace que una caída JAMÁS sea silenciosa:
+ *  - marca el canal en estado "error" (el panel muestra el banner "Reautorizar");
+ *  - registra la incidencia en la actividad del tenant (`integration_events`);
+ *  - levanta una EXCEPCIÓN de plataforma `token_invalido` CRÍTICA (dedupe por canal) →
+ *    visible en la consola del super admin;
+ *  - en la transición activo→error: correo al tenant + ALERTA al super admin
+ *    (OPS_ALERT_WEBHOOK_URL → BetterStack: correo + push).
+ * No lanza (se llama desde catch y desde el scheduler). Idempotente: no spamea.
  */
 export async function markChannelAuthError(
   organizationId: string,
   channelConnectionId: string | null,
   detail: string,
+  meta?: { phone?: string | null; source?: "send" | "health" },
 ): Promise<void> {
   try {
-    // Alerta por correo SOLO en la transición activo→error (no por cada fallo).
+    // Alerta (correo + super admin) SOLO en la transición activo→error (no por cada fallo).
     let wasActive = false;
     await withTenant(organizationId, async (tx) => {
       if (channelConnectionId) {
@@ -172,9 +189,22 @@ export async function markChannelAuthError(
           type: "channel.auth_error",
           status: "error",
           message: `Token del canal inválido o vencido — reautoriza WhatsApp en Canales. Detalle: ${detail.slice(0, 300)}`,
+          payload: { source: meta?.source ?? "send", phone: meta?.phone ?? null, channelConnectionId },
         },
       });
     });
+
+    // Excepción de plataforma CRÍTICA (dedupe por token/canal → una por token caído, no por minuto).
+    const dedupeKey = channelConnectionId ?? `${organizationId}:wa-token`;
+    await raiseException(getAdminPrisma(), {
+      organizationId,
+      type: "token_invalido",
+      severity: "critical",
+      title: "Token de WhatsApp inválido",
+      detail: `${meta?.phone ? `Número ${meta.phone}. ` : ""}El token de envío de WhatsApp fue rechazado por Meta (190/401)${meta?.source === "health" ? " — detectado por el chequeo activo (sin tráfico)" : " — detectado al enviar"}. Reemplázalo en Railway (api y worker). Detalle: ${detail.slice(0, 200)}`,
+      dedupeKey,
+    });
+
     if (wasActive) {
       // import diferido: evita ciclo mailer ↔ channel-auth
       const { enqueueIntegrationAlert } = await import("./mailer.js");
@@ -183,6 +213,40 @@ export async function markChannelAuthError(
         "⚠ WhatsApp requiere reautorización — TuBot",
         "<p>El token del canal de WhatsApp está vencido o fue revocado: los mensajes salientes están fallando.</p><p>Entra a <b>Canales</b> y pulsa <b>Reautorizar con Meta</b>.</p>",
       );
+      await opsAlert({
+        summary: "WhatsApp token inválido (190)",
+        description: `Org ${organizationId}${meta?.phone ? ` · ${meta.phone}` : ""}: token de WhatsApp rechazado por Meta (190/401). Los envíos están fallando. Reemplazar el token en Railway (api y worker).`,
+        severity: "critical",
+      });
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Contraparte: el token de un canal volvió a responder 200. Reactiva el canal, registra el
+ * evento de recuperación y RESUELVE la excepción `token_invalido`. La llama el chequeo activo.
+ */
+export async function markChannelRecovered(organizationId: string, channelConnectionId: string | null): Promise<void> {
+  try {
+    let wasError = false;
+    await withTenant(organizationId, async (tx) => {
+      if (channelConnectionId) {
+        const prev = await tx.channelConnection.findUnique({ where: { id: channelConnectionId }, select: { status: true } });
+        wasError = prev?.status === "error";
+        if (wasError) await tx.channelConnection.update({ where: { id: channelConnectionId }, data: { status: "active" } });
+      }
+      if (wasError) {
+        await tx.integrationEvent.create({
+          data: { organizationId, provider: "whatsapp", type: "channel.recovered", status: "ok", message: "El token de WhatsApp volvió a responder: canal reactivado." },
+        });
+      }
+    });
+    const dedupeKey = channelConnectionId ?? `${organizationId}:wa-token`;
+    const closed = await resolveException(getAdminPrisma(), { organizationId, type: "token_invalido", dedupeKey, resolution: "El token de WhatsApp volvió a responder (chequeo activo)." });
+    if ((wasError || closed > 0)) {
+      await opsAlert({ summary: "WhatsApp token recuperado", description: `Org ${organizationId}: el token de WhatsApp volvió a responder; canal reactivado.`, severity: "info" });
     }
   } catch {
     /* best-effort */

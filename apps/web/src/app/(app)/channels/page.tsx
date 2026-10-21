@@ -612,11 +612,12 @@ export default function ChannelsPage() {
             {c.status === "error" && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:bg-red-500/10 dark:border-red-500/30">
                 <p className="text-xs font-medium text-red-700 dark:text-red-300">
-                  El token de este canal está vencido o fue revocado — los mensajes salientes están fallando.
+                  Conexión con WhatsApp interrumpida: el token de este canal está vencido o fue revocado y los
+                  mensajes salientes están fallando. <b>Nuestro equipo ya fue avisado.</b>
                 </p>
                 <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400">
-                  Reautoriza con <b>Conectar con Meta</b> (renueva el token automáticamente) o carga un token nuevo con el
-                  formulario <b>Manual</b>. Al pasar la prueba de conexión, el canal vuelve a activo.
+                  Para reactivarlo ya mismo: reautoriza con <b>Conectar con Meta</b> (renueva el token automáticamente) o
+                  carga un token nuevo con el formulario <b>Manual</b>. Al pasar la prueba de conexión, el canal vuelve a activo.
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button

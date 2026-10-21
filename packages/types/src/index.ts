@@ -170,9 +170,22 @@ export interface ChannelSendOptions {
   accessToken?: string | null;
 }
 
+/** Resultado de validar un token de envío contra el proveedor (chequeo activo de salud). */
+export interface VerifyTokenResult {
+  ok: boolean;
+  /** Código de error de Meta si falló (190 = token inválido/revocado). */
+  code?: number;
+  detail?: string;
+}
+
 export interface ChannelProvider {
   readonly kind: string; // meta | mock
   send(phoneNumberId: string, message: OutboundMessage, options?: ChannelSendOptions): Promise<ChannelSendResult>;
+  /**
+   * Chequeo ACTIVO y barato del token (sin enviar nada): `GET /{phone_number_id}?fields=id`.
+   * Permite detectar un token muerto SIN tráfico de por medio (ese era el hueco del incidente).
+   */
+  verifyToken(input: { phoneNumberId: string; accessToken: string | null }): Promise<VerifyTokenResult>;
 }
 
 /**

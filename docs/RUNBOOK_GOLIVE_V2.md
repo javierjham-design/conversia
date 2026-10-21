@@ -249,7 +249,7 @@ con los permisos: **`business_management` + `whatsapp_business_management` + `wh
    automáticamente (o revísala en la cola de excepciones).
 4. Manda un mensaje de prueba al bot y confirma que responde.
 
-## 12. Estado de las cuentas de WhatsApp de TuBot (auditoría vía MCP oficial, 21-oct-2026)
+## 13. Estado de las cuentas de WhatsApp de TuBot (auditoría vía MCP oficial, 21-oct-2026)
 
 - **PRODUCTIVA: "Asistente Virtual TuBot"** — número registrado y listo, cuenta suscrita
   a la app (14 campos de webhook, incluidos los 3 de coexistencia), app publicada. NO

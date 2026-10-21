@@ -742,12 +742,13 @@ export async function runAgentTurn(opts: {
       if (isV2Credit && !graceFallback) await bumpResponseGuardrail(conversationId).catch(() => undefined);
     } else {
       if (sendErr instanceof ChannelAuthError) {
-        await markChannelAuthError(organizationId, auth.channelConnectionId, sendErr.message);
+        await markChannelAuthError(organizationId, auth.channelConnectionId, sendErr.message, { phone: auth.phoneNumberId, source: "send" });
       }
+      const failText = sendErr instanceof ChannelAuthError ? sendErr.userMessage : (sendErr as Error).message.slice(0, 500);
       await withTenant(organizationId, (tx) =>
         tx.message.update({
           where: { id: persisted.id },
-          data: { status: "FAILED", error: (sendErr as Error).message.slice(0, 500) },
+          data: { status: "FAILED", error: failText },
         }),
       );
       console.error(`✖ Envío WhatsApp falló tras ${MAX_SEND_ATTEMPTS} intentos (${conversationId}):`, (sendErr as Error).message);

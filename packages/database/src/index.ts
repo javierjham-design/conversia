@@ -160,3 +160,29 @@ export async function raiseException(
     console.error(`✖ raiseException (${input.type}/${input.organizationId}):`, (e as Error).message);
   }
 }
+
+/**
+ * Cierra (resuelve) las excepciones abiertas que coincidan con el tipo (+ dedupeKey) — la
+ * contraparte de `raiseException` para auto-resolución cuando la causa se recupera (p. ej. el
+ * token de WhatsApp vuelve a responder). Devuelve cuántas cerró. Best-effort.
+ */
+export async function resolveException(
+  admin: PrismaClient,
+  input: { organizationId: string; type: string; dedupeKey?: string; resolution?: string },
+): Promise<number> {
+  try {
+    const res = await admin.platformException.updateMany({
+      where: {
+        organizationId: input.organizationId,
+        type: input.type,
+        ...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
+        status: { in: ["open", "assigned"] },
+      },
+      data: { status: "resolved", resolvedAt: new Date(), resolution: input.resolution ?? "Resuelto automáticamente" },
+    });
+    return res.count;
+  } catch (e) {
+    console.error(`✖ resolveException (${input.type}/${input.organizationId}):`, (e as Error).message);
+    return 0;
+  }
+}

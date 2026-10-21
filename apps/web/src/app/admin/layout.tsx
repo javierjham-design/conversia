@@ -32,6 +32,7 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
   const [ready, setReady] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(true);
+  const [waToken, setWaToken] = useState<{ globalOk: boolean; dead: Array<{ phone: string | null; name: string | null }> } | null>(null);
 
   const isLogin = pathname === "/admin/login";
   const isSecurity = pathname === "/admin/security";
@@ -63,6 +64,19 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
       })
       .catch(() => setReady(true));
   }, [router, isLogin, isSecurity]);
+
+  // Salud de los tokens de WhatsApp: banner rojo global si el token del Tech Provider cayó.
+  useEffect(() => {
+    if (isLogin) return;
+    let alive = true;
+    const load = () =>
+      padmin<{ globalOk: boolean; dead: Array<{ phone: string | null; name: string | null }> }>("/platform/whatsapp-token-health")
+        .then((r) => { if (alive) setWaToken({ globalOk: r.globalOk, dead: r.dead ?? [] }); })
+        .catch(() => undefined);
+    void load();
+    const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [isLogin]);
 
   if (!ready) return null;
   if (isLogin) return <>{children}</>;
@@ -139,6 +153,25 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
               <span>
                 <b>Activa la autenticación en dos pasos (MFA)</b> para desbloquear el panel. Es
                 obligatoria: protege el acceso total a la plataforma.
+              </span>
+            </div>
+          )}
+          {waToken && !waToken.globalOk && (
+            <div className="flex items-center gap-2 border-b border-red-400 bg-red-600 px-4 py-2.5 text-[13px] font-medium text-white">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>
+                <b>Token del Tech Provider de WhatsApp CAÍDO</b> — los envíos están fallando.
+                Reemplázalo en Railway (variables de <b>api</b> y <b>worker</b>) y verifica en{" "}
+                <Link href="/admin/alerts" className="underline">Alertas</Link>.
+              </span>
+            </div>
+          )}
+          {waToken && waToken.globalOk && waToken.dead.length > 0 && (
+            <div className="flex items-center gap-2 border-b border-red-300 bg-red-50 px-4 py-2.5 text-[13px] text-red-900">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>
+                <b>{waToken.dead.length} canal(es) de WhatsApp con token caído</b> — esos clientes no
+                reciben respuestas. Revisa <Link href="/admin/alerts" className="underline">Alertas</Link>.
               </span>
             </div>
           )}
