@@ -38,9 +38,13 @@ export function detectAppointmentResponse(text: string | null | undefined): Appt
   // Prefijo de saludo opcional (hola/buenas/…) para cazar "hola si confirmo", "buenas, confirmado".
   // Se mantiene el anclaje ^ tras el saludo: evita falsos positivos tipo "no voy a confirmar".
   if (/^(?:(?:hola|buenas|buenos dias|buenas tardes|buen dia)[\s,.!]*)?(si,?\s*(confirmo|confirmad[oa]s?|ire|asistire|voy|asisto)|confirm(o|ar|ad[oa]s?|o mi cita)?|asistire|ahi\s+(estare|estoy|voy|nos vemos)|estare\s+(ahi|manana|presente|sin falta|puntual))\b/.test(t)) return "confirm";
-  // Cancelar ANTES que reagendar: "cancelar y reagendar" es reagendar; "cancelar" solo es cancelar.
-  if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|anula(r|me)?|dar de baja|no (podre|puedo|voy a|podria) (ir|asistir|llegar)|ya no (puedo|voy|podre))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (dia|horario))/.test(t)) return "cancel";
-  if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|dia)|mover( la)? (cita|hora|dia)|otro (dia|horario))/.test(t)) return "reschedule";
+  // CANCELAR = solo cancelación EXPLÍCITA ("cancelar", "anular", "ya no quiero"). OJO: "no puedo/
+  // no asistiré/no voy a poder ir" NO es cancelar a secas → es REAGENDAR (el paciente no puede a ESA
+  // hora pero probablemente quiere otra). Antes caían a cancelar (o a nada) y el bot no preguntaba
+  // para cuándo reagendar (caso Carolina Guala: "no asistiré a la hora de mañana" → el bot se rindió).
+  if (/\b(cancel(ar|a|o|ada|en|o mi cita)?|anular|anula(r|me)?|dar de baja|ya no quiero|no quiero (la cita|seguir|ir mas))\b/.test(t) && !/\b(reagend|reprogram|cambiar|otro (dia|horario))/.test(t)) return "cancel";
+  // REAGENDAR = reagendar explícito + "no puedo/no asistiré/no voy a poder (ir|asistir|llegar)".
+  if (/\b(reagend|reprogram|cambiar( la| de)? (hora|cita|fecha|dia)|mover( la)? (cita|hora|dia)|otro (dia|horario)|no (podre|puedo|voy a|voy a poder|podria) (ir|asistir|llegar)|no asistire|no (ire|voy a ir)|no alcanzo|no voy a poder)/.test(t)) return "reschedule";
   return null;
 }
 
@@ -216,14 +220,17 @@ export async function handleAppointmentResponse(
   await cancelAppt("patient_reschedule");
   await tagConversation(orgId, conversationId, "Reagenda solicitada");
   const note =
-    `REAGENDAR: el paciente pidió cambiar su hora y YA liberé su cita anterior` +
+    `REAGENDAR: el paciente no puede/no asistirá a su hora y YA liberé su cita anterior` +
     (profName ? ` (era con ${profName} el ${fechaTxt})` : ` (del ${fechaTxt})`) +
-    `. Reagéndale con el MISMO profesional y la MISMA duración: ` +
+    `. PASO 1: si el paciente NO te dijo para cuándo quiere reagendar, PREGÚNTALE PRIMERO, con calidez, para ` +
+    `qué día u horario le acomoda (ej. "¡claro! ¿para qué día te gustaría reagendar?"). NO busques ni ` +
+    `ofrezcas/niegues fechas a ciegas antes de saberlo. PASO 2: con su preferencia, llama getAvailability con ` +
     (profId ? `professionalId=${profId}` : `el mismo profesional de esa cita`) +
-    `, durationMin=${durMin}. Llama getAvailability con ESE professionalId y durationMin, ofrece 2-3 horas ` +
-    `reales (las más cercanas a lo que pida) y agéndala con createAppointment usando el id exacto del horario. ` +
-    `NO necesitas getPatientAppointments para esto (esa cita ya no está): guíate por esta nota. ` +
-    `Si getAvailability NO devuelve ningún cupo con ese profesional, discúlpate y escala a una persona con transferToHuman.`;
+    ` y durationMin=${durMin} (MISMO profesional y duración) y ofrece 2-3 horas reales cercanas a lo que pidió; ` +
+    `agéndala con createAppointment usando el id exacto. NO necesitas getPatientAppointments (esa cita ya no está). ` +
+    `Si la hora más próxima está lejos, OFRÉCELA igual en positivo ("la más cercana que tengo es ... ¿te sirve o ` +
+    `prefieres que recepción te busque algo antes?") — NUNCA respondas "no hay disponibilidad hasta [fecha]" y ` +
+    `derives sin ofrecer. Escala a una persona SOLO si no hay NINGÚN cupo con ese profesional en varias semanas, o si lo pide.`;
   await withTenant(orgId, (tx) =>
     tx.conversationAiNote.create({
       data: { organizationId: orgId, conversationId, body: note, active: true },
