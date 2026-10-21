@@ -208,3 +208,60 @@ destructivo**: no borra datos. Verificación post-apply: con la cuenta reparada,
   "Funciones" y "Tipo de función" + la URL alojada que generan. Si los selectores no
   ofrecen el onboarding de la app → ticket por Direct Support, tipo
   "Embedded Signup - Coexistence Onboarding".
+
+## 12. Rotación / caída de token de WhatsApp (incidente 19-oct-2026)
+
+**Síntoma:** los ENVÍOS de WhatsApp fallan (Meta error **190 / OAuthException**) aunque los
+mensajes entrantes siguen llegando — "todo se ve normal" pero nadie recibe respuestas.
+**Gatillo conocido:** una **migración o cambio de titularidad del Business Manager** en Meta
+**invalida los tokens** emitidos antes del cambio (fue la causa del incidente). También: revocar
+el Usuario del sistema, rotar su token, o que caduque.
+
+**Cómo nos enteramos ahora (ya no es silencioso):**
+- Chequeo ACTIVO cada 15 min (worker `whatsapp-token-health.ts`): valida cada token con
+  `GET /{phone_number_id}?fields=id` **sin enviar nada** → un 190 levanta la excepción crítica
+  `token_invalido` (consola del super admin) + alerta externa (OPS_ALERT_WEBHOOK_URL → correo/push).
+- Fail-fast en el envío: el primer 190 marca el canal "error", deja el mensaje FAILED con el motivo
+  y deja de martillar a Meta.
+- Visibilidad: banner rojo global en `/admin` si el token del Tech Provider cayó; tarjeta "Salud de
+  tokens de WhatsApp" en `/admin/alerts`; aviso humano en Canales del tenant; `whatsappTokenOk` en
+  `GET /health/status` (y el check `11-wa-token` de `smoke-prod.mjs`).
+
+**Dónde se genera el token** (Usuario del sistema del Tech Provider):
+`Meta Business Settings → Usuarios → Usuarios del sistema → (el de la plataforma) → Generar token`,
+con los permisos: **`business_management` + `whatsapp_business_management` + `whatsapp_business_messaging`**
+(token permanente de sistema). Para un canal de un tenant, su token propio se recarga en
+**Canales → Editar** (o "Reautorizar con Meta", que lo renueva por Embedded Signup).
+
+**Qué variable(s) de Railway tocar** (token GLOBAL / Tech Provider):
+- `META_ACCESS_TOKEN` en el servicio **api** Y en el servicio **worker** (ambos; el worker es quien
+  envía). Pegar el token nuevo y **redeploy** de ambos.
+- (Los tokens por-canal de cada tenant viven cifrados en `integration_credentials`, no en env: esos
+  se renuevan desde Canales, no aquí.)
+
+**Cómo verificar que quedó bien:**
+1. `GET /health/status` → `whatsappTokenOk: true` (o `node tools/sim/smoke-prod.mjs` con
+   `MONITOR_TOKEN` → check `11-wa-token` verde).
+2. Forzar el chequeo sin esperar 15 min:
+   `railway run -s worker -- node apps/worker/dist/token-health-cli.js` → imprime `SNAPSHOT:` con
+   `"ok":true`.
+3. El banner rojo de `/admin` desaparece; la excepción `token_invalido` se marca **resuelta**
+   automáticamente (o revísala en la cola de excepciones).
+4. Manda un mensaje de prueba al bot y confirma que responde.
+
+## 12. Estado de las cuentas de WhatsApp de TuBot (auditoría vía MCP oficial, 21-oct-2026)
+
+- **PRODUCTIVA: "Asistente Virtual TuBot"** — número registrado y listo, cuenta suscrita
+  a la app (14 campos de webhook, incluidos los 3 de coexistencia), app publicada. NO
+  tocar sin plan.
+- **DORMIDA: "Asistente Virtual TuBot V2"** — migración de titularidad que quedó a medio
+  hacer (origen del incidente de tokens del 19-oct): número "TuBot IA" VERIFICADO pero
+  NO registrado, cuenta SIN suscripción de webhooks y SIN método de pago. No eliminar
+  (recuperar cuentas/números es difícil); no usar hasta decidir.
+- **Si se decide completar la migración a V2** (proyecto planificado, con el dev):
+  1) suscribir la cuenta V2 a la app (MCP `whatsapp_biz_subscribe_webhook`),
+  2) registrar el número (MCP `whatsapp_biz_register_phone_number`; PIN si tiene 2FA),
+  3) método de pago de la V2 (Billing Hub, link en el reporte del MCP),
+  4) actualizar los canales de la plataforma al phone_number_id nuevo y verificar
+     salud de token + humo completo. Jamás a mano ni a medias: esa mezcla fue la del
+     incidente.
