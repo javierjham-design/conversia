@@ -48,6 +48,7 @@ import { startRetentionPurge } from "./retention-purge";
 import { startCatalogSync } from "./catalog/scheduler";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
 import { startReliabilityMonitor } from "./reliability-monitor";
+import { startWhatsappTokenHealth } from "./whatsapp-token-health";
 import { startContactOverageMeter } from "./contact-overage";
 
 async function main() {
@@ -205,6 +206,7 @@ async function main() {
   const stopCatalogSync = startCatalogSync(); // sync incremental del catálogo cada 6 h
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
   const stopReliability = startReliabilityMonitor(connection); // canario TuBot + scan sin-responder
+  const stopWaTokenHealth = startWhatsappTokenHealth(connection); // chequeo activo de tokens de WhatsApp (190)
   const stopOverageMeter = startContactOverageMeter(); // excedente de contactos → billable post-pago
 
   // Latido para monitoreo: el worker escribe su timestamp cada 15 s con TTL 60 s.
@@ -232,6 +234,7 @@ async function main() {
     stopCatalogSync();
     stopOrphanWaba();
     stopReliability();
+    stopWaTokenHealth();
     stopOverageMeter();
     stopScheduler();
     stopTemplateSync();

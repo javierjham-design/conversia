@@ -36,15 +36,32 @@ function Metric({ label, value, warn }: { label: string; value: string | number;
   );
 }
 
+interface WaTokenHealth {
+  ok: boolean;
+  globalOk: boolean;
+  globalDetail: string | null;
+  checked: number;
+  stale: boolean;
+  hasData: boolean;
+  ts: number | null;
+  dead: { organizationId: string; phone: string | null; name: string | null; detail: string }[];
+}
+
 export default function AlertsPage() {
   const toast = useToast();
   const [rows, setRows] = useState<Alert[] | null>(null);
   const [q, setQ] = useState<Quality | null>(null);
+  const [wa, setWa] = useState<WaTokenHealth | null>(null);
 
   const load = useCallback(async () => {
-    const [a, quality] = await Promise.all([padmin<Alert[]>("/platform/alerts"), padmin<Quality>("/platform/quality")]);
+    const [a, quality, waHealth] = await Promise.all([
+      padmin<Alert[]>("/platform/alerts"),
+      padmin<Quality>("/platform/quality"),
+      padmin<WaTokenHealth>("/platform/whatsapp-token-health").catch(() => null),
+    ]);
     setRows(a);
     setQ(quality);
+    setWa(waHealth);
   }, []);
   useEffect(() => {
     void load().catch((e) => toast.push((e as Error).message, "error"));
@@ -54,6 +71,39 @@ export default function AlertsPage() {
   return (
     <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8">
       <PageHeader title="Alertas" description="Avisos y errores de integración de todos los tenants (salud de Meta, IA en pausa, suspensiones…)." />
+
+      <section className="mb-6">
+        <h2 className="mb-2 text-sm font-semibold text-navy-900">Salud de tokens de WhatsApp</h2>
+        {!wa ? (
+          <Skeleton className="h-16" />
+        ) : (
+          <div className={`rounded-card border p-4 shadow-card ${wa.ok ? "border-slate-200 bg-white" : "border-red-300 bg-red-50"}`}>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${wa.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                {wa.ok ? "Todo vivo ✔" : "Hay tokens caídos"}
+              </span>
+              <span className="text-slate-600">
+                Token global del Tech Provider: <b className={wa.globalOk ? "text-emerald-700" : "text-red-700"}>{wa.globalOk ? "vivo" : "CAÍDO"}</b>
+                {!wa.globalOk && wa.globalDetail ? ` (${wa.globalDetail})` : ""}
+              </span>
+              <span className="text-slate-500">{wa.checked} canal(es) verificado(s)</span>
+              <span className="text-slate-400">
+                Última verificación: {wa.ts ? new Date(wa.ts).toLocaleString("es-CL") : "aún sin datos"}{wa.stale ? " (desactualizada)" : ""}
+              </span>
+            </div>
+            {wa.dead.length > 0 && (
+              <ul className="mt-3 space-y-1 text-[13px]">
+                {wa.dead.map((d, i) => (
+                  <li key={i} className="flex gap-2 text-red-800">
+                    <span className="font-medium">{d.name ?? "Canal"}{d.phone ? ` · ${d.phone}` : ""}:</span>
+                    <span className="text-red-700">token caído — reemplazar en Railway</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
 
       <section className="mb-6">
         <h2 className="mb-2 text-sm font-semibold text-navy-900">Calidad del bot (últimas 24 h)</h2>

@@ -169,6 +169,26 @@ export class PlatformController {
     return { open };
   }
 
+  /**
+   * Salud de los TOKENS de WhatsApp (snapshot del chequeo activo del worker, Redis). Alimenta el
+   * banner rojo global (token del Tech Provider caído) + la vista de canales del super admin.
+   * `dead` se filtra a las orgs de ESTA marca; `globalOk` es del token global (compartido).
+   */
+  @Get("whatsapp-token-health")
+  async whatsappTokenHealth(@Req() req: PlatformRequest) {
+    const orgIds = new Set(await this.brandOrgIds(req));
+    try {
+      const raw = await this.queues.connection.get("conversia:health:whatsapp-token");
+      if (!raw) return { ok: true, globalOk: true, checked: 0, dead: [], ts: null, stale: false, hasData: false };
+      const snap = JSON.parse(raw) as { ok: boolean; ts: number; globalOk: boolean; globalDetail?: string; checked: number; dead: Array<{ organizationId: string; channelConnectionId: string | null; phone: string | null; name: string | null; detail: string }> };
+      const dead = (snap.dead ?? []).filter((d) => orgIds.has(d.organizationId));
+      const stale = Date.now() - snap.ts > 25 * 60_000;
+      return { ok: snap.globalOk && dead.length === 0 && !stale, globalOk: snap.globalOk, globalDetail: snap.globalDetail ?? null, checked: snap.checked, dead, ts: snap.ts, stale, hasData: true };
+    } catch (e) {
+      return { ok: false, globalOk: false, checked: 0, dead: [], ts: null, stale: false, hasData: false, error: (e as Error).message };
+    }
+  }
+
   private async assertExceptionBrand(req: PlatformRequest, id: string): Promise<string> {
     const ex = await this.prisma.admin.platformException.findUnique({ where: { id }, select: { organizationId: true } });
     if (!ex) throw new NotFoundException("Excepción no encontrada");

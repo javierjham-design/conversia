@@ -114,8 +114,30 @@ export class HealthController {
       checks.canary = { ok: false, detail: (e as Error).message };
     }
 
+    // 5. Salud de los TOKENS de WhatsApp: lo escribe el worker (whatsapp-token-health) cada 15
+    //    min. Un token muerto (Meta 190) hace que los ENVÍOS fallen en silencio aunque todo "se
+    //    vea" normal → el monitor externo debe verlo como caída. Tolerante al arranque en frío.
+    try {
+      const raw = await this.queues.connection.get("conversia:health:whatsapp-token");
+      if (!raw) {
+        checks.whatsappToken = { ok: true, detail: "sin datos aún" };
+      } else {
+        const c = JSON.parse(raw) as { ok: boolean; ts: number; globalOk: boolean; checked: number; dead: unknown[] };
+        const stale = Date.now() - c.ts > 25 * 60_000; // debería correr cada 15 min
+        const deadN = Array.isArray(c.dead) ? c.dead.length : 0;
+        checks.whatsappToken = {
+          ok: c.ok && !stale,
+          detail: stale ? `viejo ${Math.round((Date.now() - c.ts) / 60000)}min` : c.ok ? `${c.checked} canal(es) OK` : `${deadN} caído(s)${c.globalOk ? "" : " + token global caído"}`,
+        };
+      }
+    } catch (e) {
+      checks.whatsappToken = { ok: false, detail: (e as Error).message };
+    }
+
     const ok = Object.values(checks).every((c) => c.ok);
-    if (!ok) throw new ServiceUnavailableException({ ok, checks });
-    return { ok, checks };
+    // `whatsappTokenOk` explícito para el humo (smoke-prod) además del check agregado.
+    const whatsappTokenOk = checks.whatsappToken?.ok ?? true;
+    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, checks });
+    return { ok, whatsappTokenOk, checks };
   }
 }

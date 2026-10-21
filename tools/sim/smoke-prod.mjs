@@ -519,6 +519,32 @@ async function checkAssistant() {
   return rollup(subs);
 }
 
+// 11. Salud de los TOKENS de WhatsApp: /health/status expone `whatsappTokenOk`. Un token muerto
+//     (Meta 190) hace fallar los ENVÍOS en silencio → el humo DEBE fallar. El body viene aun en
+//     503 (status profundo). Si /health/status pide MONITOR_TOKEN y no lo tenemos → WARN.
+async function checkWhatsappTokenHealth() {
+  const headers = {};
+  const mt = process.env.MONITOR_TOKEN || process.env.SMOKE_MONITOR_TOKEN;
+  if (mt) headers["x-monitor-token"] = mt;
+  let r;
+  try {
+    r = await fetchT(API + "/health/status", { headers });
+  } catch (e) {
+    return { status: "FAIL", detail: `/health/status → ERROR ${e.message}`, extra: null };
+  }
+  const body = await r.json().catch(() => null);
+  if (r.status === 401) {
+    return { status: "WARN", detail: "/health/status pide MONITOR_TOKEN (pásalo por env MONITOR_TOKEN) — no se pudo leer whatsappTokenOk.", extra: null };
+  }
+  if (!body || typeof body.whatsappTokenOk !== "boolean") {
+    return { status: "WARN", detail: `/health/status no expone whatsappTokenOk (HTTP ${r.status}). ¿Deploy viejo?`, extra: null };
+  }
+  const subs = [
+    { ok: body.whatsappTokenOk === true, label: `whatsappTokenOk = ${body.whatsappTokenOk} (${body.checks?.whatsappToken?.detail ?? "sin detalle"})` },
+  ];
+  return rollup(subs);
+}
+
 // ───────────────────────────── Runner ─────────────────────────────
 
 async function main() {
@@ -536,6 +562,7 @@ async function main() {
   await runCheck("8-console", "Consola limpia (navegador headless)", checkConsoleClean);
   await runCheck("9-security", "Seguridad de borde (rechazos esperados, no destructivo)", checkSecurityEdges);
   await runCheck("10-assistant", "Asistente: burbuja útil en conversia + 404 en marca ajena (opt-in QA)", checkAssistant);
+  await runCheck("11-wa-token", "Salud de tokens de WhatsApp (whatsappTokenOk en /health/status)", checkWhatsappTokenHealth);
 
   // Resumen legible.
   const icon = { PASS: C.green("PASS"), FAIL: C.red("FAIL"), WARN: C.yellow("WARN"), SKIP: C.gray("SKIP") };

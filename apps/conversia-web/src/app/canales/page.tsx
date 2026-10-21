@@ -165,12 +165,28 @@ export default function Canales() {
       // {"version":"v4"} en los extras y su verificador trata `version` como clave del
       // launch config. Sin ella, el lanzamiento puede caer al comportamiento v2/v3
       // (deprecado el 15-oct-2026) donde el featureType de coexistencia no corre.
-      { config_id: cfg.configId, response_type: "code", override_default_response_type: true, extras: { version: "v4", setup: {}, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" } },
+      // extras.features [app_only_install] (hallazgo 21-oct-2026): el launcher oficial
+      // del panel lo incluye junto al featureType de coexistencia; sin él, el diálogo
+      // puede caer al flujo de número nuevo aunque el número tenga la app instalada.
+      {
+        config_id: cfg.configId,
+        response_type: "code",
+        override_default_response_type: true,
+        extras: {
+          version: "v4",
+          setup: {},
+          featureType: cfg.featureType ?? "",
+          sessionInfoVersion: "3",
+          ...(mode === "coexistence" ? { features: [{ name: "app_only_install" }] } : {}),
+        },
+      },
     );
   }
 
   const waChannels = (channels ?? []).filter((c) => c.type === "WHATSAPP_CLOUD");
   const waActive = waChannels.find((c) => c.status === "active");
+  // Canal caído por TOKEN (lo marca el worker ante un 190 de Meta): aviso humano al dueño.
+  const waDown = waChannels.find((c) => c.status === "error");
   const activeSteps = modeRef.current === "coexistence" ? COEX_STEPS : STEPS;
   // Al menos una vía disponible habilita el botón principal.
   const canConnect = Boolean(coex?.ready || es?.ready);
@@ -180,6 +196,16 @@ export default function Canales() {
       <main style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px 44px" }}>
         <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Canales</h1>
         <p className="text-dim" style={{ fontSize: 14, margin: "0 0 22px" }}>Conecta dónde conversan tus clientes contigo.</p>
+
+        {waDown ? (
+          <div className="card" style={{ padding: 14, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start", borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, transparent)" }}>
+            <AlertTriangle size={18} style={{ color: "var(--danger)", flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: 14, lineHeight: 1.5 }}>
+              <b>Conexión con WhatsApp interrumpida.</b> Tu número dejó de responder (el acceso con Meta venció).
+              Nuestro equipo ya fue avisado y lo estamos reponiendo. No necesitas hacer nada.
+            </span>
+          </div>
+        ) : null}
 
         {okMsg ? (
           <div className="card" style={{ padding: 14, marginBottom: 16, display: "flex", gap: 10, alignItems: "center", borderColor: "var(--ok)" }}>

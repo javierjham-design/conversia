@@ -1,6 +1,6 @@
 import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
-import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend, chargeServiceSend } from "./messaging-guard";
@@ -45,6 +45,24 @@ export async function processOutbound(
     return;
   }
   const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId });
+
+  // No MARTILLAR un token ya marcado muerto: si el canal está en "error" (token caído, lo fijó
+  // markChannelAuthError), NO llamamos a Meta — el mensaje queda FAILED con el motivo claro hasta
+  // que el chequeo de salud (o "Reautorizar") vea el token vivo y reactive el canal. Evita gastar
+  // reintentos y golpear a Meta con 190 uno tras otro.
+  if (auth.channelConnectionId) {
+    const ch = await withTenant(organizationId, (tx) =>
+      tx.channelConnection.findUnique({ where: { id: auth.channelConnectionId! }, select: { status: true } }),
+    );
+    if (ch?.status === "error") {
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: TOKEN_INVALID_FAIL_TEXT } }),
+      );
+      const { publishRealtime } = await import("./realtime.js");
+      await publishRealtime(organizationId, { type: "message.updated", conversationId: data.conversationId });
+      return;
+    }
+  }
 
   // Plantilla HSM (fuera de la ventana de 24 h): parámetros resueltos con los
   // datos reales del contacto según el mapeo posición→campo de la plantilla.
@@ -177,7 +195,7 @@ export async function processOutbound(
 
     // Fallo terminal (config que no se arregla sola, o se agotaron los reintentos).
     // En errores de config del canal, guarda el mensaje CLARO (no el 400 crudo).
-    const failText = err instanceof ChannelConfigError ? err.userMessage : (err as Error).message.slice(0, 500);
+    const failText = err instanceof ChannelConfigError || err instanceof ChannelAuthError ? err.userMessage : (err as Error).message.slice(0, 500);
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
@@ -212,7 +230,7 @@ export async function processOutbound(
     // Auth (token) o configuración (nombre para mostrar, registro, pago…): marcar
     // el canal con un aviso y NO reintentar en bucle — no se arreglan solos.
     if (err instanceof ChannelAuthError) {
-      await markChannelAuthError(organizationId, auth.channelConnectionId, err.message);
+      await markChannelAuthError(organizationId, auth.channelConnectionId, err.message, { phone: auth.phoneNumberId, source: "send" });
       return;
     }
     if (err instanceof ChannelConfigError) {

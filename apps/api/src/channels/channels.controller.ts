@@ -122,6 +122,10 @@ export class ChannelsController {
           type: c.type,
           name: c.name,
           status: c.status,
+          // Salud del TOKEN: el estado "error" lo fija markChannelAuthError ante un 190 de Meta
+          // (token vencido/revocado). `tokenHealthy=false` → el panel muestra "conexión
+          // interrumpida, el equipo ya fue avisado". (Las fallas de config NO cambian el estado.)
+          tokenHealthy: c.status !== "error",
           // Foto de perfil de la página/cuenta IG (pages_read_engagement) —
           // guardada en config al conectar la página en Meta CRM.
           pictureUrl: (((c.config as Record<string, unknown>) ?? {}).pictureUrl as string | undefined) ?? null,
