@@ -275,6 +275,26 @@ export class ChannelsController {
   }
 
   /**
+   * 2.3 — Extras de conexión POR ORG (autenticado; no va en /public/meta-config para no filtrar
+   * datos de la org). Devuelve el `preVerifiedPhoneId` del pool ASIGNADO a esta org (para saltar
+   * el SMS en el registro insertado), solo si su marca tiene el pool ACTIVO. Apagado → null.
+   */
+  @Get("connection-extras")
+  async connectionExtras() {
+    const ctx = requireContext();
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+    const brand = (org?.brand ?? "tubot").toLowerCase();
+    const enabled = brand === "conversia" && getEnv().META_PREVERIFIED_ENABLED_CONVERSIA;
+    if (!enabled) return { preVerifiedPhoneId: null };
+    // Pool global → cliente admin (sin RLS). Devolvemos el número ya asignado a esta org si existe.
+    const assigned = await this.prisma.admin.preVerifiedPhone.findFirst({
+      where: { organizationId: ctx.organizationId, status: "assigned", brand },
+      select: { metaPhoneId: true },
+    });
+    return { preVerifiedPhoneId: assigned?.metaPhoneId ?? null };
+  }
+
+  /**
    * BLOQUE A — el cliente intentó conectar su WhatsApp y falló ≥2 veces. Levanta una
    * excepción en la cola de operación (V2-8) con el detalle técnico para que el equipo
    * lo vea SIN que el cliente tenga que reportar nada. Idempotente por org+día.
@@ -318,6 +338,10 @@ export class ChannelsController {
         businessId: z.string().optional(), // negocio (portfolio) elegido en el ES
         name: z.string().min(2).max(60).optional(),
         defaultAgentId: z.string().nullable().optional(),
+        // 2.1 — cómo terminó la sesión del registro insertado (FINISH / coexistencia / …) y en
+        // qué pantalla. Lo persistimos en el canal para saber por qué vía se conectó el cliente.
+        event: z.string().max(80).optional(),
+        currentStep: z.string().max(80).optional(),
       }),
       body,
     );
@@ -336,19 +360,11 @@ export class ChannelsController {
       throw new BadRequestException(`No se pudo obtener el token de Meta: ${tokenJson?.error?.message ?? tokenRes.status}`);
     }
 
-    // 2. Suscribir nuestra app al WABA del cliente (webhooks) — best-effort
-    await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.wabaId)}/subscribed_apps`, accessToken), {
-      method: "POST",
-      headers: { authorization: `Bearer ${accessToken}` },
-    }).catch(() => undefined);
-
-    // 3. Registrar el número para Cloud API — best-effort (puede estar ya registrado)
-    const pin = String(Math.floor(100000 + Math.random() * 900000));
-    await fetch(withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}/register`, accessToken), {
-      method: "POST",
-      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ messaging_product: "whatsapp", pin }),
-    }).catch(() => undefined);
+    // 2+3. Suscribir la app al WABA (webhooks entrantes) y REGISTRAR el número para Cloud API
+    // (necesario para ENVIAR y para sacarlo de "verified_not_registered"). Usa el helper
+    // compartido: idempotente (si ya está suscrito/registrado lo trata como éxito), maneja el
+    // PIN y el #133005 ("PIN ya configurado") y devuelve avisos claros si algo no quedó.
+    const onboard = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, accessToken);
 
     // 4. Nombre visible del número — best-effort
     let displayPhone = input.phoneNumberId;
@@ -391,6 +407,19 @@ export class ChannelsController {
       /* ignore */
     }
     const name = input.name ?? `WhatsApp ${displayPhone}`;
+    // 2.1 — cómo se conectó (FINISH estándar vs coexistencia) para guardarlo en el canal.
+    const connectEvent = input.event ?? null;
+
+    // Guard de colisión GLOBAL: phone_number_id es único en toda la BD. Bajo RLS solo vemos los
+    // números de ESTA org, así que un número ya conectado en OTRA cuenta no aparece y el create
+    // reventaría con un 500 feo. Lo detectamos con el cliente admin (sin RLS) y damos un mensaje claro.
+    const anywhere = await this.prisma.admin.whatsappPhoneNumber.findUnique({
+      where: { phoneNumberId: input.phoneNumberId },
+      select: { organizationId: true },
+    });
+    if (anywhere && anywhere.organizationId !== ctx.organizationId) {
+      throw new BadRequestException("Ese número de WhatsApp ya está conectado en otra cuenta. Si es tuyo, desconéctalo allí primero o escríbenos para moverlo.");
+    }
 
     // 5. Persistir el canal con el token por-WABA cifrado
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -418,7 +447,7 @@ export class ChannelsController {
             data: {
               status: "active",
               ...(input.defaultAgentId ? { defaultAgentId: input.defaultAgentId } : {}),
-              ...(metaUserId ? { config: { ...((cc?.config as Record<string, unknown>) ?? {}), metaUserId } } : {}),
+              config: { ...((cc?.config as Record<string, unknown>) ?? {}), ...(metaUserId ? { metaUserId } : {}), ...(connectEvent ? { signupEvent: connectEvent } : {}) },
             },
           });
         }
@@ -433,7 +462,7 @@ export class ChannelsController {
             after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
           },
         });
-        return { ok: true, id: existing.channelConnectionId, name, displayPhone, businessName, reconnected: true };
+        return { ok: true, id: existing.channelConnectionId, name, displayPhone, businessName, reconnected: true, warnings: onboard.warnings };
       }
 
       await enforcePlanLimit(tx, "channels", await tx.channelConnection.count({ where: { status: { not: "inactive" } } }));
@@ -444,7 +473,7 @@ export class ChannelsController {
           name,
           defaultAgentId: input.defaultAgentId ?? null,
           status: "active",
-          ...(metaUserId ? { config: { metaUserId } } : {}),
+          config: { ...(metaUserId ? { metaUserId } : {}), ...(connectEvent ? { signupEvent: connectEvent } : {}) },
         },
       });
       const credential = await tx.integrationCredential.create({
@@ -481,7 +510,7 @@ export class ChannelsController {
           after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId },
         },
       });
-      return { ok: true, id: channel.id, name, displayPhone, businessName };
+      return { ok: true, id: channel.id, name, displayPhone, businessName, warnings: onboard.warnings };
     });
   }
 
@@ -508,6 +537,8 @@ export class ChannelsController {
         businessId: z.string().optional(),
         name: z.string().min(2).max(60).optional(),
         defaultAgentId: z.string().nullable().optional(),
+        event: z.string().max(80).optional(),
+        currentStep: z.string().max(80).optional(),
       }),
       body,
     );
@@ -574,7 +605,7 @@ export class ChannelsController {
         /* ignore */
       }
       const name = input.name ?? `WhatsApp ${displayPhone}`;
-      const config: Record<string, unknown> = { coexistence: true, coexVerified, ...(metaUserId ? { metaUserId } : {}) };
+      const config: Record<string, unknown> = { coexistence: true, coexVerified, ...(metaUserId ? { metaUserId } : {}), ...(input.event ? { signupEvent: input.event } : {}) };
 
       // 4. Persistir el canal coexistente.
       const result = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
