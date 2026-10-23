@@ -107,8 +107,32 @@ export async function runWhatsappTokenHealth(connection: IORedis): Promise<Token
       if (!globalOk) globalDetail = "mock: simulated invalid global token";
     } else if (env.META_ACCESS_TOKEN) {
       const res = await fetchGraphWithProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/me?fields=id`, env.META_ACCESS_TOKEN);
-      globalOk = res.ok;
-      if (!res.ok) globalDetail = `HTTP ${res.status}`;
+      if (res.ok) {
+        globalOk = true;
+      } else {
+        // Parsea el error real de Graph: NO todo 400 es un token muerto. Solo un error de
+        // AUTENTICACIÓN (190/102/467 o 401) significa que el token global está caído y hay que
+        // reemplazarlo. Un error de `appsecret_proof` quiere decir que el App Secret configurado
+        // no corresponde a la app que emitió el token (el token puede estar VIVO) → NO es caída, y
+        // no debe disparar el banner rojo de "envíos fallando". Cualquier otro 4xx tampoco se
+        // afirma como caída (se reporta como "no verificado") para no generar falsos positivos.
+        const body = (await res.json().catch(() => ({}))) as { error?: { code?: number; error_subcode?: number; message?: string; type?: string } };
+        const err = body.error ?? {};
+        const code = typeof err.code === "number" ? err.code : undefined;
+        const msg = err.message ?? `HTTP ${res.status}`;
+        const authDead = code === 190 || code === 102 || code === 467 || res.status === 401;
+        const isProof = /appsecret_proof/i.test(err.message ?? "");
+        if (authDead) {
+          globalOk = false;
+          globalDetail = `token inválido — code ${code}${err.error_subcode ? `/${err.error_subcode}` : ""}: ${msg}`;
+        } else if (isProof) {
+          globalOk = true;
+          globalDetail = `no verificado: el App Secret no coincide con la app del token (revisa META_APP_SECRET; el token podría estar bien)`;
+        } else {
+          globalOk = true;
+          globalDetail = `no verificado — code ${code ?? "?"}: ${msg}`;
+        }
+      }
     }
   } catch (e) {
     // Bache de red: no afirmamos caída global (evita falsos positivos).

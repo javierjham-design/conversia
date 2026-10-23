@@ -52,6 +52,7 @@ export default function AlertsPage() {
   const [rows, setRows] = useState<Alert[] | null>(null);
   const [q, setQ] = useState<Quality | null>(null);
   const [wa, setWa] = useState<WaTokenHealth | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const [a, quality, waHealth] = await Promise.all([
@@ -68,12 +69,41 @@ export default function AlertsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
+  // Re-dispara el chequeo activo de tokens de WhatsApp y recarga. Tras corregir un token en
+  // Railway, detecta la recuperación al instante (no espera el ciclo de 15 min) y limpia la alerta.
+  const recheck = useCallback(async () => {
+    setBusy(true);
+    try {
+      await padmin("/platform/alerts/recheck", { method: "POST" });
+      // El barrido corre en el worker; dale un momento y recarga.
+      await new Promise((r) => setTimeout(r, 2500));
+      await load();
+      toast.push("Verificación re-ejecutada", "ok");
+    } catch (e) {
+      toast.push((e as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
+
   return (
     <div className="mx-auto max-w-[1100px] px-6 py-6 lg:px-8">
       <PageHeader title="Alertas" description="Avisos y errores de integración de todos los tenants (salud de Meta, IA en pausa, suspensiones…)." />
 
       <section className="mb-6">
-        <h2 className="mb-2 text-sm font-semibold text-navy-900">Salud de tokens de WhatsApp</h2>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-navy-900">Salud de tokens de WhatsApp</h2>
+          <button
+            type="button"
+            onClick={() => void recheck()}
+            disabled={busy}
+            title="Vuelve a verificar los tokens de WhatsApp y actualiza la lista"
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {busy ? "Revisando…" : "↻ Revisar de nuevo"}
+          </button>
+        </div>
         {!wa ? (
           <Skeleton className="h-16" />
         ) : (
@@ -85,6 +115,7 @@ export default function AlertsPage() {
               <span className="text-slate-600">
                 Token global del Tech Provider: <b className={wa.globalOk ? "text-emerald-700" : "text-red-700"}>{wa.globalOk ? "vivo" : "CAÍDO"}</b>
                 {!wa.globalOk && wa.globalDetail ? ` (${wa.globalDetail})` : ""}
+                {wa.globalOk && wa.globalDetail ? <span className="ml-1 text-amber-600">· ⓘ {wa.globalDetail}</span> : null}
               </span>
               <span className="text-slate-500">{wa.checked} canal(es) verificado(s)</span>
               <span className="text-slate-400">
