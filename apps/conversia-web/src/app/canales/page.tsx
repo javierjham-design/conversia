@@ -11,7 +11,7 @@ import { openAssistant } from "@/lib/assistant";
  * (lista), GET /onboarding (checklist). Errores legibles + reporte a la cola de operación. */
 
 type Channel = { id: string; type: string; name: string; status: string; displayPhone: string | null; defaultAgentName: string | null };
-type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string };
+type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string; esVersion?: "v4" | "v5" };
 type ConnMode = "coexistence" | "embedded";
 
 /** Pasos que corre el backend al conectar (se animan mientras el POST está en vuelo). */
@@ -32,10 +32,10 @@ function mapConnectError(raw: string): { title: string; help: string } {
   if (/dominio|domain|url.*(block|allow)|not allowed|sdk/.test(s)) return { title: "El dominio aún no está autorizado en Meta", help: "Falta habilitar este sitio en la app de Meta (dominios del SDK). Es un ajuste de configuración; pide ayuda al asistente y el equipo lo deja listo." };
   if (/verif|elegib|not eligible|unverified|no verificad/.test(s)) return { title: "Meta necesita verificar tu negocio", help: "Es un trámite único de Meta para confirmar que tu negocio existe. Te acompañamos a dejarlo listo hoy; o conecta el WhatsApp que ya usas, que normalmente no lo requiere." };
   if (/business|portfolio|página|page|no.*cuenta/.test(s)) return { title: "Falta tu cuenta de Meta Business o una página de Facebook", help: "Para WhatsApp Business necesitas una cuenta de Meta Business y una página de Facebook. Créalas en business.facebook.com y reintenta." };
-  if (/already|en uso|in use|otra app|registered elsewhere/.test(s)) return { title: "Ese número ya está en uso en la app de WhatsApp", help: 'Si quieres SEGUIR usándolo en tu teléfono, usa "Conecta el WhatsApp que ya usas" (coexistencia): mantienes la app y tus chats. O usa un número nuevo dedicado.' };
+  if (/already|en uso|in use|otra app|registered elsewhere/.test(s)) return { title: "Ese número ya está en uso en la app de WhatsApp", help: "Perfecto: ese es el caso de coexistencia. Vuelve a pulsar Conectar e ingresa ese mismo número — lo conectamos tal cual, manteniendo tu app y tus chats." };
   if (/133005|pin/.test(s)) return { title: "Tu número ya tenía un PIN de verificación", help: "Lo detectamos automáticamente. Si persiste, desactiva la verificación en dos pasos del número en WhatsApp Business y reintenta." };
-  if (/cancel|denied|permiso|permission/.test(s)) return { title: "Se canceló o no se autorizó la conexión", help: "En la ventana de Meta hay que aceptar los permisos y elegir tu WhatsApp Business. Vuelve a intentarlo y completa todos los pasos." };
-  if (/no devolvió|account|cuenta\/número|number/.test(s)) return { title: "Meta no devolvió la cuenta o el número", help: 'Reintenta y en la ventana elige "Editar configuración" para seleccionar tu WhatsApp Business (no "Reconectar").' };
+  if (/cancel|denied|permiso|permission/.test(s)) return { title: "Se canceló o no se autorizó la conexión", help: "En la ventana de Meta hay que ingresar tu número y aceptar los permisos. Vuelve a intentarlo y completa todos los pasos." };
+  if (/no devolvió|account|cuenta\/número|number/.test(s)) return { title: "Meta no devolvió la cuenta o el número", help: "Reintenta e ingresa tu número en la ventana de Meta. Si ya lo usas en WhatsApp Business, se conectará en coexistencia automáticamente." };
   return { title: "No se pudo conectar", help: raw || "Ocurrió un error inesperado. Reintenta; si sigue, pide ayuda al asistente y el equipo lo revisa." };
 }
 
@@ -145,8 +145,14 @@ export default function Canales() {
   }
 
   async function finish(code: string) {
-    if (!sessionRef.current.wabaId || !sessionRef.current.phoneNumberId) { fail("Meta no devolvió la cuenta/número."); return; }
+    // "Phone Number First" (Meta, sep-2026): en COEXISTENCIA el evento final trae SOLO waba_id
+    // (sin phone_number_id — el número se resuelve en el backend desde la WABA). Para número nuevo
+    // sí llega el phone_number_id. Exigimos solo lo mínimo de cada vía.
     const coexistence = modeRef.current === "coexistence";
+    if (!sessionRef.current.wabaId || (!coexistence && !sessionRef.current.phoneNumberId)) {
+      fail("Meta no devolvió la cuenta/número.");
+      return;
+    }
     const endpoint = coexistence ? "/channels/coexistence" : "/channels/embedded-signup";
     setPhase("connecting"); setStepIdx(0); setErr(null); setOkMsg(null);
     const steps = coexistence ? COEX_STEPS : STEPS;
@@ -209,23 +215,31 @@ export default function Canales() {
       // {"version":"v4"} en los extras y su verificador trata `version` como clave del
       // launch config. Sin ella, el lanzamiento puede caer al comportamiento v2/v3
       // (deprecado el 15-oct-2026) donde el featureType de coexistencia no corre.
-      // extras.features [app_only_install] (hallazgo 21-oct-2026): el launcher oficial
-      // del panel lo incluye junto al featureType de coexistencia; sin él, el diálogo
-      // puede caer al flujo de número nuevo aunque el número tenga la app instalada.
-      {
-        config_id: cfg.configId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          version: "v4",
-          // 2.3 — número preverificado del pool (solo flujo de número NUEVO): salta el SMS. El
-          // launcher oficial lo pasa en setup.preVerifiedPhone.ids. Apagado salvo que la org tenga uno.
-          setup: preVerifiedId && mode !== "coexistence" ? { preVerifiedPhone: { ids: [preVerifiedId] } } : {},
-          featureType: cfg.featureType ?? "",
-          sessionInfoVersion: "3",
-          ...(mode === "coexistence" ? { features: [{ name: "app_only_install" }] } : {}),
-        },
-      },
+      // SIN extras.features (corrección 23-oct-2026): App-Only Install es OTRO producto
+      // (compartir cuentas de API existentes) y NO incorpora usuarios de la app de
+      // WhatsApp Business — enviarlo bloqueaba el enrutamiento a coexistencia. El snippet
+      // oficial de coexistencia lleva solo setup/featureType/sessionInfoVersion. Con
+      // "Phone Number First" (Meta, sep-2026) el diálogo pide el número al inicio y
+      // enruta a coexistencia AUTOMÁTICAMENTE si el número usa la app de WhatsApp Business.
+      //
+      // MIGRACIÓN v5 PREPARADA (apagada): cuando el backend sirva esVersion="v5"
+      // (flag META_ES_V5_ENABLED_CONVERSIA), los extras pasan a {version:"v5",
+      // sessionInfoVersion:5} SIN featureType — v5 enruta solo por "Phone Number First".
+      // Mientras esVersion sea "v4" (default) se mantiene el flujo vigente. Un solo punto de verdad.
+      (() => {
+        const v5 = cfg.esVersion === "v5";
+        // 2.3 — número preverificado del pool (solo flujo de número NUEVO): salta el SMS. El
+        // launcher oficial lo pasa en setup.preVerifiedPhone.ids. Apagado salvo que la org tenga uno.
+        const setup = preVerifiedId && mode !== "coexistence" ? { preVerifiedPhone: { ids: [preVerifiedId] } } : {};
+        return {
+          config_id: cfg.configId,
+          response_type: "code",
+          override_default_response_type: true,
+          extras: v5
+            ? { version: "v5", setup, sessionInfoVersion: 5 }
+            : { version: "v4", setup, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" },
+        };
+      })(),
     );
   }
 
@@ -311,32 +325,34 @@ export default function Canales() {
           {/* Acción primaria (si no está conectado y no estamos en medio de algo) */}
           {!waActive && phase === "idle" ? (
             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Vía 1 (recomendada): COEXISTENCIA — conecta el número que YA usa */}
+              {/* Vía 1 (recomendada): tu número. Con "Phone Number First" el diálogo de Meta pide
+                  el número al inicio y, si ya lo usas en la app de WhatsApp Business, lo conecta en
+                  coexistencia automáticamente (sin selector de "cuenta existente"). */}
               <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <QrCode size={17} style={{ color: "var(--acc-deep)" }} />
-                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta el WhatsApp que ya usas</span>
+                  <MessageCircle size={17} style={{ color: "var(--acc-deep)" }} />
+                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
                   <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
                 </div>
                 <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 13, lineHeight: 1.5 }}>
-                  Escanea o ingresa el código desde tu app y listo. Sigues respondiendo desde tu teléfono con tus chats de siempre, y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
+                  Ingresa tu número en la ventana de Meta. Si ya lo usas en la app de <strong>WhatsApp Business</strong>, lo conectamos tal cual: sigues respondiendo desde tu teléfono con tus chats de siempre y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
                 </p>
                 <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
-                  <QrCode size={16} /> Conectar mi número <ArrowRight size={15} />
+                  <MessageCircle size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
                 </button>
               </div>
 
-              {/* Vía 2: número dedicado (Embedded Signup normal) */}
+              {/* Vía 2: número NUEVO dedicado (Embedded Signup de número nuevo) */}
               <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--line)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <MessageCircle size={16} style={{ color: "var(--ink-dim)" }} />
+                  <QrCode size={16} style={{ color: "var(--ink-dim)" }} />
                   <span style={{ fontWeight: 600, fontSize: 14 }}>Prefiero un número nuevo dedicado</span>
                 </div>
                 <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 12.5, lineHeight: 1.5 }}>
-                  Te armamos un número aparte solo para el asistente, sin tocar el tuyo. Se abre una ventana de Meta.
+                  ¿No usas WhatsApp Business o quieres un número aparte solo para el asistente, sin tocar el tuyo? Te guiamos para crearlo en la misma ventana de Meta.
                 </p>
                 <button onClick={() => connect("embedded")} disabled={es ? !es.ready : true} className="card" style={{ cursor: es?.ready ? "pointer" : "not-allowed", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: es?.ready ? 1 : 0.6 }}>
-                  <MessageCircle size={14} /> Usar un número nuevo
+                  <QrCode size={14} /> Usar un número nuevo
                 </button>
               </div>
 

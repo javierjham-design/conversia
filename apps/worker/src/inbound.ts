@@ -167,6 +167,15 @@ export async function processInbound(job: InboundJob): Promise<void> {
     console.error("✖ Error en monitoreo de salud WhatsApp:", (err as Error).message),
   );
 
+  // Sync de COEXISTENCIA (phone_number / smb_app_state_sync / history): a nivel WABA, sin
+  // phone_number_id, por eso no pasa por parseWebhook. Backfill del número + contactos del dueño.
+  {
+    const { processCoexistenceSync } = await import("./coexistence-sync.js");
+    await processCoexistenceSync(job.raw).catch((err) =>
+      console.error("✖ Error en sync de coexistencia:", (err as Error).message),
+    );
+  }
+
   // Omnicanal: DMs de Messenger (object=page) e Instagram (object=instagram)
   {
     const { parseMessagingEvents } = await import("./messaging-events.js");

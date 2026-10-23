@@ -95,7 +95,7 @@ export async function armarCanalesConPopupBloqueado(page: Page): Promise<void> {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ appId: "0", configId: "0", graphVersion: "v21.0", ready: true, mode: "coexistence" }),
+      body: JSON.stringify({ appId: "0", configId: "0", graphVersion: "v26.0", ready: true, mode: "coexistence" }),
     }),
   );
   // El SDK de Meta nunca carga → fbReady=false → connect() falla con "¿bloqueador?".

@@ -15,6 +15,23 @@ reanudarse. **TuBot intacto.** Prohibido marcar verde algo que un test/navegador
 | **2.4 — Campos de webhook opcionales** | 🟢 **Anotado** (no urgente) | TODO en `meta-health.ts` (`user_preferences`, `template_category_update`, `message_template_components_update`) para cuando se activen difusiones. **No se tocó la suscripción de producción.** |
 | **3 — Prueba real en Docker** | 🟢 **Ya estaba hecho** + jornada nueva **verde** | `docs/PRUEBA_REAL_RESULTADOS.md` existe y está verde (PRs #515/#516/#517: suite "como el dueño" A–D, `reparar-marca.mjs`, fix de elegibilidad). **Nuevo:** `jornada-e-registro-insertado.spec.ts` cubre el popup mockeado FINISH / coexistencia / CANCEL — **6/6 verde** (desktop + iphone) contra el stack Docker. |
 
+## Revisión 23-oct (alineación a Meta: "Phone Number First" + Graph v26)
+
+La CORRECCIÓN 23-oct del prompt manda sobre lo anterior. Ajustes aplicados (PR aparte):
+
+| Punto | Estado | Evidencia |
+|---|---|---|
+| Extras del FB.login **sin** `features: [{name:"app_only_install"}]` | 🟢 | `canales/page.tsx`: extras de coexistencia exactos `{version:"v4", setup:{}, featureType:"whatsapp_business_app_onboarding", sessionInfoVersion:"3"}`. Comentario explica por qué App-Only Install bloqueaba el enrutamiento. |
+| **Phone Number First**: sin selector de cuenta existente; el diálogo pide el número y enruta solo | 🟢 | UI/textos de /canales realineados (vía 1 "Conecta tu WhatsApp" = ingresa el número → coexistencia automática si ya usas la app; vía 2 = número nuevo). `mapConnectError` sin referencias al viejo selector. Jornada E verde. |
+| **Coexistencia con solo `waba_id`** (sin phone_number_id, sin register) | 🟢 | `finish()` exige solo `wabaId` en coexistencia. Backend `/channels/coexistence`: `phoneNumberId` OPCIONAL; resuelve el número desde la WABA (`GET /{waba_id}/phone_numbers`, helper `listWabaPhoneNumbers`); si aún no existe, canal **waba-only** (`config.pendingNumber`). Nunca llama a `/register` en coexistencia. |
+| **Sync de contactos/historial** (`smb_app_data`) dentro de 24 h, **una sola vez cada uno** | 🟢 | `apps/worker/src/coexistence-sync.ts`: maneja `phone_number` (backfill del número waba-only), `smb_app_state_sync`/`smb_app_data` (contactos) e `history` (contactos + constancia; import de mensajes = TODO testeable aparte, falta validar el shape real). **DEDUPE "una sola vez":** contactos e historial se sellan con un evento marcador por org (`coexistence.state_sync_received` / `coexistence.history_received`); un REENVÍO de Meta se ignora (ni re-sync ni doble conteo). **vitest 9/9**. Enganchado en `processInbound`. |
+| **Graph v26** y nada de v2/v3 | 🟢 | Default `META_GRAPH_VERSION=v26.0` (config) + `.env.example` y `META_SETUP_CONVERSIA.md` actualizados (eran v21/v25 y **pisaban** el default en despliegues). |
+| **Migración a v5 PREPARADA (sin activar)** | 🟢 | Flag `META_ES_V5_ENABLED_CONVERSIA` **apagado por defecto**. Encendido (cuando Meta confirme GA para nuestra app) → `/public/meta-config` sirve `esVersion:"v5"` y los extras del FB.login pasan a `{version:"v5", sessionInfoVersion:5}` **SIN** `featureType`; apagado = flujo v4 vigente intacto. Un solo punto de verdad (el front no hardcodea la versión). Jornada E: tests `extras v4` y `extras v5` aseveran ambas formas. |
+
+Verificación: suite "como el dueño" **a–e verde** (Jornada A 15/15 con `--workers=2`; b/c/d/e verdes;
+Jornada E FINISH/coexistencia-waba-only/CANCEL/**extras v4**/**extras v5** verde). vitest coexistence-sync **9/9**;
+api **176/176**, worker **318/318**. Typecheck api/worker/web limpio.
+
 ## Decisiones tomadas
 
 - **`preVerifiedPhoneId` se expone en un endpoint AUTENTICADO** (`GET /channels/connection-extras`),
@@ -29,6 +46,14 @@ reanudarse. **TuBot intacto.** Prohibido marcar verde algo que un test/navegador
   almacén de PIN en esta fase.
 - **Flag del pool apagado por defecto** por marca (`META_PREVERIFIED_ENABLED_CONVERSIA`): con el flag
   off, el flujo de /canales es idéntico al actual (sin preVerifiedPhone).
+- **Migración v5 detrás de env, no de build**: la versión del registro insertado la decide el backend
+  (`esVersion` en `/public/meta-config`), no una constante del front. Así se enciende v5 cambiando una
+  env en Railway (sin redeploy del frontend) el día que Meta confirme la GA, y se revierte igual de fácil.
+  Elegí un **único flag** que cambia los tres campos a la vez (`version`, ausencia de `featureType`,
+  `sessionInfoVersion`) porque Meta los liga: v5 enruta por "Phone Number First" y el `featureType` sobra.
+- **Dedupe de sync por evento marcador** (no por columna nueva ni Redis): reusa `IntegrationEvent`, que
+  ya es la bitácora de integraciones del tenant. Barato, auditable y sobrevive reinicios del worker. El
+  marcador se consulta DENTRO de `withTenant` (RLS correcto) antes de tocar contactos.
 
 ## PRs
 

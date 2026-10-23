@@ -96,6 +96,10 @@ export class PublicController {
     const coexConfigId = b === "conversia" ? env.META_ES_COEX_CONFIG_ID_CONVERSIA || esConfigId : esConfigId;
     const configId = coex ? coexConfigId : esConfigId;
     const featureType = coex ? env.META_ES_COEX_FEATURE_TYPE : env.META_ES_FEATURE_TYPE;
+    // Versión del "registro insertado": v4 (vigente) o v5 (GA futuro). La flag está APAGADA por
+    // defecto; al encenderla por marca conversia, el front arma los extras del FB.login en v5
+    // (sin featureType, sessionInfoVersion 5). Ver META_ES_V5_ENABLED_CONVERSIA.
+    const esVersion = b === "conversia" && env.META_ES_V5_ENABLED_CONVERSIA ? "v5" : "v4";
     return {
       brand: b,
       mode: coex ? "coexistence" : "embedded_signup",
@@ -103,6 +107,7 @@ export class PublicController {
       configId,
       graphVersion: env.META_GRAPH_VERSION,
       featureType,
+      esVersion,
       // true si la marca ya tiene config → el front habilita el botón "Conectar".
       ready: Boolean(env.META_APP_ID && configId),
     };

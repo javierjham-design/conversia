@@ -29,6 +29,38 @@ export interface OnboardResult {
  *
  * `fetchImpl` se inyecta en tests; en producción usa el `fetch` global.
  */
+/**
+ * Lista los números de una WABA (GET /{waba_id}/phone_numbers). Lo usa COEXISTENCIA con
+ * "Phone Number First" (Meta, sep-2026): el evento final trae solo `waba_id`, así que el número
+ * se resuelve desde la WABA tras suscribir la app. Best-effort: [] si falla.
+ */
+export async function listWabaPhoneNumbers(
+  wabaId: string,
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Array<{ id: string; displayPhone: string | null; verifiedName: string | null; coexVerified: boolean }>> {
+  const v = getEnv().META_GRAPH_VERSION;
+  try {
+    const res = await fetchImpl(
+      withAppSecretProof(
+        `https://graph.facebook.com/${v}/${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name,platform_type,is_on_biz_app`,
+        accessToken,
+      ),
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    );
+    const json = (await res.json().catch(() => ({}))) as { data?: Array<Record<string, unknown>> };
+    if (!res.ok || !Array.isArray(json?.data)) return [];
+    return json.data.map((n) => ({
+      id: String(n.id),
+      displayPhone: (n.display_phone_number as string) ?? null,
+      verifiedName: (n.verified_name as string) ?? null,
+      coexVerified: n.is_on_biz_app === true && String(n.platform_type ?? "").toUpperCase() === "CLOUD_API",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function subscribeAndRegisterWhatsapp(
   wabaId: string,
   phoneNumberId: string,
