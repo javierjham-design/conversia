@@ -39,6 +39,20 @@ function mapConnectError(raw: string): { title: string; help: string } {
   return { title: "No se pudo conectar", help: raw || "Ocurrió un error inesperado. Reintenta; si sigue, pide ayuda al asistente y el equipo lo revisa." };
 }
 
+/** Nombres legibles de los pasos del registro insertado (para el mensaje honesto de CANCEL). */
+const STEP_LABELS: Record<string, string> = {
+  LOGIN: "iniciar sesión en Facebook",
+  BUSINESS_SELECTION: "elegir tu cuenta de Meta Business",
+  BUSINESS_CREATION: "crear tu cuenta de Meta Business",
+  WHATSAPP_BUSINESS_ACCOUNT_SELECTION: "elegir tu cuenta de WhatsApp Business",
+  WHATSAPP_BUSINESS_ACCOUNT_CREATION: "crear tu cuenta de WhatsApp Business",
+  PHONE_NUMBER_SELECTION: "elegir tu número",
+  PHONE_NUMBER_INPUT: "ingresar tu número",
+  PHONE_NUMBER_VERIFICATION: "verificar tu número (código SMS)",
+  VERIFICATION: "verificación",
+  PERMISSIONS: "aceptar los permisos",
+};
+
 export default function Canales() {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [es, setEs] = useState<EsConfig | null>(null);
@@ -50,7 +64,12 @@ export default function Canales() {
   const [err, setErr] = useState<{ title: string; help: string } | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [needsVerif, setNeedsVerif] = useState(false);
-  const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string; businessId?: string }>({});
+  // 2.3 — id del número PREVERIFICADO asignado a esta org (si la marca lo tiene activo). Si llega,
+  // se pasa en setup.preVerifiedPhone para saltar el SMS en el flujo de número nuevo.
+  const [preVerifiedId, setPreVerifiedId] = useState<string | null>(null);
+  // 2.1 — capturamos también `event` (FINISH / FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING / CANCEL)
+  // y `current_step` del postMessage para saber CÓMO terminó la sesión y dar un mensaje honesto.
+  const sessionRef = useRef<{ wabaId?: string; phoneNumberId?: string; businessId?: string; event?: string; currentStep?: string }>({});
   const modeRef = useRef<ConnMode>("coexistence");
   const attemptsRef = useRef(0);
 
@@ -69,12 +88,18 @@ export default function Canales() {
   useEffect(() => {
     api<EsConfig>("/public/meta-config?brand=conversia&mode=coexistence").then(setCoex).catch(() => undefined);
     api<EsConfig>("/public/meta-config?brand=conversia").then(setEs).catch(() => undefined);
+    // 2.3 — número preverificado asignado a la org (endpoint autenticado; vacío si la marca no
+    // tiene el pool activo). No usa /public/meta-config (público) para no filtrar datos por org.
+    api<{ preVerifiedPhoneId: string | null }>("/channels/connection-extras").then((r) => setPreVerifiedId(r.preVerifiedPhoneId ?? null)).catch(() => undefined);
     function onMsg(event: MessageEvent) {
       if (typeof event.origin !== "string" || !event.origin.endsWith("facebook.com")) return;
       let d: any = event.data;
       if (typeof d === "string") { try { d = JSON.parse(d); } catch { return; } }
       if (d?.type && d.type !== "WA_EMBEDDED_SIGNUP") return;
       const data = d?.data ?? d;
+      // `event` es hermano de `data`; `current_step` vive dentro de `data`.
+      if (d?.event) sessionRef.current.event = d.event;
+      if (data?.current_step) sessionRef.current.currentStep = data.current_step;
       if (data?.waba_id) sessionRef.current.wabaId = data.waba_id;
       if (data?.phone_number_id) sessionRef.current.phoneNumberId = data.phone_number_id;
       if (data?.business_id) sessionRef.current.businessId = data.business_id;
@@ -129,7 +154,9 @@ export default function Canales() {
     try {
       const r = await api<{ displayPhone: string; businessName?: string | null; coexistence?: boolean }>(endpoint, {
         method: "POST",
-        body: JSON.stringify({ code, wabaId: sessionRef.current.wabaId, phoneNumberId: sessionRef.current.phoneNumberId, businessId: sessionRef.current.businessId }),
+        // 2.1 — enviamos también el `event` (cómo terminó la sesión: FINISH estándar vs
+        // coexistencia) para que el backend lo persista en el canal.
+        body: JSON.stringify({ code, wabaId: sessionRef.current.wabaId, phoneNumberId: sessionRef.current.phoneNumberId, businessId: sessionRef.current.businessId, event: sessionRef.current.event, currentStep: sessionRef.current.currentStep }),
       });
       clearInterval(timer);
       attemptsRef.current = 0;
@@ -157,7 +184,24 @@ export default function Canales() {
     w.FB.login(
       (response: any) => {
         const code = response?.authResponse?.code;
-        if (!code) { fail("Se canceló la conexión."); return; }
+        if (!code) {
+          // 2.1 — sin code: o canceló (postMessage event=CANCEL con current_step) o falló. Mensaje
+          // HONESTO con el paso donde quedó, nunca un error genérico.
+          if (sessionRef.current.event === "CANCEL" || sessionRef.current.currentStep) {
+            const step = sessionRef.current.currentStep ? STEP_LABELS[sessionRef.current.currentStep] ?? sessionRef.current.currentStep : null;
+            setNeedsVerif(false);
+            setPhase("error");
+            setErr({
+              title: "Cerraste la ventana de Meta",
+              help: step
+                ? `Quedó pendiente en el paso: ${step}. No pasa nada — puedes retomar cuando quieras pulsando Conectar de nuevo.`
+                : "No se completó la conexión. Puedes retomar cuando quieras pulsando Conectar de nuevo.",
+            });
+            return;
+          }
+          fail("Se canceló la conexión.");
+          return;
+        }
         void finish(code);
       },
       // extras.version "v4" EXPLÍCITO (hallazgo del panel "Registro insertado" del App
@@ -174,7 +218,9 @@ export default function Canales() {
         override_default_response_type: true,
         extras: {
           version: "v4",
-          setup: {},
+          // 2.3 — número preverificado del pool (solo flujo de número NUEVO): salta el SMS. El
+          // launcher oficial lo pasa en setup.preVerifiedPhone.ids. Apagado salvo que la org tenga uno.
+          setup: preVerifiedId && mode !== "coexistence" ? { preVerifiedPhone: { ids: [preVerifiedId] } } : {},
           featureType: cfg.featureType ?? "",
           sessionInfoVersion: "3",
           ...(mode === "coexistence" ? { features: [{ name: "app_only_install" }] } : {}),

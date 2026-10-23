@@ -265,3 +265,31 @@ con los permisos: **`business_management` + `whatsapp_business_management` + `wh
   4) actualizar los canales de la plataforma al phone_number_id nuevo y verificar
      salud de token + humo completo. Jamás a mano ni a medias: esa mezcla fue la del
      incidente.
+
+## 14. Pool de números PREVERIFICADOS ("número llave en mano", fase 1)
+
+Permite saltar el SMS al conectar un número NUEVO: el registro insertado recibe
+`setup.preVerifiedPhone.ids` con un número ya verificado del negocio de la plataforma. Fase 1:
+el alta al pool es MANUAL y la asignación a una org también; el código solo lo expone al
+launcher si la marca tiene el flag encendido y la org tiene un número asignado.
+
+**Encender la marca** (apagado por defecto): variable de Railway (api y worker)
+`META_PREVERIFIED_ENABLED_CONVERSIA=true`. Sin esto, `GET /channels/connection-extras` siempre
+devuelve `preVerifiedPhoneId: null` y el flujo es idéntico al de hoy.
+
+**Alta de un número al pool** (como se hizo a mano el 21-oct con el +1 835-277-9428 del business
+`1051306350709612`), con el token de sistema del negocio Conversia/TuBot:
+1. `POST /{waba_id}/phone_numbers` (o el alta desde WhatsApp Manager) → obtienes el `phone_id`.
+2. `POST /{phone_id}/request_code` (método SMS/VOICE) → llega el código.
+3. `POST /{phone_id}/verify_code` con el código → el número queda **preverificado**.
+4. Insertar la fila en el pool (vía super admin / SQL), estado `free`:
+   `INSERT INTO pre_verified_phones (id, brand, meta_phone_id, display_number, business_id, status)
+    VALUES (<cuid>, 'conversia', '<phone_id>', '+1 835 277 9428', '1051306350709612', 'free');`
+
+**Asignar un número a una org** (cuando el cliente pide "número nuevo llave en mano"):
+`UPDATE pre_verified_phones SET status='assigned', organization_id='<orgId>', assigned_at=now()
+ WHERE meta_phone_id='<phone_id>' AND status='free';`
+Desde ahí, al abrir /canales esa org recibe el `preVerifiedPhoneId` y el popup de Meta salta el SMS.
+
+> Fase 2 (futura): alta y asignación automáticas del pool desde la consola; por ahora es manual
+> y auditado. El flag apagado deja todo el flujo intacto.

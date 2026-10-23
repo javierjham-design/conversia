@@ -160,6 +160,12 @@ const envSchema = z.object({
   // crédito → el cliente NO configura su propio pago en Meta. "" = OBO desactivado.
   META_EXTENDED_CREDIT_ID: z.string().optional().default(""),
   META_CREDIT_CURRENCY: z.string().default("USD"), // moneda de la línea de crédito (debe coincidir con la WABA)
+  // 2.3 — "número llave en mano": pool de números PREVERIFICADOS por marca. APAGADO por defecto;
+  // enciéndelo por marca cuando el pool tenga números cargados (ver runbook §14).
+  META_PREVERIFIED_ENABLED_CONVERSIA: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
   // App de Meta SEPARADA "TuBot CRM" (Lead Ads + dataset): webhook page/leadgen
   // propio con su secret y verify token. Vacíos = se usa la app principal.
   META_CRM_APP_SECRET: z.string().optional().default(""),

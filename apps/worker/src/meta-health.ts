@@ -14,6 +14,12 @@ const HEALTH_FIELDS = new Set([
   "message_template_quality_update",
   "business_capability_update", // cambios de límite de mensajería
   "phone_number_name_update",
+  // 2.4 (anotado 21-oct, NO urgente) — suscribir y manejar estos campos CUANDO se activen las
+  // DIFUSIONES en Conversia (no cambiar la suscripción de producción hoy):
+  //   "user_preferences"                     — opt-in/opt-out de marketing por contacto
+  //   "template_category_update"             — Meta recategoriza una plantilla (marketing/utility)
+  //   "message_template_components_update"   — cambios de componentes de una plantilla aprobada
+  // El handler de abajo ya los ignoraría sin romper; faltaría clasificarlos y accionarlos.
 ]);
 
 type Severity = "ok" | "warning" | "error";

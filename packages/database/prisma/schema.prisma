@@ -1053,6 +1053,25 @@ model WhatsappPhoneNumber {
   @@map("whatsapp_phone_numbers")
 }
 
+/// 2.3 — Pool de números PREVERIFICADOS de la plataforma ("número llave en mano"). Global por
+/// marca (no es un dato del tenant): se accede con el cliente admin. Un número libre (status
+/// "free", sin org) se ASIGNA a una org (status "assigned") para saltar el SMS en el registro
+/// insertado vía setup.preVerifiedPhone. El alta al pool es manual (ver runbook §14).
+model PreVerifiedPhone {
+  id             String    @id @default(cuid())
+  brand          String    @default("conversia")
+  metaPhoneId    String    @unique @map("meta_phone_id") // phone_number_id de Meta
+  displayNumber  String    @map("display_number")
+  businessId     String?   @map("business_id") // negocio de Meta dueño del número (pool)
+  status         String    @default("free") // free | assigned
+  organizationId String?   @map("organization_id") // org asignada (null = libre)
+  assignedAt     DateTime? @map("assigned_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([brand, status])
+  @@map("pre_verified_phones")
+}
+
 model WhatsappTemplate {
   id             String   @id @default(cuid())
   organizationId String   @map("organization_id")
