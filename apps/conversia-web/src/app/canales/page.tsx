@@ -11,7 +11,7 @@ import { openAssistant } from "@/lib/assistant";
  * (lista), GET /onboarding (checklist). Errores legibles + reporte a la cola de operación. */
 
 type Channel = { id: string; type: string; name: string; status: string; displayPhone: string | null; defaultAgentName: string | null };
-type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string };
+type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string; esVersion?: "v4" | "v5" };
 type ConnMode = "coexistence" | "embedded";
 
 /** Pasos que corre el backend al conectar (se animan mientras el POST está en vuelo). */
@@ -221,19 +221,25 @@ export default function Canales() {
       // oficial de coexistencia lleva solo setup/featureType/sessionInfoVersion. Con
       // "Phone Number First" (Meta, sep-2026) el diálogo pide el número al inicio y
       // enruta a coexistencia AUTOMÁTICAMENTE si el número usa la app de WhatsApp Business.
-      {
-        config_id: cfg.configId,
-        response_type: "code",
-        override_default_response_type: true,
-        extras: {
-          version: "v4",
-          // 2.3 — número preverificado del pool (solo flujo de número NUEVO): salta el SMS. El
-          // launcher oficial lo pasa en setup.preVerifiedPhone.ids. Apagado salvo que la org tenga uno.
-          setup: preVerifiedId && mode !== "coexistence" ? { preVerifiedPhone: { ids: [preVerifiedId] } } : {},
-          featureType: cfg.featureType ?? "",
-          sessionInfoVersion: "3",
-        },
-      },
+      //
+      // MIGRACIÓN v5 PREPARADA (apagada): cuando el backend sirva esVersion="v5"
+      // (flag META_ES_V5_ENABLED_CONVERSIA), los extras pasan a {version:"v5",
+      // sessionInfoVersion:5} SIN featureType — v5 enruta solo por "Phone Number First".
+      // Mientras esVersion sea "v4" (default) se mantiene el flujo vigente. Un solo punto de verdad.
+      (() => {
+        const v5 = cfg.esVersion === "v5";
+        // 2.3 — número preverificado del pool (solo flujo de número NUEVO): salta el SMS. El
+        // launcher oficial lo pasa en setup.preVerifiedPhone.ids. Apagado salvo que la org tenga uno.
+        const setup = preVerifiedId && mode !== "coexistence" ? { preVerifiedPhone: { ids: [preVerifiedId] } } : {};
+        return {
+          config_id: cfg.configId,
+          response_type: "code",
+          override_default_response_type: true,
+          extras: v5
+            ? { version: "v5", setup, sessionInfoVersion: 5 }
+            : { version: "v4", setup, featureType: cfg.featureType ?? "", sessionInfoVersion: "3" },
+        };
+      })(),
     );
   }
 

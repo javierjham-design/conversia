@@ -154,6 +154,16 @@ const envSchema = z.object({
   // featureType fue retirado por Meta (may-2025) → el vigente es whatsapp_business_app_onboarding.
   META_ES_COEX_CONFIG_ID_CONVERSIA: z.string().optional().default(""),
   META_ES_COEX_FEATURE_TYPE: z.string().optional().default("whatsapp_business_app_onboarding"),
+  // MIGRACIÓN a v5 del "registro insertado" (Embedded Signup) — PREPARADA pero APAGADA.
+  // Cuando Meta confirme GA de v5 para NUESTRA app, se enciende por marca y los extras del
+  // FB.login pasan a {version:"v5", sessionInfoVersion:5} SIN featureType (v5 enruta solo por
+  // "Phone Number First", el featureType dejó de ser necesario). Mientras esté en false se
+  // mantiene el flujo vigente v4 {version:"v4", featureType, sessionInfoVersion:"3"}. La sirve
+  // GET /public/meta-config como `esVersion` ("v4" | "v5") para que el front no hardcodee nada.
+  META_ES_V5_ENABLED_CONVERSIA: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
   // Línea de crédito compartida OBO (On Behalf Of): id de la línea de crédito
   // extendida de TuBot (Business Settings → Pagos, o GET /{business_id}/extendedcredits).
   // Si está seteada, al onboardear la WABA del cliente le adjuntamos NUESTRA línea de

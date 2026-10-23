@@ -13,7 +13,8 @@ function fakeTx(seed: Partial<Record<string, any>> = {}) {
     whatsappPhoneNumber: { findUnique: vi.fn(async () => seed.number ?? null), create: vi.fn(async () => ({})) },
     channelConnection: { findFirst: vi.fn(async () => seed.channel ?? null), update: vi.fn(async () => ({})) },
     contact: { findFirst: vi.fn(async () => seed.contact ?? null), create: vi.fn(async () => ({})), update: vi.fn(async () => ({})) },
-    integrationEvent: { create: vi.fn(async () => ({})) },
+    // `seed.syncMarker` = marcador de sync ya existente (dedupe "una sola vez"); null = primera vez.
+    integrationEvent: { findFirst: vi.fn(async () => seed.syncMarker ?? null), create: vi.fn(async () => ({})) },
   };
 }
 
@@ -73,5 +74,31 @@ describe("processCoexistenceSync — enruta por campo y resuelve la org por waba
     await processCoexistenceSync({ entry: [{ id: "WABA9", changes: [{ field: "history", value: { contacts: [{ wa_id: "56933334444", profile: { name: "Bea" } }], history: [{ threads: [{ messages: [{}, {}] }] }] } }] }] });
     expect(tx.contact.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ phone: "+56933334444" }) }));
     expect(tx.integrationEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: "coexistence.history_received", payload: expect.objectContaining({ contacts: 1, messages: 2 }) }) }));
+  });
+
+  it("smb_app_state_sync → sella un marcador tras sincronizar (para dedupe)", async () => {
+    asMock(getAdminPrisma).mockReturnValue({ whatsappAccount: { findFirst: vi.fn(async () => ({ organizationId: "ORG1" })) } });
+    const tx = fakeTx(); // sin marcador → primera vez
+    asMock(withTenant).mockImplementation(async (_org: string, cb: (t: any) => Promise<unknown>) => cb(tx));
+    await processCoexistenceSync({ entry: [{ id: "WABA9", changes: [{ field: "smb_app_state_sync", value: { state_sync: [{ type: "contact", action: "add", contact: { full_name: "Ana", phone_number: "+56 9 1111 2222" } }] } }] }] });
+    expect(tx.integrationEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: "coexistence.state_sync_received" }) }));
+  });
+
+  it('"una sola vez": un REENVÍO del sync de contactos no re-sincroniza ni sella de nuevo', async () => {
+    asMock(getAdminPrisma).mockReturnValue({ whatsappAccount: { findFirst: vi.fn(async () => ({ organizationId: "ORG1" })) } });
+    const tx = fakeTx({ syncMarker: { id: "ev1" } }); // ya hay marcador → reenvío
+    asMock(withTenant).mockImplementation(async (_org: string, cb: (t: any) => Promise<unknown>) => cb(tx));
+    await processCoexistenceSync({ entry: [{ id: "WABA9", changes: [{ field: "smb_app_state_sync", value: { state_sync: [{ type: "contact", action: "add", contact: { full_name: "Ana", phone_number: "+56 9 1111 2222" } }] } }] }] });
+    expect(tx.contact.create).not.toHaveBeenCalled();
+    expect(tx.integrationEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('"una sola vez": un REENVÍO del historial no re-sincroniza ni duplica constancia', async () => {
+    asMock(getAdminPrisma).mockReturnValue({ whatsappAccount: { findFirst: vi.fn(async () => ({ organizationId: "ORG1" })) } });
+    const tx = fakeTx({ syncMarker: { id: "ev1" } }); // ya hay marcador → reenvío
+    asMock(withTenant).mockImplementation(async (_org: string, cb: (t: any) => Promise<unknown>) => cb(tx));
+    await processCoexistenceSync({ entry: [{ id: "WABA9", changes: [{ field: "history", value: { contacts: [{ wa_id: "56933334444" }], messages: [{}] } }] }] });
+    expect(tx.contact.create).not.toHaveBeenCalled();
+    expect(tx.integrationEvent.create).not.toHaveBeenCalled();
   });
 });

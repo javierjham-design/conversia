@@ -19,13 +19,16 @@ test.skip(!process.env.RUN_DUENO, "Suite 'como el dueño': requiere el stack Doc
 const META_CONFIG = { appId: "0", configId: "0", graphVersion: "v26.0", ready: true };
 type Scenario = { event?: string; code?: string; currentStep?: string; waba?: string; phone?: string };
 
-/** Inyecta, ANTES del paint, un window.FB falso que emula el popup de Meta con un escenario fijo. */
-async function setup(page: Page, scenario: Scenario) {
+/** Inyecta, ANTES del paint, un window.FB falso que emula el popup de Meta con un escenario fijo.
+ * `configOverride` permite probar variantes de /public/meta-config (p. ej. esVersion="v5"). El fake
+ * guarda los `extras` del FB.login en window.__fbExtras para poder aseverar la forma del launch config. */
+async function setup(page: Page, scenario: Scenario, configOverride: Record<string, unknown> = {}) {
   await page.addInitScript((s: Scenario) => {
-    const w = window as unknown as { FB?: unknown };
+    const w = window as unknown as { FB?: unknown; __fbExtras?: unknown };
     w.FB = {
       init() {},
-      login(cb: (r: unknown) => void) {
+      login(cb: (r: unknown) => void, params?: { extras?: unknown }) {
+        w.__fbExtras = params?.extras ?? null;
         const data: Record<string, unknown> = {};
         if (s.waba) data.waba_id = s.waba;
         if (s.phone) data.phone_number_id = s.phone;
@@ -37,7 +40,7 @@ async function setup(page: Page, scenario: Scenario) {
       },
     };
   }, scenario);
-  await page.route("**/public/meta-config**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(META_CONFIG) }));
+  await page.route("**/public/meta-config**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...META_CONFIG, ...configOverride }) }));
   await page.route("**/channels/connection-extras**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ preVerifiedPhoneId: null }) }));
 }
 
@@ -85,5 +88,31 @@ test.describe("Jornada E — registro insertado (FINISH / coexistencia / CANCEL)
     await expect(page.getByText(/Cerraste la ventana de Meta/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/elegir tu número/i)).toBeVisible();
     await expect(page.getByText(/No se pudo conectar/i)).toHaveCount(0);
+  });
+
+  test("extras v4 (vigente): version v4 + featureType + sessionInfoVersion '3'", async ({ page, request }) => {
+    const cuenta = await registerAccount(request, { brand: "conversia", vertical: "barberia" });
+    await useSession(page, cuenta.token);
+    await setup(page, { event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", code: "c4", waba: "WABA_V4" });
+    await page.route("**/channels/coexistence", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, displayPhone: "+56 9 1", coexistence: true, warnings: [] }) }));
+    await page.goto("/canales", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /Conectar mi WhatsApp/i }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__fbExtras?.version), { timeout: 10_000 }).toBe("v4");
+    const e = await page.evaluate(() => (window as any).__fbExtras);
+    expect(e.sessionInfoVersion).toBe("3");
+    expect("featureType" in e).toBe(true);
+  });
+
+  test("extras v5 (preparado, flag esVersion='v5'): version v5 + sessionInfoVersion 5 SIN featureType", async ({ page, request }) => {
+    const cuenta = await registerAccount(request, { brand: "conversia", vertical: "peluqueria" });
+    await useSession(page, cuenta.token);
+    await setup(page, { event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", code: "c5", waba: "WABA_V5" }, { esVersion: "v5" });
+    await page.route("**/channels/coexistence", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, displayPhone: "+56 9 2", coexistence: true, warnings: [] }) }));
+    await page.goto("/canales", { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /Conectar mi WhatsApp/i }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__fbExtras?.version), { timeout: 10_000 }).toBe("v5");
+    const e = await page.evaluate(() => (window as any).__fbExtras);
+    expect(e.sessionInfoVersion).toBe(5);
+    expect("featureType" in e).toBe(false);
   });
 });
