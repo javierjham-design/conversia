@@ -37,7 +37,9 @@ test.describe("Jornada B — me equivoco y el sistema me cuida", () => {
     await page.getByRole("button", { name: /Pedir ayuda al asistente/i }).click();
     await expect(page.getByText("Asistente Conversia")).toBeVisible({ timeout: 10_000 });
     // Mi consulta llegó con el contexto del error (lo arma el botón, no la IA).
-    await expect(page.getByText(/Necesito ayuda con esto/i)).toBeVisible({ timeout: 10_000 });
+    // .first(): el prellenado puede aparecer a la vez en el compositor y en la burbuja
+    // enviada (carrera breve) → sin .first() el strict mode falla con "2 elements".
+    await expect(page.getByText(/Necesito ayuda con esto/i).first()).toBeVisible({ timeout: 10_000 });
     // Y el asistente responde ALGO (mock o real) — jamás un "(Not Found)" crudo.
     await expect(page.getByText(/^Asistente$/).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/not found/i)).toHaveCount(0);

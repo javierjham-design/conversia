@@ -14,8 +14,8 @@ describe("detectAppointmentResponse", () => {
     }
   });
 
-  it("detecta Cancelar (F4)", () => {
-    for (const t of ["Cancelar", "cancelar", "cancelar mi cita", "anular", "quiero anular", "ya no puedo ir", "no podré asistir", "dar de baja"]) {
+  it("detecta Cancelar (F4) SOLO cuando es cancelación explícita", () => {
+    for (const t of ["Cancelar", "cancelar", "cancelar mi cita", "anular", "quiero anular", "ya no quiero la cita", "dar de baja"]) {
       expect(detectAppointmentResponse(t)).toBe("cancel");
     }
   });
@@ -26,9 +26,9 @@ describe("detectAppointmentResponse", () => {
     }
   });
 
-  it("detecta 'no puedo asistir' como cancelar", () => {
-    for (const t of ["no puedo asistir", "no puedo ir", "no podré llegar"]) {
-      expect(detectAppointmentResponse(t)).toBe("cancel");
+  it("'no puedo / no asistiré' es REAGENDAR, no cancelar (caso Carolina: preguntar para cuándo)", () => {
+    for (const t of ["no puedo asistir", "no puedo ir", "no podré llegar", "ya no puedo ir", "no podré asistir", "no asistiré", "no voy a poder"]) {
+      expect(detectAppointmentResponse(t)).toBe("reschedule");
     }
   });
 
