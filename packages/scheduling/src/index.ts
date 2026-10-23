@@ -644,23 +644,47 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
 export function withAppointmentDuration(base: SchedulingProvider, durMin: number): SchedulingProvider {
   const wrapped = Object.create(base) as SchedulingProvider;
   wrapped.getAvailableSlots = async (q) => {
-    // Se pide la grilla YA con la duración (proveedores que lo soportan, como Cláriva,
-    // exponen los huecos cortos entre citas); la subdivisión de abajo queda como
-    // respaldo para bloques más largos o proveedores que ignoran durationMin.
-    const slots = await base.getAvailableSlots({ ...q, durationMin: durMin });
+    // Pedimos la grilla NATIVA (sin forzar durationMin): pedirla con la duración exacta hacía que
+    // Cláriva devolviera VACÍO cuando la cita es MÁS LARGA que la granularidad de la agenda (p. ej.
+    // 60 min con slots de 30) — aunque hubiera huecos CONSECUTIVOS que sí forman una ventana válida.
+    // Luego: los bloques >= durMin se SUBDIVIDEN; los más cortos se COMBINAN con los consecutivos del
+    // MISMO profesional (sin hueco) hasta cubrir durMin. Así una cita de 60 min encuentra ventana en
+    // dos slots de 30 seguidos (caso Angelica/Carolina/Maria Cecilia: "no hay" habiendo decenas de cupos).
+    const slots = (await base.getAvailableSlots({ ...q, durationMin: undefined })) ?? [];
+    const MS = durMin * 60000;
+    const groups = new Map<string, typeof slots>();
+    for (const s of slots) {
+      const k = `${s.professionalId}|${s.clinicId ?? ""}|${s.serviceId ?? ""}`;
+      const g = groups.get(k);
+      if (g) g.push(s);
+      else groups.set(k, [s]);
+    }
     const out: typeof slots = [];
-    for (const s of slots ?? []) {
-      const start = new Date(s.start).getTime();
-      const end = new Date(s.end ?? s.start).getTime();
-      const blockMin = Math.round((end - start) / 60000);
-      if (!Number.isFinite(blockMin) || blockMin <= durMin) {
-        out.push(s); // bloque igual o menor que la duración: se ofrece tal cual
-        continue;
-      }
-      for (let t0 = start; t0 + durMin * 60000 <= end; t0 += durMin * 60000) {
-        out.push({ ...s, start: new Date(t0).toISOString(), end: new Date(t0 + durMin * 60000).toISOString() });
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => a.start.localeCompare(b.start));
+      for (let i = 0; i < arr.length; i++) {
+        const start = new Date(arr[i].start).getTime();
+        const blockEnd = new Date(arr[i].end ?? arr[i].start).getTime();
+        if (blockEnd - start >= MS) {
+          // Bloque que ya cubre la duración: subdividir en ventanas de durMin.
+          for (let t0 = start; t0 + MS <= blockEnd; t0 += MS) {
+            out.push({ ...arr[i], start: new Date(t0).toISOString(), end: new Date(t0 + MS).toISOString() });
+          }
+        } else {
+          // Bloque más corto: combinar con los consecutivos (sin hueco) hasta cubrir durMin.
+          let covered = blockEnd;
+          let j = i;
+          while (covered - start < MS && j + 1 < arr.length && new Date(arr[j + 1].start).getTime() === covered) {
+            j++;
+            covered = new Date(arr[j].end ?? arr[j].start).getTime();
+          }
+          if (covered - start >= MS) {
+            out.push({ ...arr[i], start: arr[i].start, end: new Date(start + MS).toISOString() });
+          }
+        }
       }
     }
+    out.sort((a, b) => a.start.localeCompare(b.start));
     return out;
   };
   wrapped.createAppointment = async (input) => {
