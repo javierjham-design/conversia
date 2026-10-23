@@ -160,9 +160,10 @@ export default function PlatformLayout({ children }: { children: React.ReactNode
             <div className="flex items-center gap-2 border-b border-red-400 bg-red-600 px-4 py-2.5 text-[13px] font-medium text-white">
               <AlertTriangle size={16} className="shrink-0" />
               <span>
-                <b>Token del Tech Provider de WhatsApp CAÍDO</b> — los envíos están fallando.
-                Reemplázalo en Railway (variables de <b>api</b> y <b>worker</b>) y verifica en{" "}
-                <Link href="/admin/alerts" className="underline">Alertas</Link>.
+                <b>Token global del Tech Provider de WhatsApp CAÍDO</b> — afecta el alta de números
+                nuevos y los canales sin token propio (los tenants con su propio token siguen
+                enviando). Reemplaza <b>META_ACCESS_TOKEN</b> en Railway (variables de <b>api</b> y{" "}
+                <b>worker</b>) y verifica en <Link href="/admin/alerts" className="underline">Alertas</Link>.
               </span>
             </div>
           )}
