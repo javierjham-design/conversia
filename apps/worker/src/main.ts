@@ -48,7 +48,7 @@ import { startRetentionPurge } from "./retention-purge";
 import { startCatalogSync } from "./catalog/scheduler";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
 import { startReliabilityMonitor } from "./reliability-monitor";
-import { startWhatsappTokenHealth } from "./whatsapp-token-health";
+import { startWhatsappTokenHealth, runWhatsappTokenHealth } from "./whatsapp-token-health";
 import { startContactOverageMeter } from "./contact-overage";
 
 async function main() {
@@ -117,7 +117,12 @@ async function main() {
   // Sincronización hacia integraciones externas (GA4, Calendar, Sheets, HubSpot).
   const syncWorker = new Worker<SyncJob>(
     QUEUE_NAMES.sync,
-    async (job) => processSyncJob(job.data),
+    async (job) => {
+      // Re-chequeo de tokens de WhatsApp a demanda (botón "Revisar de nuevo" del super admin):
+      // corre el mismo barrido que el timer de 15 min, así la recuperación se detecta al instante.
+      if (job.data.kind === "whatsapp_token_health") return void (await runWhatsappTokenHealth(connection));
+      return processSyncJob(job.data);
+    },
     { connection, concurrency: 2 },
   );
   // Canal Web Push (VAPID). El stub nativo se registra el día de Capacitor.

@@ -25,20 +25,53 @@ function fecha(iso: string): string {
 export default function AdminAlerts() {
   const [rows, setRows] = useState<Alert[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const cargar = () =>
     padmin<Alert[]>("/platform/alerts")
-      .then(setRows)
+      .then((r) => { setRows(r); setError(null); })
       .catch((e) => setError((e as Error).message));
-  }, []);
+
+  useEffect(() => { void cargar(); }, []);
+
+  // Re-dispara el chequeo activo de tokens de WhatsApp y recarga. Tras corregir un token,
+  // detecta la recuperación al instante (no espera el ciclo de 15 min) y limpia la alerta.
+  async function revisarDeNuevo() {
+    setBusy(true);
+    setError(null);
+    try {
+      await padmin("/platform/alerts/recheck", { method: "POST" });
+      // El barrido corre en el worker; dale un momento y recarga.
+      await new Promise((r) => setTimeout(r, 2500));
+      await cargar();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const th: React.CSSProperties = { padding: "10px 12px", textAlign: "left", fontSize: 11, color: "var(--ink-dim)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" };
   const td: React.CSSProperties = { padding: "11px 12px", fontSize: 13, borderTop: "1px solid var(--hairline)", verticalAlign: "top" };
 
   return (
     <div style={{ maxWidth: 1000 }}>
-      <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Alertas</h1>
-      <p className="text-dim" style={{ margin: "0 0 18px", fontSize: 14 }}>Avisos y errores de integración de tus tenants: salud de Meta, IA en pausa, suspensiones y más.</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Alertas</h1>
+          <p className="text-dim" style={{ margin: "0 0 18px", fontSize: 14 }}>Avisos y errores de integración de tus tenants: salud de Meta, IA en pausa, suspensiones y más.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void revisarDeNuevo()}
+          disabled={busy}
+          className="text-dim"
+          style={{ whiteSpace: "nowrap", border: "1px solid var(--line)", background: "transparent", cursor: busy ? "default" : "pointer", borderRadius: 10, padding: "9px 14px", fontSize: 13, opacity: busy ? 0.6 : 1 }}
+          title="Vuelve a verificar los tokens de WhatsApp y actualiza la lista"
+        >
+          {busy ? "Revisando…" : "↻ Revisar de nuevo"}
+        </button>
+      </div>
       {error ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p> : null}
 
       {!rows ? (
