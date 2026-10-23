@@ -49,8 +49,8 @@ test.describe("Jornada D — marca ajena en conversia-web", () => {
     await expect(page.getByRole("button", { name: "Asistente" })).toHaveCount(0);
     await expect(page.getByText("Asistente Conversia")).toHaveCount(0);
 
-    // Disparo el error del popup como Javier: "Conectar mi número".
-    const conectar = page.getByRole("button", { name: /Conectar mi número/i });
+    // Disparo el error del popup como Javier: "Conectar mi WhatsApp".
+    const conectar = page.getByRole("button", { name: /Conectar mi WhatsApp/i });
     await expect(conectar).toBeEnabled({ timeout: 15_000 });
     await conectar.click();
 

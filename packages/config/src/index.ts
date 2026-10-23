@@ -134,7 +134,7 @@ const envSchema = z.object({
   META_APP_SECRET: z.string().optional().default(""),
   META_VERIFY_TOKEN: z.string().default("conversia-verify-token-dev"),
   META_ACCESS_TOKEN: z.string().optional().default(""),
-  META_GRAPH_VERSION: z.string().default("v21.0"),
+  META_GRAPH_VERSION: z.string().default("v26.0"), // v26 (oct-2026); v2/v3 del ES deprecados 15-oct-2026
   // Embedded Signup (onboarding self-service tipo Respond): app id + id de configuración
   META_APP_ID: z.string().optional().default(""),
   META_CONFIG_ID: z.string().optional().default(""),

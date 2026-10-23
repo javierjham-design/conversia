@@ -16,7 +16,7 @@ import { registerAccount, useSession } from "./_fixtures";
  */
 test.skip(!process.env.RUN_DUENO, "Suite 'como el dueño': requiere el stack Docker (RUN_DUENO=1).");
 
-const META_CONFIG = { appId: "0", configId: "0", graphVersion: "v21.0", ready: true };
+const META_CONFIG = { appId: "0", configId: "0", graphVersion: "v26.0", ready: true };
 type Scenario = { event?: string; code?: string; currentStep?: string; waba?: string; phone?: string };
 
 /** Inyecta, ANTES del paint, un window.FB falso que emula el popup de Meta con un escenario fijo. */
@@ -61,15 +61,18 @@ test.describe("Jornada E — registro insertado (FINISH / coexistencia / CANCEL)
   test("coexistencia: el POST va a /channels/coexistence con su event", async ({ page, request }) => {
     const cuenta = await registerAccount(request, { brand: "conversia", vertical: "peluqueria" });
     await useSession(page, cuenta.token);
-    await setup(page, { event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", code: "test-code-coex", waba: "WABA_C", phone: "PHONE_C" });
+    // Phone Number First: el evento de coexistencia trae SOLO waba_id (sin phone_number_id).
+    await setup(page, { event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", code: "test-code-coex", waba: "WABA_C" });
     let body: any = null;
     await page.route("**/channels/coexistence", (r) => {
       body = JSON.parse(r.request().postData() || "{}");
       return r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, displayPhone: "+56 9 2222 3333", coexistence: true, warnings: [] }) });
     });
     await page.goto("/canales", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /Conectar mi número/i }).click();
+    await page.getByRole("button", { name: /Conectar mi WhatsApp/i }).click();
     await expect.poll(() => body?.event, { timeout: 10_000, message: "el POST de coexistencia debía llevar el event" }).toBe("FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING");
+    expect(body.wabaId).toBe("WABA_C");
+    expect(body.phoneNumberId).toBeUndefined(); // sin phone_number_id en coexistencia
     await expect(page.getByText(/¡Listo! Conectamos el WhatsApp que ya usas/i)).toBeVisible({ timeout: 10_000 });
   });
 
@@ -78,7 +81,7 @@ test.describe("Jornada E — registro insertado (FINISH / coexistencia / CANCEL)
     await useSession(page, cuenta.token);
     await setup(page, { event: "CANCEL", currentStep: "PHONE_NUMBER_SELECTION" });
     await page.goto("/canales", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /Conectar mi número/i }).click();
+    await page.getByRole("button", { name: /Conectar mi WhatsApp/i }).click();
     await expect(page.getByText(/Cerraste la ventana de Meta/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/elegir tu número/i)).toBeVisible();
     await expect(page.getByText(/No se pudo conectar/i)).toHaveCount(0);

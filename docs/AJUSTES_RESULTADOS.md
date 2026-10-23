@@ -15,6 +15,21 @@ reanudarse. **TuBot intacto.** Prohibido marcar verde algo que un test/navegador
 | **2.4 — Campos de webhook opcionales** | 🟢 **Anotado** (no urgente) | TODO en `meta-health.ts` (`user_preferences`, `template_category_update`, `message_template_components_update`) para cuando se activen difusiones. **No se tocó la suscripción de producción.** |
 | **3 — Prueba real en Docker** | 🟢 **Ya estaba hecho** + jornada nueva **verde** | `docs/PRUEBA_REAL_RESULTADOS.md` existe y está verde (PRs #515/#516/#517: suite "como el dueño" A–D, `reparar-marca.mjs`, fix de elegibilidad). **Nuevo:** `jornada-e-registro-insertado.spec.ts` cubre el popup mockeado FINISH / coexistencia / CANCEL — **6/6 verde** (desktop + iphone) contra el stack Docker. |
 
+## Revisión 23-oct (alineación a Meta: "Phone Number First" + Graph v26)
+
+La CORRECCIÓN 23-oct del prompt manda sobre lo anterior. Ajustes aplicados (PR aparte):
+
+| Punto | Estado | Evidencia |
+|---|---|---|
+| Extras del FB.login **sin** `features: [{name:"app_only_install"}]` | 🟢 | `canales/page.tsx`: extras de coexistencia exactos `{version:"v4", setup:{}, featureType:"whatsapp_business_app_onboarding", sessionInfoVersion:"3"}`. Comentario explica por qué App-Only Install bloqueaba el enrutamiento. |
+| **Phone Number First**: sin selector de cuenta existente; el diálogo pide el número y enruta solo | 🟢 | UI/textos de /canales realineados (vía 1 "Conecta tu WhatsApp" = ingresa el número → coexistencia automática si ya usas la app; vía 2 = número nuevo). `mapConnectError` sin referencias al viejo selector. Jornada E verde. |
+| **Coexistencia con solo `waba_id`** (sin phone_number_id, sin register) | 🟢 | `finish()` exige solo `wabaId` en coexistencia. Backend `/channels/coexistence`: `phoneNumberId` OPCIONAL; resuelve el número desde la WABA (`GET /{waba_id}/phone_numbers`, helper `listWabaPhoneNumbers`); si aún no existe, canal **waba-only** (`config.pendingNumber`). Nunca llama a `/register` en coexistencia. |
+| **Sync de contactos/historial** (`smb_app_data`) dentro de 24 h | 🟢 | `apps/worker/src/coexistence-sync.ts`: maneja `phone_number` (backfill del número waba-only), `smb_app_state_sync`/`smb_app_data` (contactos) e `history` (contactos + constancia; import de mensajes = TODO testeable aparte, falta validar el shape real). **vitest 6/6**. Enganchado en `processInbound`. |
+| **Graph v26** y nada de v2/v3 | 🟢 | Default `META_GRAPH_VERSION=v26.0` (config) + `.env.example` y `META_SETUP_CONVERSIA.md` actualizados (eran v21/v25 y **pisaban** el default en despliegues). |
+
+Verificación: suite "como el dueño" **a–e verde** (Jornada A 15/15 con `--workers=2`; b/c/d/e verdes;
+Jornada E FINISH/coexistencia-waba-only/CANCEL verde). vitest coexistence-sync 6/6. Typecheck api/worker/web limpio.
+
 ## Decisiones tomadas
 
 - **`preVerifiedPhoneId` se expone en un endpoint AUTENTICADO** (`GET /channels/connection-extras`),

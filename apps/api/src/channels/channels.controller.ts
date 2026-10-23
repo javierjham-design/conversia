@@ -18,7 +18,7 @@ import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
-import { subscribeAndRegisterWhatsapp } from "./whatsapp-onboard";
+import { listWabaPhoneNumbers, subscribeAndRegisterWhatsapp } from "./whatsapp-onboard";
 
 const createChannelSchema = z.object({
   type: z.enum(["WHATSAPP_CLOUD", "MOCK"]),
@@ -533,7 +533,9 @@ export class ChannelsController {
       z.object({
         code: z.string().min(5),
         wabaId: z.string().min(3),
-        phoneNumberId: z.string().min(3),
+        // "Phone Number First" (sep-2026): el evento final de coexistencia trae SOLO waba_id.
+        // Por eso phoneNumberId es OPCIONAL: si no llega, se resuelve desde la WABA.
+        phoneNumberId: z.string().min(3).optional(),
         businessId: z.string().optional(),
         name: z.string().min(2).max(60).optional(),
         defaultAgentId: z.string().nullable().optional(),
@@ -557,27 +559,38 @@ export class ChannelsController {
         throw new BadRequestException(`No se pudo obtener el token de Meta: ${tokenJson?.error?.message ?? tokenRes.status}`);
       }
 
-      // 2. Suscribir la app al WABA (webhooks entrantes + ecos) y SALTAR el registro
-      //    (coexistencia: el número ya está registrado en la app del cliente).
-      const onboard = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, accessToken, fetch, { coexistence: true });
+      // 2. Suscribir la app al WABA (webhooks entrantes + ecos). SIN registrar el número
+      //    (coexistencia: el número ya está activo en la app del cliente) — la suscripción solo
+      //    necesita el waba_id.
+      const onboard = await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId ?? "", accessToken, fetch, { coexistence: true });
 
-      // 3. Nombre visible del número — best-effort.
-      let displayPhone = input.phoneNumberId;
+      // 2b. Resolver el número desde la WABA (Phone Number First manda solo waba_id). Si el body
+      //     trajo phoneNumberId lo usamos; si no, tomamos el primero de la WABA. Puede no existir
+      //     aún (lo backfillea el webhook `phone_number`/`smb_app_data`) → canal waba-only.
+      let effectivePhoneId: string | null = input.phoneNumberId ?? null;
+      let displayPhone: string | null = effectivePhoneId;
       let coexVerified = false;
-      try {
-        const numRes = await fetch(
-          withAppSecretProof(
-            `https://graph.facebook.com/${v}/${encodeURIComponent(input.phoneNumberId)}?fields=display_phone_number,verified_name,is_on_biz_app,platform_type`,
-            accessToken,
-          ),
-          { headers: { authorization: `Bearer ${accessToken}` } },
-        );
-        const numJson: any = await numRes.json();
-        if (numRes.ok && numJson?.display_phone_number) displayPhone = numJson.display_phone_number;
-        // Señal de coexistencia de Meta: el número corre en la app Y en Cloud API.
-        coexVerified = numJson?.is_on_biz_app === true && String(numJson?.platform_type ?? "").toUpperCase() === "CLOUD_API";
-      } catch {
-        /* ignore */
+      if (!effectivePhoneId) {
+        const nums = await listWabaPhoneNumbers(input.wabaId, accessToken);
+        if (nums[0]) { effectivePhoneId = nums[0].id; displayPhone = nums[0].displayPhone ?? nums[0].id; coexVerified = nums[0].coexVerified; }
+      }
+
+      // 3. Nombre visible + señal de coexistencia (si tenemos número y no lo trajimos ya).
+      if (effectivePhoneId && !coexVerified) {
+        try {
+          const numRes = await fetch(
+            withAppSecretProof(
+              `https://graph.facebook.com/${v}/${encodeURIComponent(effectivePhoneId)}?fields=display_phone_number,verified_name,is_on_biz_app,platform_type`,
+              accessToken,
+            ),
+            { headers: { authorization: `Bearer ${accessToken}` } },
+          );
+          const numJson: any = await numRes.json();
+          if (numRes.ok && numJson?.display_phone_number) displayPhone = numJson.display_phone_number;
+          coexVerified = numJson?.is_on_biz_app === true && String(numJson?.platform_type ?? "").toUpperCase() === "CLOUD_API";
+        } catch {
+          /* ignore */
+        }
       }
 
       // 3b. Nombre del negocio + id del usuario de Meta — best-effort.
@@ -604,12 +617,14 @@ export class ChannelsController {
       } catch {
         /* ignore */
       }
-      const name = input.name ?? `WhatsApp ${displayPhone}`;
-      const config: Record<string, unknown> = { coexistence: true, coexVerified, ...(metaUserId ? { metaUserId } : {}), ...(input.event ? { signupEvent: input.event } : {}) };
+      const name = input.name ?? `WhatsApp ${displayPhone ?? "(coexistencia)"}`;
+      // `pendingNumber`: canal waba-only (el número aún no está en la WABA); lo backfillea el
+      // webhook `phone_number`/`smb_app_data` (ver apps/worker/src/coexistence-sync.ts).
+      const config: Record<string, unknown> = { coexistence: true, coexVerified, ...(metaUserId ? { metaUserId } : {}), ...(input.event ? { signupEvent: input.event } : {}), ...(effectivePhoneId ? {} : { pendingNumber: true }) };
 
       // 4. Persistir el canal coexistente.
       const result = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-        const existing = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId } });
+        const existing = effectivePhoneId ? await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: effectivePhoneId } }) : null;
         if (existing) {
           const credential = await tx.integrationCredential.create({
             data: {
@@ -642,7 +657,7 @@ export class ChannelsController {
               action: "channel.coexistence_reconnect",
               entityType: "channel_connection",
               entityId: existing.channelConnectionId ?? existing.id,
-              after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexVerified },
+              after: { wabaId: input.wabaId, phoneNumberId: effectivePhoneId, coexVerified },
             },
           });
           return { ok: true, id: existing.channelConnectionId, name, displayPhone, businessName, coexistence: true, coexVerified, reconnected: true, warnings: onboard.warnings };
@@ -672,13 +687,13 @@ export class ChannelsController {
           update: { credentialId: credential.id, ...(input.businessId ? { businessId: input.businessId } : {}) },
           create: { organizationId: ctx.organizationId, wabaId: input.wabaId, businessId: input.businessId ?? null, name, credentialId: credential.id },
         });
-        await tx.whatsappPhoneNumber.create({
+        if (effectivePhoneId) await tx.whatsappPhoneNumber.create({
           data: {
             organizationId: ctx.organizationId,
             accountId: account.id,
             channelConnectionId: channel.id,
-            phoneNumberId: input.phoneNumberId,
-            displayPhone,
+            phoneNumberId: effectivePhoneId,
+            displayPhone: displayPhone ?? effectivePhoneId,
             status: "active",
           },
         });
@@ -690,10 +705,10 @@ export class ChannelsController {
             action: "channel.coexistence_connect",
             entityType: "channel_connection",
             entityId: channel.id,
-            after: { wabaId: input.wabaId, phoneNumberId: input.phoneNumberId, coexVerified },
+            after: { wabaId: input.wabaId, phoneNumberId: effectivePhoneId, coexVerified, pendingNumber: !effectivePhoneId },
           },
         });
-        return { ok: true, id: channel.id, name, displayPhone, businessName, coexistence: true, coexVerified, warnings: onboard.warnings };
+        return { ok: true, id: channel.id, name, displayPhone: displayPhone ?? "(se activará en breve)", businessName, coexistence: true, coexVerified, pendingNumber: !effectivePhoneId, warnings: onboard.warnings };
       });
       return result;
     } catch (e) {

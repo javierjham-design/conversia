@@ -88,7 +88,7 @@ Si quieres que los clientes de Conversia NO tengan que configurar su propio pago
 | `META_APP_ID` | App ID (token exchange + SDK) | ✅ ya `2024917441656687` |
 | `META_APP_SECRET` | Secreto de la app (token exchange) | debe estar seteada |
 | `META_ES_CONFIG_ID_CONVERSIA` | config_id de Conversia | ⬜ **opcional** (cae a `997145850023471`) |
-| `META_GRAPH_VERSION` | versión Graph | ✅ `v25.0` |
+| `META_GRAPH_VERSION` | versión Graph | ✅ `v26.0` (v2/v3 del ES deprecados 15-oct-2026) |
 | `META_EXTENDED_CREDIT_ID` | OBO línea de crédito | ⬜ opcional |
 
 ---

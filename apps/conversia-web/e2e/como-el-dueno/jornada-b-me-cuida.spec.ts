@@ -24,7 +24,7 @@ test.describe("Jornada B — me equivoco y el sistema me cuida", () => {
     await armarCanalesConPopupBloqueado(page);
 
     await page.goto("/canales", { waitUntil: "domcontentloaded" });
-    const conectar = page.getByRole("button", { name: /Conectar mi número/i });
+    const conectar = page.getByRole("button", { name: /Conectar mi WhatsApp/i });
     await expect(conectar).toBeEnabled({ timeout: 15_000 });
     await conectar.click();
 
