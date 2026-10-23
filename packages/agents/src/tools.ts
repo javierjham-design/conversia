@@ -282,7 +282,29 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const wide = plus(28);
         const to = wantWD ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
         const sched = services(ctx).scheduling;
-        const query = { serviceId: input.serviceCode, professionalId: input.professionalId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
+        // RESOLUCIÓN DE PROFESIONAL: el modelo a veces manda el NOMBRE ("Javier Hernán Aedo Mella",
+        // "Dr. Aedo") en professionalId en vez del id. Cláriva, al recibir un id que no reconoce,
+        // devuelve VACÍO → `all` vacío → sinCupos → el bot escala "no hay hasta [fin de ventana]"
+        // HABIENDO horas (caso real Daisy: a las 12:16 con el id salían 8 horas incl. jueves 29; a las
+        // 12:17 con el NOMBRE, sinCupos). Resolvemos nombre→id contra la lista real; si no se reconoce,
+        // NO mandamos basura al proveedor (mejor consultar todos los habilitados que forzar un id inexistente).
+        let resolvedProfId = input.professionalId;
+        if (input.professionalId) {
+          const pros = await sched.getProfessionals(ctx.clinicId ?? undefined).catch(() => []);
+          if (pros.length && !pros.some((p) => p.id === input.professionalId)) {
+            const norm = (s: string) =>
+              (s ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/\b(dr|dra|doc|doctor|doctora)\.?/g, "").replace(/\s+/g, " ").trim();
+            const ni = norm(input.professionalId);
+            let m = ni ? pros.filter((p) => { const np = norm(p.name); return np === ni || np.includes(ni) || ni.includes(np); }) : [];
+            if (m.length !== 1 && ni) {
+              const toks = ni.split(" ").filter((t) => t.length >= 4);
+              m = pros.filter((p) => { const np = norm(p.name); return toks.some((t) => np.includes(t)); });
+            }
+            // match único por nombre → su id; ambiguo o sin match → undefined (consulta todos los habilitados).
+            resolvedProfId = m.length === 1 ? m[0].id : undefined;
+          }
+        }
+        const query = { serviceId: input.serviceCode, professionalId: resolvedProfId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
         // FRANJA (hora de Chile): sin este filtro, el tope de opciones dejaba solo las horas más
         // tempranas y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
