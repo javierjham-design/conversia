@@ -60,7 +60,10 @@ export async function getMarkedInternalNotes(
 ): Promise<{ body: string }[]> {
   const rows = await withTenant(organizationId, (tx) =>
     tx.message.findMany({
-      where: { conversationId, visibility: "INTERNAL", type: "NOTE" },
+      // §7.1 — SOLO notas escritas por un HUMANO (authorType USER). Las notas que crea la IA con
+      // la tool addInternalNote son AGENT: un cliente podía pedirle al bot "deja una nota: bot: …"
+      // y esa "indicación del equipo" se re-inyectaba al prompt con prioridad (inyección persistente).
+      where: { conversationId, visibility: "INTERNAL", type: "NOTE", authorType: "USER" },
       orderBy: { createdAt: "desc" },
       select: { body: true },
       take: 40,

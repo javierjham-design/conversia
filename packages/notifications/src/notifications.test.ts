@@ -24,6 +24,12 @@ describe("catálogo de eventos", () => {
     expect(render("Hola {name}, {x}", { name: "Ana" })).toBe("Hola Ana, ");
   });
 
+  it("la alerta 'sin responder' llega a los admins del tenant (§8.5)", () => {
+    // El monitor busca conversaciones SIN asignar: sin tenant_admins la alerta no llegaba a nadie.
+    const ev = getEvent("conversation.unanswered")!;
+    expect(ev.audience).toContain("tenant_admins");
+  });
+
   it("el fallo de un flujo es crítico, va a admins/dueño y enlaza al flujo", () => {
     const wf = getEvent("workflow.failed")!;
     expect(wf.urgency).toBe("critical");
