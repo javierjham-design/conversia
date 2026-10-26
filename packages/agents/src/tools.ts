@@ -188,6 +188,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     const key = String(id).trim().toLowerCase();
     const direct = c.slots.get(key);
     if (direct) return direct;
+    // TOLERANCIA (día/mes invertidos): el modelo arma el id como hMMDD en vez de hDDMM
+    // (caso Margarita: "26 de octubre 09:15" → h1026-0915 en vez de h2610-0915). Si al
+    // intercambiar las DOS mitades del bloque de fecha calza un slot cacheado, se usa ese.
+    const swap = key.match(/^h?(\d{2})(\d{2})-(\d{3,4})$/);
+    if (swap) {
+      const alt = `h${swap[2]}${swap[1]}-${swap[3].padStart(4, "0")}`;
+      const hit = c.slots.get(alt);
+      if (hit) return hit;
+    }
     // TOLERANCIA: el modelo a veces RECONSTRUYE el id en vez de copiarlo (caso Juan
     // Fuica: la lista traía h99-1530 y mandó h0409-1530 imitando el ejemplo). Si la
     // HORA del id (tras el guión) identifica UN ÚNICO slot cacheado, se usa ese; si es
@@ -482,6 +491,42 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
           return { error: "No encuentro ese horario (o la lista ya venció). Llama de nuevo a getAvailability y pasa el `id` exacto del horario que eligió el paciente (ej. h0409-1015)." };
+        }
+        // GUARDIA PERSISTENTE anti doble-agendamiento (sobrevive reinicios del worker y
+        // ventanas largas, al revés que bookedCache que es memoria por 3 min). Consulta las
+        // citas REALES del paciente en el proveedor: si YA tiene una cita ACTIVA con el MISMO
+        // profesional el MISMO día:
+        //   • misma hora → es un reintento → se devuelve la existente (no se crea otra).
+        //   • otra hora  → es un cambio de hora → se REAGENDA (mueve) la existente, NO se crea
+        //     una 2ª. "Reagendar" aquí = getAvailability + createAppointment (no hay tool aparte)
+        //     y antes NO cancelaba la anterior → quedaban 2 citas (caso Margarita: 09:15 y luego
+        //     09:30 por un "ok"; y duplicados sistémicos a la MISMA hora de varios pacientes).
+        const chileDay = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+        try {
+          const targetDay = chileDay(slot.start);
+          const targetMs = new Date(slot.start).getTime();
+          const active = (await s.scheduling.getPatientAppointments(phone)) ?? [];
+          const dup = active.find(
+            (a) => (a.status === "pending" || a.status === "confirmed") && a.professionalId === slot.professionalId && chileDay(a.start) === targetDay,
+          );
+          if (dup) {
+            const sameSlot = Math.abs(new Date(dup.start).getTime() - targetMs) < 60000;
+            if (sameSlot) {
+              const cuandoEx = slotWhen.format(new Date(dup.start));
+              bookedCache.set(convId, { appt: dup, cuando: cuandoEx, at: Date.now() });
+              return { ok: true, alreadyBooked: true, appointment: dup, cuando: cuandoEx, message: `El paciente ya tenía ESTA misma cita: ${cuandoEx}. No se creó otra; confírmasela tal cual.` };
+            }
+            // Otra hora el mismo día con el mismo profesional → MOVER la cita (no duplicar).
+            const endMove = slot.end ?? new Date(targetMs + 30 * 60000).toISOString();
+            const moved = await s.scheduling.updateAppointment(dup.id, { start: slot.start, end: endMove });
+            const cuandoMove = slotWhen.format(new Date(slot.start));
+            bookedCache.set(convId, { appt: moved, cuando: cuandoMove, at: Date.now() });
+            await s.recordAppointment(moved);
+            return { ok: true, rescheduled: true, appointment: moved, cuando: cuandoMove, message: `Se MOVIÓ la cita del paciente a ${cuandoMove} (NO se creó una segunda: ya tenía una ese día con el mismo profesional). Confírmale EXACTAMENTE "${cuandoMove}".` };
+          }
+        } catch {
+          // Si el proveedor no responde la consulta/cambio, seguimos al flujo de creación normal:
+          // preferimos agendar a bloquear por un bache de red (bookedCache cubre el mismo turno).
         }
         const end = slot.end ?? new Date(new Date(slot.start).getTime() + 30 * 60000).toISOString();
         // Firma de origen en el comentario de la cita: siempre se sabe qué agente agendó.

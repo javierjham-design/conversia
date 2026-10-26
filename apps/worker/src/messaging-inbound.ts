@@ -12,6 +12,10 @@ import { pageToken } from "./messaging-send";
 // agente). El tenant se resuelve por el asset de página/IG registrado al
 // conectar la página en Meta CRM (docs/OMNICHANNEL.md).
 
+// Ventana para reabrir una conversación cerrada al volver a escribir el contacto (evita hilos
+// duplicados en la bandeja). Igual criterio que el ingreso de WhatsApp (ver inbound.ts).
+const CONVERSATION_REOPEN_WINDOW_DAYS = 45;
+
 async function resolveMessagingTenant(e: MessagingEvent): Promise<string | null> {
   const prisma = getAdminPrisma();
   const kind = e.platform === "messenger" ? "page" : "instagram";
@@ -184,6 +188,20 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       where: { contactId: contact.id, channelConnectionId: channel.id, status: { in: ["OPEN", "PENDING"] } },
       orderBy: { createdAt: "desc" },
     });
+    // REABRIR el hilo reciente (cerrado al confirmar la cita, etc.) en vez de crear uno nuevo:
+    // así el mismo contacto no aparece "duplicado" en la bandeja al volver a escribir.
+    if (!conversation) {
+      const recent = await tx.conversation.findFirst({
+        where: {
+          contactId: contact.id,
+          channelConnectionId: channel.id,
+          status: "CLOSED",
+          lastMessageAt: { gte: new Date(Date.now() - CONVERSATION_REOPEN_WINDOW_DAYS * 24 * 3600 * 1000) },
+        },
+        orderBy: { lastMessageAt: "desc" },
+      });
+      if (recent) conversation = await tx.conversation.update({ where: { id: recent.id }, data: { status: "OPEN" } });
+    }
     let started = false;
     if (!conversation) {
       conversation = await tx.conversation.create({
