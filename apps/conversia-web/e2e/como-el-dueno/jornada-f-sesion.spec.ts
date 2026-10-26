@@ -57,6 +57,8 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
   test('cerrar sesión desde el panel ("Cerrar sesión") borra la sesión y lleva a /login', async ({ page, request }) => {
     const cuenta = await registerAccount(request, { brand: "conversia", vertical: "peluqueria" });
     await useSession(page, cuenta.token); // sesión REAL y válida
+    // Silencia el banner de instalación PWA (fijo abajo): en iPhone tapa la pestaña "Más".
+    await page.addInitScript(() => { try { localStorage.setItem("conversia_pwa_install_dismissed", "1"); } catch { /* noop */ } });
     await page.goto("/inicio", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveURL(/\/inicio/);
 
