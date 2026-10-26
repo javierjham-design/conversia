@@ -1425,18 +1425,42 @@ export class PlatformController {
       orderBy: { createdAt: "desc" },
       take,
     });
-    const orgIds = [...new Set(rows.map((r) => r.organizationId))];
+    // Estado VIVO: ocultar los errores de autenticación de canales YA recuperados. La alerta es un
+    // evento histórico; si el canal volvió a estar activo (token corregido), el problema ya no existe
+    // y no debe seguir figurando. Así, tras reautorizar + "Revisar de nuevo", la alerta se limpia.
+    const chanId = (r: (typeof rows)[number]) => (r.payload as { channelConnectionId?: string } | null)?.channelConnectionId ?? null;
+    const authChIds = [...new Set(rows.filter((r) => r.type === "channel.auth_error").map(chanId).filter((x): x is string => !!x))];
+    const activeCh = authChIds.length
+      ? new Set((await this.prisma.admin.channelConnection.findMany({ where: { id: { in: authChIds }, status: "active" }, select: { id: true } })).map((c) => c.id))
+      : new Set<string>();
+    const visibleRows = rows.filter((r) => !(r.type === "channel.auth_error" && activeCh.has(chanId(r) ?? "")));
+    const orgIds = [...new Set(visibleRows.map((r) => r.organizationId))];
     const orgs = await this.prisma.admin.organization.findMany({ where: { id: { in: orgIds } }, select: { id: true, name: true } });
     const nameById = new Map(orgs.map((o) => [o.id, o.name]));
-    return rows.map((r) => ({
+    return visibleRows.map((r) => ({
       id: r.id,
       provider: r.provider,
       type: r.type,
       status: r.status,
       message: r.message,
       org: nameById.get(r.organizationId) ?? r.organizationId,
+      organizationId: r.organizationId,
       createdAt: r.createdAt,
     }));
+  }
+
+  /** Re-dispara el chequeo activo de tokens de WhatsApp (encola el mismo barrido que corre el timer
+   *  de 15 min). Lo usa el botón "Revisar de nuevo" de Alertas: tras corregir un token, limpia la
+   *  alerta al instante sin esperar al próximo ciclo. Idempotente (jobId fijo → no se apila). */
+  @Post("alerts/recheck")
+  async alertsRecheck(@Req() req: PlatformRequest) {
+    await this.queues.sync.add(
+      "whatsapp_token_health",
+      { organizationId: "", kind: "whatsapp_token_health", payload: {} },
+      { jobId: "wa-token-health-recheck", removeOnComplete: true, removeOnFail: 50 },
+    );
+    await this.audit(req, "platform.alerts.recheck", "alerts", "whatsapp-token", {});
+    return { ok: true };
   }
 
   // --------------------------- Soporte in-app ---------------------------
