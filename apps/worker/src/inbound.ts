@@ -18,6 +18,11 @@ import { cancelTimersOnReply, dispatchEvent, handlePendingObjective, handleWaitR
 import { handleAppointmentResponse } from "./appointment-responses";
 import { resolveAdContext } from "./meta-ads-sync";
 
+// Ventana para REABRIR una conversación cerrada cuando el paciente vuelve a escribir, en vez de
+// crear una nueva (evita "conversaciones duplicadas"). Dentro de la ventana = mismo hilo; más
+// allá = hilo nuevo (no revive historia vieja). Ver appointment-responses.ts (cierre al confirmar).
+const CONVERSATION_REOPEN_WINDOW_DAYS = 45;
+
 interface ParsedInbound {
   phoneNumberId: string;
   externalId: string;
@@ -407,6 +412,23 @@ export async function processInbound(job: InboundJob): Promise<void> {
         where: { contactId: contact.id, status: { in: ["OPEN", "PENDING"] } },
         orderBy: { createdAt: "desc" },
       });
+      // REABRIR el hilo reciente en vez de crear uno nuevo: appointment-responses cierra la
+      // conversación al confirmar la cita ("se reabre sola si el paciente vuelve a escribir"),
+      // pero nadie la reabría → cada respuesta posterior abría una conversación NUEVA y se veían
+      // "duplicadas" (caso Margarita: 4 hilos, todos con "Tu cita quedó confirmada ✅"). Mantiene
+      // UN hilo por paciente/canal mientras vuelva dentro de la ventana.
+      if (!conversation && tenant.channelConnectionId) {
+        const recent = await tx.conversation.findFirst({
+          where: {
+            contactId: contact.id,
+            channelConnectionId: tenant.channelConnectionId,
+            status: "CLOSED",
+            lastMessageAt: { gte: new Date(Date.now() - CONVERSATION_REOPEN_WINDOW_DAYS * 24 * 3600 * 1000) },
+          },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (recent) conversation = await tx.conversation.update({ where: { id: recent.id }, data: { status: "OPEN" } });
+      }
       let started = false;
       if (!conversation) {
         const channel = tenant.channelConnectionId
@@ -675,6 +697,20 @@ export async function processInbound(job: InboundJob): Promise<void> {
         where: { contactId: contact.id, status: { in: ["OPEN", "PENDING"] } },
         orderBy: { createdAt: "desc" },
       });
+      // Igual que en el ingreso del paciente: reabre el hilo reciente (si la clínica responde
+      // manualmente a un paciente cuya conversación se cerró) en vez de crear un duplicado.
+      if (!conversation && tenant.channelConnectionId) {
+        const recent = await tx.conversation.findFirst({
+          where: {
+            contactId: contact.id,
+            channelConnectionId: tenant.channelConnectionId,
+            status: "CLOSED",
+            lastMessageAt: { gte: new Date(Date.now() - CONVERSATION_REOPEN_WINDOW_DAYS * 24 * 3600 * 1000) },
+          },
+          orderBy: { lastMessageAt: "desc" },
+        });
+        if (recent) conversation = await tx.conversation.update({ where: { id: recent.id }, data: { status: "OPEN" } });
+      }
       if (!conversation) {
         conversation = await tx.conversation.create({
           data: {
