@@ -517,6 +517,11 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
         // (p. ej. confirmAppointment vía texto libre) se creaba una fila DUPLICADA a la misma hora en
         // estado PENDING — la confirmación nunca se reflejaba y la agenda local mostraba la cita doble.
         // Appointment no tiene índice único por externalId, así que se deduplica aquí a mano.
+        // Serializa los registros concurrentes de la MISMA cita (este agendamiento + el webhook de
+        // Cláriva, o dos webhooks) para que el findFirst→create no compita y cree una fila doble.
+        // Mismo patrón que clariva-webhook.ts (#461); respaldado por el índice único parcial
+        // (organization_id, provider, external_id) WHERE external_id IS NOT NULL.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}), hashtext(${appt.id}))`;
         const existing = await tx.appointment.findFirst({ where: { provider: provider as any, externalId: appt.id } });
         if (existing) {
           const mergedMeta = { ...((existing.meta as Record<string, any> | null) ?? {}) };
