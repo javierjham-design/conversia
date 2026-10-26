@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, Moon, Sun } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, LogOut, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { NotificationsSettings } from "@/components/NotificationsSettings";
-import { api } from "@/lib/api";
+import { api, logout } from "@/lib/api";
 
 // Hex canónicos de CONVERSIA_DISENO.md §3 (deben coincidir con --acc de globals.css).
 const ACCENTS: { key: string; label: string; color: string; ink: string }[] = [
@@ -27,6 +28,7 @@ function applyAccent(a: string) {
 }
 
 export default function Ajustes() {
+  const router = useRouter();
   const [theme, setTheme] = useState("dark");
   const [accent, setAccent] = useState("menta");
   const [name, setName] = useState("");
@@ -67,6 +69,11 @@ export default function Ajustes() {
     } catch (e) {
       setError((e as Error).message);
     }
+  }
+
+  async function cerrarSesion() {
+    await logout();
+    router.replace("/login");
   }
 
   async function saveName(e: React.FormEvent) {
@@ -143,6 +150,19 @@ export default function Ajustes() {
             Guardar
           </button>
         </form>
+
+        <div className="card" style={{ padding: 20, marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+          <div>
+            <h2 className="display" style={{ fontSize: 18, margin: "0 0 4px" }}>Sesión</h2>
+            <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Cierra la sesión en este dispositivo. Volverás a la pantalla de entrada.</p>
+          </div>
+          <button
+            onClick={cerrarSesion}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 600, border: "1px solid var(--danger)", background: "transparent", color: "var(--danger)" }}
+          >
+            <LogOut size={16} /> Cerrar sesión
+          </button>
+        </div>
       </main>
     </AppShell>
   );

@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, Globe, Home, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
-import { api, getToken } from "@/lib/api";
+import { CalendarDays, CreditCard, Globe, Home, LogOut, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
+import { api, getToken, getRefreshToken, sessionActive, clearToken, logout } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
 import { openAssistant } from "@/lib/assistant";
@@ -82,10 +82,26 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [moreOpen, setMoreOpen] = useState(false);
 
-  // Guard de sesión: sin token → al login (toda pantalla con shell es privada).
+  // Guard de sesión (toda pantalla con shell es privada):
+  //  - Sin token NI refresh → al login.
+  //  - Access vencido y SIN refresh con que renovar → al login con aviso de "sesión expiró"
+  //    (sin flash de panel muerto). Si hay refresh, dejamos pasar: la 1.ª llamada a la API lo
+  //    renueva sola (lib/api) y el usuario ni se entera.
   useEffect(() => {
-    if (!getToken()) router.replace("/login");
+    const t = getToken();
+    const rt = getRefreshToken();
+    if (!t && !rt) {
+      router.replace("/login");
+    } else if (t && !sessionActive(t) && !rt) {
+      clearToken();
+      router.replace(`/login?expirada=1&volver=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    }
   }, [router]);
+
+  async function cerrarSesion() {
+    await logout();
+    router.replace("/login");
+  }
 
   // Hidrata el ACENTO del usuario desde el servidor en TODA pantalla (no solo Ajustes) para
   // que la personalización de color persista cross-dispositivo (CONVERSIA_DISENO.md §3).
@@ -120,6 +136,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             </li>
           ))}
         </ul>
+        {/* Cerrar sesión: al final del riel, separado de la navegación. */}
+        <button
+          onClick={cerrarSesion}
+          className="nav-item"
+          title="Cerrar sesión"
+          aria-label="Cerrar sesión"
+          style={{ marginTop: "auto", border: "none", background: "transparent", cursor: "pointer" }}
+        >
+          <LogOut size={22} strokeWidth={2} />
+        </button>
       </nav>
 
       <div className="shell-body">
@@ -155,6 +181,16 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <Sparkles size={20} strokeWidth={2} />
                 <span>Asistente</span>
+              </button>
+              {/* Cerrar sesión (ocupa la fila completa, separado del resto). */}
+              <button
+                onClick={() => { setMoreOpen(false); void cerrarSesion(); }}
+                className="nav-item"
+                aria-label="Cerrar sesión"
+                style={{ gridColumn: "1 / -1", width: "100%", height: 46, justifyContent: "flex-start", gap: 10, padding: "0 12px", fontSize: 14, border: "none", borderTop: "1px solid var(--hairline)", borderRadius: 0, marginTop: 4, background: "transparent", color: "var(--danger)", cursor: "pointer" }}
+              >
+                <LogOut size={20} strokeWidth={2} />
+                <span>Cerrar sesión</span>
               </button>
             </div>
           </div>

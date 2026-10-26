@@ -113,6 +113,29 @@ export class AuthController {
     return this.auth.login({ ...input, brand });
   }
 
+  /**
+   * Bloque 3 — renueva la sesión (deslizante) con el refresh token. PÚBLICO: se autentica por el
+   * refresh del body, no por el access token (que justamente puede estar vencido). Rota el refresh.
+   * 401 → el frontend cae al flujo de "sesión expirada" (Bloque 1). Rate-limit por el refresh.
+   */
+  @Post("refresh")
+  async refresh(@Body() body: unknown) {
+    const input = parse(z.object({ refreshToken: z.string().min(10).max(400) }), body);
+    const rl = await this.rateLimit.login(`refresh:${input.refreshToken.slice(0, 24)}`);
+    if (!rl.allowed) throw new HttpException("Demasiados intentos. Espera unos segundos.", HttpStatus.TOO_MANY_REQUESTS);
+    return this.auth.refresh(input.refreshToken);
+  }
+
+  /**
+   * Bloque 2 — cierra sesión: revoca el refresh token en el servidor (best-effort). PÚBLICO: debe
+   * funcionar aunque el access token ya esté vencido. El cliente borra sus tokens igual.
+   */
+  @Post("logout")
+  async logout(@Body() body: unknown) {
+    const input = parse(z.object({ refreshToken: z.string().max(400).optional() }), body ?? {});
+    return this.auth.logout(input.refreshToken);
+  }
+
   // --------------------------- Invitaciones ---------------------------
 
   /** Datos del invitado a partir del token del link (público). */
@@ -420,6 +443,9 @@ export class AuthController {
       where: { id: ctx.userId },
       data: { passwordHash: bcrypt.hashSync(parsed.data.next, 12) },
     });
+    // Seguridad: al cambiar la contraseña, invalida TODAS las sesiones deslizantes abiertas
+    // (otros dispositivos/robos) — la sesión actual seguirá con su access token hasta expirar.
+    await this.auth.revokeAllSessions(ctx.userId!);
     await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "profile.password_change", entityType: "user", entityId: ctx.userId },

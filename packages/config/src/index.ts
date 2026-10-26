@@ -38,6 +38,10 @@ const envSchema = z.object({
   API_URL: z.string().default("http://localhost:4000"),
   JWT_SECRET: z.string().default("dev-secret-change-me"),
   JWT_EXPIRES_IN: z.string().default("12h"),
+  // Sesión DESLIZANTE (Bloque 3): el access token (JWT_EXPIRES_IN) es corto; el refresh token
+  // (opaco, revocable, en Redis) es de larga vida y se rota en cada uso. Pensado para el cliente
+  // móvil (no re-login cada 12 h). Formato de duración "Nd"/"Nh"/"Nm"/"Ns" o segundos a secas.
+  JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
   JWT_ISSUER: z.string().default("conversia"),
   JWT_AUDIENCE: z.string().default("conversia-api"),
   CREDENTIALS_ENCRYPTION_KEY: z.string().length(64).default("0".repeat(64)),

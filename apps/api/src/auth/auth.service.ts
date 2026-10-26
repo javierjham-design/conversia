@@ -6,6 +6,7 @@ import { brandOf, accentForCountry } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken } from "./jwt";
+import { RefreshSessionService } from "./refresh-session.service";
 import { sendEmail } from "../common/email";
 import { encryptSecret, decryptSecret } from "../common/crypto";
 import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
@@ -29,6 +30,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private vertical: VerticalService,
+    private refreshSessions: RefreshSessionService,
   ) {}
 
   /**
@@ -535,8 +537,46 @@ export class AuthService {
     }
   }
 
-  private issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
+  private async issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
     const token = signAppToken({ sub: userId, orgId, role: roleCode, perms });
-    return { token, organizationId: orgId, role: roleCode };
+    // Sesión deslizante (Bloque 3): junto al access token corto emitimos un refresh token opaco de
+    // larga vida. Aditivo — quien no lo use (p. ej. el panel de TuBot) simplemente lo ignora.
+    const refreshToken = await this.refreshSessions.create(userId, orgId);
+    return { token, refreshToken, organizationId: orgId, role: roleCode };
+  }
+
+  /**
+   * Bloque 3 — renueva la sesión a partir de un refresh token válido: valida que siga vivo en
+   * Redis, RE-RESUELVE la membresía (si fue revocada, 401), emite un access token nuevo y ROTA el
+   * refresh (revoca el usado, entrega uno nuevo). Cada uso corre 30 d la ventana. 401 = re-login.
+   */
+  async refresh(refreshToken: string) {
+    const session = await this.refreshSessions.resolve(refreshToken);
+    if (!session) throw new UnauthorizedException("Sesión expirada o revocada");
+    const membership = await this.prisma.admin.organizationUser.findUnique({
+      where: { organizationId_userId: { organizationId: session.orgId, userId: session.userId } },
+    });
+    if (!membership || !membership.active) {
+      await this.refreshSessions.revoke(refreshToken); // la membresía ya no existe → el refresh no sirve
+      throw new UnauthorizedException("La sesión ya no es válida");
+    }
+    const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
+    const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
+    const token = signAppToken({ sub: session.userId, orgId: session.orgId, role: role?.code ?? "viewer", perms });
+    // Rotación: el token usado deja de valer y entregamos uno nuevo (anti-replay).
+    await this.refreshSessions.revoke(refreshToken);
+    const nextRefresh = await this.refreshSessions.create(session.userId, session.orgId);
+    return { token, refreshToken: nextRefresh, organizationId: session.orgId, role: role?.code ?? "viewer" };
+  }
+
+  /** Bloque 2 — cierra la sesión revocando el refresh token (best-effort; el logout del cliente igual sale). */
+  async logout(refreshToken?: string) {
+    if (refreshToken) await this.refreshSessions.revoke(refreshToken);
+    return { ok: true as const };
+  }
+
+  /** Revoca TODAS las sesiones deslizantes del usuario (p. ej. tras cambiar la contraseña). Best-effort. */
+  async revokeAllSessions(userId: string): Promise<void> {
+    await this.refreshSessions.revokeAllForUser(userId);
   }
 }

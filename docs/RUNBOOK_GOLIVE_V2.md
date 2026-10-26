@@ -293,3 +293,30 @@ Desde ahí, al abrir /canales esa org recibe el `preVerifiedPhoneId` y el popup 
 
 > Fase 2 (futura): alta y asignación automáticas del pool desde la consola; por ahora es manual
 > y auditado. El flag apagado deja todo el flujo intacto.
+
+## 15. Política de sesión del panel (sesión deslizante + passkeys Fase 2)
+
+Desde el encargo `docs/PROMPT_SESION_LOGOUT.md` (26-oct-2026) el panel de **conversia-web** usa
+**sesión deslizante**: access token corto (`JWT_EXPIRES_IN`, 12 h) + **refresh token** opaco de
+larga vida en Redis (`JWT_REFRESH_EXPIRES_IN`, 30 d, rotativo y revocable). El cliente ya no
+re-loguea cada 12 h; sí tras 30 d de inactividad, al cerrar sesión o al cambiar la contraseña
+(que revoca todas sus sesiones). Detalle en `docs/SESION_RESULTADOS.md`.
+
+- **Env (Railway, servicio api):** `JWT_EXPIRES_IN` (default `12h`), `JWT_REFRESH_EXPIRES_IN`
+  (default `30d`). Ambas opcionales; con los defaults funciona. Cambiarlas NO requiere migración.
+- **Dependencia de Redis:** los refresh viven en Redis (claves `csess:*`), igual que las sesiones
+  de super admin (`psess:*`). Si Redis se reinicia, los refresh se pierden → los clientes re-logean
+  (molestia menor, no brecha: el access token caduca igual). No hay migración ni tabla nueva.
+- **Revocar la sesión de un usuario a mano** (soporte): borrar sus claves de refresh en Redis —
+  `DEL` de `csess:user:<userId>` y de cada `csess:<hash>` del set. El access vigente caduca solo.
+- **Acciones sensibles:** hoy el cambio de contraseña revoca todas las sesiones. Una compuerta de
+  re-auth reciente para `/cobros`/datos de pago queda apuntada (patrón `reauthAt` del super admin).
+
+### Fase 2 — passkeys / WebAuthn (solo diseño, NO implementar aún)
+Para que en el celular el cliente entre con Face ID/huella en vez de contraseña:
+- Guardar credenciales WebAuthn por usuario (modelo nuevo `webauthn_credentials`: credentialId,
+  publicKey, counter, transports, deviceLabel) + endpoints de registro (attestation) y login
+  (assertion) con `@simplewebauthn/server`. El RP ID sería `conversia.cl`.
+- El login por passkey emite la MISMA sesión (access + refresh) que el login por contraseña → se
+  integra sin tocar el flujo de sesión ya construido. Passkey como 2.º factor o como primer factor.
+- Priorizar tras validar adopción del panel móvil. No bloquea nada del estado actual.
