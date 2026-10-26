@@ -161,7 +161,7 @@ Después, correr el escáner `node tools/audit/scan-tenant-filter.js apps/api/sr
 
 | Etapa | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|
-| 0 — Verificación Railway | pendiente (dueño) | | | rol BD: ? · Redis: ? · fusibles: ? |
+| 0 — Verificación Railway | en curso (dueño) | | 2026-10-26 | rol BD: ✅ `conversia_app` en api y worker, `DIRECT_DATABASE_URL` = `postgres` en ambos (RLS activa; etapa 2 = defensa en profundidad) · Redis: ? · fusibles: ? |
 | 1 — Hotfixes | pendiente | | | |
 | 2 — Aislamiento | pendiente | | | |
 | 3 — Confiabilidad 24/7 | pendiente | | | |

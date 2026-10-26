@@ -10,7 +10,7 @@
 
 **El producto es funcional y el diseño de seguridad es bueno en el papel, pero en producción hay tres condiciones que lo dejan más expuesto de lo que dicen los documentos de seguridad.**
 
-1. **No está claro con qué rol conecta producción a la base de datos, y de eso depende todo el aislamiento entre clientes.** `docs/PROGRESS.md:388` (26-jul) dice que se pasó al rol `conversia_app` con RLS; `docs/RUNBOOK_GOLIVE_V2.md` §1 (17-oct) y `docs/DEPLOYMENT.md:25` dicen que hoy api y worker conectan como superusuario `postgres`. El código **depende de la RLS**: hay ~1.150 consultas sin filtro de organización, incluidas las pantallas de contactos, bandeja y agentes, y una purga diaria que borra conversaciones. **Si producción es superusuario, no hay aislamiento entre clientes** (cada uno vería los datos de todos y la purga borraría conversaciones de todos). Como nadie ha reportado eso, lo más probable es que el runbook esté desactualizado, pero **hay que verificarlo hoy** (§1.1).
+1. **El aislamiento entre clientes depende por completo de la RLS, y nada impide desactivarla por error.** ✅ **Verificado en Railway el 26-oct-2026:** api y worker conectan como `conversia_app` (RLS activa) y `DIRECT_DATABASE_URL` usa `postgres` en ambos, que es la configuración correcta. El runbook del 17-oct que decía lo contrario estaba desactualizado. Aun así, hay ~1.150 consultas sin filtro de organización (incluida una purga diaria que borra conversaciones) y ningún chequeo al arrancar: un cambio equivocado en `DATABASE_URL` eliminaría todo el aislamiento sin que nada avise (§1.1, §2).
 2. **El backend compartido no tiene guardarraíles de confiabilidad para 24/7.** Hay rutas confirmadas donde el bot **responde dos veces**, **queda mudo sin aviso**, o **reenvía mensajes** tras un reintento; la alerta "conversación sin responder" **no le llega a nadie**; y Redis crece sin límite hasta que un día se llena y se cae el ingreso de mensajes de **ambas marcas**.
 3. **Hay caminos de dinero que fallan "a favor del cliente" en silencio.** El cobro recurrente puede caer a un proveedor de pagos FALSO que marca todo como pagado; Lemon Squeezy acredita varias veces el mismo pago; los pagos por transferencia no recargan la bolsa.
 
@@ -20,8 +20,8 @@ Nada de lo encontrado exige detener TuBot. **Casi todas las correcciones son des
 
 | Severidad | Cantidad | Ejemplos |
 |---|---|---|
-| Crítica | 4 | rol de BD de prod sin confirmar + ~1.150 consultas sin filtro de org · modo dueño cruzado entre clientes · proveedor de pago falso en cobro recurrente · seed de prod destructivo |
-| Alta | ~35 | fusible de mensajería compartido entre marcas, credenciales de Flow globales editables desde Conversia, viewer que cambia la cuenta de cobro, impersonación sin límite, MFA saltable, doble respuesta, bot mudo, Redis sin tope, alerta que no llega, inyección de prompt persistente, WABA sin verificar propiedad, Lemon doble acreditación, login TuBot que recarga sin mostrar error |
+| Crítica | 2 | proveedor de pago falso en cobro recurrente · seed de prod destructivo |
+| Alta | ~35 | sin chequeo de rol de BD al arrancar + ~1.150 consultas que dependen solo de la RLS, modo dueño por teléfono (vía Instagram/Messenger), fusible de mensajería compartido entre marcas, credenciales de Flow globales editables desde Conversia, viewer que cambia la cuenta de cobro, impersonación sin límite, MFA saltable, doble respuesta, bot mudo, Redis sin tope, alerta que no llega, inyección de prompt persistente, WABA sin verificar propiedad, Lemon doble acreditación, login TuBot que recarga sin mostrar error |
 | Media | ~30 | ver secciones |
 | Baja/Info | ~35 | ver secciones |
 
@@ -29,7 +29,9 @@ Nada de lo encontrado exige detener TuBot. **Casi todas las correcciones son des
 
 ## 1. Infraestructura, base de datos y despliegue (verificación propia)
 
-### 1.1 🔴 CRÍTICA (verificar hoy) — Rol de base de datos de producción sin confirmar y sin chequeo al arrancar
+### 1.1 🟠 ALTA — Sin chequeo del rol de base de datos al arrancar
+
+> ✅ **Verificado el 26-oct-2026 en Railway:** `DATABASE_URL` de api y worker usa `conversia_app`; `DIRECT_DATABASE_URL` usa `postgres` en ambos. **La RLS está activa en producción.** Lo que sigue queda como contexto y como procedimiento si algún día cambia.
 - **Evidencia contradictoria:** `docs/PROGRESS.md:388` (26-jul: "cliente dual: rol `conversia_app`") y `docs/PUESTA_EN_MARCHA.md:102` ("ya seteado; verificar") frente a `docs/RUNBOOK_GOLIVE_V2.md` §1 (17-oct: "Hoy `api` y `worker` conectan como `postgres`") y `docs/DEPLOYMENT.md:25`. `packages/database/src/index.ts` no verifica el rol al arrancar, así que nada impide volver a superusuario por error en una variable.
 - **Por qué importa tanto:** el código está diseñado para que la RLS haga el aislamiento. Hay **~1.150 consultas dentro de `withTenant` sin filtro de organización** (777 en api, 371 en worker; ~79 son `updateMany`/`deleteMany`). Con superusuario, todas cruzan clientes (§2).
 - **Verificación (2 minutos):** en Railway, mirar el usuario de `DATABASE_URL` de api y de worker, o ejecutar con esa misma URL:
@@ -40,7 +42,7 @@ Nada de lo encontrado exige detener TuBot. **Casi todas las correcciones son des
 - **Si sale `conversia_app`:** el aislamiento está sostenido por la RLS y es razonable. Corregir los runbooks y aplicar igual las correcciones de §2 como defensa en profundidad.
 - **En ambos casos:** agregar un chequeo de arranque que en producción **falle o alerte** si el cliente de tenant es superusuario o `BYPASSRLS`. **En caliente:** sí.
 
-### 1.2 🔴 CRÍTICA — Revocar el "montaje asistido" de un cliente revoca el de TODOS
+### 1.2 🟡 MEDIA (defensa en profundidad; con RLS activa queda acotado) — Revocar el "montaje asistido" de un cliente revocaría el de TODOS sin RLS
 - **Archivo:** `apps/api/src/assisted-setup/assisted-setup.controller.ts:119-122`, `:209-212`, `:245-248`.
 - ```ts
   await tx.assistedSetupGrant.updateMany({
@@ -84,7 +86,7 @@ Nada de lo encontrado exige detener TuBot. **Casi todas las correcciones son des
 
 ## 2. Aislamiento de datos entre clientes (RLS)
 
-**Lectura de esta sección:** con la RLS activa (rol `conversia_app`) estos casos quedan acotados y su riesgo es bajo. Con superusuario son fallas activas. Todas se corrigen en caliente agregando `organizationId` al `where`, sin migración, y conviene hacerlo igual: hoy un solo error de configuración en `DATABASE_URL` desactivaría todo el aislamiento.
+**Lectura de esta sección:** con la RLS activa (rol `conversia_app`, **verificado en producción el 26-oct-2026**) estos casos quedan acotados y su riesgo es bajo. Con superusuario serían fallas activas. Todas se corrigen en caliente agregando `organizationId` al `where`, sin migración, y conviene hacerlo igual: hoy un solo error de configuración en `DATABASE_URL` desactivaría todo el aislamiento.
 
 **Estado de la RLS en sí:** `setup.sql:60` aplica `FORCE ROW LEVEL SECURITY` a toda tabla con `organization_id`, más organizations, users, platform_admins y plans; sin contexto no se ve ninguna fila. Pero **13 tablas creadas en octubre** (cuotas y créditos de conversación, caja, plantillas verticales, excepciones, pool de prueba, números preverificados) no traen la RLS en su propia migración y dependen de volver a correr `pnpm db:setup`. No hay inyección SQL (los `$queryRawUnsafe` usan parámetros posicionales).
 
@@ -110,7 +112,7 @@ Nada de lo encontrado exige detener TuBot. **Casi todas las correcciones son des
 
 **Enrutamiento ambiguo (independiente de la RLS):** `MetaAsset` es único por organización, no global; `meta-leads.ts:29-33` y `messaging-inbound.ts:22, 26` enrutan un lead o DM de una página conectada en dos orgs a cualquiera de ellas. Lo mismo con `wabaId` (§4.4). Corrección: rechazar la conexión duplicada.
 
-### 2.1 🔴 CRÍTICA (condicional a §1.1) — "Modo dueño" se concede por teléfono buscando en TODAS las organizaciones
+### 2.1 🟠 ALTA — "Modo dueño" se concede por teléfono (con RLS activa, el cruce entre organizaciones queda acotado; el vector de Instagram/Messenger dentro de la misma organización sigue abierto)
 - **Archivo:** `apps/worker/src/agent-turn.ts:517-533`.
 - ```ts
   const roles = await tx.role.findMany({ where: { code: { in: ["owner", "admin"] } } });          // sin organizationId
@@ -458,7 +460,7 @@ Sin `dangerouslySetInnerHTML` con datos; mensajes renderizados como texto; cabec
 Todo lo de P0 y P1 se despliega en caliente, solo código o variables. Desplegar en horario de bajo tráfico, un PR por bloque, y vigilar `/health/status` 30 min después de cada uno.
 
 ### P0-HOY — Verificaciones de 5 minutos en Railway (sin código)
-- **Rol de `DATABASE_URL`** en api y worker (§1.1). Si es `postgres`: desactivar la purga de retención y seguir el procedimiento de §1.1.
+- ✅ **Rol de `DATABASE_URL`** en api y worker (§1.1): `conversia_app` en ambos, `DIRECT_DATABASE_URL` = `postgres` (verificado 26-oct).
 - **Memoria de Redis** y su `maxmemory-policy` (§8.2).
 - **Consumo del fusible global** de mensajería frente a su techo (§6.1).
 
@@ -496,7 +498,7 @@ Todo lo de P0 y P1 se despliega en caliente, solo código o variables. Desplegar
 
 | # | Pregunta | Define |
 |---|---|---|
-| 1 | ¿`DATABASE_URL` de api y worker sigue siendo el usuario `postgres`? | §1.1, §2 completo |
+| 1 | ✅ Respondida 26-oct: `DATABASE_URL` = `conversia_app` y `DIRECT_DATABASE_URL` = `postgres` en api y worker | §1.1, §2 |
 | 2 | Memoria usada y `maxmemory-policy` de Redis | Urgencia de §8.2 |
 | 3 | ¿`RECURRING_BILLING_ENABLED=true` en el worker? ¿`CREDENTIALS_ENCRYPTION_KEY` idéntica en api y worker? | §9.1, §9.4 |
 | 4 | ¿Hay clientes TuBot pagando por Lemon Squeezy o por transferencia? | §9.2, §9.3 |
