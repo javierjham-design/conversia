@@ -8,7 +8,7 @@ deploy del 23-oct (`ca001d06`) mientras el fix de sesión **#533** ya estaba en 
 
 | Bloque | Estado | Evidencia |
 |---|---|---|
-| **1 — Publicar YA + verificar en prod** | 🟢 Publicado y verificado | `railway up --service conversia-web --ci` desde `main` (`8608679`). Nuevo deploy **`cbc504be`** (antes `ca001d06`). Build recibió `NEXT_PUBLIC_API_URL` (build arg del servicio). Verificación con navegador (Playwright contra prod, cuenta sandbox) — ver abajo. |
+| **1 — Publicar YA + verificar en prod** | 🟢 Publicado y verificado (incl. asistente) | `railway up --service conversia-web --ci`. Deploy `cbc504be` y re-publicado con sello (`871852d`). Sesión/logout verificados en navegador; **asistente verificado respondiendo 201 con texto real de Anthropic** tras #538+#539 — ver abajo. |
 | **2 — Autodeploy + sello de versión** | 🟢 Implementado (autodeploy requiere 1 paso del dueño) | GitHub Action `deploy-conversia-web.yml` (push a main → stamp + `railway up`), guardada ante la falta del secret. Sello `GET /version.json`. `DEPLOYMENT.md` corregido. |
 | **3 — Robustez del asistente** | 🟢 Corregido + test | `buildContext` degrada a contexto mínimo (no 500) + bug de proveedor de IA (ver §Asistente). |
 | **4 — SUPER_ADMIN_SESSION_SECRET** | 🟢 Documentado | Runbook §16 (el dueño la carga en Railway; no se generó ni se escribió). |
@@ -44,8 +44,16 @@ proveedor de IA (abajo).
 - **Corrección (en este PR, API):** el asistente usa `createAIProvider({ provider: env.AI_PROVIDER, … })`
   → honra el proveedor configurado (anthropic→Anthropic, openai→OpenAI, mock→Mock). Nunca más cae a
   un OpenAI roto. Aislado a `AssistantService` (worker/TuBot intactos). Test en `assistant-context.spec.ts`.
-- **Efecto:** al redeployarse la **API** con este PR (autodeploy en el merge), el asistente responde
-  con texto real de Anthropic. **Re-verificación post-merge:** ver §Cierre.
+- **Segunda capa del mismo bug (#539):** tras #538 el log pasó a `404 not_found_error "model:
+  gpt-4o-mini"` — ya llamaba a Anthropic, pero con un modelo de OpenAI. Causa: `packages/config`
+  define `AI_DEFAULT_MODEL` con default **`"gpt-4o-mini"`**, así que `env.AI_DEFAULT_MODEL` nunca es
+  vacío y se lo mandaba a Anthropic. Fix (#539): `resolveAssistantModel(provider, model)` elige un
+  modelo de la FAMILIA del proveedor (anthropic→`claude-sonnet-4-6`; respeta `AI_DEFAULT_MODEL` solo
+  si coincide). Función pura + test del caso exacto.
+- **VERIFICADO EN PRODUCCIÓN (2026-10-26 13:00Z):** tras el autodeploy de la API con #539,
+  `POST /assistant/message` (sesión sandbox válida) → **HTTP 201** con texto real y contextual de
+  Anthropic (ej.: *"…llevas un 50% de implementación y el siguiente paso es conectar tu WhatsApp…"*),
+  y **cero `✖ Asistente`** en los logs. Ya no es mock ni fallback.
 
 ## Bloque 2 — autodeploy y sello de versión
 
@@ -81,14 +89,15 @@ generó ni se escribió en el repo.**
 
 - **SHA de `main` al publicar:** `8608679` (deploy `cbc504be`). El sello `/version.json` queda vivo
   tras el primer deploy que corra `stamp-version.mjs` (la Action, o el deploy manual).
-- **Tras el merge de este PR:** (1) la **API** autodeploya → re-verificar el asistente en prod
-  (`POST /assistant/message` → 201 con texto real de Anthropic, sin `✖ Asistente` en el log); (2)
-  re-publicar **conversia-web** con sello (`node apps/conversia-web/scripts/stamp-version.mjs &&
-  railway up …`) y confirmar `version.json.sha == origin/main`.
-- **Pendientes del dueño:** crear el secret `RAILWAY_TOKEN` (autodeploy de la web) · rotar/corregir
-  el `OPENAI_API_KEY` inválido o quitarlo si no se usa (opcional; el asistente ya no depende de él) ·
-  definir `SUPER_ADMIN_SESSION_SECRET` (§16).
+- **Hecho tras los merges:** (1) la **API** autodeployó #538+#539 (deployments `e423bba8`→commit
+  `871852d`, luego #539) → asistente verificado (arriba); (2) **conversia-web** re-publicado con sello
+  → `https://app.conversia.cl/version.json.sha == 871852dc… == origin/main`.
+- **Pendientes del dueño:** crear el secret `RAILWAY_TOKEN` (para que la web autodeploye sola) ·
+  rotar/quitar el `OPENAI_API_KEY` inválido (opcional; el asistente ya no depende de él) · definir
+  `SUPER_ADMIN_SESSION_SECRET` (§16). Nota: `api`/`worker` **sí** autodespliegan en el merge
+  (confirmado); solo `conversia-web` necesitaba el mecanismo del Bloque 2.
 
 ## Pruebas
-- `pnpm typecheck` (api/web) ✓ · `pnpm --filter @conversia/api test` **180/180** ✓ (incl. asistente 4/4)
-  · build de conversia-web ✓ · verificación con navegador en producción (tabla del Bloque 1).
+- `pnpm typecheck` (api/web) ✓ · `pnpm --filter @conversia/api test` **181/181** ✓ (asistente 5/5,
+  incl. `resolveAssistantModel`) · build de conversia-web ✓ · verificación en producción (navegador
+  para sesión/logout; API con sesión real para el asistente → 201 texto real, logs limpios).
