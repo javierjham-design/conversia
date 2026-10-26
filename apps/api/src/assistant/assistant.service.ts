@@ -26,6 +26,21 @@ export function assistantMode(checklistPct: number): "implementacion" | "asisten
   return checklistPct >= 100 ? "asistencia" : "implementacion";
 }
 
+/**
+ * Elige un modelo COMPATIBLE con el proveedor configurado (pura, testeable). Hallazgo prod
+ * 26-oct: `AI_DEFAULT_MODEL` trae un default de OpenAI ("gpt-4o-mini") en la config; si el
+ * proveedor es Anthropic, mandar ESE modelo a Anthropic da 404 → el asistente caía al fallback.
+ * Respetamos `AI_DEFAULT_MODEL` solo si pertenece a la familia del proveedor; si no, usamos el
+ * default propio del proveedor. Así el asistente nunca manda un gpt-* a Anthropic (ni viceversa).
+ */
+export function resolveAssistantModel(provider: string, configuredModel: string): string {
+  const isClaude = /^claude/i.test(configuredModel);
+  const isOpenai = /^(gpt-|o[1-9]|chatgpt)/i.test(configuredModel);
+  if (provider === "anthropic") return isClaude ? configuredModel : "claude-sonnet-4-6";
+  if (provider === "openai") return isOpenai ? configuredModel : "gpt-4o-mini";
+  return configuredModel; // mock u otro: el MockAIProvider ignora el modelo
+}
+
 type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string };
 
 @Injectable()
@@ -255,8 +270,9 @@ REGLAS:
     const specs = this.toolSpecs(owner);
     const messages: AIChatMessage[] = [...history.slice(-12), { role: "user", content: userMessage }];
     const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
-    // Modelo por defecto acorde al proveedor configurado (si no se fijó AI_DEFAULT_MODEL).
-    const model = env.AI_DEFAULT_MODEL || (env.AI_PROVIDER === "openai" ? "gpt-4o-mini" : "claude-sonnet-4-6");
+    // Modelo COMPATIBLE con el proveedor (ver resolveAssistantModel): el default de config es un
+    // modelo OpenAI, así que con AI_PROVIDER=anthropic hay que elegir uno de Anthropic, no mandarle gpt-*.
+    const model = resolveAssistantModel(env.AI_PROVIDER, env.AI_DEFAULT_MODEL);
     let reply = "";
     let wrote = false;
 
