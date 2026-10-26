@@ -320,3 +320,26 @@ Para que en el celular el cliente entre con Face ID/huella en vez de contraseña
 - El login por passkey emite la MISMA sesión (access + refresh) que el login por contraseña → se
   integra sin tocar el flujo de sesión ya construido. Passkey como 2.º factor o como primer factor.
 - Priorizar tras validar adopción del panel móvil. No bloquea nada del estado actual.
+
+## 16. Secreto separado para las sesiones de super admin (`SUPER_ADMIN_SESSION_SECRET`)
+
+**Hallazgo (arranque de prod, 26-oct-2026):** el log de la API avisa
+`SUPER_ADMIN_SESSION_SECRET vacío → el token de plataforma comparte secreto con los de tenant`.
+Hoy los tokens del **super admin / operador** (consola `/admin`) se firman con
+`SUPER_ADMIN_SESSION_SECRET` **o**, si está vacío, con el `JWT_SECRET` de los tenants
+(`apps/api/src/platform/platform.jwt.ts`). Compartir secreto significa que un `JWT_SECRET` filtrado
+permitiría forjar tokens de plataforma (y viceversa): conviene **aislarlos**.
+
+**Qué hace el dueño (una sola vez, en Railway, servicio `api`):**
+1. Generar un valor **aleatorio y largo** (≥ 48 caracteres), **distinto** de `JWT_SECRET`
+   (p. ej. con un gestor de contraseñas o `openssl rand -base64 48` en su equipo). No reutilizar
+   ningún otro secreto.
+2. En el servicio **`api`** (y, si el worker verificara tokens de plataforma, también ahí — hoy no
+   hace falta) → *Variables* → agregar `SUPER_ADMIN_SESSION_SECRET=<ese valor>`. Guardar.
+3. Railway redespliega la `api`. El aviso de arranque desaparece.
+
+**Efecto / advertencia:** al definir (o cambiar) este secreto, **todos los tokens de super admin
+ya emitidos dejan de ser válidos** → las sesiones abiertas de la consola `/admin` se cierran y los
+admins deben **volver a iniciar sesión** (con su MFA). No afecta a los tenants (su `JWT_SECRET` no
+cambia) ni a TuBot. Hacerlo en un momento tranquilo. **El valor lo carga el dueño en Railway; no se
+escribe en el repo ni en ningún archivo.**
