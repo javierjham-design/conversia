@@ -32,7 +32,7 @@ import { flowCollect, flowCustomerGet, flowPaymentStatus } from "../billing/flow
 import { createPaymentProvider } from "../billing/payment-provider";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
-import { PlatformGuard, type PlatformRequest } from "./platform.guard";
+import { PlatformGuard, assertTubotBrand, type PlatformRequest } from "./platform.guard";
 import { isFullPlatformAdmin } from "./platform-policy";
 import { getRailwayInfra } from "./railway-metrics";
 import { randomBytes } from "node:crypto";
@@ -1383,6 +1383,7 @@ export class PlatformController {
   /** Guarda credenciales de pasarela (se CIFRAN en BD; nunca se devuelven). */
   @Post("billing/settings")
   async saveBillingSettings(@Body() body: unknown, @Req() req: PlatformRequest) {
+    assertTubotBrand(req); // §6.2 — credenciales de pago globales: solo TuBot las administra.
     const parsed = z
       .object({
         provider: z.enum(["flow", "lemonsqueezy"]),
@@ -1404,6 +1405,7 @@ export class PlatformController {
    */
   @Post("billing/flow/test")
   async testFlowCredentials(@Req() req: PlatformRequest) {
+    assertTubotBrand(req); // §6.2 — prueba credenciales de pago globales: solo TuBot.
     const s = await this.paymentSettings.get();
     if (!s.flow) throw new BadRequestException("Faltan credenciales de Flow (API Key y Secret Key)");
     const { flowTestCredentials } = await import("../billing/flow-subscriptions.js");

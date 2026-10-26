@@ -20,7 +20,9 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     key: "conversation.unanswered",
     title: "Conversación sin responder",
     body: "{contactName} lleva {minutes} min esperando respuesta.",
-    audience: ["assigned_user", "team"],
+    // §8.5: el monitor busca conversaciones SIN asignar → sin assigned_user ni team la alerta no
+    // llegaba a nadie. Se agregan los admins del tenant para que alguien la vea.
+    audience: ["assigned_user", "team", "tenant_admins"],
     urgency: "critical",
     channels: ["in_app", "web_push", "whatsapp"],
     defaultChannels: ["in_app", "web_push"],

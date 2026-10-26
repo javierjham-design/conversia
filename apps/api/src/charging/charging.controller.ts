@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 import { encryptSecret, decryptSecret, maskSecret } from "../common/crypto";
 import { flowTestCredentials, type FlowConfig } from "../billing/flow-subscriptions";
 import { flowSign } from "../billing/payment-provider";
@@ -104,7 +105,8 @@ export class ChargingController {
    */
   @Post("link")
   async createLink(@Body() body: unknown) {
-    const ctx = requireContext();
+    // §3.1: enviar un link de cobro mueve dinero → exige permiso de bandeja, no cualquier sesión.
+    const ctx = requirePermission("inbox:write");
     const parsed = z
       .object({ conversationId: z.string().optional(), amount: z.number().int().positive(), concept: z.string().trim().min(1).max(120) })
       .safeParse(body);
@@ -193,7 +195,9 @@ export class ChargingController {
 
   @Put()
   async save(@Body() body: unknown) {
-    const ctx = requireContext();
+    // §3.1: cambiar la cuenta de cobro (Flow/Getnet) es sensible — un "Solo lectura" NO debe poder
+    // redirigir los cobros del negocio a otra cuenta. Exige settings:write + deja auditoría.
+    const ctx = requirePermission("settings:write");
     const parsed = z
       .object({
         enabled: z.boolean().optional(),
@@ -225,8 +229,25 @@ export class ChargingController {
     });
 
     // Credenciales por proveedor (nunca se devuelven). Solo se guardan si vienen completas.
-    await this.upsertCred(ctx.organizationId, FLOW_PROVIDER, "Flow (cobros a clientes)", d.apiKey && d.secretKey ? { apiKey: d.apiKey, secretKey: d.secretKey } : null);
-    await this.upsertCred(ctx.organizationId, GETNET_PROVIDER, "Getnet (cobros a clientes)", d.login && d.secretKey ? { login: d.login, secretKey: d.secretKey } : null);
+    const flowCreds = d.apiKey && d.secretKey ? { apiKey: d.apiKey, secretKey: d.secretKey } : null;
+    const getnetCreds = d.login && d.secretKey ? { login: d.login, secretKey: d.secretKey } : null;
+    await this.upsertCred(ctx.organizationId, FLOW_PROVIDER, "Flow (cobros a clientes)", flowCreds);
+    await this.upsertCred(ctx.organizationId, GETNET_PROVIDER, "Getnet (cobros a clientes)", getnetCreds);
+    // §3.1 Auditoría del cambio de credenciales de cobro (SIN valores) para trazabilidad.
+    if (flowCreds || getnetCreds) {
+      await this.prisma.admin.auditLog
+        .create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "charging.credentials_updated",
+            entityType: "charging",
+            entityId: flowCreds ? "flow" : "getnet",
+          },
+        })
+        .catch(() => undefined);
+    }
     return { ok: true };
   }
 

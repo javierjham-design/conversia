@@ -144,7 +144,7 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
  * Resuelve la audiencia del evento a ids de usuario, según el contexto. Excluye
  * al actor (no te notificas a ti mismo). Cross-tenant vía admin prisma.
  */
-async function resolveRecipients(
+export async function resolveRecipients(
   prisma: ReturnType<typeof getAdminPrisma>,
   organizationId: string,
   event: NotifEventDef,

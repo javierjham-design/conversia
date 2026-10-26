@@ -161,8 +161,8 @@ Después, correr el escáner `node tools/audit/scan-tenant-filter.js apps/api/sr
 
 | Etapa | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|
-| 0 — Verificación Railway | en curso (dueño) | | 2026-10-26 | rol BD: ✅ `conversia_app` en api y worker, `DIRECT_DATABASE_URL` = `postgres` en ambos (RLS activa; etapa 2 = defensa en profundidad) · Redis: ? · fusibles: ? |
-| 1 — Hotfixes | pendiente | | | |
+| 0 — Verificación Railway | ✅ completa | — | 2026-10-26 | rol BD: ✅ `conversia_app` en api y worker, `DIRECT_DATABASE_URL` = `postgres` en ambos (RLS activa; etapa 2 = defensa en profundidad) · Redis: ~40 MB, crecimiento casi plano · fusibles: 0 plantillas y 27 de servicio frente a los techos por defecto (1.500 y 20.000), nunca se han cortado |
+| 1 — Hotfixes | ✅ en PR #537 | #537 | 2026-10-26 | §4.1 mock por `phone_number_id` (no por texto) · §3.1 cobros: `settings:write`/`inbox:write` + auditoría · §6.2 billing global solo `tubot` · §8.5 `conversation.unanswered` → `tenant_admins` · §10.1 login TuBot muestra el error (no recarga) · §7.1 notas al prompt solo `authorType USER`. 8 tests nuevos. Sin cambios visibles para TuBot fuera de estos 6 puntos. |
 | 2 — Aislamiento | pendiente | | | |
 | 3 — Confiabilidad 24/7 | pendiente | | | |
 | 4 — Dinero | pendiente | | | |
