@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec } from "@conversia/types";
 import { getEnv } from "@conversia/config";
-import { createAIRouter } from "@conversia/agents";
+import { createAIProvider } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
 
@@ -24,6 +24,21 @@ export function isWebOwner(role: string): boolean {
 /** Modo del asistente según el avance del checklist (pura, testeable). */
 export function assistantMode(checklistPct: number): "implementacion" | "asistencia" {
   return checklistPct >= 100 ? "asistencia" : "implementacion";
+}
+
+/**
+ * Elige un modelo COMPATIBLE con el proveedor configurado (pura, testeable). Hallazgo prod
+ * 26-oct: `AI_DEFAULT_MODEL` trae un default de OpenAI ("gpt-4o-mini") en la config; si el
+ * proveedor es Anthropic, mandar ESE modelo a Anthropic da 404 → el asistente caía al fallback.
+ * Respetamos `AI_DEFAULT_MODEL` solo si pertenece a la familia del proveedor; si no, usamos el
+ * default propio del proveedor. Así el asistente nunca manda un gpt-* a Anthropic (ni viceversa).
+ */
+export function resolveAssistantModel(provider: string, configuredModel: string): string {
+  const isClaude = /^claude/i.test(configuredModel);
+  const isOpenai = /^(gpt-|o[1-9]|chatgpt)/i.test(configuredModel);
+  if (provider === "anthropic") return isClaude ? configuredModel : "claude-sonnet-4-6";
+  if (provider === "openai") return isOpenai ? configuredModel : "gpt-4o-mini";
+  return configuredModel; // mock u otro: el MockAIProvider ignora el modelo
 }
 
 type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string };
@@ -215,16 +230,49 @@ REGLAS:
     return base + modeBlock + ownerBlock;
   }
 
+  /**
+   * Contexto MÍNIMO de degradado (Bloque 3): si `buildContext` falla (una consulta de BD caída,
+   * una tabla no migrada), el asistente NO debe tirar un 500 ni mostrar el fallback genérico —
+   * responde con un contexto seguro para que la IA igual conteste. Misma forma que buildContext.
+   */
+  private minimalContext(): Awaited<ReturnType<AssistantService["buildContext"]>> {
+    return {
+      businessName: "tu negocio",
+      currency: "CLP",
+      steps: [],
+      checklistPct: 0,
+      nextStep: null,
+      saldo: null,
+      lastChannelError: null,
+      mode: assistantMode(0),
+    };
+  }
+
   /** Corre un turno del asistente. Devuelve la respuesta + si hubo cambios de config. */
   async run(ctx: AssistantCtx, userMessage: string, history: AIChatMessage[], route?: string): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
-    const context = await this.buildContext(ctx.organizationId);
-    const ai = createAIRouter({ anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
+    // ROBUSTEZ (Bloque 3): el contexto se arma FUERA del loop de IA, pero un fallo suyo no debe
+    // tumbar el turno. Si falla, degradamos a un contexto mínimo y lo dejamos en el log (igual que
+    // hacemos con el proveedor de IA más abajo) → la IA responde 200 con texto real, nunca un 500.
+    let context: Awaited<ReturnType<AssistantService["buildContext"]>>;
+    try {
+      context = await this.buildContext(ctx.organizationId);
+    } catch (e) {
+      console.error(`✖ Asistente: contexto no disponible (${(e as Error).message?.slice(0, 120)})`);
+      context = this.minimalContext();
+    }
+    // Proveedor EXPLÍCITO por AI_PROVIDER (hallazgo prod 26-oct): el router por nombre de modelo
+    // mandaba a OpenAI (key inválida → 401 → fallback) pese a AI_PROVIDER=anthropic con llave
+    // válida. createAIProvider honra la configuración: anthropic→Anthropic, openai→OpenAI,
+    // mock→Mock (sim). Así el asistente usa SIEMPRE el proveedor que el dueño configuró.
+    const ai = createAIProvider({ provider: env.AI_PROVIDER, anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
     const specs = this.toolSpecs(owner);
     const messages: AIChatMessage[] = [...history.slice(-12), { role: "user", content: userMessage }];
     const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
-    const model = env.AI_DEFAULT_MODEL || "claude-sonnet-4-6";
+    // Modelo COMPATIBLE con el proveedor (ver resolveAssistantModel): el default de config es un
+    // modelo OpenAI, así que con AI_PROVIDER=anthropic hay que elegir uno de Anthropic, no mandarle gpt-*.
+    const model = resolveAssistantModel(env.AI_PROVIDER, env.AI_DEFAULT_MODEL);
     let reply = "";
     let wrote = false;
 

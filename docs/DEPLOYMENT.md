@@ -14,7 +14,7 @@
 | api | Dockerfile `apps/api/Dockerfile` (upload CLI) | https://api-production-cf8e.up.railway.app |
 | worker | Dockerfile `apps/worker/Dockerfile` | — (sin dominio) |
 | web | Dockerfile `apps/web/Dockerfile` | https://web-production-d50dd.up.railway.app |
-| conversia-web | Dockerfile `apps/conversia-web/Dockerfile` (F3) | app.conversia.cl (a configurar) |
+| conversia-web | Dockerfile `apps/conversia-web/Dockerfile` (F3) | https://app.conversia.cl (LIVE; ver "Publicar conversia-web") |
 
 Claves de la configuración:
 - Cada servicio usa `RAILWAY_DOCKERFILE_PATH` y se despliega con `railway up --service <n> --ci` desde la raíz (el contexto respeta .gitignore).
@@ -35,7 +35,7 @@ TuBot. Lo único nuevo es UN servicio de frontend en el MISMO proyecto Railway `
 Pasos (dashboard o CLI; el dueño los ejecuta):
 
 1. **Nuevo servicio** en el proyecto `conversia`, mismo repo/monorepo. Nombre: `conversia-web`.
-2. **Build:** `RAILWAY_DOCKERFILE_PATH=apps/conversia-web/Dockerfile` (build filtrado por turbo a `@conversia/conversia-web`). Autodeploy desde `main` como los demás.
+2. **Build:** `RAILWAY_DOCKERFILE_PATH=apps/conversia-web/Dockerfile` (build filtrado por turbo a `@conversia/conversia-web`). **Publicación: ver "Publicar conversia-web" más abajo** — NO autodespliega por la integración GitHub de Railway como api/worker (ese fue el bug del 23-oct: la web quedó atrás mientras #533 ya estaba en main y en la API).
 3. **Variables del servicio** (solo frontend — NO duplicar otras):
    - `NEXT_PUBLIC_API_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}` (build arg: se inlinea en el bundle; apunta a la api EXISTENTE).
    - `PORT=8080` (dominio con `--port 8080`, igual que web).
@@ -47,6 +47,37 @@ Pasos (dashboard o CLI; el dueño los ejecuta):
 
 Primer release recomendado DESPUÉS de aplicar las migraciones E3/F1/F2/F5 + `db:setup` +
 `db:seed` (planes/paquetes/pesos conversia), para que el frontend tenga datos reales.
+
+### Publicar conversia-web (cómo se publica REALMENTE) + sello de versión
+
+**IMPORTANTE:** `api` y `worker` se autodespliegan solos al mergear a `main` (integración GitHub de
+Railway). **`conversia-web` NO** — por eso quedó en el deploy del 23-oct mientras #533 ya estaba en
+`main` y en la API. Para que no vuelva a pasar hay DOS caminos (basta uno):
+
+1. **Autodeploy por GitHub Action (ya en el repo):** `.github/workflows/deploy-conversia-web.yml`
+   corre en cada push a `main` que toque `apps/conversia-web/**` o `packages/**`, sella la versión y
+   hace `railway up --service conversia-web --ci`. **Requisito de una sola vez del dueño:** crear el
+   secret `RAILWAY_TOKEN` (token de PROYECTO de Railway del proyecto `conversia`) en GitHub →
+   *Settings → Secrets and variables → Actions*. Sin el secret el job NO falla: avisa y se salta el
+   deploy. El token **nunca** va en el código.
+2. **Autodeploy nativo de Railway (equivalente a api/worker):** en el dashboard, servicio
+   `conversia-web` → *Settings → Source* → conectar el repo de GitHub, rama `main`, watch paths
+   `apps/conversia-web/**` y `packages/**`. Si se usa este camino, desactivar el workflow anterior
+   para no deployar dos veces.
+
+**Deploy manual (plan B / primera vez):** desde la raíz, sobre `main` actualizado:
+```bash
+node apps/conversia-web/scripts/stamp-version.mjs   # sella public/version.json con el SHA de HEAD
+railway up --service conversia-web --ci
+```
+
+**Sello de versión — detecta un deploy atrasado en segundos.** conversia-web expone el SHA con el
+que se construyó en `https://app.conversia.cl/version.json` (`{ "sha": "<git sha>", "builtAt": … }`,
+servido estático desde `apps/conversia-web/public/version.json`, escrito por `stamp-version.mjs`).
+
+> **Checklist de cierre de cada PR que toque la web:** tras publicar, `curl -s
+> https://app.conversia.cl/version.json` y confirmar que su `sha` == `git rev-parse origin/main`
+> (y == el SHA de la API). Si difiere, el deploy quedó atrás → re-publicar.
 
 ### API por dominio propio — `api.conversia.cl` (B8)
 

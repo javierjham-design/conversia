@@ -1,0 +1,48 @@
+name: deploy-conversia-web
+
+# Autodeploy de conversia-web (Bloque 2 de PROMPT_DEPLOY_CONVERSIA_WEB). La API y el worker se
+# autodespliegan por la integración GitHub de Railway; conversia-web no estaba conectado y quedaba
+# atrás en cada merge (quedó en el deploy del 23-oct mientras #533 ya estaba en main y en la API).
+# Este workflow publica la web en cada push a main que toque su código o los paquetes compartidos.
+#
+# Requisito de UNA sola vez del dueño: crear el secret RAILWAY_TOKEN del repo (token de PROYECTO de
+# Railway del proyecto conversia). Sin él, el job NO falla: se salta el deploy con un aviso. Nunca
+# se escribe el token en el código. Alternativa equivalente: conectar el servicio a GitHub en el
+# dashboard de Railway (como api/worker) y desactivar este workflow.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/conversia-web/**"
+      - "packages/**"
+      - ".github/workflows/deploy-conversia-web.yml"
+  workflow_dispatch: {}
+
+# Evita despliegues solapados: si entran dos pushes, el último manda.
+concurrency:
+  group: deploy-conversia-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Sello de versión: escribe public/version.json con el SHA de este commit ANTES de subir el
+      # árbol a Railway, para que https://app.conversia.cl/version.json lo exponga.
+      - name: Sellar versión
+        run: node apps/conversia-web/scripts/stamp-version.mjs
+      - name: Publicar en Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::warning::RAILWAY_TOKEN no está configurado → se omite el deploy. Cárgalo en Settings → Secrets and variables → Actions (token de proyecto de Railway)."
+            exit 0
+          fi
+          npm i -g @railway/cli
+          railway up --service conversia-web --ci
