@@ -4,6 +4,7 @@ import { BillingSuspensionGuard } from "./tenancy/billing-suspension.guard";
 import { AgentsController } from "./agents/agents.controller";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
+import { RefreshSessionService } from "./auth/refresh-session.service";
 import { ChannelsController } from "./channels/channels.controller";
 import { WhatsappController } from "./channels/whatsapp.controller";
 import { MetaAppController } from "./channels/meta-app.controller";
@@ -104,7 +105,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, AuthService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
+  providers: [PrismaService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

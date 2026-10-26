@@ -1,7 +1,14 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setToken } from "@/lib/api";
+import { api, setSession } from "@/lib/api";
+
+/** Solo acepta rutas internas ("/algo"), nunca absolutas ("//host") → anti open-redirect. */
+function safeVolver(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
 
 export default function Login() {
   const router = useRouter();
@@ -9,6 +16,16 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [volver, setVolver] = useState<string | null>(null);
+
+  // Lee el motivo (?expirada=1) y la ruta a la que volver (?volver=) del querystring. Vía
+  // window.location para no exigir un <Suspense> alrededor de useSearchParams (Next 15).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setExpired(q.get("expirada") === "1");
+    setVolver(safeVolver(q.get("volver")));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -16,12 +33,13 @@ export default function Login() {
     setLoading(true);
     try {
       // Identidad ÚNICA de plataforma: el MISMO login que TuBot (misma API, mismo JWT).
-      const res = await api<{ token: string }>("/auth/login", {
+      const res = await api<{ token: string; refreshToken?: string }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      setToken(res.token);
-      router.replace("/inicio");
+      setSession(res);
+      // Tras entrar, vuelve a donde estaba cuando expiró la sesión (si es una ruta interna segura).
+      router.replace(volver ?? "/inicio");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -47,6 +65,11 @@ export default function Login() {
         <h1 className="display" style={{ fontSize: 26, margin: "4px 0 20px" }}>
           Entra a tu <span className="display-italic">negocio</span>
         </h1>
+        {expired ? (
+          <p style={{ fontSize: 13, margin: "0 0 16px", padding: "10px 12px", borderRadius: 10, background: "var(--acc-dim)", color: "var(--acc-deep)", lineHeight: 1.45 }}>
+            Tu sesión expiró por seguridad. Entra de nuevo y seguimos donde estabas.
+          </p>
+        ) : null}
         <label style={{ fontSize: 13 }} className="text-dim">
           Correo
           <input style={field} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />

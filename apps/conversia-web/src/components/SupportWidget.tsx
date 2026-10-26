@@ -73,6 +73,9 @@ export function SupportWidget() {
       // NUNCA mostrar el error técnico crudo al dueño (jamás un "(Not Found)"). Mensaje humano
       // y accionable; si hay WhatsApp de soporte lo ofrecemos como salida.
       const status = (e as { status?: number }).status;
+      // 401 = sesión vencida: lib/api ya limpió la sesión y está redirigiendo a /login. NO es un
+      // fallo del asistente → no mostramos nada (evita el falso "No pude responder" del hallazgo 26-oct).
+      if (status === 401) return;
       const human =
         status === 429
           ? "Vamos un poco rápido 🙏. Espera unos segundos y escríbeme de nuevo."

@@ -5,7 +5,7 @@ import {
   ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, Menu, MessageSquare,
   ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, getRefreshToken, sessionActive, clearToken } from "@/lib/api";
 
 /**
  * LANDING PÚBLICA de Conversia (apex conversia.cl). La ve quien NO ha iniciado sesión;
@@ -25,10 +25,15 @@ export default function Landing() {
   const [menu, setMenu] = useState(false);
   const [faq, setFaq] = useState<number | null>(0);
 
-  // La landing SIEMPRE se renderiza (SSR → SEO + primer paint). Si el visitante YA tiene
-  // sesión, lo llevamos a su panel como efecto secundario (no bloquea el render del servidor).
+  // La landing SIEMPRE se renderiza (SSR → SEO + primer paint). Si el visitante YA tiene una
+  // sesión REANUDABLE, lo llevamos a su panel (no bloquea el render del servidor). Validamos el
+  // token client-side (sin red): si venció Y no hay refresh con qué renovar, limpiamos la sesión
+  // muerta y mostramos la landing — nunca lo metemos a un panel con sesión caída (hallazgo 26-oct).
   useEffect(() => {
-    if (getToken()) router.replace("/inicio");
+    const t = getToken();
+    if (!t) return;
+    if (sessionActive(t) || getRefreshToken()) router.replace("/inicio");
+    else clearToken();
   }, [router]);
 
   // Precios reales del catálogo público V2 (si el go-live está encendido).
