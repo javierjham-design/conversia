@@ -21,7 +21,9 @@ export function toCsv(headers: string[], rows: unknown[][]): string {
 }
 
 export async function processExport(organizationId: string, payload: { exportId: string }): Promise<void> {
-  const job = await withTenant(organizationId, (tx) => tx.exportJob.findUnique({ where: { id: payload.exportId } }));
+  // El job SIEMPRE se busca acotado a la organización del job de la cola: un
+  // exportId de otro cliente no debe resolver nunca (defensa sobre RLS).
+  const job = await withTenant(organizationId, (tx) => tx.exportJob.findFirst({ where: { id: payload.exportId, organizationId } }));
   if (!job || job.status === "DONE") return;
   await withTenant(organizationId, (tx) => tx.exportJob.update({ where: { id: job.id }, data: { status: "RUNNING" } }));
 
@@ -38,7 +40,7 @@ export async function processExport(organizationId: string, payload: { exportId:
     if (job.type === "contacts") {
       const contacts = await withTenant(organizationId, (tx) =>
         tx.contact.findMany({
-          where: { deletedAt: null, ...(dateFilter ? { createdAt: dateFilter } : {}) },
+          where: { organizationId, deletedAt: null, ...(dateFilter ? { createdAt: dateFilter } : {}) },
           orderBy: { createdAt: "asc" },
           take: MAX_ROWS,
         }),
@@ -46,7 +48,8 @@ export async function processExport(organizationId: string, payload: { exportId:
       const stages = await withTenant(organizationId, (tx) =>
         tx.$queryRaw<{ contact_id: string; name: string }[]>`
           SELECT DISTINCT ON (l.contact_id) l.contact_id, ls.name
-          FROM leads l JOIN lead_statuses ls ON ls.id = l.status_id
+          FROM leads l JOIN lead_statuses ls ON ls.id = l.status_id AND ls.organization_id = l.organization_id
+          WHERE l.organization_id = ${organizationId}
           ORDER BY l.contact_id, l.created_at DESC`,
       );
       const stageBy = new Map(stages.map((s) => [s.contact_id, s.name]));
@@ -59,7 +62,7 @@ export async function processExport(organizationId: string, payload: { exportId:
       // Transcripciones: una fila por mensaje PÚBLICO (sin notas internas)
       const messages = await withTenant(organizationId, (tx) =>
         tx.message.findMany({
-          where: { visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] }, ...(dateFilter ? { createdAt: dateFilter } : {}) },
+          where: { organizationId, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] }, ...(dateFilter ? { createdAt: dateFilter } : {}) },
           orderBy: [{ conversationId: "asc" }, { createdAt: "asc" }],
           take: MAX_ROWS,
           include: { conversation: { include: { contact: { select: { firstName: true, lastName: true, phone: true } } } } },
@@ -84,7 +87,7 @@ export async function processExport(organizationId: string, payload: { exportId:
       // el offboarding/portabilidad. Respeta RLS (withTenant) y el rango de fechas.
       const entries = await withTenant(organizationId, (tx) =>
         tx.cashLedger.findMany({
-          where: dateFilter ? { createdAt: dateFilter } : {},
+          where: { organizationId, ...(dateFilter ? { createdAt: dateFilter } : {}) },
           orderBy: { createdAt: "asc" },
           take: MAX_ROWS,
         }),
@@ -97,7 +100,7 @@ export async function processExport(organizationId: string, payload: { exportId:
     } else {
       const appointments = await withTenant(organizationId, (tx) =>
         tx.appointment.findMany({
-          where: dateFilter ? { startsAt: dateFilter } : {},
+          where: { organizationId, ...(dateFilter ? { startsAt: dateFilter } : {}) },
           orderBy: { startsAt: "asc" },
           take: MAX_ROWS,
           include: { contact: { select: { firstName: true, lastName: true, phone: true } } },

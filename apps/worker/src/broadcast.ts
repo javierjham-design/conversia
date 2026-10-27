@@ -47,13 +47,17 @@ export async function processBroadcast(job: Job<BroadcastJob>): Promise<void> {
       await tx.broadcast.update({ where: { id: broadcastId }, data: { status: "FAILED" } });
       return null;
     }
-    // Canal: el elegido, o el primer WhatsApp activo.
+    // Canal: el elegido, o el primer WhatsApp activo DE ESTA ORGANIZACIÓN (filtro
+    // explícito además de RLS: sin él, una org sin canal propio podía caer al canal
+    // de OTRO cliente y la difusión saldría desde el número de otra empresa).
     const channel = b.channelConnectionId
-      ? await tx.channelConnection.findFirst({ where: { id: b.channelConnectionId, type: "WHATSAPP_CLOUD" }, select: { id: true, defaultAgentId: true } })
-      : await tx.channelConnection.findFirst({ where: { type: "WHATSAPP_CLOUD", status: "active" }, orderBy: { createdAt: "asc" }, select: { id: true, defaultAgentId: true } });
+      ? await tx.channelConnection.findFirst({ where: { id: b.channelConnectionId, organizationId: orgId, type: "WHATSAPP_CLOUD" }, select: { id: true, defaultAgentId: true } })
+      : await tx.channelConnection.findFirst({ where: { organizationId: orgId, type: "WHATSAPP_CLOUD", status: "active" }, orderBy: { createdAt: "asc" }, select: { id: true, defaultAgentId: true } });
     if (!channel) {
+      // Sin canal propio NO se difunde por el de nadie más: la difusión queda FAILED
+      // y el job falla con el motivo claro (nunca se sigue en silencio).
       await tx.broadcast.update({ where: { id: broadcastId }, data: { status: "FAILED" } });
-      return null;
+      return { error: `La organización ${orgId} no tiene un canal de WhatsApp activo propio para difundir` };
     }
     await tx.broadcast.update({ where: { id: broadcastId }, data: { status: "SENDING", startedAt: b.startedAt ?? new Date() } });
     const components = ((template.body as Record<string, any>)?.components ?? []) as any[];
@@ -61,6 +65,7 @@ export async function processBroadcast(job: Job<BroadcastJob>): Promise<void> {
     return { channelId: channel.id, defaultAgentId: channel.defaultAgentId, templateId: template.id, templateName: template.name, preview };
   });
   if (!setup) return;
+  if ("error" in setup) throw new Error(setup.error);
 
   // 2) Procesar destinatarios PENDING por lotes.
   for (;;) {

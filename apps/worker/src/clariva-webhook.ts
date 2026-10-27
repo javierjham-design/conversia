@@ -69,7 +69,9 @@ export async function processClarivaWebhook(
       // Solo rellena huecos: Cláriva no pisa datos ya capturados en Conversia.
       const phone = geoFromPhone(String(payload.phone ?? "")).phone;
       if (!phone) return null;
-      const contact = await tx.contact.findFirst({ where: { phone, deletedAt: null } });
+      // Búsqueda por teléfono SIEMPRE acotada al tenant del webhook: el mismo
+      // número puede existir en otro cliente (defensa sobre RLS).
+      const contact = await tx.contact.findFirst({ where: { organizationId, phone, deletedAt: null } });
       if (!contact) return null;
       const upd: Record<string, unknown> = {};
       if (payload.firstName && !contact.firstName) upd.firstName = payload.firstName;
@@ -84,7 +86,7 @@ export async function processClarivaWebhook(
       // teléfono y marca el resultado para despachar el trigger fuera del tx.
       const phone = geoFromPhone(String(payload.patient?.phone ?? payload.phone ?? "")).phone;
       if (!phone) return null;
-      let contact = await tx.contact.findFirst({ where: { phone, deletedAt: null } });
+      let contact = await tx.contact.findFirst({ where: { organizationId, phone, deletedAt: null } });
       if (!contact) {
         contact = await tx.contact.create({
           data: {
@@ -122,7 +124,9 @@ export async function processClarivaWebhook(
     // el mismo segundo). El lock serializa: el 2º espera, ve la fila del 1º y hace UPDATE.
     // Se libera solo al cerrar la transacción. Es de asesoría (no bloquea otras filas).
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${organizationId}), hashtext(${externalId}))`;
-    const existing = await tx.appointment.findFirst({ where: { provider: "CLARIVA", externalId } });
+    // El externalId de Cláriva es por clínica (puede repetirse entre tenants):
+    // la proyección se busca acotada a la org, igual que el lock de arriba.
+    const existing = await tx.appointment.findFirst({ where: { organizationId, provider: "CLARIVA", externalId } });
 
     // Servicio / profesional / sede / PACIENTE del payload (para filtros de trigger y
     // variables de plantilla). El nombre del paciente de Cláriva se guarda en la cita
@@ -176,7 +180,7 @@ export async function processClarivaWebhook(
     if (!payload.start || !payload.end) return null;
     const phone = geoFromPhone(String(payload.patient?.phone ?? "")).phone;
     if (!phone) return null;
-    let contact = await tx.contact.findFirst({ where: { phone, deletedAt: null } });
+    let contact = await tx.contact.findFirst({ where: { organizationId, phone, deletedAt: null } });
     if (!contact) {
       contact = await tx.contact.create({
         data: {

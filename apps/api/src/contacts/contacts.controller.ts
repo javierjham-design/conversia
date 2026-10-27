@@ -439,7 +439,7 @@ export class ContactsController {
   deleteSegment(@Param("id") id: string) {
     const ctx = requirePermission("contacts:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.contactSegment.deleteMany({ where: { id } });
+      await tx.contactSegment.deleteMany({ where: { id, organizationId: ctx.organizationId } });
       return { ok: true };
     });
   }
@@ -499,7 +499,7 @@ export class ContactsController {
     const ctx = requirePermission("contacts:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       // La FK ON DELETE CASCADE limpia los miembros; borrar el grupo NO borra contactos.
-      await tx.contactGroup.deleteMany({ where: { id } });
+      await tx.contactGroup.deleteMany({ where: { id, organizationId: ctx.organizationId } });
       return { ok: true };
     });
   }
@@ -543,7 +543,7 @@ export class ContactsController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const group = await tx.contactGroup.findFirst({ where: { id }, select: { id: true } });
       if (!group) throw new NotFoundException("Grupo no encontrado");
-      const where: any = { groupId: id };
+      const where: any = { groupId: id, organizationId: ctx.organizationId };
       if (!b.all) {
         if (!b.contactIds?.length) throw new BadRequestException("Indica contactIds o all=true");
         where.contactId = { in: b.contactIds };
@@ -632,7 +632,7 @@ export class ContactsController {
     let tagged: { name: string; contactIds: string[] } | null = null;
     const result = await this.prisma.withTenant(orgId, async (tx) => {
       // Solo IDs que realmente pertenecen al tenant (RLS ya aísla, pero validamos).
-      const valid = (await tx.contact.findMany({ where: { id: { in: b.ids }, deletedAt: null }, select: { id: true } })).map((c) => c.id);
+      const valid = (await tx.contact.findMany({ where: { id: { in: b.ids }, organizationId: orgId, deletedAt: null }, select: { id: true } })).map((c) => c.id);
       if (valid.length === 0) return { affected: 0 };
       let affected = 0;
 
@@ -659,7 +659,7 @@ export class ContactsController {
         }
         case "tag_remove": {
           if (!b.tagId) throw new BadRequestException("Falta tagId");
-          const res = await tx.tagAssignment.deleteMany({ where: { tagId: b.tagId, entityType: "contact", entityId: { in: valid } } });
+          const res = await tx.tagAssignment.deleteMany({ where: { organizationId: orgId, tagId: b.tagId, entityType: "contact", entityId: { in: valid } } });
           affected = res.count;
           break;
         }
@@ -676,7 +676,7 @@ export class ContactsController {
         }
         case "group_remove": {
           if (!b.groupId) throw new BadRequestException("Falta groupId");
-          const res = await tx.contactGroupMember.deleteMany({ where: { groupId: b.groupId, contactId: { in: valid } } });
+          const res = await tx.contactGroupMember.deleteMany({ where: { organizationId: orgId, groupId: b.groupId, contactId: { in: valid } } });
           affected = res.count;
           break;
         }
@@ -710,14 +710,14 @@ export class ContactsController {
         case "block":
         case "unblock": {
           const res = await tx.contact.updateMany({
-            where: { id: { in: valid } },
+            where: { id: { in: valid }, organizationId: orgId },
             data: b.action === "block" ? { blocked: true, doNotContact: true } : { blocked: false },
           });
           affected = res.count;
           break;
         }
         case "delete": {
-          const res = await tx.contact.updateMany({ where: { id: { in: valid } }, data: { deletedAt: new Date() } });
+          const res = await tx.contact.updateMany({ where: { id: { in: valid }, organizationId: orgId }, data: { deletedAt: new Date() } });
           affected = res.count;
           break;
         }
@@ -860,7 +860,7 @@ export class ContactsController {
     const ctx = requirePermission("contacts:write");
     const input = parse(z.object({ confirm: z.string() }), body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const contact = await tx.contact.findFirst({ where: { id } });
+      const contact = await tx.contact.findFirst({ where: { id, organizationId: ctx.organizationId } });
       if (!contact) throw new NotFoundException("Contacto no encontrado");
       // Confirmación fuerte: hay que escribir el teléfono o el nombre del contacto.
       const expected = (contact.phone || contact.firstName || "ELIMINAR").trim();
@@ -868,10 +868,10 @@ export class ContactsController {
         throw new BadRequestException(`Confirmación incorrecta. Escribe exactamente: ${expected}`);
       }
       const [convs] = await Promise.all([
-        tx.conversation.deleteMany({ where: { contactId: id } }), // cascada mensajes+adjuntos (incluye transcripciones en body)
-        tx.customFieldValue.deleteMany({ where: { entityId: id } }),
-        tx.contactIdentity.deleteMany({ where: { contactId: id } }),
-        tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: id } }),
+        tx.conversation.deleteMany({ where: { contactId: id, organizationId: ctx.organizationId } }), // cascada mensajes+adjuntos (incluye transcripciones en body)
+        tx.customFieldValue.deleteMany({ where: { entityId: id, organizationId: ctx.organizationId } }),
+        tx.contactIdentity.deleteMany({ where: { contactId: id, organizationId: ctx.organizationId } }),
+        tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: id, organizationId: ctx.organizationId } }),
       ]);
       // Anonimiza la ficha (conserva la fila para integridad de leads/citas/reportes).
       await tx.contact.update({
@@ -909,9 +909,9 @@ export class ContactsController {
       if (merges.length === 0) throw new BadRequestException("Sin contactos válidos para fusionar");
 
       for (const m of merges) {
-        await tx.conversation.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
-        await tx.lead.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
-        await tx.appointment.updateMany({ where: { contactId: m.id }, data: { contactId: primary.id } });
+        await tx.conversation.updateMany({ where: { contactId: m.id, organizationId: orgId }, data: { contactId: primary.id } });
+        await tx.lead.updateMany({ where: { contactId: m.id, organizationId: orgId }, data: { contactId: primary.id } });
+        await tx.appointment.updateMany({ where: { contactId: m.id, organizationId: orgId }, data: { contactId: primary.id } });
 
         // Identidades: mover solo si no colisionan con una del primario
         const idents = await tx.contactIdentity.findMany({ where: { contactId: m.id } });
@@ -927,7 +927,7 @@ export class ContactsController {
         for (const ta of tagAssigns) {
           await tx.tagAssignment.createMany({ data: [{ organizationId: orgId, tagId: ta.tagId, entityType: "contact", entityId: primary.id }], skipDuplicates: true });
         }
-        await tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: m.id } });
+        await tx.tagAssignment.deleteMany({ where: { entityType: "contact", entityId: m.id, organizationId: orgId } });
         const cfvs = await tx.customFieldValue.findMany({ where: { entityId: m.id } });
         for (const v of cfvs) {
           const has = await tx.customFieldValue.findUnique({ where: { organizationId_definitionId_entityId: { organizationId: orgId, definitionId: v.definitionId, entityId: primary.id } } });
@@ -945,7 +945,7 @@ export class ContactsController {
         }
       }
       if (Object.keys(fill).length) await tx.contact.update({ where: { id: primary.id }, data: fill });
-      await tx.contact.updateMany({ where: { id: { in: merges.map((m) => m.id) } }, data: { deletedAt: new Date() } });
+      await tx.contact.updateMany({ where: { id: { in: merges.map((m) => m.id) }, organizationId: orgId }, data: { deletedAt: new Date() } });
       await tx.auditLog.create({ data: { organizationId: orgId, actorType: "user", actorId: ctx.userId, action: "contact.merge", entityType: "contact", entityId: primary.id, after: { merged: merges.map((m) => m.id) } } });
       return { ok: true, primaryId: primary.id, merged: merges.length };
     });

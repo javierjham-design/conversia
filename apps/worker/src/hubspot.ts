@@ -48,7 +48,7 @@ export function buildHubspotSearch(contact: ConversiaContactFields): { filterGro
 
 async function getHubspotConfig(organizationId: string): Promise<{ fieldMapping: Record<string, string>; syncAuto: boolean } | null> {
   return withTenant(organizationId, async (tx) => {
-    const conn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+    const conn = await tx.integrationConnection.findFirst({ where: { organizationId, provider: "hubspot" } });
     if (!conn) return null;
     const cfg = (conn.config as Record<string, any>) ?? {};
     return {
@@ -164,7 +164,7 @@ export async function syncContactToHubspot(organizationId: string, payload: { co
 
   await withTenant(organizationId, async (tx) => {
     await tx.contact.update({ where: { id: contact.id }, data: { meta: { ...meta, hubspotContactId: hubspotId } as object } });
-    await tx.integrationConnection.updateMany({ where: { provider: "hubspot" }, data: { lastSyncAt: new Date(), lastError: null } });
+    await tx.integrationConnection.updateMany({ where: { organizationId, provider: "hubspot" }, data: { lastSyncAt: new Date(), lastError: null } });
   });
   const label = [contact.firstName, contact.lastName].filter(Boolean).join(" ") || contact.phone || contact.id;
   await log("ok", `Contacto «${label}» sincronizado a HubSpot (#${hubspotId})`);

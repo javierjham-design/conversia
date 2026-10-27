@@ -105,33 +105,47 @@ export async function resolveChannelAuth(
 ): Promise<ChannelAuth> {
   const env = getEnv();
   return withTenant(organizationId, async (tx) => {
+    // AISLAMIENTO: todo número/canal debe ser de ESTA organización (filtro explícito,
+    // además de RLS). Un número de otra org haría que el mensaje saliera desde el
+    // WhatsApp de otro cliente.
     let number = opts.phoneNumberId
-      ? await tx.whatsappPhoneNumber.findFirst({ where: { phoneNumberId: opts.phoneNumberId } })
+      ? await tx.whatsappPhoneNumber.findFirst({ where: { organizationId, phoneNumberId: opts.phoneNumberId } })
       : null;
     if (!number && opts.channelConnectionId) {
-      number = await tx.whatsappPhoneNumber.findFirst({ where: { channelConnectionId: opts.channelConnectionId } });
+      number = await tx.whatsappPhoneNumber.findFirst({ where: { organizationId, channelConnectionId: opts.channelConnectionId } });
     }
     if (!number) {
       // Canal mock o tenant sin número: id sintético que el MockProvider imprime.
       if (opts.channelConnectionId) {
-        const channel = await tx.channelConnection.findUnique({ where: { id: opts.channelConnectionId } });
+        const channel = await tx.channelConnection.findFirst({ where: { id: opts.channelConnectionId, organizationId } });
         if (channel?.type === "MOCK") {
           const org = await tx.organization.findUnique({ where: { id: organizationId } });
           return { phoneNumberId: `mock:${org?.slug ?? organizationId}`, accessToken: null, channelConnectionId: opts.channelConnectionId };
         }
       }
-      number = await tx.whatsappPhoneNumber.findFirst({ where: { status: "active" } });
+      // Respaldo: el primer número activo DE ESTA ORGANIZACIÓN (antes era "el primer
+      // número activo" sin filtrar → podía ser el de otro cliente).
+      number = await tx.whatsappPhoneNumber.findFirst({ where: { organizationId, status: "active" } });
       if (!number) {
-        const org = await tx.organization.findUnique({ where: { id: organizationId } });
-        return { phoneNumberId: `mock:${org?.slug ?? organizationId}`, accessToken: null, channelConnectionId: opts.channelConnectionId ?? null };
+        // Sin número propio: con el proveedor mock se sigue con el id sintético (E2E
+        // sin credenciales de Meta); con Meta real se FALLA con un motivo claro — nunca
+        // se envía por el número de otra organización ni se sigue en silencio.
+        if (env.WHATSAPP_PROVIDER !== "meta") {
+          const org = await tx.organization.findUnique({ where: { id: organizationId } });
+          return { phoneNumberId: `mock:${org?.slug ?? organizationId}`, accessToken: null, channelConnectionId: opts.channelConnectionId ?? null };
+        }
+        throw new ChannelConfigError(
+          `resolveChannelAuth: la organización ${organizationId} no tiene un canal de WhatsApp activo propio`,
+          "La organización no tiene un canal de WhatsApp activo propio: conecta tu número en Canales antes de enviar mensajes.",
+        );
       }
     }
 
     let accessToken: string | null = env.META_ACCESS_TOKEN || null;
     let tokenSource: ChannelAuth["tokenSource"] = accessToken ? "global-no-account" : "none";
-    const account = await tx.whatsappAccount.findUnique({ where: { id: number.accountId } });
+    const account = await tx.whatsappAccount.findFirst({ where: { id: number.accountId, organizationId } });
     if (account?.credentialId) {
-      const credential = await tx.integrationCredential.findUnique({ where: { id: account.credentialId } });
+      const credential = await tx.integrationCredential.findFirst({ where: { id: account.credentialId, organizationId } });
       if (credential) {
         try {
           accessToken = decryptCredential(credential.ciphertext);

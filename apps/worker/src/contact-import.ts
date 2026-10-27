@@ -60,7 +60,9 @@ async function processBatch(
       continue;
     }
     let contactId: string;
-    const existing = phone ? await tx.contact.findFirst({ where: { phone, deletedAt: null } }) : null;
+    // Dedupe por teléfono SIEMPRE acotado a la organización del job: el mismo
+    // número puede existir en otro cliente y jamás debe cruzarse (defensa sobre RLS).
+    const existing = phone ? await tx.contact.findFirst({ where: { organizationId: orgId, phone, deletedAt: null } }) : null;
     if (existing) {
       contactId = existing.id;
       if (updateExisting) {
@@ -69,7 +71,7 @@ async function processBatch(
         if (row.lastName && !existing.lastName) data.lastName = row.lastName;
         if (row.email && !existing.email) data.email = row.email;
         if (row.country && !existing.country) data.country = row.country.toUpperCase().slice(0, 2);
-        if (Object.keys(data).length) await tx.contact.update({ where: { id: existing.id }, data });
+        if (Object.keys(data).length) await tx.contact.update({ where: { id: existing.id, organizationId: orgId }, data });
         out.updated++;
       } else {
         out.skipped++;

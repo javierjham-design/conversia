@@ -260,7 +260,7 @@ export class UsersController {
     const ctx = requirePermission("users:write");
     const input = parse(updateMemberSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const member = await tx.organizationUser.findUnique({ where: { id: membershipId } });
+      const member = await tx.organizationUser.findFirst({ where: { id: membershipId, organizationId: ctx.organizationId } });
       if (!member) throw new NotFoundException("Miembro no encontrado");
       if (member.userId === ctx.userId && input.active === false) {
         throw new BadRequestException("No puedes desactivar tu propia cuenta");
@@ -304,7 +304,7 @@ export class UsersController {
     const ctx = requirePermission("users:write");
     const input = parse(updateProfileSchema, body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const member = await tx.organizationUser.findUnique({ where: { id: membershipId } });
+      const member = await tx.organizationUser.findFirst({ where: { id: membershipId, organizationId: ctx.organizationId } });
       if (!member) throw new NotFoundException("Miembro no encontrado");
       await this.assertCanManage(tx, ctx, member.roleId);
 
@@ -348,8 +348,8 @@ export class UsersController {
   resetPassword(@Param("membershipId") membershipId: string) {
     const ctx = requirePermission("users:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const member = await tx.organizationUser.findUnique({
-        where: { id: membershipId },
+      const member = await tx.organizationUser.findFirst({
+        where: { id: membershipId, organizationId: ctx.organizationId },
         include: { user: { select: { id: true, email: true } } },
       });
       if (!member) throw new NotFoundException("Miembro no encontrado");
@@ -414,7 +414,7 @@ export class UsersController {
     const ctx = requirePermission("users:write");
     const input = parse(z.object({ name: z.string().min(2).max(50).optional(), description: z.string().max(200).optional() }), body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const team = await tx.team.findUnique({ where: { id: teamId } });
+      const team = await tx.team.findFirst({ where: { id: teamId, organizationId: ctx.organizationId } });
       if (!team) throw new NotFoundException("Equipo no encontrado");
       return tx.team.update({ where: { id: teamId }, data: input });
     });
@@ -425,10 +425,10 @@ export class UsersController {
   deleteTeam(@Param("teamId") teamId: string) {
     const ctx = requirePermission("users:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const team = await tx.team.findUnique({ where: { id: teamId } });
+      const team = await tx.team.findFirst({ where: { id: teamId, organizationId: ctx.organizationId } });
       if (!team) throw new NotFoundException("Equipo no encontrado");
-      const unassigned = await tx.conversation.updateMany({ where: { assignedTeamId: teamId }, data: { assignedTeamId: null } });
-      await tx.teamMember.deleteMany({ where: { teamId } });
+      const unassigned = await tx.conversation.updateMany({ where: { assignedTeamId: teamId, organizationId: ctx.organizationId }, data: { assignedTeamId: null } });
+      await tx.teamMember.deleteMany({ where: { teamId, organizationId: ctx.organizationId } });
       await tx.team.delete({ where: { id: teamId } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "team.delete", entityType: "team", entityId: teamId, after: { name: team.name, unassignedConversations: unassigned.count } },
@@ -442,7 +442,7 @@ export class UsersController {
     const ctx = requirePermission("users:write");
     const input = parse(z.object({ userId: z.string() }), body);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const team = await tx.team.findUnique({ where: { id: teamId } });
+      const team = await tx.team.findFirst({ where: { id: teamId, organizationId: ctx.organizationId } });
       if (!team) throw new NotFoundException("Equipo no encontrado");
       await tx.teamMember.upsert({
         where: { teamId_userId: { teamId, userId: input.userId } },
@@ -457,7 +457,7 @@ export class UsersController {
   removeTeamMember(@Param("teamId") teamId: string, @Param("userId") userId: string) {
     const ctx = requirePermission("users:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.teamMember.deleteMany({ where: { teamId, userId } });
+      await tx.teamMember.deleteMany({ where: { teamId, userId, organizationId: ctx.organizationId } });
       return { ok: true };
     });
   }

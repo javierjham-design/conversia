@@ -39,22 +39,30 @@ async function ensureConversationForContact(organizationId: string, contactId: s
     // Con historial: reutiliza la conversación abierta → sale por el MISMO número
     // con el que el contacto ya habló.
     const existing = await tx.conversation.findFirst({
-      where: { contactId, status: { not: "CLOSED" } },
+      where: { organizationId, contactId, status: { not: "CLOSED" } },
       orderBy: { lastMessageAt: "desc" },
     });
     if (existing) return existing.id;
     // Sin historial (caso común de cita nacida en Cláriva): sale por el número por
     // defecto que fijó el tenant en Configuración; si no configuró, el primero activo.
+    // AISLAMIENTO: ambos canales se buscan SOLO dentro de esta organización (filtro
+    // explícito además de RLS); antes el respaldo tomaba "el primer canal activo" sin
+    // filtrar → podía ser el de otro cliente.
     const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
     const defaultId = ((org?.settings as any)?.messaging?.defaultReminderChannelId as string | undefined) ?? null;
-    let channel = defaultId ? await tx.channelConnection.findFirst({ where: { id: defaultId, status: "active" } }) : null;
-    if (!channel) channel = await tx.channelConnection.findFirst({ where: { status: "active" } });
+    let channel = defaultId ? await tx.channelConnection.findFirst({ where: { id: defaultId, organizationId, status: "active" } }) : null;
+    if (!channel) channel = await tx.channelConnection.findFirst({ where: { organizationId, status: "active" } });
+    if (!channel) {
+      // Sin canal propio no se abre la conversación con el canal de nadie más: se falla
+      // con el motivo claro (el motor marca el paso FAILED y el run con el error).
+      throw new Error(`La organización ${organizationId} no tiene un canal de WhatsApp activo propio`);
+    }
     const created = await tx.conversation.create({
       data: {
         organizationId,
         contactId,
-        channelConnectionId: channel?.id ?? null,
-        activeAgentId: channel?.defaultAgentId ?? null,
+        channelConnectionId: channel.id,
+        activeAgentId: channel.defaultAgentId ?? null,
         status: "OPEN",
       },
     });
@@ -284,7 +292,7 @@ function makeDeps(): EngineDeps {
         });
         if (!tag) return;
         await tx.tagAssignment.deleteMany({
-          where: { tagId: tag.id, entityType: "conversation", entityId: ctx.conversationId! },
+          where: { organizationId: ctx.organizationId, tagId: tag.id, entityType: "conversation", entityId: ctx.conversationId! },
         });
       });
     },
@@ -674,9 +682,10 @@ function makeDeps(): EngineDeps {
       const kind = String(config.kind ?? "");
       if (kind === "no_reply" && ctx.conversationId) {
         return withTenant(ctx.organizationId, async (tx) => {
-          const run = await tx.workflowRun.findUnique({ where: { id: ctx.runId } });
+          const run = await tx.workflowRun.findFirst({ where: { id: ctx.runId, organizationId: ctx.organizationId } });
           const reply = await tx.message.findFirst({
             where: {
+              organizationId: ctx.organizationId,
               conversationId: ctx.conversationId!,
               direction: "INBOUND",
               createdAt: { gt: run?.startedAt ?? new Date(0) },
@@ -748,9 +757,11 @@ export async function dispatchEvent(event: PlatformEvent): Promise<void> {
   );
   if (!isOrgOperational(org?.status)) return;
 
+  // AISLAMIENTO: solo los flujos DE ESTA organización pueden dispararse con su evento
+  // (filtro explícito además de RLS).
   const candidates = await withTenant(event.organizationId, (tx) =>
     tx.workflow.findMany({
-      where: { active: true, deletedAt: null },
+      where: { organizationId: event.organizationId, active: true, deletedAt: null },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
     }),
   );
@@ -815,7 +826,7 @@ export async function startWorkflowByName(
 ): Promise<{ ok: boolean; error?: string }> {
   const wf = await withTenant(organizationId, (tx) =>
     tx.workflow.findFirst({
-      where: { active: true, deletedAt: null, name: workflowName },
+      where: { organizationId, active: true, deletedAt: null, name: workflowName },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
     }),
   );
@@ -839,7 +850,8 @@ export async function startWorkflowById(
 ): Promise<{ ok: boolean; error?: string }> {
   const wf = await withTenant(organizationId, (tx) =>
     tx.workflow.findFirst({
-      where: { id: workflowId, active: true, deletedAt: null },
+      // id viene del panel → el filtro por organización es obligatorio.
+      where: { id: workflowId, organizationId, active: true, deletedAt: null },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
     }),
   );
@@ -910,9 +922,10 @@ async function runWorkflowVersion(
 // condiciones del guard): no hay camino paralelo.
 export async function retryRun(organizationId: string, runId: string): Promise<void> {
   const data = await withTenant(organizationId, async (tx) => {
-    const run = await tx.workflowRun.findUnique({ where: { id: runId } });
+    // runId viene del panel → filtro explícito por organización.
+    const run = await tx.workflowRun.findFirst({ where: { id: runId, organizationId } });
     if (!run || run.status !== "FAILED" || !run.currentNodeId) return null;
-    const versionRow = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+    const versionRow = await tx.workflowVersion.findFirst({ where: { id: run.versionId, organizationId } });
     if (!versionRow) return null;
     await tx.workflowRun.update({ where: { id: runId }, data: { status: "RUNNING", error: null } });
     return { run, versionRow };
@@ -1011,17 +1024,18 @@ export async function scheduleAppointmentReminders(
     // sendNow: resetea el estado previo del recordatorio de ESTA cita (runs WAITING que
     // esperaban el R2) para no duplicar la insistencia; luego cada workflow re-arma su job.
     if (sendNow) {
-      const waiting = await tx.workflowRun.findMany({ where: { status: "WAITING" }, select: { id: true, variables: true } });
+      // AISLAMIENTO: runs y timers SIEMPRE acotados a esta organización.
+      const waiting = await tx.workflowRun.findMany({ where: { organizationId, status: "WAITING" }, select: { id: true, variables: true } });
       const runIds = waiting
         .filter((r) => (r.variables as Record<string, unknown> | null)?.__appointmentExternalId === appt.id)
         .map((r) => r.id);
       if (runIds.length) {
-        await tx.workflowRun.updateMany({ where: { id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
-        await tx.scheduledJob.updateMany({ where: { kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
+        await tx.workflowRun.updateMany({ where: { organizationId, id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
+        await tx.scheduledJob.updateMany({ where: { organizationId, kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
       }
     }
     const wfs = await tx.workflow.findMany({
-      where: { active: true, deletedAt: null },
+      where: { organizationId, active: true, deletedAt: null },
       include: { versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, take: 1 } },
     });
     for (const wf of wfs) {
@@ -1119,6 +1133,7 @@ export async function cancelAppointmentReminders(organizationId: string, appoint
     // 1) Jobs de recordatorio pendientes (antes de que dispare R1).
     await tx.scheduledJob.updateMany({
       where: {
+        organizationId,
         kind: "appointment_reminder",
         status: "PENDING",
         uniqueKey: { endsWith: `:${appointmentExternalId}` },
@@ -1128,13 +1143,13 @@ export async function cancelAppointmentReminders(organizationId: string, appoint
     // 2) Runs del recordatorio YA en marcha (R1 enviado, esperando en wait_reply para
     //    la insistencia R2): se cancelan el run y su timer para no mandar el R2 si la
     //    cita se resolvió por otro medio (confirmada/cancelada por recepción).
-    const waiting = await tx.workflowRun.findMany({ where: { status: "WAITING" }, select: { id: true, variables: true } });
+    const waiting = await tx.workflowRun.findMany({ where: { organizationId, status: "WAITING" }, select: { id: true, variables: true } });
     const runIds = waiting
       .filter((r) => (r.variables as Record<string, unknown> | null)?.__appointmentExternalId === appointmentExternalId)
       .map((r) => r.id);
     if (runIds.length) {
-      await tx.workflowRun.updateMany({ where: { id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
-      await tx.scheduledJob.updateMany({ where: { kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
+      await tx.workflowRun.updateMany({ where: { organizationId, id: { in: runIds } }, data: { status: "CANCELLED", finishedAt: new Date() } });
+      await tx.scheduledJob.updateMany({ where: { organizationId, kind: "workflow_timer", status: "PENDING", runId: { in: runIds } }, data: { status: "CANCELLED" } });
     }
   });
 }
@@ -1182,9 +1197,9 @@ async function clearPendingObjective(organizationId: string, conversationId: str
 /** Carga run+definición (WAITING→RUNNING) para reanudarlo. */
 async function loadWaitingRun(organizationId: string, runId: string): Promise<{ ctx: RunCtx; def: WorkflowDefinition } | null> {
   const data = await withTenant(organizationId, async (tx) => {
-    const run = await tx.workflowRun.findUnique({ where: { id: runId } });
+    const run = await tx.workflowRun.findFirst({ where: { id: runId, organizationId } });
     if (!run || run.status !== "WAITING") return null;
-    const versionRow = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+    const versionRow = await tx.workflowVersion.findFirst({ where: { id: run.versionId, organizationId } });
     if (!versionRow) return null;
     await tx.workflowRun.update({ where: { id: runId }, data: { status: "RUNNING" } });
     return { run, versionRow };
@@ -1243,7 +1258,7 @@ export async function resumeRunWithBranch(organizationId: string, runId: string,
  */
 export async function handleWaitReply(organizationId: string, conversationId: string): Promise<boolean> {
   const jobs = await withTenant(organizationId, (tx) =>
-    tx.scheduledJob.findMany({ where: { status: "PENDING", kind: "workflow_timer" } }),
+    tx.scheduledJob.findMany({ where: { organizationId, status: "PENDING", kind: "workflow_timer" } }),
   );
   let handled = false;
   for (const job of jobs) {
@@ -1251,9 +1266,9 @@ export async function handleWaitReply(organizationId: string, conversationId: st
     if (p.conversationId !== conversationId || !job.runId) continue;
     // Solo los que esperan en un nodo wait_reply (sin tocar el estado del run).
     const info = await withTenant(organizationId, async (tx) => {
-      const run = await tx.workflowRun.findUnique({ where: { id: job.runId! } });
+      const run = await tx.workflowRun.findFirst({ where: { id: job.runId!, organizationId } });
       if (!run || run.status !== "WAITING") return null;
-      const ver = await tx.workflowVersion.findUnique({ where: { id: run.versionId } });
+      const ver = await tx.workflowVersion.findFirst({ where: { id: run.versionId, organizationId } });
       return ver ? { def: ver.definition } : null;
     });
     if (!info) continue;
@@ -1311,7 +1326,7 @@ export async function handlePendingObjective(organizationId: string, conversatio
   await clearPendingObjective(organizationId, conversationId);
   await withTenant(organizationId, (tx) =>
     tx.scheduledJob.updateMany({
-      where: { status: "PENDING", kind: "workflow_timer", uniqueKey: `${pending.runId}:${pending.nodeId}` },
+      where: { organizationId, status: "PENDING", kind: "workflow_timer", uniqueKey: `${pending.runId}:${pending.nodeId}` },
       data: { status: "CANCELLED" },
     }),
   );
@@ -1323,7 +1338,7 @@ export async function handlePendingObjective(organizationId: string, conversatio
 export async function cancelTimersOnReply(organizationId: string, conversationId: string): Promise<void> {
   await withTenant(organizationId, async (tx) => {
     const jobs = await tx.scheduledJob.findMany({
-      where: { status: "PENDING", kind: "workflow_timer" },
+      where: { organizationId, status: "PENDING", kind: "workflow_timer" },
     });
     const toCancel = jobs.filter((j) => {
       const p = j.payload as Record<string, unknown>;

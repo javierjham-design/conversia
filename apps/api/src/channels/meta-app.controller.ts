@@ -66,7 +66,7 @@ export class MetaAppController {
             where: { organizationId: ch.organizationId },
             data: { status: "DISCONNECTED", lastError: "La app fue desautorizada en Meta. Reconéctala para reactivar WhatsApp.", credentialId: null },
           });
-          if (conn.credentialId) await tx.integrationCredential.deleteMany({ where: { id: conn.credentialId } });
+          if (conn.credentialId) await tx.integrationCredential.deleteMany({ where: { organizationId: ch.organizationId, id: conn.credentialId } });
         }
         await tx.integrationEvent.create({
           data: { organizationId: ch.organizationId, provider: "meta", type: "connection.deauthorized", status: "error", message: "La app fue desautorizada desde Meta. Reconecta WhatsApp para seguir recibiendo mensajes." },

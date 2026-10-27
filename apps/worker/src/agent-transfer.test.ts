@@ -17,11 +17,23 @@ describe("normalizeAgentKey", () => {
   });
 });
 
-// tx falso: solo necesita agent.findMany (RLS ya acota por org en producción).
-function fakeTx(agents: Array<{ id: string; slug: string; name: string; active: boolean }>) {
-  return { agent: { findMany: async () => agents } } as never;
+// tx falso: solo necesita agent.findMany. `seen` captura el `where` para poder verificar
+// que la consulta lleva el filtro EXPLÍCITO de organización (auditoría etapa 2).
+function fakeTx(
+  agents: Array<{ id: string; slug: string; name: string; active: boolean }>,
+  seen?: { where?: Record<string, unknown> },
+) {
+  return {
+    agent: {
+      findMany: async (args: { where?: Record<string, unknown> }) => {
+        if (seen) seen.where = args?.where;
+        return agents;
+      },
+    },
+  } as never;
 }
 
+const ORG = "org-A";
 const AGENTS = [
   { id: "a1", slug: "recepcion-digital-dent", name: "Recepción Digital Dent", active: true },
   { id: "a2", slug: "resp-implantes", name: "RESP IMPLANTES", active: true },
@@ -30,27 +42,35 @@ const AGENTS = [
 
 describe("resolveAgentByNameOrSlug — derivar a un AGENTE (no equipo ni persona)", () => {
   it("resuelve por NOMBRE visible", async () => {
-    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "RESP IMPLANTES");
+    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "RESP IMPLANTES", ORG);
     expect(r?.slug).toBe("resp-implantes");
   });
   it("resuelve por MENCIÓN @Nombre", async () => {
-    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "@RESP IMPLANTES");
+    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "@RESP IMPLANTES", ORG);
     expect(r?.slug).toBe("resp-implantes");
   });
   it("resuelve por SLUG", async () => {
-    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "resp-implantes");
+    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "resp-implantes", ORG);
     expect(r?.id).toBe("a2");
   });
   it("insensible a acentos/mayúsculas", async () => {
-    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "recepción digital dent");
+    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "recepción digital dent", ORG);
     expect(r?.slug).toBe("recepcion-digital-dent");
   });
   it("devuelve el agente aunque esté inactivo (el caller decide)", async () => {
-    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "resp ortodoncia");
+    const r = await resolveAgentByNameOrSlug(fakeTx(AGENTS), "resp ortodoncia", ORG);
     expect(r?.active).toBe(false);
   });
   it("null si no es ningún agente (p. ej. un equipo/persona)", async () => {
-    expect(await resolveAgentByNameOrSlug(fakeTx(AGENTS), "Ventas")).toBeNull();
-    expect(await resolveAgentByNameOrSlug(fakeTx(AGENTS), "")).toBeNull();
+    expect(await resolveAgentByNameOrSlug(fakeTx(AGENTS), "Ventas", ORG)).toBeNull();
+    expect(await resolveAgentByNameOrSlug(fakeTx(AGENTS), "", ORG)).toBeNull();
+  });
+
+  // Auditoría etapa 2: la derivación jamás debe poder resolver al agente de otro cliente.
+  it("acota la búsqueda a la organización (filtro explícito, no solo RLS)", async () => {
+    const seen: { where?: Record<string, unknown> } = {};
+    await resolveAgentByNameOrSlug(fakeTx(AGENTS, seen), "resp-implantes", ORG);
+    expect(seen.where?.organizationId).toBe(ORG);
+    expect(seen.where?.deletedAt).toBeNull();
   });
 });

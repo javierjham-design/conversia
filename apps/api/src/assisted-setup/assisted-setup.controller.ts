@@ -111,13 +111,16 @@ export class AssistedSetupController {
       // El canal (si se indicó) debe ser de este mismo cliente (RLS ya lo acota).
       let channelName: string | null = null;
       if (channelId) {
-        const ch = await tx.channelConnection.findUnique({ where: { id: channelId }, select: { id: true, name: true } });
+        const ch = await tx.channelConnection.findFirst({
+          where: { id: channelId, organizationId: ctx.organizationId },
+          select: { id: true, name: true },
+        });
         if (!ch) throw new BadRequestException("El canal indicado no existe en tu cuenta");
         channelName = ch.name;
       }
       // Renovar = revocar los activos previos y crear uno nuevo con nueva vigencia.
       await tx.assistedSetupGrant.updateMany({
-        where: { grantedByOrganizationId: providerOrgId, status: "active" },
+        where: { organizationId: ctx.organizationId, grantedByOrganizationId: providerOrgId, status: "active" },
         data: { status: "revoked", revokedAt: new Date() },
       });
       const grant = await tx.assistedSetupGrant.create({
@@ -207,7 +210,7 @@ export class AssistedSetupController {
     const expiresAt = new Date(Date.now() + 14 * 24 * 3600 * 1000);
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.assistedSetupGrant.updateMany({
-        where: { grantedByOrganizationId: providerOrgId, status: "active" },
+        where: { organizationId: ctx.organizationId, grantedByOrganizationId: providerOrgId, status: "active" },
         data: { status: "revoked", revokedAt: new Date() },
       });
       const grant = await tx.assistedSetupGrant.create({
@@ -243,7 +246,7 @@ export class AssistedSetupController {
     const providerOrgId = getEnv().ASSISTED_SETUP_PROVIDER_ORG_ID;
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.assistedSetupGrant.updateMany({
-        where: { grantedByOrganizationId: providerOrgId, status: "active" },
+        where: { organizationId: ctx.organizationId, grantedByOrganizationId: providerOrgId, status: "active" },
         data: { status: "revoked", revokedAt: new Date() },
       });
       await tx.auditLog.create({

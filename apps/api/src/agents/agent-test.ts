@@ -244,7 +244,7 @@ export async function runAgentTest(prisma: PrismaService, orgId: string, agentId
     const transferRaw = result.transferToAgentSlug ?? sandboxHandoffSlug(result.toolEvents);
     let transfer: { slug: string; name: string; reply: string | null; toolEvents: unknown[] } | null = null;
     if (transferRaw) {
-      const target = await prisma.withTenant(orgId, (tx) => resolveAgentByNameOrSlug(tx, transferRaw));
+      const target = await prisma.withTenant(orgId, (tx) => resolveAgentByNameOrSlug(tx, transferRaw, orgId));
       if (target && target.active && target.slug !== agent.slug) {
         const tv = await prisma.withTenant(orgId, (tx) =>
           tx.agentVersion.findFirst({ where: { agentId: target.id, status: "PUBLISHED" }, orderBy: { version: "desc" } }),

@@ -457,7 +457,7 @@ export class SettingsController {
   deletePromptTemplate(@Param("id") id: string) {
     const ctx = requirePermission("settings:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.promptTemplate.deleteMany({ where: { id } });
+      await tx.promptTemplate.deleteMany({ where: { organizationId: ctx.organizationId, id } });
       return { ok: true };
     });
   }

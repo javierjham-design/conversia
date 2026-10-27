@@ -99,7 +99,7 @@ export class DevelopersController {
   deleteInbound(@Param("id") id: string) {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.inboundWebhook.deleteMany({ where: { id } });
+      await tx.inboundWebhook.deleteMany({ where: { organizationId: ctx.organizationId, id } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "inbound_webhook.delete", entityType: "inbound_webhook", entityId: id },
       });

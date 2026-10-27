@@ -1,5 +1,6 @@
 import { Controller, Get, Header, Headers, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { getEnv } from "@conversia/config";
+import { getDbRoleStatus } from "@conversia/database";
 import { QueueService } from "./queues";
 import { PrismaService } from "./prisma.service";
 
@@ -134,10 +135,21 @@ export class HealthController {
       checks.whatsappToken = { ok: false, detail: (e as Error).message };
     }
 
+    // 6. Rol de BD del cliente de TENANT (auditoría §2.0 / etapa 2): si el usuario de
+    //    DATABASE_URL puede saltarse la RLS (rolsuper/rolbypassrls), el aislamiento entre
+    //    clientes queda dependiendo solo de los filtros del código → caída para el monitor.
+    //    "sin verificar" (dev, o no se pudo consultar) NO rompe el health.
+    const dbRole = getDbRoleStatus();
+    checks.dbRole =
+      dbRole.ok === false
+        ? { ok: false, detail: "el usuario de DATABASE_URL puede saltarse la RLS (rolsuper/rolbypassrls)" }
+        : { ok: true, detail: dbRole.checked ? "rol restringido" : "sin verificar" };
+
     const ok = Object.values(checks).every((c) => c.ok);
-    // `whatsappTokenOk` explícito para el humo (smoke-prod) además del check agregado.
+    // `whatsappTokenOk` y `dbRoleOk` explícitos para el humo (smoke-prod) además del agregado.
     const whatsappTokenOk = checks.whatsappToken?.ok ?? true;
-    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, checks });
-    return { ok, whatsappTokenOk, checks };
+    const dbRoleOk = checks.dbRole?.ok ?? true;
+    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, dbRoleOk, checks });
+    return { ok, whatsappTokenOk, dbRoleOk, checks };
   }
 }

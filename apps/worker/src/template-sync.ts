@@ -142,7 +142,7 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
       // Plantillas borradas en Meta → fuera de la proyección local.
       const existing = await tx.whatsappTemplate.findMany({ where: { accountId: account.id }, select: { id: true, name: true, language: true } });
       const stale = existing.filter((e) => !seen.has(`${e.name}::${e.language}`));
-      if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+      if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { organizationId, id: { in: stale.map((s) => s.id) } } });
     });
   }
   // Tras proyectar las APROBADAS, empújalas a Cláriva para su Gestor de IA (best-effort).
