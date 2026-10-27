@@ -3,7 +3,7 @@
  * datos de tenant va por withTenant (RLS activa) y queda auditada. La lectura cross-tenant
  * (catálogo de subs a cobrar) usa admin, como los demás ticks de plataforma.
  */
-import { getAdminPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, refillMessageWallet, withTenant } from "@conversia/database";
 import { planIncludedQuota } from "../annual-wallet-refill";
 import { alertOwner, sendBillingEmail } from "./billing-emails";
 import { getEnv } from "@conversia/config";
@@ -111,14 +111,10 @@ export function createDbBillingPort(): BillingPort {
         delete cleanSettings.billing;
         await tx.organization.update({ where: { id: sub.organizationId }, data: { status: "ACTIVE", settings: cleanSettings as object } });
         // Acreditar la bolsa del mes (mismo cálculo que el pago único / recarga anual).
+        // §9.3/§9.5: una sola implementación compartida, y ATÓMICA (un UPDATE con LEAST)
+        // para no pisar los débitos concurrentes del worker. Deja el asiento plan_renewal.
         const included = planIncludedQuota(plan?.features ?? {}, getEnv().WALLET_DEFAULT_QUOTA);
-        const wallet = await tx.messageWallet.findUnique({ where: { organizationId: sub.organizationId } });
-        const keep = wallet ? Math.min(wallet.balance, included) : 0;
-        await tx.messageWallet.upsert({
-          where: { organizationId: sub.organizationId },
-          create: { organizationId: sub.organizationId, balance: keep + included, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
-          update: { balance: keep + included, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
-        });
+        await refillMessageWallet(tx, { organizationId: sub.organizationId, included });
         // Comprobante interno (no es DTE — la boleta/factura del SII va fuera).
         const count = await tx.invoice.count();
         await tx.invoice.create({

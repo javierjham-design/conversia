@@ -166,4 +166,21 @@ describe("applyOutcome — resultado asíncrono (webhook / reconciliación)", ()
     expect(f.successes[0].periodEnd).toEqual(addMonths(hoursAfter(T0, 100), 1)); // período fresco desde ahora
     expect(f.notes.map((n) => n.kind)).toContain("reactivated");
   });
+
+  it("§9.4 si la RENOVACIÓN falla, el intento NO queda 'succeeded' (no se le re-cobra la tarjeta)", async () => {
+    const sub = baseSub({ dueAt: T0, periodEnd: T0 });
+    const f = fakePort([sub]);
+    const port: BillingPort = {
+      ...f.port,
+      async applySuccess() {
+        throw new Error("fallo al renovar (timeout / colisión de número de factura)");
+      },
+    };
+    await port.createAttempt(sub, "auto", 1, "sub-s1-boom");
+    await expect(applyOutcome(port, sub, "sub-s1-boom", true, null, T0)).rejects.toThrow();
+    // Sigue PENDIENTE: la suscripción cuenta como "cobro en vuelo" y el próximo tick no
+    // vuelve a cobrar. Antes se marcaba succeeded primero → cobrado sin renovar y re-cobro.
+    expect(f.attempts[0].status).toBeUndefined();
+    expect(f.notes.length).toBe(0);
+  });
 });

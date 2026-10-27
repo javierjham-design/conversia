@@ -193,6 +193,10 @@ export async function resolveAgentByNameOrSlug(
 // Loaders de datos de rubro (F2): compartidos por el seed y el instalador de paquetes.
 export * from "./vertical-loaders.js";
 
+// Recarga ATÓMICA de la bolsa de mensajes (§9.3/§9.5): compartida por la API
+// (activar/registrar pago/asignar suscripción) y el worker (cobro recurrente).
+export * from "./wallet-refill.js";
+
 /**
  * V2-8 — levanta una excepción en la cola de operación (idempotente por dedupeKey abierto).
  * La usan los módulos V2-1…V2-7 (API y worker). `admin` = cliente sin RLS (getAdminPrisma()).

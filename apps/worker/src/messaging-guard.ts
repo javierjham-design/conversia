@@ -1,7 +1,8 @@
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant, raiseException } from "@conversia/database";
-import { debitForMessage, notifyWalletThresholds, refundForMessage } from "./wallet";
+import { debitForMessage, notifyWalletThresholds, refundForMessage, type DebitResult } from "./wallet";
+import { opsAlert } from "./ops-alert.js";
 import { countConversationOnce } from "./conversation-quota";
 import { isWithinServiceFreeTier, resolveServiceWindowTz } from "./service-metering";
 import { enqueueNotification } from "./notifications/queue";
@@ -155,6 +156,8 @@ export async function chargeTemplateSend(
   category: string | null | undefined,
   costUsd?: number,
 ): Promise<SendGate> {
+  // (1) TOPES Y ESTADO DE NEGOCIO → fallan ABIERTO: un problema de infraestructura no
+  //     puede dejar sin enviar a todos los tenants.
   try {
     // Capacidad de plantillas (plan + interruptor por-tenant): condición previa a
     // todo — si el plan no la incluye o el switch está apagado, no se envía.
@@ -167,23 +170,52 @@ export async function chargeTemplateSend(
     // Rate-limit diario por tenant (antes de tocar la bolsa).
     const cap = await perTenantCapBlock(organizationId);
     if (cap) return cap;
+  } catch {
+    /* No se pudo verificar → fail open (no romper la operación por un fallo). */
+  }
 
-    // Débito de bolsa (previo al envío). Sin saldo → no sale.
-    const debit = await debitForMessage(organizationId, messageId, category, costUsd);
-    if (!debit.ok) {
-      void notifyWalletThresholds(organizationId, 0);
-      return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h con tu cupo de conversaciones.");
+  // (2) DÉBITO DE BOLSA → falla CERRADO (§9.5). Antes compartía el try/catch fail-open de
+  //     arriba: un error de BD dejaba pasar el mensaje SIN cobrarlo, es decir plantillas
+  //     gratis a costa de la plataforma y sin rastro. Ahora: un reintento y, si vuelve a
+  //     fallar, se BLOQUEA el envío y se alerta a operaciones.
+  let debit: DebitResult | undefined;
+  for (let intento = 1; intento <= 2 && !debit; intento++) {
+    try {
+      debit = await debitForMessage(organizationId, messageId, category, costUsd);
+    } catch (err) {
+      if (intento === 2) {
+        const detalle = `No se pudo debitar la bolsa (org ${organizationId}, mensaje ${messageId}): ${(err as Error).message}`;
+        console.error(`✖ ${detalle}`);
+        await opsAlert({
+          summary: "Débito de bolsa caído: envíos de plantilla bloqueados",
+          description: detalle,
+          severity: "critical",
+        }).catch(() => undefined);
+        return block(
+          "debit_unavailable",
+          "No pudimos verificar tu bolsa de mensajes en este momento. Reintenta en unos minutos.",
+        );
+      }
     }
-    if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
+  }
+  if (!debit) {
+    return block("debit_unavailable", "No pudimos verificar tu bolsa de mensajes en este momento. Reintenta en unos minutos.");
+  }
+  if (!debit.ok) {
+    void notifyWalletThresholds(organizationId, 0);
+    return block("no_balance", "Se agotó tu bolsa de mensajes de plantilla. Compra un paquete adicional o sube de plan para reanudar los envíos. Puedes seguir respondiendo dentro de las 24 h con tu cupo de conversaciones.");
+  }
+  if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
 
-    // Fusible global (última red). Si corta tras debitar, se devuelve el crédito.
+  // (3) Fusible global (última red) → fail open. Si corta tras debitar, se devuelve el crédito.
+  try {
     const fuse = await globalFuseBlock();
     if (fuse) {
       await refundForMessage(organizationId, messageId).catch(() => undefined);
       return fuse;
     }
   } catch {
-    /* No se pudo verificar → fail open (no romper la operación por un fallo). */
+    /* fail open */
   }
   return { blocked: false };
 }

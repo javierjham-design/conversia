@@ -24,7 +24,7 @@ import { enforcePlanLimit } from "../common/plan-limits";
 // R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
 import { runQaBattery } from "../agents/agent-qa";
-import { raiseException } from "@conversia/database"; // V2-8 cola de excepciones
+import { raiseException, messageWalletQuota, refillMessageWallet } from "@conversia/database"; // V2-8 cola de excepciones · §9.3 recarga compartida
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { PaymentSettingsService } from "../billing/payment-settings.service";
@@ -2251,6 +2251,24 @@ export class PlatformController {
 
   // ---------------------------- Suscripciones ----------------------------
 
+  /**
+   * §9.3 — Acredita el cupo de mensajes del período con la MISMA regla y la MISMA función
+   * que el cobro por pasarela (`refillMessageWallet`: min(saldo, cupo) + cupo, atómico,
+   * con asiento `plan_renewal`). Best-effort y ruidoso: si falla, no se cae la acción del
+   * Super Admin (el período ya quedó renovado) pero queda en el log.
+   */
+  private async rechargePlanWallet(organizationId: string, planId: string): Promise<boolean> {
+    try {
+      const plan = await this.prisma.admin.plan.findUnique({ where: { id: planId }, select: { features: true } });
+      const included = messageWalletQuota(plan?.features ?? {}, getEnv().WALLET_DEFAULT_QUOTA);
+      await refillMessageWallet(this.prisma.admin, { organizationId, included });
+      return true;
+    } catch (e) {
+      console.error(`✖ platform: no se pudo recargar la bolsa de ${organizationId}:`, (e as Error).message);
+      return false;
+    }
+  }
+
   @Post("organizations/:id/subscription")
   async assignSubscription(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
     await this.assertOrgBrand(req, id);
@@ -2267,6 +2285,10 @@ export class PlatformController {
     // Al asignar plan pagado, la org pasa a ACTIVE
     if (parsed.data.status === "ACTIVE") {
       await this.prisma.admin.organization.update({ where: { id }, data: { status: "ACTIVE", planId: plan.id } });
+      // §9.3 — RECARGA DE LA BOLSA: igual que el pago por pasarela (`activate`). Sin esto,
+      // un cliente al que el Super Admin le asigna el plan quedaba ACTIVE pero SIN saldo y
+      // el bot dejaba de poder enviar plantillas. Misma regla (min(saldo, cupo) + cupo).
+      await this.rechargePlanWallet(id, plan.id);
     }
     await this.audit(req, "platform.subscription.assign", "subscription", sub.id, { planCode: plan.code, status: parsed.data.status });
     return { ok: true, planCode: plan.code, status: sub.status };
@@ -2346,6 +2368,10 @@ export class PlatformController {
       periodEnd.setMonth(periodEnd.getMonth() + (sub.interval === "yearly" || plan?.interval === "yearly" ? 12 : 1));
       await admin.subscription.update({ where: { id: sub.id }, data: { status: "ACTIVE", pastDueSince: null, retriesDone: 0, periodStart: new Date(), periodEnd, nextChargeAt: periodEnd } });
       await admin.organization.update({ where: { id }, data: { status: "ACTIVE", settings: await clearBillingFlag() } });
+      // §9.3 — RECARGA DE LA BOLSA: el pago por transferencia renovaba el período pero NO
+      // acreditaba créditos; el cliente quedaba al día y sin saldo para plantillas. Misma
+      // regla y misma función que el cobro por pasarela (min(saldo, cupo) + cupo).
+      await this.rechargePlanWallet(id, sub.planId);
       await admin.paymentAttempt.create({ data: { organizationId: id, subscriptionId: sub.id, commerceOrder: `ext-${sub.id}-${Date.now()}`, amount: 0, currency: "CLP", kind: "manual", status: "succeeded", provider: "external", reason: "Pago externo registrado por el Super Admin" } });
     }
     await this.audit(req, `platform.billing.${parsed.data.action}`, "subscription", sub.id, { hours: parsed.data.hours ?? null });

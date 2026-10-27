@@ -30,6 +30,14 @@ const envSchema = z.object({
     .optional()
     .transform((v) => v === "true" || v === "1"),
 
+  // Interruptor del endpoint de pago SIMULADO (`POST /billing/mock-confirm`, que activa
+  // plan/pack sin cobrar). En producción el endpoint está bloqueado SIEMPRE salvo que
+  // esto valga "true" (auditoría §9.5). Apagado por defecto: no setear en producción.
+  BILLING_MOCK_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
+
   API_PORT: z.coerce.number().default(4000),
   WEB_URL: z.string().default("http://localhost:3000"),
   // URL del panel de la segunda marca Conversia. Opcional: si falta, la marca
