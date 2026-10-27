@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import type { DefaultJobOptions, Job } from "bullmq";
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
@@ -19,6 +19,16 @@ import { QUEUE_NAMES, type BroadcastJob, type OutboundJob } from "@conversia/typ
 
 const BATCH = 100;
 
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): completados 24 h o 5.000, fallidos 7 días —
+ * sin esto Redis guarda cada job para siempre. SOLO retención: no toca
+ * `attempts`/`backoff`, y lo que declara cada `add()` le gana.
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
+
 let connection: IORedis | undefined;
 let outboundQueue: Queue<OutboundJob> | undefined;
 function getOutboundQueue(): Queue<OutboundJob> {
@@ -28,7 +38,7 @@ function getOutboundQueue(): Queue<OutboundJob> {
     // también pasan por `outbound` y deben reintentar fallos transitorios de Meta.
     outboundQueue = new Queue(QUEUE_NAMES.outbound, {
       connection,
-      defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
+      defaultJobOptions: { ...JOB_RETENTION, attempts: 3, backoff: { type: "exponential", delay: 3000 } },
     });
   }
   return outboundQueue;

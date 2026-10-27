@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { Queue } from "bullmq";
+import { Queue, type DefaultJobOptions } from "bullmq";
 import IORedis from "ioredis";
 import { brandOf, getEnv } from "@conversia/config";
 import { getAdminPrisma, withTenant } from "@conversia/database";
@@ -8,11 +8,22 @@ import { QUEUE_NAMES, validateOutboundUrl, type WebhookDeliveryJob } from "@conv
 /** Backoff de reintentos: 1m, 5m, 30m, 2h, 6h… */
 const BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000];
 
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): completados 24 h o 5.000, fallidos 7 días —
+ * sin esto Redis guarda cada job para siempre. SOLO retención: no define
+ * `attempts`/`backoff`, y lo que declara cada `add()` le gana (el `delay` del
+ * reintento de abajo sigue intacto).
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
+
 let retryQueue: Queue<WebhookDeliveryJob> | undefined;
 function getRetryQueue(): Queue<WebhookDeliveryJob> {
   if (!retryQueue) {
     const connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
-    retryQueue = new Queue(QUEUE_NAMES.webhooks, { connection });
+    retryQueue = new Queue(QUEUE_NAMES.webhooks, { connection, defaultJobOptions: { ...JOB_RETENTION } });
   }
   return retryQueue;
 }

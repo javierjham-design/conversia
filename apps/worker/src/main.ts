@@ -65,10 +65,15 @@ async function main() {
 
   const connection = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
+  // lockDuration 120 s (§8.4/§8.6): un turno de IA con herramientas pasa de los
+  // 30 s por defecto, BullMQ daba el job por perdido y lo re-procesaba en
+  // paralelo → el cliente recibía respuesta doble.
+  const AI_LOCK_DURATION_MS = 120_000;
+
   const inboundWorker = new Worker<InboundJob>(
     QUEUE_NAMES.inbound,
     async (job) => processInbound(job.data),
-    { connection, concurrency: env.WORKER_CONCURRENCY },
+    { connection, concurrency: env.WORKER_CONCURRENCY, lockDuration: AI_LOCK_DURATION_MS },
   );
   const outboundWorker = new Worker<OutboundJob>(
     QUEUE_NAMES.outbound,
@@ -137,7 +142,7 @@ async function main() {
   const agentTurnWorker = new Worker<AgentTurnJob>(
     QUEUE_NAMES.agentTurn,
     async (job) => runAgentTurn(job.data),
-    { connection, concurrency: 4 },
+    { connection, concurrency: 4, lockDuration: AI_LOCK_DURATION_MS },
   );
   // Reintento manual de una ejecución fallida desde el paso que falló (Observabilidad).
   const workflowRetryWorker = new Worker<WorkflowRetryJob>(
@@ -194,7 +199,25 @@ async function main() {
     { connection, concurrency: env.WORKER_CONCURRENCY },
   );
 
-  for (const w of [inboundWorker, outboundWorker, webhookWorker, capiWorker, eventsWorker, importsWorker, messageImportsWorker, broadcastWorker, emailsWorker, syncWorker, notificationsWorker, waEscalationWorker, agentTurnWorker, workflowRetryWorker]) {
+  // Lista ÚNICA de workers: la usan el log de fallos y el apagado, así ninguno
+  // queda fuera del cierre (messageImports se nos había quedado afuera, §8.6).
+  const allWorkers = [
+    inboundWorker,
+    outboundWorker,
+    webhookWorker,
+    capiWorker,
+    eventsWorker,
+    importsWorker,
+    messageImportsWorker,
+    broadcastWorker,
+    emailsWorker,
+    syncWorker,
+    notificationsWorker,
+    waEscalationWorker,
+    agentTurnWorker,
+    workflowRetryWorker,
+  ];
+  for (const w of allWorkers) {
     w.on("failed", (job, err) => console.error(`✖ Job ${w.name}/${job?.id} falló: ${err.message}`));
   }
 
@@ -227,6 +250,28 @@ async function main() {
     `✔ Worker Conversia activo — colas: ${QUEUE_NAMES.inbound}, ${QUEUE_NAMES.outbound} | IA: ${env.AI_PROVIDER} | WhatsApp: ${env.WHATSAPP_PROVIDER}`,
   );
 
+  // Apagado ordenado (§8.6): un worker trabado (turno de IA largo, Meta sin
+  // responder) no puede colgar el cierre. Se espera a lo sumo 25 s por cierre,
+  // se avisa y se sigue; los jobs que no terminaron vuelven a la cola y los
+  // retoma la instancia nueva.
+  const CLOSE_TIMEOUT_MS = 25_000;
+  const closeWithTimeout = async (name: string, closing: Promise<unknown>) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        closing.then(() => "closed" as const),
+        new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), CLOSE_TIMEOUT_MS);
+        }),
+      ]);
+      if (result === "timeout") console.error(`⚠ ${name} no cerró en ${CLOSE_TIMEOUT_MS} ms; se continúa con el apagado`);
+    } catch (e) {
+      console.error(`⚠ Error cerrando ${name}:`, (e as Error).message);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
   const shutdown = async () => {
     console.log("Cerrando worker…");
     clearInterval(heartbeat);
@@ -241,24 +286,12 @@ async function main() {
     stopReliability();
     stopWaTokenHealth();
     stopOverageMeter();
-    stopScheduler();
     stopTemplateSync();
     stopDailyDigests();
-    await Promise.all([
-      inboundWorker.close(),
-      outboundWorker.close(),
-      webhookWorker.close(),
-      capiWorker.close(),
-      eventsWorker.close(),
-      importsWorker.close(),
-      broadcastWorker.close(),
-      emailsWorker.close(),
-      syncWorker.close(),
-      notificationsWorker.close(),
-      waEscalationWorker.close(),
-      agentTurnWorker.close(),
-      workflowRetryWorker.close(),
-    ]);
+    // El scheduler espera su tick en curso (no corta un recordatorio a medias),
+    // acotado por el mismo techo de 25 s para no quedarnos colgados.
+    await closeWithTimeout("scheduler", stopScheduler());
+    await Promise.all(allWorkers.map((w) => closeWithTimeout(w.name, w.close())));
     await getPrisma().$disconnect();
     connection.disconnect();
     process.exit(0);

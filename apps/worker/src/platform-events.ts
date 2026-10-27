@@ -1,8 +1,18 @@
-import { Queue } from "bullmq";
+import { Queue, type DefaultJobOptions } from "bullmq";
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { QUEUE_NAMES, type CapiJob, type WebhookDeliveryJob } from "@conversia/types";
+
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): completados 24 h o 5.000, fallidos 7 días —
+ * sin esto Redis guarda cada job para siempre. SOLO retención: no define
+ * `attempts`/`backoff`, y lo que declara cada `add()` le gana.
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
 
 let connection: IORedis | undefined;
 let webhookQueue: Queue<WebhookDeliveryJob> | undefined;
@@ -11,8 +21,8 @@ let capiQueue: Queue<CapiJob> | undefined;
 function queues() {
   if (!connection) {
     connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
-    webhookQueue = new Queue(QUEUE_NAMES.webhooks, { connection });
-    capiQueue = new Queue(QUEUE_NAMES.capi, { connection });
+    webhookQueue = new Queue(QUEUE_NAMES.webhooks, { connection, defaultJobOptions: { ...JOB_RETENTION } });
+    capiQueue = new Queue(QUEUE_NAMES.capi, { connection, defaultJobOptions: { ...JOB_RETENTION } });
   }
   return { webhookQueue: webhookQueue!, capiQueue: capiQueue! };
 }
