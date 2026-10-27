@@ -18,6 +18,7 @@ import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits";
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
+import { assignPublishedAgentToChannelsSafe } from "../agents/assign-agent-to-channels";
 import { listWabaPhoneNumbers, subscribeAndRegisterWhatsapp } from "./whatsapp-onboard";
 
 const createChannelSchema = z.object({
@@ -258,6 +259,10 @@ export class ChannelsController {
       });
       return channel;
     });
+    // ETAPA 0 (hallazgo 2) — un canal sin agente por defecto es un número donde NADIE responde.
+    // Si la org ya tiene un agente publicado y el canal quedó sin agente, se le asigna solo.
+    // Gateado a marca conversia, idempotente y fail-soft (TuBot sale antes de tocar nada).
+    await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { actorId: ctx.userId });
     return { ...created, warnings };
   }
 
@@ -422,7 +427,7 @@ export class ChannelsController {
     }
 
     // 5. Persistir el canal con el token por-WABA cifrado
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const saved = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const existing = await tx.whatsappPhoneNumber.findUnique({ where: { phoneNumberId: input.phoneNumberId } });
 
       // Re-onboarding idempotente: si ESTE tenant ya tiene el número (bajo RLS solo
@@ -512,6 +517,11 @@ export class ChannelsController {
       });
       return { ok: true, id: channel.id, name, displayPhone, businessName, warnings: onboard.warnings };
     });
+    // ETAPA 0 (hallazgo 2) — camino ESTÁNDAR (Embedded Signup): número conectado y agente
+    // publicado, pero el canal se guardaba con `defaultAgentId: null` y nadie respondía.
+    // Idempotente: solo rellena los canales sin agente; nunca pisa el que eligió el cliente.
+    await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { actorId: ctx.userId });
+    return saved;
   }
 
   /**
@@ -710,6 +720,10 @@ export class ChannelsController {
         });
         return { ok: true, id: channel.id, name, displayPhone: displayPhone ?? "(se activará en breve)", businessName, coexistence: true, coexVerified, pendingNumber: !effectivePhoneId, warnings: onboard.warnings };
       });
+      // ETAPA 0 (hallazgo 2) — mismo cierre que en el camino estándar: el canal coexistente
+      // también nacía sin agente por defecto. Fuera de la tx y fail-soft: si falla, el canal
+      // queda conectado igual y el cliente puede elegir el agente a mano en Canales.
+      await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { actorId: ctx.userId });
       return result;
     } catch (e) {
       // Fail-soft: deja constancia en la cola de operación y responde accionable (no 500).

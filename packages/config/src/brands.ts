@@ -21,6 +21,28 @@ export interface BrandConfig {
   paymentSubjectPrefix: string;
   userAgent: string;
   logoPath: string;
+  /** Rutas de la pantalla de dinero del panel de ESTA marca (los frontends no comparten rutas). */
+  billing: BrandBillingConfig;
+}
+
+/**
+ * Rutas de cobro del panel de una marca. Existen porque los dos frontends NO comparten
+ * rutas: TuBot (apps/web) tiene `/billing` y `/settings/plan`; conversia-web tiene `/cobros`
+ * y nada más. Mandar a un cliente de Conversia a `/billing` lo deja en un 404 después de
+ * pagar (hallazgo 3 de la auditoría 26/27-oct-2026: "el cliente no puede pagar desde su
+ * panel"). Las de TuBot son EXACTAMENTE las de hoy y no se tocan.
+ */
+export interface BrandBillingConfig {
+  /** Pantalla de plan/pagos del panel. */
+  path: string;
+  /** Pantalla a la que vuelve la compra de un paquete de créditos/mensajes. */
+  packagesPath: string;
+  /** Query del retorno de un checkout PAGADO ("" = sin marca, como TuBot hoy). */
+  paidQuery: string;
+  /** Query del retorno de un checkout CANCELADO ("" = sin marca, como TuBot hoy). */
+  cancelledQuery: string;
+  /** Query del retorno del registro de tarjeta: la UI la lee para llamar `confirm-card`. */
+  cardQuery: string;
 }
 
 /** Valores estáticos por marca (los dinámicos —webUrl/mailFrom/replyTo/resendApiKey— los pone brandOf). */
@@ -32,6 +54,9 @@ export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom" | "r
     paymentSubjectPrefix: "TuBot",
     userAgent: "TuBot/1.0",
     logoPath: "/brands/tubot-logo.svg",
+    // EXACTAMENTE lo de hoy en apps/web (TuBot en producción): /billing, /settings/plan y
+    // ?card=1, sin marca de resultado en el retorno del checkout.
+    billing: { path: "/billing", packagesPath: "/settings/plan", paidQuery: "", cancelledQuery: "", cardQuery: "card=1" },
   },
   conversia: {
     key: "conversia",
@@ -40,6 +65,9 @@ export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom" | "r
     paymentSubjectPrefix: "Conversia",
     userAgent: "Conversia/1.0",
     logoPath: "/brands/conversia-logo.svg",
+    // conversia-web NO tiene /billing ni /settings/plan: su pantalla de dinero es /cobros,
+    // y lee ?pago=ok|cancelado para no dejar al cliente perdido tras volver de la pasarela.
+    billing: { path: "/cobros", packagesPath: "/cobros", paidQuery: "pago=ok", cancelledQuery: "pago=cancelado", cardQuery: "card=1" },
   },
 };
 
@@ -67,6 +95,54 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
     replyTo: env.MAIL_REPLY_TO || null,
     resendApiKey: env.RESEND_API_KEY,
     mfaIssuer: env.SUPER_ADMIN_MFA_ISSUER, // respeta override actual del env
+  };
+}
+
+/**
+ * Pega una query a una URL que PUEDE ya tener una (`?a=1` → `&b=2`). Las pasarelas
+ * añaden sus propias marcas al retorno (`?paid=1`, `?mock_session=…`), así que sin esto
+ * un retorno de Conversia (`/cobros?pago=ok`) saldría con dos `?` y el navegador
+ * perdería el parámetro. Query vacía → URL tal cual.
+ */
+export function appendQuery(url: string, query: string): string {
+  if (!query) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}${query}`;
+}
+
+/** URLs absolutas de retorno de cobro de una organización (checkout, tarjeta, paquetes). */
+export interface BillingReturnUrls {
+  /** Pantalla de plan/pagos del panel, sin query (usada también como urlReturn del collect). */
+  home: string;
+  /** Retorno de un checkout PAGADO. */
+  success: string;
+  /** Retorno de un checkout CANCELADO/abandonado. */
+  cancel: string;
+  /** Retorno del registro de tarjeta de Flow (la UI confirma con `subscription/confirm-card`). */
+  card: string;
+  /** Retorno de la compra de un paquete de créditos/mensajes, pagada. */
+  packagesSuccess: string;
+  /** Retorno de la compra de un paquete, cancelada. */
+  packagesCancel: string;
+}
+
+/**
+ * Retornos de cobro POR MARCA DE LA ORGANIZACIÓN. Única fuente de verdad: todo
+ * `successUrl`/`cancelUrl`/`urlReturn` del módulo de facturación sale de aquí, nunca de
+ * una ruta escrita a mano (que es cómo un cliente de Conversia terminaba en el `/billing`
+ * de TuBot, inexistente en su panel).
+ */
+export function billingReturnUrls(org: { brand?: string | null } | null | undefined): BillingReturnUrls {
+  const brand = brandOf(org);
+  const b = brand.billing;
+  const home = `${brand.webUrl}${b.path}`;
+  const packages = `${brand.webUrl}${b.packagesPath}`;
+  return {
+    home,
+    success: appendQuery(home, b.paidQuery),
+    cancel: appendQuery(home, b.cancelledQuery),
+    card: appendQuery(home, b.cardQuery),
+    packagesSuccess: appendQuery(packages, b.paidQuery),
+    packagesCancel: appendQuery(packages, b.cancelledQuery),
   };
 }
 

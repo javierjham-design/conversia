@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Post, Put, Req, UnauthorizedException } from "@nestjs/common";
 import type { Request } from "express";
 import { z } from "zod";
-import { getEnv, brandOf } from "@conversia/config";
+import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -293,7 +293,9 @@ export class BillingController {
     else await this.prisma.admin.subscription.create({ data: { organizationId: ctx.organizationId, status: "TRIALING", ...data } });
     let reg: { url: string; token: string };
     try {
-      reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: `${brandOf(org).webUrl}/billing?card=1` });
+      // Retorno POR MARCA (hallazgo 3): TuBot vuelve a /billing?card=1 (igual que siempre);
+      // una org Conversia vuelve a /cobros?card=1, que es la pantalla que SÍ existe en su panel.
+      reg = await flowRegisterCard(cfg, { customerId: customerRef, urlReturn: billingReturnUrls(org).card });
     } catch (err) {
       // El comercio aún no tiene contratado "cobro automático" en Flow: error
       // claro y marcado para que el frontend caiga al checkout de pago único.
@@ -387,9 +389,10 @@ export class BillingController {
     const cfg = await this.flowCfg();
     const commerceOrder = `sub-${subId}-${Date.now()}`;
     // F1/B2 — asunto y retorno por marca del tenant (no el panel de TuBot fijo).
-    const brand = brandOf(await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } }));
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+    const brand = brandOf(org);
     await this.prisma.admin.paymentAttempt.create({ data: { organizationId, subscriptionId: subId, commerceOrder, amount, currency, kind, attemptNumber, status: "pending", provider: "flow" } });
-    const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `${brand.paymentSubjectPrefix} · Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: `${brand.webUrl}/billing` });
+    const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `${brand.paymentSubjectPrefix} · Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: billingReturnUrls(org).home });
     await this.prisma.admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
   }
 
@@ -456,6 +459,8 @@ export class BillingController {
     const feats = (plan.features as any) ?? {};
     const variantId = useYearly ? (feats.lsVariantIdYearly ?? feats.lsVariantId) : feats.lsVariantId;
     const brand = brandOf(org);
+    // Retornos POR MARCA: TuBot → /billing (como hoy); Conversia → /cobros?pago=ok|cancelado.
+    const back = billingReturnUrls(org);
     const session = await provider.createCheckout({
       organizationId: ctx.organizationId,
       planCode: plan.code,
@@ -465,8 +470,8 @@ export class BillingController {
       interval,
       variantId: variantId ? String(variantId) : undefined,
       brandSubjectPrefix: brand.paymentSubjectPrefix,
-      successUrl: `${brand.webUrl}/billing`,
-      cancelUrl: `${brand.webUrl}/billing`,
+      successUrl: back.success,
+      cancelUrl: back.cancel,
     });
     // Cuenta la redención sólo cuando el checkout se creó bien (no en validaciones fallidas).
     if (applied.coupon) {
@@ -508,8 +513,9 @@ export class BillingController {
       email: user?.email,
       interval: "monthly",
       brandSubjectPrefix: brand.paymentSubjectPrefix,
-      successUrl: `${brand.webUrl}/settings/plan`,
-      cancelUrl: `${brand.webUrl}/settings/plan`,
+      // TuBot → /settings/plan (como hoy); Conversia → /cobros (su única pantalla de dinero).
+      successUrl: billingReturnUrls(org).packagesSuccess,
+      cancelUrl: billingReturnUrls(org).packagesCancel,
     });
     await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.buy_package", entityType: "package", entityId: pkg.code, after: { amount, provider: session.provider } } }),

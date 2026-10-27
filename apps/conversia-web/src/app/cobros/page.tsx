@@ -1,36 +1,89 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { leerRetorno } from "@/lib/cobros-retorno";
 
-// Estado de suscripción en español (es-CL), sin anglicismos técnicos.
+/**
+ * COBROS — la pantalla de dinero del cliente de Conversia (su plan, sus créditos y su
+ * método de pago). Es también la pantalla de RETORNO de la pasarela: la API manda los
+ * `successUrl`/`cancelUrl`/`urlReturn` de una org Conversia a `/cobros` (antes iban al
+ * `/billing` de TuBot, que acá no existe → el cliente terminaba en un 404 después de
+ * pagar). Lee:
+ *   - `?pago=ok`        → volvió de pagar (lo confirma el webhook de la pasarela).
+ *   - `?pago=cancelado` → abandonó el pago; no se le cobró nada.
+ *   - `?card=1`         → volvió de registrar la tarjeta en Flow → confirma con la API.
+ *
+ * Flujo de tarjeta (mismo contrato que TuBot, apps/web/.../subscription-self-service.tsx):
+ *   POST /billing/subscription/start {planCode, billingInterval} → {url, token}
+ *   → guardamos el token en sessionStorage y vamos a la página segura de Flow
+ *   → Flow devuelve a /cobros?card=1
+ *   → POST /billing/subscription/confirm-card {token} → {registered}
+ * Nunca pasan datos de tarjeta por acá: solo el token de la operación.
+ */
+
+// Estado de suscripción en español (es-CL), sin anglicismos técnicos. La API devuelve el
+// estado en MAYÚSCULAS (TRIALING/ACTIVE/PAST_DUE/…) → se busca en minúsculas.
 const SUB_ESTADO: Record<string, string> = {
   active: "activa",
   trialing: "en prueba",
   past_due: "pago pendiente",
   paused: "en pausa",
+  suspended: "suspendida",
   canceled: "cancelada",
   cancelled: "cancelada",
   incomplete: "incompleta",
   unpaid: "impaga",
 };
+const subEstado = (s: string) => SUB_ESTADO[s.toLowerCase()] ?? s;
 
 type Summary = { balance: number; included: number; consumed: number; byCategory: Record<string, number>; projected: number; pctUsed: number; over80: boolean };
 type Me = {
   organization: { currency: string };
   plan: { code: string; name: string; interval: string } | null;
   subscription: { status: string; periodEnd: string | null; interval: string } | null;
+  paymentMethod: { provider: string; brand: string | null; last4: string | null } | null;
+  /** Pasarela con la que pagaría hoy esta cuenta ("flow" en Chile). */
+  paymentProvider: string;
 };
 type Pkg = { code: string; name: string; credits: number; priceClp: number; priceUsd: number };
 type Plan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; custom: boolean };
 
 const CAT_LABEL: Record<string, string> = { utility: "Utilidad", authentication: "Autenticación", marketing: "Marketing", service: "Servicio", otro: "Otro" };
 
+/** Token de la operación de registro de tarjeta mientras el cliente está en Flow. */
+const CARD_TOKEN_KEY = "conversia_card_token";
+function ssGet(k: string): string | null {
+  try {
+    return sessionStorage.getItem(k);
+  } catch {
+    return null; // modo privado / almacenamiento bloqueado
+  }
+}
+function ssSet(k: string, v: string): void {
+  try {
+    sessionStorage.setItem(k, v);
+  } catch {
+    /* noop */
+  }
+}
+function ssDel(k: string): void {
+  try {
+    sessionStorage.removeItem(k);
+  } catch {
+    /* noop */
+  }
+}
+
 function barColor(pct: number): string {
   if (pct >= 100) return "var(--danger)";
   if (pct >= 80) return "var(--warn)";
   return "var(--ok)";
 }
+
+/** Aviso único de la pantalla (retorno de la pasarela, tarjeta, errores). */
+type Aviso = { kind: "ok" | "info" | "warn" | "error"; text: string };
+const AVISO_COLOR: Record<Aviso["kind"], string> = { ok: "var(--ok)", info: "var(--acc-deep)", warn: "var(--warn)", error: "var(--danger)" };
 
 export default function Cobros() {
   const [me, setMe] = useState<Me | null>(null);
@@ -40,41 +93,164 @@ export default function Cobros() {
   const [interval, setIntervalSel] = useState<"monthly" | "yearly">("monthly");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
 
-  useEffect(() => {
-    api<Me>("/billing/me").then(setMe).catch((e) => setError((e as Error).message));
-    api<Summary>("/billing/wallet/summary").then(setS).catch(() => {});
-    api<{ packages: Pkg[] }>("/billing/wallet").then((r) => setPkgs(r.packages)).catch(() => {});
-    api<Plan[]>("/billing/plans").then(setPlans).catch(() => {});
+  const load = useCallback(async () => {
+    const m = await api<Me>("/billing/me").catch((e) => {
+      setError((e as Error).message);
+      return null;
+    });
+    if (m) setMe(m);
+    await Promise.all([
+      api<Summary>("/billing/wallet/summary").then(setS).catch(() => {}),
+      api<{ packages: Pkg[] }>("/billing/wallet").then((r) => setPkgs(r.packages)).catch(() => {}),
+      api<Plan[]>("/billing/plans").then(setPlans).catch(() => {}),
+    ]);
   }, []);
+
+  // ───────────── Retorno de la pasarela (una sola vez por carga) ─────────────
+  const retornoLeido = useRef(false);
+  useEffect(() => {
+    void load();
+    if (retornoLeido.current) return;
+    retornoLeido.current = true;
+    const retorno = leerRetorno(window.location.search);
+    if (!retorno) return;
+    // Limpia la URL para que un refresco no repita el aviso ni la confirmación.
+    window.history.replaceState(null, "", window.location.pathname);
+    if (retorno === "tarjeta") {
+      void confirmarTarjeta();
+    } else if (retorno === "pago-ok") {
+      setAviso({
+        kind: "ok",
+        text: "Pago recibido. Lo estamos confirmando con la pasarela: tu plan y tus créditos quedan activos en cuanto nos lo confirme (suele ser cuestión de segundos).",
+      });
+    } else {
+      setAviso({ kind: "warn", text: "Cancelaste el pago, así que no te cobramos nada. Puedes volver a intentarlo cuando quieras." });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
 
   const currency = me?.organization.currency ?? "CLP";
   const money = (clpV: number, usdV: number) =>
     currency === "CLP" ? "$" + Math.round(clpV).toLocaleString("es-CL") : "US$" + Math.round(usdV).toLocaleString("en-US");
 
-  async function buyPackage(code: string) {
-    setBusy("pkg:" + code);
-    setError(null);
+  /** Plan de pago vigente (el de prueba/gratis no está en el catálogo → no sirve para la tarjeta). */
+  const planContratado = me?.plan && plans.some((p) => p.code === me.plan!.code && !p.custom) ? me.plan.code : null;
+  const conFlow = me?.paymentProvider === "flow" || !!me?.paymentMethod;
+  /** Hay una operación de tarjeta en vuelo (abriendo Flow o confirmando el retorno). */
+  const tarjetaEnCurso = busy === "card" || !!busy?.startsWith("card:");
+
+  // ───────────── Registro de tarjeta (Flow) ─────────────
+
+  async function confirmarTarjeta() {
+    const token = ssGet(CARD_TOKEN_KEY);
+    if (!token) {
+      setAviso({
+        kind: "warn",
+        text: "Volviste del registro de tarjeta, pero no pudimos retomar la operación en este navegador. Si tu tarjeta quedó registrada la verás más abajo; si no, vuelve a intentarlo.",
+      });
+      return;
+    }
+    setBusy("card");
+    setAviso({ kind: "info", text: "Estamos confirmando tu tarjeta…" });
     try {
-      const r = await api<{ url?: string }>("/billing/buy-package", { method: "POST", body: JSON.stringify({ code }) });
-      if (r.url) window.location.href = r.url;
-      else setError("No se pudo iniciar el pago.");
+      const r = await api<{ registered: boolean }>("/billing/subscription/confirm-card", { method: "POST", body: JSON.stringify({ token }) });
+      ssDel(CARD_TOKEN_KEY);
+      setAviso(
+        r.registered
+          ? {
+              kind: "ok",
+              text: "Tarjeta registrada ✔ Estamos procesando el primer cobro de tu plan. Se renovará solo en cada fecha y puedes cambiar la tarjeta cuando quieras.",
+            }
+          : { kind: "error", text: "No pudimos registrar tu tarjeta y no te cobramos nada. Revisa los datos o prueba con otra tarjeta." },
+      );
+      await load();
     } catch (e) {
-      setError((e as Error).message);
+      setAviso({ kind: "error", text: (e as Error).message });
     } finally {
       setBusy(null);
     }
   }
 
-  async function changePlan(code: string) {
-    setBusy("plan:" + code);
+  /**
+   * Activa el cobro automático: registra la tarjeta en la página segura de Flow (el token
+   * de la operación queda en sessionStorage para confirmarlo al volver). Si la cuenta de
+   * Flow todavía no tiene cobro automático —o no hay Flow configurado— no dejamos al
+   * cliente sin poder pagar: cae al checkout de pago único.
+   */
+  async function registrarTarjeta(planCode: string) {
+    setBusy("card:" + planCode);
     setError(null);
     try {
-      const r = await api<{ url?: string }>("/billing/checkout", { method: "POST", body: JSON.stringify({ planCode: code, billingInterval: interval }) });
-      if (r.url) window.location.href = r.url;
-      else setError("No se pudo iniciar el pago.");
+      const r = await api<{ url: string; token: string }>("/billing/subscription/start", {
+        method: "POST",
+        body: JSON.stringify({ planCode, billingInterval: interval }),
+      });
+      ssSet(CARD_TOKEN_KEY, r.token);
+      setAviso({ kind: "info", text: "Te llevamos a la página segura de Flow para registrar tu tarjeta…" });
+      window.location.href = r.url;
     } catch (e) {
-      setError((e as Error).message);
+      const m = (e as Error).message;
+      if (/FLOW_NO_AUTO_CHARGE|Flow no est[áa] configurado/i.test(m)) {
+        setAviso({ kind: "info", text: "El cobro automático todavía no está disponible: lo procesamos como un pago único." });
+        await checkout(planCode);
+        return;
+      }
+      setAviso({ kind: "error", text: m });
+      setBusy(null);
+    }
+  }
+
+  // ───────────── Checkout (pago único / mock en desarrollo) ─────────────
+
+  async function checkout(planCode: string) {
+    setBusy("plan:" + planCode);
+    try {
+      const r = await api<{ url?: string; mock?: boolean }>("/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({ planCode, billingInterval: interval }),
+      });
+      if (r.mock) {
+        // Sin pasarela real (desarrollo): se confirma simulado, SIN cobro.
+        await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode, billingInterval: interval }) });
+        setAviso({ kind: "ok", text: "Pago de PRUEBA confirmado (no hubo cobro real). Tu plan quedó activo." });
+        await load();
+      } else if (r.url) {
+        window.location.href = r.url;
+      } else {
+        setAviso({ kind: "error", text: "No pudimos abrir el pago. Inténtalo de nuevo en un momento." });
+      }
+    } catch (e) {
+      setAviso({ kind: "error", text: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Puerta única de pago del plan: con Flow va por tarjeta (recurrente); si no, checkout. */
+  function contratar(planCode: string) {
+    setAviso(null);
+    if (me?.paymentProvider === "flow") return void registrarTarjeta(planCode);
+    return void checkout(planCode);
+  }
+
+  async function buyPackage(code: string) {
+    setBusy("pkg:" + code);
+    setAviso(null);
+    try {
+      const r = await api<{ url?: string; mock?: boolean }>("/billing/buy-package", { method: "POST", body: JSON.stringify({ code }) });
+      if (r.mock) {
+        await api("/billing/mock-confirm", { method: "POST", body: JSON.stringify({ planCode: `pkg:${code}` }) });
+        setAviso({ kind: "ok", text: "Créditos acreditados (pago de PRUEBA, sin cobro real)." });
+        await load();
+      } else if (r.url) {
+        window.location.href = r.url;
+      } else {
+        setAviso({ kind: "error", text: "No pudimos abrir el pago. Inténtalo de nuevo en un momento." });
+      }
+    } catch (e) {
+      setAviso({ kind: "error", text: (e as Error).message });
     } finally {
       setBusy(null);
     }
@@ -91,6 +267,26 @@ export default function Cobros() {
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "28px 20px 40px" }}>
         <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Cobros</h1>
         <p className="text-dim" style={{ fontSize: 14, margin: "0 0 20px" }}>Tus créditos, tu plan y tus pagos.</p>
+
+        {/* Aviso del retorno de la pasarela / de la tarjeta. Siempre arriba y anunciado. */}
+        <div aria-live="polite" role="status">
+          {aviso ? (
+            <div
+              className="card"
+              data-cobros-aviso={aviso.kind}
+              style={{ padding: "14px 16px", marginBottom: 16, borderLeft: `4px solid ${AVISO_COLOR[aviso.kind]}`, display: "flex", gap: 12, alignItems: "flex-start" }}
+            >
+              <p style={{ margin: 0, fontSize: 14, flex: 1 }}>{aviso.text}</p>
+              <button
+                onClick={() => setAviso(null)}
+                aria-label="Cerrar aviso"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-dim)", fontSize: 18, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+        </div>
         {error ? <p style={{ color: "var(--danger)" }}>{error}</p> : null}
 
         {/* Créditos */}
@@ -157,6 +353,7 @@ export default function Cobros() {
                 const current = me?.plan?.code === p.code;
                 const price = planPrice(p);
                 const unavailable = !p.custom && (price == null || price <= 0);
+                const working = busy === "plan:" + p.code || busy === "card:" + p.code;
                 return (
                   <div key={p.code} className="card" style={{ padding: 18, border: current ? "none" : undefined, boxShadow: current ? "inset 0 0 0 2px var(--acc)" : undefined }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -170,8 +367,8 @@ export default function Cobros() {
                     ) : p.custom ? (
                       <a href="/conversaciones" className="btn-accent" style={{ display: "block", textAlign: "center", textDecoration: "none" }}>Hablar con nosotros</a>
                     ) : (
-                      <button className="btn-accent" onClick={() => changePlan(p.code)} disabled={unavailable || busy === "plan:" + p.code} style={{ width: "100%", opacity: unavailable || busy === "plan:" + p.code ? 0.5 : 1 }}>
-                        {unavailable ? "Sin precio " + (interval === "yearly" ? "anual" : "mensual") : busy === "plan:" + p.code ? "Abriendo pago…" : "Contratar"}
+                      <button className="btn-accent" data-copilot={`cobros-contratar-${p.code}`} onClick={() => contratar(p.code)} disabled={unavailable || working} style={{ width: "100%", opacity: unavailable || working ? 0.5 : 1 }}>
+                        {unavailable ? "Sin precio " + (interval === "yearly" ? "anual" : "mensual") : working ? "Abriendo pago…" : "Contratar"}
                       </button>
                     )}
                   </div>
@@ -180,11 +377,60 @@ export default function Cobros() {
             </div>
             {me?.subscription ? (
               <p className="text-dim" style={{ fontSize: 12, margin: "12px 0 0" }}>
-                Suscripción: {SUB_ESTADO[me.subscription.status] ?? me.subscription.status}{me.subscription.periodEnd ? ` · próximo período ${new Date(me.subscription.periodEnd).toLocaleDateString("es-CL")}` : ""}
+                Suscripción: {subEstado(me.subscription.status)}{me.subscription.periodEnd ? ` · próximo período ${new Date(me.subscription.periodEnd).toLocaleDateString("es-CL")}` : ""}
               </p>
             ) : null}
             <p className="text-dim" style={{ fontSize: 12, margin: "6px 0 0" }}>Pagas con {currency === "CLP" ? "Flow (tarjetas chilenas)" : "tarjeta internacional"}. Al confirmar te llevamos a la pasarela.</p>
           </>
+        ) : null}
+
+        {/* Método de pago (cobro automático con tarjeta en Flow) */}
+        {conFlow ? (
+          <div className="card" data-copilot="cobros-metodo-pago" style={{ padding: 22, marginTop: 24 }}>
+            <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Método de pago</h2>
+            {me?.paymentMethod ? (
+              <>
+                <p style={{ margin: "0 0 4px", fontSize: 14 }}>
+                  <span style={{ color: "var(--ok)", fontWeight: 700 }}>●</span> Tarjeta registrada
+                  {me.paymentMethod.brand ? ` · ${me.paymentMethod.brand}` : ""}
+                  {me.paymentMethod.last4 ? ` ···· ${me.paymentMethod.last4}` : ""}
+                </p>
+                <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
+                  Tu plan se renueva solo en cada fecha; no tienes que pagar a mano. Nunca guardamos los datos de tu tarjeta.
+                </p>
+                <button
+                  className="btn-accent"
+                  data-copilot="cobros-registrar-tarjeta"
+                  onClick={() => { if (planContratado) void registrarTarjeta(planContratado); }}
+                  disabled={!planContratado || tarjetaEnCurso}
+                  style={{ opacity: !planContratado || tarjetaEnCurso ? 0.5 : 1 }}
+                >
+                  {tarjetaEnCurso ? "Abriendo Flow…" : "Cambiar tarjeta"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
+                  Registra tu tarjeta una sola vez en la página segura de Flow (nunca guardamos sus datos) y tu plan se
+                  cobra solo en cada fecha de renovación. Puedes cambiarla o cancelar cuando quieras.
+                </p>
+                <button
+                  className="btn-accent"
+                  data-copilot="cobros-registrar-tarjeta"
+                  onClick={() => { if (planContratado) void registrarTarjeta(planContratado); }}
+                  disabled={!planContratado || tarjetaEnCurso}
+                  style={{ opacity: !planContratado || tarjetaEnCurso ? 0.5 : 1 }}
+                >
+                  {busy === "card" ? "Confirmando tarjeta…" : tarjetaEnCurso ? "Abriendo Flow…" : "Registrar mi tarjeta"}
+                </button>
+                {!planContratado ? (
+                  <p className="text-dim" style={{ fontSize: 12, margin: "10px 0 0" }}>
+                    Primero elige tu plan aquí arriba: al contratarlo registras la tarjeta en el mismo paso.
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
         ) : null}
       </main>
     </AppShell>

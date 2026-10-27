@@ -5,6 +5,7 @@ import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { brandOf, accentForCountry } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { VerticalService } from "../organizations/vertical.service";
+import { applyDraftToOrganization, type ApplyDraftTx } from "./apply-draft";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken } from "./jwt";
 import { RefreshSessionService } from "./refresh-session.service";
 import { sendEmail } from "../common/email";
@@ -232,6 +233,26 @@ export class AuthService {
         await this.vertical.install(result.org.id, effectiveVertical, { source: "registration" });
       } catch (e) {
         console.error(`✖ No se pudo instalar el paquete vertical "${effectiveVertical}" en ${result.org.id}:`, (e as Error).message);
+      }
+    }
+
+    // COP Etapa 0 — aplicar lo que el cliente ya cargó en `/crear` (hallazgo 5): web y
+    // texto leído de su sitio quedan en la organización, y ese texto se ANEXA al prompt de
+    // los agentes que acaba de instalar el paquete del rubro. Sin esto, el cliente prueba
+    // un bot que habla de SU negocio y al registrarse recibe uno genérico.
+    // Va DESPUÉS del vertical a propósito (anexa sobre lo que el paquete dejó) y es
+    // best-effort: si falla, la cuenta queda igual de usable.
+    if (draftValid && isConversia) {
+      try {
+        await this.prisma.withTenant(result.org.id, (tx) =>
+          applyDraftToOrganization(tx as unknown as ApplyDraftTx, result.org.id, {
+            businessName: draft!.businessName,
+            website: draft!.website,
+            config: draft!.config,
+          }),
+        );
+      } catch (e) {
+        console.error(`✖ No se pudo aplicar el borrador de /crear en ${result.org.id}:`, (e as Error).message);
       }
     }
 

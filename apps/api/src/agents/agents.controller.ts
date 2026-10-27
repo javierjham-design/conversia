@@ -8,6 +8,9 @@ import { enforcePlanLimit } from "../common/plan-limits";
 import { RateLimitService } from "../common/rate-limit";
 // Lógica/schemas compartidos con la consola de plataforma (una sola fuente de verdad).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify, runAgentTest } from "./agent-test";
+import { runQaBattery } from "./agent-qa";
+import { explainQaResults, qaHeadline } from "./qa-report";
+import { assignPublishedAgentToChannelsSafe } from "./assign-agent-to-channels";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -247,11 +250,116 @@ export class AgentsController {
     });
   }
 
+  /**
+   * ETAPA 0 (hallazgo 1) — PUBLICACIÓN EN EL FLUJO DEL CLIENTE. El paquete vertical deja los
+   * agentes en BORRADOR y hasta hoy solo el super admin podía correr la batería de auto-QA, así
+   * que el cliente se quedaba para siempre en "Asistente en preparación".
+   *
+   * Corre `runQaBattery` con `autoPublish: true` sobre el agente de SU organización:
+   *  - batería verde  → publica (y asigna el agente a los canales que no tengan uno).
+   *  - batería roja   → NO publica y devuelve, en lenguaje simple, qué falló y cómo arreglarlo.
+   * Siempre queda auditado (`agent.qa_publish`). El uso del super admin (platform.controller)
+   * no se toca: `runQaBattery` queda igual.
+   */
+  @Post(":id/qa-publish")
+  async qaPublish(@Param("id") id: string) {
+    const ctx = requirePermission("agents:write");
+    // La batería ejecuta varios turnos reales del agente (tokens del proveedor): mismo criterio
+    // antiabuso que el probador, pero más estricto porque cada corrida son 4+ llamadas.
+    const rl = await this.rateLimit.custom(`rl:agent-qa:${ctx.userId ?? ctx.organizationId}`, 6, 300);
+    if (!rl.allowed) {
+      throw new HttpException(
+        "Ya probamos tu asistente varias veces seguidas. Espera un par de minutos y vuelve a intentar.",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const agent = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.agent.findFirst({ where: { id, deletedAt: null }, select: { id: true, name: true } }),
+    );
+    if (!agent) throw new NotFoundException("Agente no encontrado");
+
+    const qa = await runQaBattery(this.prisma, ctx.organizationId, id, { autoPublish: true });
+
+    if (!qa.ok) {
+      // Sin versión guardada (o la batería no pudo arrancar): mensaje entendible, no un 500.
+      const problemas = explainQaResults([{ name: "preparación", pass: false, reason: qa.error ?? "error" }]);
+      await this.auditQaPublish(ctx.organizationId, ctx.userId, id, qa, problemas);
+      return {
+        ok: false,
+        passed: false,
+        published: false,
+        corrected: false,
+        mensaje:
+          qa.error === "sin versión del agente"
+            ? "Tu asistente todavía no tiene instrucciones guardadas. Guárdalo y vuelve a intentar."
+            : qaHeadline({ passed: false, published: false, corrected: false }, problemas.length),
+        problemas,
+        escenarios: [],
+      };
+    }
+
+    const problemas = explainQaResults(qa.results);
+    // Recién publicado → que alguien lo use: se asigna a los canales sin agente por defecto
+    // (solo marca conversia, idempotente). Fail-soft: nunca tumba la publicación.
+    const canales = qa.published
+      ? await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { preferAgentId: id, actorId: ctx.userId })
+      : { assigned: 0, agentId: null as string | null, channelIds: [] as string[] };
+
+    await this.auditQaPublish(ctx.organizationId, ctx.userId, id, qa, problemas);
+
+    return {
+      ok: true,
+      passed: qa.passed,
+      published: qa.published,
+      corrected: qa.corrected,
+      mensaje: qaHeadline(qa, problemas.length),
+      problemas,
+      canalesAsignados: canales.assigned,
+      // Detalle técnico para soporte (el cliente ve `problemas`).
+      escenarios: qa.results,
+    };
+  }
+
+  /** Deja constancia de cada intento de publicación del cliente (pase o falle). */
+  private auditQaPublish(
+    orgId: string,
+    userId: string | undefined,
+    agentId: string,
+    qa: { passed: boolean; published: boolean; corrected: boolean; results?: { name: string; pass: boolean }[] },
+    problemas: { titulo: string }[],
+  ) {
+    return this.prisma
+      .withTenant(orgId, (tx) =>
+        tx.auditLog.create({
+          data: {
+            organizationId: orgId,
+            actorType: "user",
+            actorId: userId,
+            action: "agent.qa_publish",
+            entityType: "agent",
+            entityId: agentId,
+            after: {
+              passed: qa.passed,
+              published: qa.published,
+              corrected: qa.corrected,
+              fallos: (qa.results ?? []).filter((r) => !r.pass).map((r) => r.name),
+              problemas: problemas.map((p) => p.titulo),
+            },
+          },
+        }),
+      )
+      .then(() => undefined)
+      .catch((e) => {
+        console.error("✖ auditar qa-publish:", (e as Error)?.message ?? e);
+      });
+  }
+
   /** Publica el borrador: pasa a PRODUCCIÓN inmediatamente para nuevas respuestas. */
   @Post(":id/publish")
-  publish(@Param("id") id: string) {
+  async publish(@Param("id") id: string) {
     const ctx = requirePermission("agents:write");
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const out = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const draft = await tx.agentVersion.findFirst({
         where: { agentId: id, status: "DRAFT" },
         orderBy: { version: "desc" },
@@ -275,6 +383,11 @@ export class AgentsController {
       });
       return { ok: true, publishedVersion: published.version };
     });
+    // ETAPA 0 (hallazgo 2) — si el agente se publica DESPUÉS de conectar el canal, se asigna
+    // a los canales que no tengan agente. Gateado a marca conversia e idempotente: para TuBot
+    // sale antes de tocar nada.
+    await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { preferAgentId: id, actorId: ctx.userId });
+    return out;
   }
 
   @Post(":id/active")

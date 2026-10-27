@@ -1,8 +1,9 @@
 name: e2e "como el dueño"
 
 # Suite browser-real contra el STACK DOCKER (pnpm sim:up): el navegador hace lo que hace el
-# dueño, jornadas A–D. Subconjunto CRÍTICO (A viaje + B + D) en PRs que tocan el producto;
-# la suite COMPLETA (14 rubros + C + todos los dispositivos) de noche. Nunca contra producción.
+# dueño, jornadas A–G. Subconjunto CRÍTICO (A viaje + B + D + G pago) en PRs que tocan el
+# producto; la suite COMPLETA (14 rubros + C + todos los dispositivos) de noche. Nunca
+# contra producción.
 
 on:
   pull_request:
@@ -43,7 +44,7 @@ jobs:
       # En PR → subconjunto CRÍTICO (A viaje completo + B + D) en móvil+escritorio.
       # Nightly / manual → suite COMPLETA (todos los proyectos, 14 rubros, C incluido).
       # workers=2 + 1 retry: el sim es un solo contenedor; evita falsos rojos por sobrecarga.
-      - name: e2e como el dueño (crítico A+B+D)
+      - name: e2e como el dueño (crítico A+B+D+G)
         if: github.event_name == 'pull_request'
         env:
           RUN_DUENO: "1"
@@ -51,7 +52,7 @@ jobs:
           SIM_API: http://localhost:4000
         run: >-
           pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
-          --grep "viaje completo|me cuida|marca ajena"
+          --grep "viaje completo|me cuida|marca ajena|pago mi plan"
           --project=desktop --project=iphone
           --workers=2 --retries=1
 
