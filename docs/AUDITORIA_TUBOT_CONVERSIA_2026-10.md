@@ -407,6 +407,15 @@ Validación zod en servidor y doble cerrojo de herramientas de dueño; las tools
 - **Suscripciones sin tarjeta nunca se suspenden** con el cobro recurrente encendido; cancelaciones y reembolsos de Lemon se ignoran.
 - **Auto-recarga V2 activable pero sin motor** (solo Conversia).
 
+### 9.7 🟡 MEDIA — TuBot: la renovación mensual RECORTA los packs de mensajes comprados
+*(Hallazgo agregado el 27-oct-2026. Es comportamiento ACTUAL de TuBot y **no se modificó**: queda registrado para que el dueño decida.)*
+
+- Cada renovación de período deja la bolsa en **`min(saldo, cupo) + cupo`** (el tope de carryover de `docs/PREPAID_WALLET_DESIGN.md`). Para el cupo incluido en el plan tiene sentido: evita acumular meses sin usar.
+- **El problema:** esa misma fórmula se aplica al saldo que el cliente **compró aparte** (packs de mensajes). Un cliente con cupo 1.000 que compró un pack de 5.000 y alcanzó a usar poco, al renovar queda en `min(5.000, 1.000) + 1.000 = 2.000`: **pierde 3.000 mensajes que pagó**, en silencio y sin asiento que lo explique como pérdida.
+- **Dónde:** la recarga unificada `refillMessageWallet` (`packages/database/src/wallet-refill.ts`), modo `cap`, invocada desde la renovación por pasarela.
+- **Mitigación ya aplicada (PR #548):** las acciones MANUALES del super admin (`assignSubscription(ACTIVE)` y `register_payment`) usan el modo `keep` (`saldo + cupo`, sin recorte), para que una acción administrativa no le borre saldo comprado a nadie. **La renovación automática sigue recortando, tal cual estaba.**
+- **Decisión pendiente del dueño.** Opciones: (a) dejarlo como está y decirlo explícitamente en los términos y en `/cobros`; (b) separar en la bolsa el saldo *incluido en el plan* (caduca) del saldo *comprado* (no caduca), que es lo habitual en la industria y lo que el cliente espera; (c) aplicar el tope solo al incluido. La opción (b) requiere migración (una columna más en `message_wallets`) y toca el débito.
+
 ### 9.6 Verificado OK
 Firmas de Lemon y Stripe sobre el body crudo y en tiempo constante; Flow reconsulta el estado firmado y valida el monto; dedupe de webhooks con índice único; débito atómico sin saldo negativo; bolsa V2 con `FOR UPDATE` y FIFO; pesos por marca con respaldo; caja F9 append-only con reversas explícitas; la IA nunca registra dinero; montos CLP como enteros.
 
