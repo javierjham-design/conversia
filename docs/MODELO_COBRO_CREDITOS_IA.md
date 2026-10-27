@@ -79,17 +79,36 @@ reales:
   una respuesta normal se suma 1 crédito. Fórmula:
   `créditos = peso_del_modelo × máx(1, techo(tokens_de_la_respuesta / TOKENS_POR_CRÉDITO))`.
   `tokens_de_la_respuesta` incluye todas las llamadas a la IA del turno (herramientas,
-  clasificación). Valor inicial propuesto: `TOKENS_POR_CRÉDITO = 12.000`, que cubre una
-  respuesta típica con historial y herramientas. Se calibra con datos reales.
-- **Peso por modelo** (para que un crédito siempre nos cueste parecido, ~$2–2,5 CLP como
-  máximo):
+  clasificación). **Valor calibrado (27-oct, §7): `TOKENS_POR_CRÉDITO = 20.000`.** El 90%
+  de las llamadas reales a gpt-4o-mini usa menos de ~16.000 tokens, así que casi toda
+  respuesta cuesta 1 crédito y solo las muy cargadas (historial largo, varias herramientas)
+  suman más.
+- **Peso por modelo**, calibrado con el costo real por llamada (§7) para que un crédito nos
+  cueste como máximo ~$2 CLP con cualquier modelo:
 
-  | Nivel de IA | Modelos | Créditos por respuesta |
-  |---|---|---|
-  | Estándar | gpt-4o-mini, claude-haiku | 1 |
-  | Avanzado | claude-sonnet | 3 |
-  | Premium | claude-opus | 5 |
+  | Nivel de IA | Modelos | Costo real por respuesta | Créditos por respuesta |
+  |---|---|---|---|
+  | Estándar | gpt-4o-mini | ~$1,9 CLP | 1 |
+  | Plus | claude-haiku | ~$7,8 CLP | 4 |
+  | Avanzado | gpt-4o | ~$24 CLP | 12 |
+  | Avanzado | claude-sonnet | ~$42 CLP (estimado) | 20 |
+  | Premium | claude-opus | ~$100 CLP | 50 — **no disponible en autoservicio**, solo planes gestionados |
 
+- **Quién elige el modelo (decisión del dueño, 27-oct):**
+  - Todo bot de cliente nace con **gpt-4o-mini**.
+  - Un modelo más avanzado se activa **solo desde el super admin de Conversia**, por agente,
+    cuando un cliente lo necesita. El cliente **no puede cambiarlo** desde su panel, ni
+    pedírselo al copiloto.
+  - Antes de activarlo, el cliente queda **avisado y conforme**: se le muestra cuántos
+    créditos por respuesta consume el modelo nuevo y cuánto le duraría su saldo a su ritmo
+    actual ("con el modelo Plus, tus 1.000 créditos rinden ~60 conversaciones en vez de
+    ~240"). Su aceptación queda registrada con fecha y usuario, y un cambio de vuelta a
+    gpt-4o-mini no requiere aceptación.
+- **El contador mide el consumo real de cada cliente:** cada débito se calcula con los
+  tokens reales de la respuesta y el modelo que efectivamente la generó (no con un
+  promedio), y queda guardado en el libro con créditos, tokens, modelo y costo USD. Así el
+  medidor del cliente y el reporte de margen del super admin muestran lo que realmente gastó
+  cada uno.
 - **Lo que NO consume créditos:** el copiloto de montaje y el asistente del panel (son
   nuestro costo de venta y soporte, acotados por el límite de uso que ya existe),
   las respuestas que escribe una persona desde la Bandeja, los mensajes entrantes que no
@@ -105,27 +124,67 @@ reales:
 - Reutiliza todo lo construido (lotes, libro, gracia, avisos, auto-recarga). Cambia **dónde
   y cuánto** se debita, no el sistema.
 
-### 5. Propuesta de precios (inicial; calibrar con los datos reales del punto 7)
+### 5. Precios (calibrados con los datos reales del §7; metas de margen del dueño, 27-oct)
 
-Precios en CLP + IVA, siempre editables desde el catálogo, nunca en el código.
+**Metas del dueño:** plan Base de **$18.990/mes** con pocos créditos incluidos y margen de
+**al menos 70%**; packs chicos con **80%** de margen; packs grandes (sobre $100.000) con
+**70%**. Siempre editables desde el catálogo, nunca en el código.
 
-| Producto | Créditos | Precio | CLP por crédito | Equivale aprox. a* |
-|---|---|---|---|---|
-| Prueba gratis | 300 | $0 | — | 30–50 conversaciones |
-| **Plan Base mensual** | **1.500** | **$18.900/mes** | 12,6 | 150–250 conversaciones |
-| Recarga | 500 | $6.900 | 13,8 | 50–80 conversaciones |
-| Pack | 2.000 | $24.900 | 12,5 | 200–330 conversaciones |
-| Pack | 5.000 | $54.900 | 11,0 | 500–830 conversaciones |
-| Pack | 15.000 | $149.900 | 10,0 | 1.500–2.500 conversaciones |
+**Supuestos del cálculo (conservadores):**
+- Costo por crédito: **$2,1 CLP**. Es el costo real promedio de una llamada a gpt-4o-mini
+  (USD 0,00204), con el dólar a $1.000 (el repo usa 950 de referencia) y 3% de colchón por
+  herramientas y respuestas largas.
+- Comisión Flow: 3,2% + IVA = **3,81%** del precio cobrado.
+- Costo fijo por cliente en el plan Base: infraestructura ~$3.000 + uso del copiloto y el
+  asistente del panel ~$500.
+- Margen a **consumo pleno**: el cliente gasta todos sus créditos. Si no los gasta, el
+  margen real es mayor.
+- Una conversación real usa en promedio **~4,2 créditos** (mediana 3, el 90% usa 9 o menos).
 
-\* Con IA estándar y 6–10 respuestas por conversación.
+Precio mínimo por crédito para cada meta, con precios **+ IVA**: 80% → $12,97 · 75% →
+$9,91 · 70% → $8,02.
 
-**Márgenes a consumo pleno** (peor caso: todo el saldo gastado con el costo máximo por
-crédito, ~$2,3 CLP):
-- Plan Base: costo IA ~$3.450 + infraestructura ~$3.000 + Flow ~$750 ≈ $7.200 → **margen
-  ~62%**. Con gpt-4o-mini el costo de IA baja a ~$900 y el margen sube a ~75%.
-- Packs: costo máximo ~$2,3 por crédito contra $10–13,8 de precio → **margen 77–83%**
-  antes de Flow.
+#### Opción A — precios + IVA (descartada; se deja como referencia)
+
+| Producto | Créditos | Precio + IVA | CLP por crédito | Margen | Alcanza para aprox. |
+|---|---|---|---|---|---|
+| Prueba gratis | 200 | $0 | — | costo de adquisición ~$420 | ~48 conversaciones |
+| **Plan Base mensual** | **500** | **$18.990/mes** | — | **72,2%** | ~120 conversaciones |
+| Pack chico | 300 | $3.990 | 13,30 | 80,4% | ~70 conversaciones |
+| Pack chico | 1.000 | $12.990 | 12,99 | 80,0% | ~240 conversaciones |
+| Pack chico | 2.500 | $32.490 | 13,00 | 80,0% | ~600 conversaciones |
+| Pack mediano | 5.000 | $49.990 | 10,00 | 75,2% | ~1.200 conversaciones |
+| Pack grande | 13.000 | $104.990 | 8,08 | 70,2% | ~3.100 conversaciones |
+| Pack grande | 24.000 | $199.990 | 8,33 | 71,0% | ~5.700 conversaciones |
+
+Créditos del plan Base y su margen (+ IVA): 200 → 75,5% · 300 → 74,4% · 400 → 73,3% ·
+**500 → 72,2%** · 600 → 71,1% · 700 → 70,0% (el máximo que respeta el 70%). Se recomienda
+**500**: deja ~2 puntos de colchón y equivale a ~120 conversaciones, más que las 100 que
+incluía el modelo anterior.
+
+#### Opción B — precios con IVA incluido (lo que paga el cliente final) — ✅ ELEGIDA por el dueño (27-oct)
+
+Si los $18.990 ya incluyen IVA, el ingreso neto baja a $15.958 y los números cambian:
+
+| Producto | Créditos | Precio IVA incl. | CLP por crédito | Margen | Alcanza para aprox. |
+|---|---|---|---|---|---|
+| **Plan Base mensual** | **250** | **$18.990/mes** | — | **70,2%** | ~60 conversaciones |
+| **Recarga básica** (la más barata; la de la recarga automática) | **1.150** | **$18.990** | 16,51 | **80,3%** | ~270 conversaciones |
+| Pack chico | 2.500 | $40.990 | 16,40 | 80,2% | ~600 conversaciones |
+| Pack mediano | 5.000 | $59.990 | 12,00 | 74,6% | ~1.200 conversaciones |
+| Pack grande | 11.000 | $109.990 | 10,00 | 70,5% | ~2.600 conversaciones |
+| Pack grande | 20.000 | $199.990 | 10,00 | 70,5% | ~4.800 conversaciones |
+
+Con IVA incluido, el plan Base solo admite ~250 créditos para mantener el 70%.
+
+**Decisión del dueño (27-oct):** la recarga más barata vale lo mismo que el plan Base,
+**$18.990**, y trae 1.150 créditos (80% de margen). Rinde más créditos que el plan porque
+el plan además paga la plataforma. Es el pack que se cobra solo con la **recarga
+automática** (§6) cuando el saldo se está agotando.
+
+**Sensibilidad:** si el costo por crédito sube 10% (dólar más caro o prompts más largos),
+cada margen baja ~2 puntos. Por eso el reporte mensual de la Etapa 4 recalibra los precios.
+
 - Contra Respond.io, que según fuentes de terceros cobra unos USD 15 por cada 1.000 créditos
   extra (con 2 a 5 créditos por respuesta), nuestro precio por respuesta queda bastante más
   bajo. Hay espacio para subir si los datos lo justifican.
@@ -142,31 +201,68 @@ Meta directo.
   banner en el panel**, una vez por umbral y período. Cada aviso dice cuánto queda en
   créditos, en conversaciones estimadas y en días a su ritmo, con botón directo para
   recargar.
-- **Recarga automática** (ya existe; se adapta a créditos): "cuando queden menos de X
-  créditos, compra el pack Y", con **tope mensual de gasto obligatorio**. Requiere tarjeta
-  guardada con Flow, que entrega la Etapa 0 del copiloto.
-- **Gracia:** 150 créditos (≈ las 20 conversaciones de hoy). El bot **nunca queda mudo de
+- **Recarga automática con tarjeta de crédito** (decisión del dueño, 27-oct; ya existe en
+  el código y se adapta a créditos):
+  - Cuando el saldo baja de **50 créditos** (~12 conversaciones), se cobra sola la
+    **recarga básica de $18.990 (1.150 créditos)** a la tarjeta guardada con Flow. Se
+    dispara antes de llegar a 0 para que el bot no se corte mientras se procesa el pago.
+  - Se ofrece **activada por defecto** al registrar la tarjeta, con una casilla de
+    consentimiento explícito ("Recargar automáticamente $18.990 cuando mis créditos se
+    estén agotando"), y se puede apagar en cualquier momento desde Cobros.
+  - **Tope mensual obligatorio**, como hoy: por defecto 3 recargas automáticas al mes
+    ($56.970), editable por el cliente. Al llegar al tope se avisa y no se cobra más.
+  - Cada recarga automática envía un correo y una notificación con el monto, los créditos
+    sumados y el comprobante. Si el cobro falla (tarjeta rechazada), se avisa de inmediato
+    y entra la gracia.
+  - Requiere la tarjeta guardada con Flow, que entrega la Etapa 0 del copiloto.
+- **Gracia:** 100 créditos (≈ 25 conversaciones, parecido a las 20 de hoy). El bot **nunca queda mudo de
   golpe**: al agotar la gracia responde con la frase de respaldo y deriva a una persona,
   como hoy.
 - **Estimador visible** en Inicio, Cobros y en el copiloto: medidor de créditos más
   "≈ N conversaciones · ~D días".
 
-### 7. Dato que falta: el costo real por conversación en producción
+### 7. Costos reales de producción (`ai_requests`, 25-jul al 26-oct-2026)
 
-`ai_requests` guarda tokens y costo de cada llamada a la IA. Para calibrar
-`TOKENS_POR_CRÉDITO`, los pesos y los precios, hay que correr el script de solo lectura
-`packages/database/scripts/_tmp_ai_cost_stats.cjs`. Saca, por modelo, la mediana y el
-percentil 90 de llamadas, tokens y costo por conversación, y los mensajes por conversación.
-No lee datos de clientes, solo agregados. Una vez usado se puede borrar.
+Medido por el dueño el 27-oct con el script de solo lectura
+`packages/database/scripts/_tmp_ai_cost_stats.cjs` (agregados, sin datos de clientes).
+Tipo de cambio de referencia: 950 CLP/USD.
+
+| Modelo | Llamadas | Conversaciones | Costo por llamada | Costo por conversación (mediana / prom. / máx.) |
+|---|---|---|---|---|
+| gpt-4o-mini | 6.196 | 1.530 | ~$1,9 | $3,9 / $7,8 / $245 |
+| gpt-4o | 147 | 58 | ~$24 | $45 / $61 / $206 |
+| claude-haiku-4-5 | 77 | 4 | ~$7,8 | $93 / $150 / $376 |
+| claude-opus-4-8 | 147 | 7 | ~$100 | $64 / $2.100 / **$12.478** |
+
+Lo que muestran los datos:
+- **Una sola conversación con Opus costó USD 13 (~$12.500 CLP)**: 110 llamadas y 2,4
+  millones de tokens. Con el cobro por conversación habría consumido 1 crédito (~$200).
+  Es exactamente el riesgo que motivó este cambio. Por eso Opus queda fuera del
+  autoservicio.
+- Incluso con gpt-4o-mini, la conversación más cara costó **60 veces** la mediana.
+- **Casi todo el costo es entrada (input):** ~9.600 tokens por llamada en la mediana contra
+  ~60 de salida. Es el prompt del agente, su conocimiento y el historial, que se reenvían en
+  cada respuesta. Optimizarlo (prompt más corto, caché de prompt, historial acotado) baja el
+  costo directo; `pricing.ts` hoy calcula el input completo sin descuento de caché, así que
+  el costo real probablemente es algo menor.
+- Una conversación tiene en la mediana **2 mensajes del cliente y 3 respuestas**; el 90%
+  tiene 10 respuestas o menos.
+- **Desde el 14-oct hay bots usando gpt-4o** (58 conversaciones), que cuesta ~12 veces más
+  que gpt-4o-mini. Revisar qué agentes lo tienen configurado y si es intencional.
 
 ### 8. Decisiones del dueño
 
 1. **Unidad:** ¿aprobado "Créditos IA" con 1 respuesta estándar = 1 crédito?
-2. **Precios:** la tabla del punto 5 como punto de partida, ajustada con los datos reales.
-3. **Modelo estándar de los bots de clientes:** gpt-4o-mini (margen mayor) o Claude Haiku
-   (mejor calidad en español y agenda). La plataforma permite cambiarlo por agente.
+2. ~~Precios~~ **Decidido (27-oct): opción B del §5, precios con IVA incluido.** Plan Base
+   $18.990/mes con 250 créditos; recarga básica 1.150/$18.990 (la más barata y la de la
+   recarga automática); packs 2.500/$40.990, 5.000/$59.990, 11.000/$109.990 y
+   20.000/$199.990.
+3. ~~Modelo estándar~~ **Decidido (27-oct):** gpt-4o-mini por defecto; modelos más
+   avanzados solo los activa el equipo de Conversia desde el super admin, con el cliente
+   avisado y conforme (§4).
 4. **Clientes actuales:** se convierten a 10 créditos por cada conversación que les quede
-   (las 30 de prueba pasan a 300) y nadie pierde saldo.
+   (las 30 de prueba pasan a 300). Como una conversación usa ~4 créditos, ganan saldo y
+   nadie pierde.
 
 ---
 
@@ -189,9 +285,28 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
 - Reutiliza lotes, libro contable, vencimientos, gracia y FIFO de
   `conversation-credits.ts`, generalizando la unidad (sin duplicar el sistema). En el libro
   contable registra por débito: créditos, tokens, modelo, costo USD real y conversación.
-- Pesos por nivel de modelo configurables (estándar 1 / avanzado 3 / premium 5) y mapeo
-  modelo → nivel. Si un modelo no tiene nivel, se cobra como premium y se levanta una alerta
-  al super admin.
+- Pesos por nivel de modelo configurables con los valores calibrados de la Parte A §4
+  (gpt-4o-mini 1 / claude-haiku 4 / gpt-4o 12 / claude-sonnet 20 / claude-opus 50) y mapeo modelo → nivel. Si un modelo no
+  tiene nivel, se cobra como premium y se levanta una alerta al super admin. El nivel premium
+  (Opus) no se puede elegir en planes de autoservicio.
+- Revisar qué agentes en producción usan gpt-4o desde el 14-oct (Parte A §7) y reportarlo
+  en el PR, sin cambiarlos: el dueño decide.
+- **Selección de modelo solo por la plataforma** (Parte A §4, "Quién elige el modelo"),
+  para orgs `conversia`:
+  - Los agentes nuevos (vertical, `/crear`, copiloto, `POST /agents`) nacen con
+    gpt-4o-mini, leído de configuración, no del código.
+  - Los endpoints de tenant que editan agentes (`PUT /agents/:id/draft` y similares)
+    **rechazan o ignoran** cambios de `config.model`; el copiloto no tiene herramienta para
+    cambiar el modelo. Test que lo verifique.
+  - En la consola del super admin: selector de modelo por agente que muestra el peso en
+    créditos y, antes de aplicar uno más caro, genera un **aviso al cliente** (in-app y
+    correo) con el impacto estimado en su saldo y un botón "Acepto". El cambio se aplica al
+    aceptar (o el super admin lo fuerza dejando constancia del motivo). Todo auditado:
+    quién lo pidió, quién aceptó y cuándo.
+- **Consumo real por cliente:** el débito usa el modelo que efectivamente respondió (si el
+  router cambió de modelo por falta de proveedor, se cobra el que respondió). El libro
+  guarda créditos, tokens de entrada y salida, modelo y costo USD por respuesta, y el
+  medidor del cliente indica el nivel de IA de cada agente.
 - No debitan créditos: el copiloto y el asistente del panel, las respuestas humanas, los
   mensajes sin respuesta de IA, las plantillas y recordatorios.
 - `serviceDebitsWallet` apagado en los planes nuevos de Conversia (Meta le cobra directo
@@ -200,13 +315,28 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
   saldo concurrente (dos turnos a la vez), y que TuBot no cambie.
 
 ### Etapa 2 — Catálogo, migración y cobro
-- Catálogo nuevo: plan Base con créditos incluidos, prueba de 300 créditos y packs de la
-  Parte A §5, sembrados con el script idempotente de catálogo. Los planes y packs de
+- Catálogo nuevo: plan Base de $18.990/mes, prueba de 200 créditos, gracia de 100 y los
+  packs de la **opción B** de la Parte A §5 (precios con IVA incluido, elegida por el dueño):
+  Base 250 créditos, recarga básica 1.150 créditos a $18.990 y packs 2.500 / 5.000 /
+  11.000 / 20.000. Sembrados
+  **inactivos** con el script idempotente de catálogo; se activan con el OK del dueño.
+- **IVA incluido:** hoy el cobro no suma IVA (Flow cobra el `priceClp` tal cual), lo que
+  calza con esta decisión; **no agregar un 19% encima**. Los textos de precios (landing,
+  `/cobros`, copiloto, correos) dicen "IVA incluido", y cualquier comprobante o reporte que
+  desglose montos usa neto = precio / 1,19. Actualizar los precios de respaldo escritos en
+  el frontend (p. ej. el `"$18.900"` de `inicio/page.tsx` y de la landing) para que lean
+  del catálogo o, si queda un respaldo, digan $18.990. Los planes y packs de
   conversaciones se desactivan para ventas nuevas, sin borrarlos.
 - Migración de saldos: conversaciones restantes × 10 = créditos, con su vencimiento
   original, en un script con **dry-run por defecto** que imprime el antes y el después por
   organización. Asiento auditado por cada conversión. Nadie pierde saldo.
-- Auto-recarga adaptada a packs de créditos (tope mensual obligatorio, como hoy).
+- **Recarga automática con tarjeta** según la Parte A §6: umbral de 50 créditos, cobra la
+  recarga básica de $18.990 (1.150 créditos) a la tarjeta guardada con Flow, ofrecida
+  activada al registrar la tarjeta con consentimiento explícito y registrado, tope mensual
+  obligatorio (por defecto 3 recargas), correo y notificación por cada cobro, y aviso
+  inmediato más gracia si la tarjeta es rechazada. Idempotente: un solo cobro por umbral
+  aunque lleguen varias respuestas a la vez. Umbral, pack y tope por defecto en
+  configuración, no en el código.
 - Herramientas del asistente/copiloto (`ofrecerRecarga`, `verEstado`) y textos del panel
   hablan de Créditos IA, siempre leyendo precios del catálogo.
 
@@ -234,7 +364,7 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
   tokens promedio por respuesta y si `TOKENS_POR_CRÉDITO` o los pesos deben ajustarse.
 
 ### Cierre
-- typecheck, tests, sim250 y Playwright en verde. Playwright "dueño nuevo": prueba con 300
+- typecheck, tests, sim250 y Playwright en verde. Playwright "dueño nuevo": prueba con 200
   créditos → conversaciones → aviso al 75% → recarga → saldo actualizado. Un PR por etapa.
 - Después de cada etapa, verificar que conversia-web quedó publicada con el sello de versión
   igual a `main` (autodeploy de #538).
