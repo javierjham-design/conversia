@@ -4,6 +4,7 @@ import { getEnv } from "@conversia/config";
 import { createAIProvider } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
+import { getSetupChecklist } from "../onboarding/setup-checklist";
 
 /**
  * BLOQUE B — "Asistente Conversia": un chat in-app que LIDERA la implementación y da
@@ -53,32 +54,23 @@ export class AssistantService {
     return (o?.brand ?? "tubot").toLowerCase();
   }
 
-  /** Contexto server-side: checklist, saldo, último error de canal, datos del negocio. */
-  async buildContext(organizationId: string) {
+  /**
+   * Contexto server-side: checklist, saldo, último error de canal, datos del negocio.
+   * `userId` (del JWT) solo decide de quién se mira el correo verificado — así el copiloto
+   * y `GET /onboarding` ven EXACTAMENTE el mismo checklist, paso por paso.
+   */
+  async buildContext(organizationId: string, userId?: string | null) {
     const admin = this.prisma.admin;
     const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { name: true, settings: true, currency: true } });
 
-    // Checklist de onboarding (pasos reales).
-    const [agents, channels, workflows, waNumbers, services, paymentMethods, paidInvoices] = await Promise.all([
-      admin.agent.count({ where: { organizationId, deletedAt: null } }),
-      admin.channelConnection.count({ where: { organizationId, status: "active" } }),
-      admin.workflow.count({ where: { organizationId, deletedAt: null } }),
-      admin.whatsappPhoneNumber.count({ where: { organizationId } }).catch(() => 0),
-      admin.service.count({ where: { organizationId } }).catch(() => 0),
-      admin.paymentMethod.count({ where: { organizationId } }).catch(() => 0),
-      admin.invoice.count({ where: { organizationId, status: "PAID" } }).catch(() => 0),
-    ]);
-    const steps = [
-      { key: "agente", label: "Crea tu asistente", done: agents > 0 },
-      { key: "servicios", label: "Carga tus servicios/precios", done: services > 0 },
-      { key: "whatsapp", label: "Conecta tu WhatsApp", done: channels > 0 || waNumbers > 0 },
-      // Pedido del negocio (sim 200): la implementación debe dejar el método de pago
-      // cargado para que recargas/renovaciones no corten al bot por saldo.
-      { key: "pago", label: "Carga tu método de pago", done: paymentMethods > 0 || paidInvoices > 0 },
-    ];
-    const done = steps.filter((s) => s.done).length;
-    const checklistPct = Math.round((done / steps.length) * 100);
-    const nextStep = steps.find((s) => !s.done) ?? null;
+    // ETAPA 0 — CHECKLIST ÚNICO (apps/api/src/onboarding/setup-checklist.ts). Antes aquí
+    // vivía un checklist PROPIO de 4 pasos que daba el asistente por listo con que EXISTIERA
+    // y el WhatsApp por listo con que el canal estuviera conectado (hallazgos 1, 2 y 4 de la
+    // auditoría): el copiloto cantaba 100% mientras el bot seguía en borrador y mudo. Ahora
+    // lee lo MISMO que `/onboarding` y la UI: agente PUBLICADO, canal CON agente asignado,
+    // prueba real respondida. El % cuenta solo los pasos bloqueantes.
+    const checklist = await getSetupChecklist(this.prisma, organizationId, { userId, org });
+    const { steps, percent: checklistPct, nextStep } = checklist;
 
     // Saldo (modelo por conversación) best-effort.
     let saldo: string | null = null;
@@ -102,6 +94,9 @@ export class AssistantService {
       businessName: org?.name ?? "tu negocio",
       currency: org?.currency ?? "CLP",
       steps, checklistPct, nextStep, saldo,
+      // "Paso 3 de 7": cuántos pasos BLOQUEANTES van (los opcionales no cuentan).
+      blockingCompleted: checklist.blockingCompleted,
+      blockingTotal: checklist.blockingTotal,
       lastChannelError: lastErr?.message ?? null,
       mode: assistantMode(checklistPct),
     };
@@ -127,8 +122,17 @@ export class AssistantService {
   private async executeTool(ctx: AssistantCtx, name: string, input: any): Promise<{ content: string; isError?: boolean; didWrite?: boolean }> {
     const admin = this.prisma.admin;
     if (name === "verEstado") {
-      const c = await this.buildContext(ctx.organizationId);
-      return { content: JSON.stringify({ checklistPct: c.checklistPct, siguientePaso: c.nextStep?.label ?? "todo listo", saldo: c.saldo ?? "no aplica", pasos: c.steps }) };
+      const c = await this.buildContext(ctx.organizationId, ctx.userId);
+      return {
+        content: JSON.stringify({
+          checklistPct: c.checklistPct,
+          avance: `${c.blockingCompleted} de ${c.blockingTotal} pasos obligatorios`,
+          siguientePaso: c.nextStep?.label ?? "todo listo",
+          saldo: c.saldo ?? "no aplica",
+          // Vista COMPACTA para el modelo (sin títulos/descripciones/CTA: gastan tokens).
+          pasos: c.steps.map((s) => ({ paso: s.label, hecho: s.done, obligatorio: s.blocking, pantalla: s.href })),
+        }),
+      };
     }
     if (name === "listarServicios") {
       const list = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.service.findMany({ where: { active: true }, orderBy: { name: "asc" }, take: 50, select: { name: true, price: true, durationMin: true } }));
@@ -243,6 +247,8 @@ REGLAS:
       checklistPct: 0,
       nextStep: null,
       saldo: null,
+      blockingCompleted: 0,
+      blockingTotal: 0,
       lastChannelError: null,
       mode: assistantMode(0),
     };
@@ -257,7 +263,7 @@ REGLAS:
     // hacemos con el proveedor de IA más abajo) → la IA responde 200 con texto real, nunca un 500.
     let context: Awaited<ReturnType<AssistantService["buildContext"]>>;
     try {
-      context = await this.buildContext(ctx.organizationId);
+      context = await this.buildContext(ctx.organizationId, ctx.userId);
     } catch (e) {
       console.error(`✖ Asistente: contexto no disponible (${(e as Error).message?.slice(0, 120)})`);
       context = this.minimalContext();

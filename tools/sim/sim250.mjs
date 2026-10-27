@@ -300,7 +300,18 @@ async function w5() {
   for (const o of ORGS.filter((x) => x.token && x.tag === "montaje")) {
     const ob = await http("GET", "/onboarding", { token: o.token });
     const steps = ob.data?.steps ?? [];
-    const okBase = ob.status === 200 && steps.length === 7 && steps.some((s) => s.key === "pago") && steps.find((s) => s.key === "vertical")?.done === true;
+    // ETAPA 0 — estas orgs son de marca conversia, así que /onboarding devuelve el CHECKLIST
+    // ÚNICO de montaje (7 bloqueantes + 5 opcionales, `href` a rutas de conversia-web) en vez
+    // de los 7 pasos históricos de TuBot. Comprobamos su contrato: pasos clave presentes,
+    // `blocking`/`href` en cada uno y el % contando solo los bloqueantes. El paso "negocio"
+    // debe venir con rubro cargado porque el registro instaló el paquete vertical.
+    const okBase =
+      ob.status === 200 &&
+      steps.length >= 7 &&
+      ["negocio", "servicios", "asistente", "whatsapp", "prueba", "pago"].every((k) => steps.some((s) => s.key === k)) &&
+      steps.every((s) => typeof s.blocking === "boolean" && typeof s.href === "string" && s.href.startsWith("/")) &&
+      typeof ob.data?.percent === "number" &&
+      ob.data.blockingTotal >= 6;
     const pl = await http("GET", "/onboarding/plantillas", { token: o.token });
     const re = await http("POST", "/onboarding/vertical", { token: o.token, body: { key: o.vertical } });
     const cx = await http("GET", "/assistant/context", { token: o.token });
