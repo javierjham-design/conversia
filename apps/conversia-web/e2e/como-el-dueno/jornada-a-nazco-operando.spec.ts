@@ -90,7 +90,9 @@ test.describe("Jornada A — quedo operando (viaje completo)", () => {
     }
     // Quedaron los 2 que cargué, con su precio formateado es-CL.
     await expect(page.getByText("Plan mensual")).toBeVisible();
-    await expect(page.getByText("Clase de prueba")).toBeVisible();
+    // `exact` a propósito: sin esto también matchea "Clase de prueba (gratis)" y el test
+    // se caía por strict mode de forma intermitente (según qué servicios trae el rubro).
+    await expect(page.getByText("Clase de prueba", { exact: true })).toBeVisible();
     await expect(page.getByText("30 min · $25.000")).toBeVisible();
     await expect(page.getByText("45 min · $8.000")).toBeVisible();
 
