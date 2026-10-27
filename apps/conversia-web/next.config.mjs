@@ -1,7 +1,8 @@
 /**
  * Conversia web (F3). App Next.js propia, design system aparte de apps/web. Habla con
- * la MISMA API (NEXT_PUBLIC_API_URL). Cabeceras de seguridad propias (sin los SDK de
- * Meta/Google del panel TuBot: Conversia aún no los usa).
+ * la MISMA API (NEXT_PUBLIC_API_URL). Cabeceras de seguridad propias. Usa el SDK de
+ * Meta (Embedded Signup de WhatsApp en /canales) y el de Google Identity Services
+ * (botón "Continuar con Google" en /login).
  * @type {import('next').NextConfig}
  */
 const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -23,11 +24,12 @@ const csp = [
   // connect.facebook.net: SDK del Embedded Signup de WhatsApp — sin él, /canales no
   // puede abrir la ventana de Meta y la UI lo confundía con "popup bloqueado"
   // (hallazgo prod 18-oct-2026, con pantallazo de Javier; espeja la CSP de apps/web).
-  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://connect.facebook.net${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-  // frame-src: iframes internos del SDK de Facebook (login/status). frame-ancestors
-  // sigue en 'none': nadie puede embeber NUESTRO panel.
-  "frame-src 'self' https://www.facebook.com https://web.facebook.com https://staticxx.facebook.com",
-  `connect-src 'self' ${api} ${prodApiFallback} https://cloudflareinsights.com https://graph.facebook.com https://www.facebook.com`,
+  // accounts.google.com: Google Identity Services (gsi/client) para el botón de login.
+  `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://connect.facebook.net https://accounts.google.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  // frame-src: iframes internos del SDK de Facebook (login/status) y de Google (botón GIS).
+  // frame-ancestors sigue en 'none': nadie puede embeber NUESTRO panel.
+  "frame-src 'self' https://www.facebook.com https://web.facebook.com https://staticxx.facebook.com https://accounts.google.com",
+  `connect-src 'self' ${api} ${prodApiFallback} https://cloudflareinsights.com https://graph.facebook.com https://www.facebook.com https://accounts.google.com`,
 ].join("; ");
 
 const securityHeaders = [
