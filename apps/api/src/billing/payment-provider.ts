@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getEnv } from "@conversia/config";
+import { appendQuery, getEnv } from "@conversia/config";
 
 /**
  * Abstracción de pasarela de pago (patrón provider). Selección por moneda:
@@ -18,6 +18,7 @@ export interface CheckoutInput {
   planCode: string;
   amount: number;
   currency: string;
+  /** Retorno de pago OK. Puede traer query propia de la marca (`/cobros?pago=ok`) → appendQuery. */
   successUrl: string;
   cancelUrl: string;
   email?: string;
@@ -36,7 +37,7 @@ export class MockPaymentProvider implements PaymentProvider {
   readonly kind = "mock";
   async createCheckout(input: CheckoutInput): Promise<CheckoutSession> {
     const id = `mock_cs_${Date.now()}`;
-    return { id, url: `${input.successUrl}?mock_session=${id}`, provider: "mock" };
+    return { id, url: appendQuery(input.successUrl, `mock_session=${id}`), provider: "mock" };
   }
 }
 
@@ -56,7 +57,7 @@ export class StripePaymentProvider implements PaymentProvider {
     const interval = input.interval === "yearly" ? "year" : "month";
     const p = new URLSearchParams();
     p.set("mode", "subscription");
-    p.set("success_url", `${input.successUrl}?paid=1`);
+    p.set("success_url", appendQuery(input.successUrl, "paid=1"));
     p.set("cancel_url", input.cancelUrl);
     p.set("client_reference_id", input.organizationId);
     p.set("metadata[organizationId]", input.organizationId);
@@ -107,7 +108,7 @@ export class LemonSqueezyPaymentProvider implements PaymentProvider {
             email: input.email,
             custom: { organization_id: input.organizationId, plan_code: input.planCode, billing_interval: input.interval === "yearly" ? "yearly" : "monthly" },
           },
-          product_options: { redirect_url: `${input.successUrl}?paid=1` },
+          product_options: { redirect_url: appendQuery(input.successUrl, "paid=1") },
         },
         relationships: {
           store: { data: { type: "stores", id: String(this.storeId) } },
@@ -170,7 +171,7 @@ export class FlowPaymentProvider implements PaymentProvider {
       amount: String(Math.round(input.amount)),
       email: input.email || "facturacion@tubot.cl",
       urlConfirmation: `${env.API_URL}/billing/webhooks/flow`,
-      urlReturn: `${input.successUrl}?paid=1`,
+      urlReturn: appendQuery(input.successUrl, "paid=1"),
       // expectedAmount: el webhook compara lo reportado por Flow contra esto (S-4).
       optional: JSON.stringify({ organizationId: input.organizationId, planCode: input.planCode, expectedAmount: Math.round(input.amount), interval: input.interval === "yearly" ? "yearly" : "monthly" }),
     };

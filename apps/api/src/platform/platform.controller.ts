@@ -16,7 +16,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, buildCoreTools } from "@conversia/agents";
-import { getEnv, brandOf } from "@conversia/config";
+import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { computeWhatsappCostUsd } from "@conversia/agents";
@@ -2344,7 +2344,7 @@ export class PlatformController {
         amount,
         currency,
         urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`,
-        urlReturn: `${getEnv().WEB_URL}/billing`,
+        urlReturn: billingReturnUrls(org).home, // panel de la marca del tenant, no el de TuBot fijo
       });
       await admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
       if (!r.ok) throw new BadRequestException(`Flow rechazó el cobro: ${r.reason ?? "error del proveedor"}`);
@@ -2479,8 +2479,10 @@ export class PlatformController {
       currency,
       email: user?.email ?? `pagos+${id.slice(-8)}@tubot.cl`,
       interval,
-      successUrl: `${getEnv().WEB_URL}/billing`,
-      cancelUrl: `${getEnv().WEB_URL}/billing`,
+      // Retorno POR MARCA del tenant (no el panel de TuBot fijo): una org Conversia
+      // volvía a un /billing que su panel no tiene. TuBot queda igual que hoy.
+      successUrl: billingReturnUrls(org).success,
+      cancelUrl: billingReturnUrls(org).cancel,
     });
     await this.audit(req, "platform.billing.payment_link", "subscription", sub?.id ?? id, { planCode: plan.code, amount, interval, provider: session.provider });
     return { ok: true, url: session.url, amount, currency, planName: plan.name, interval };

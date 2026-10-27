@@ -3,7 +3,7 @@
  * hacia el/los administrador(es) del tenant. Español, claros, sin tono amenazante, con el
  * botón de pago siempre visible. No pasan por el SMTP del tenant (es cobranza nuestra).
  */
-import { getEnv, brandOf } from "@conversia/config";
+import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
 
 export type BillingEmailKind = "payment_failed" | "payment_succeeded" | "suspended" | "reactivated";
@@ -47,7 +47,9 @@ export async function sendBillingEmail(orgId: string, kind: BillingEmailKind, da
   // F1/A4 — cobranza por marca del tenant: remitente, link de pago y pie de la marca.
   const org = await getAdminPrisma().organization.findUnique({ where: { id: orgId }, select: { brand: true } });
   const brand = brandOf(org);
-  const payUrl = `${brand.webUrl}/billing`;
+  // El botón "pagar" del correo va a la pantalla de dinero QUE EXISTE en el panel de esa
+  // marca: TuBot /billing (igual que siempre), Conversia /cobros (en /billing daba 404).
+  const payUrl = billingReturnUrls(org).home;
   const { subject, html } = render(kind, payUrl, brand.name, data);
   try {
     await fetch("https://api.resend.com/emails", {

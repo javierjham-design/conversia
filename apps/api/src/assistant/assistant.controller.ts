@@ -30,7 +30,7 @@ export class AssistantController {
   async context() {
     const ctx = requireContext();
     await this.assertConversia(ctx.organizationId);
-    const c = await this.assistant.buildContext(ctx.organizationId);
+    const c = await this.assistant.buildContext(ctx.organizationId, ctx.userId);
     return { ...c, canConfigure: isWebOwner(ctx.roleCode) };
   }
 

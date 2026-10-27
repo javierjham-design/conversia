@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
+import { getSetupChecklist } from "../onboarding/setup-checklist";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { templateGuideFor } from "./template-guide";
@@ -28,13 +29,40 @@ export class OnboardingController {
     private vertical: VerticalService,
   ) {}
 
+  /**
+   * ETAPA 0 — una sola fuente de verdad del montaje, pero SOLO para Conversia.
+   *
+   * `brand=conversia` → `getSetupChecklist` (los 8 puntos de la Etapa 0, con `href` a rutas
+   * reales de conversia-web y el porcentaje contando solo los bloqueantes). La forma que ya
+   * devolvíamos (`steps[].key/title/description/done/cta` + `completed/total/percent/done`)
+   * se mantiene como superset, así que `canales/page.tsx` sigue funcionando igual.
+   *
+   * Cualquier otra marca (TuBot) → `legacyStatus`, BYTE POR BYTE lo de hoy: su panel
+   * (`apps/web`: página "Primeros pasos" + OnboardingBanner) depende de esos 7 pasos y de
+   * sus CTAs (`/channels`, `/billing`, `/agents`, `/settings/users`), que allá SÍ existen.
+   * Si la lectura de la marca falla, caemos a TuBot (fail-safe: nunca cambiamos lo que ya
+   * funciona en producción).
+   */
   @Get()
-  status() {
+  async status() {
     const ctx = requireContext();
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const org = await this.prisma.admin.organization
+      .findUnique({ where: { id: ctx.organizationId }, select: { brand: true, name: true, settings: true } })
+      .catch(() => null);
+    const brand = (org?.brand ?? "tubot").toLowerCase();
+    if (brand === "conversia") {
+      // Reusamos la fila ya leída (nombre + settings): el checklist no vuelve a consultarla.
+      return getSetupChecklist(this.prisma, ctx.organizationId, { userId: ctx.userId, org });
+    }
+    return this.legacyStatus(ctx.organizationId);
+  }
+
+  /** Checklist histórico de TuBot. NO TOCAR: es el contrato que consume `apps/web`. */
+  private legacyStatus(organizationId: string) {
+    return this.prisma.withTenant(organizationId, async (tx) => {
       const [org, whatsappNumbers, templates, publishedAgents, publishedWorkflows, activeMembers, paymentMethods, paidInvoices] =
         await Promise.all([
-          tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
+          tx.organization.findUnique({ where: { id: organizationId }, select: { settings: true } }),
           tx.whatsappPhoneNumber.count({ where: { status: "active" } }),
           tx.whatsappTemplate.count(),
           tx.agentVersion.count({ where: { status: "PUBLISHED" } }),

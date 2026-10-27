@@ -30,6 +30,11 @@ funcionar; prohibido bajar la vara: se arregla el producto.
   `brand='tubot'` que entra a conversia-web NO ve la burbuja, no ve "(Not Found)" crudo, y
   "Pedir ayuda" cae a soporte. Control positivo: una cuenta conversia SÍ ve la burbuja.
   (El caso exacto del pantallazo de Javier — PARTE 1 del documento.)
+- **G — "Pago mi plan"** (`jornada-g-pago-plan.spec.ts`): contrato el plan desde `/cobros`
+  (checkout **mock**, sin cobro real) y lo veo "Actual"; vuelvo de la pasarela a
+  `/cobros?pago=ok|cancelado` y a `/cobros?card=1` con un mensaje claro; y la API devuelve
+  los retornos de MI marca (regresión: una org `tubot` sigue volviendo a `/billing`).
+  Cubre el hallazgo 3 de la auditoría (el cliente no podía pagar desde su panel).
 
 ## Cómo correr
 
