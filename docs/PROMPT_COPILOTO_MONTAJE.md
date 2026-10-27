@@ -112,7 +112,9 @@ sin salida no sirve.
   - Agenda: crear/editar profesionales con su horario semanal, ajustar la configuración de
     agenda (intervalo, anticipación). Hoy el prompt manda a "Agenda → Configurar"; ahora lo
     hace él, confirmando.
-  - Agentes: listar plantillas del rubro (`/public/verticals`), crear el agente desde
+  - Agentes (el copiloto **nunca** cambia el modelo de IA: todo agente nace con
+    gpt-4o-mini y solo el super admin activa uno más avanzado, con el cliente avisado; ver
+    `docs/MODELO_COBRO_CREDITOS_IA.md` §4): listar plantillas del rubro (`/public/verticals`), crear el agente desde
     plantilla o desde lo que cuente el dueño, ajustar tono, reglas y preguntas frecuentes
     (`PUT /agents/:id/draft`), **probarlo** (`POST /agents/:id/test`) mostrando la
     conversación de prueba en el chat, y **publicarlo** con el endpoint de la Etapa 0. Puede
