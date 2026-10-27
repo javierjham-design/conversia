@@ -73,7 +73,6 @@ export async function sendTenantEmail(
   organizationId: string,
   mail: { to: string[]; subject: string; html: string },
 ): Promise<{ ok: boolean; detail: string }> {
-  const env = getEnv();
   const integration = await getEmailIntegration(organizationId);
   const log = (status: "ok" | "error", message: string) =>
     withTenant(organizationId, (tx) =>
@@ -100,17 +99,18 @@ export async function sendTenantEmail(
       await log("ok", `Correo «${mail.subject}» → ${mail.to.join(", ")} (SMTP propio)`);
       return { ok: true, detail: "Enviado por SMTP del tenant" };
     }
-    // Modo plataforma (Resend)
-    if (!env.RESEND_API_KEY) {
-      await log("error", "Correo no enviado: la plataforma no tiene RESEND_API_KEY configurada");
+    // Modo plataforma (Resend) — remitente Y key POR MARCA del tenant (las keys de
+    // Resend están restringidas por dominio: la de conversia.cl no envía como tubot.cl).
+    const brandOrg = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+    const brandCfg = brandOf(brandOrg);
+    if (!brandCfg.resendApiKey) {
+      await log("error", "Correo no enviado: la plataforma no tiene RESEND_API_KEY configurada para esta marca");
       return { ok: false, detail: "Remitente de plataforma no configurado" };
     }
-    // F1/A2 — remitente por marca del tenant (no el de TuBot fijo) en el modo plataforma.
-    const brandOrg = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: brandOf(brandOrg).mailFrom, to: mail.to, subject: mail.subject, html: mail.html }),
+      headers: { authorization: `Bearer ${brandCfg.resendApiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ from: brandCfg.mailFrom, to: mail.to, subject: mail.subject, html: mail.html }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

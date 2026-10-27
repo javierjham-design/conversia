@@ -15,14 +15,16 @@ export interface BrandConfig {
   mailFrom: string;
   /** Reply-To de los correos de marca (null = sin Reply-To). Sale de MAIL_REPLY_TO. */
   replyTo: string | null;
+  /** Key de Resend de ESTA marca (sus keys están restringidas por dominio). "" = sin envío. */
+  resendApiKey: string;
   mfaIssuer: string;
   paymentSubjectPrefix: string;
   userAgent: string;
   logoPath: string;
 }
 
-/** Valores estáticos por marca (los dinámicos —webUrl/mailFrom/replyTo— los pone brandOf). */
-export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom" | "replyTo">> = {
+/** Valores estáticos por marca (los dinámicos —webUrl/mailFrom/replyTo/resendApiKey— los pone brandOf). */
+export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom" | "replyTo" | "resendApiKey">> = {
   tubot: {
     key: "tubot",
     name: "TuBot",
@@ -55,6 +57,7 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
       webUrl: env.WEB_URL_CONVERSIA ?? env.WEB_URL,
       mailFrom: "Conversia <no-reply@conversia.cl>",
       replyTo: env.MAIL_REPLY_TO || null,
+      resendApiKey: env.RESEND_API_KEY_CONVERSIA || env.RESEND_API_KEY,
     };
   }
   return {
@@ -62,6 +65,7 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
     webUrl: env.WEB_URL,
     mailFrom: env.RESEND_FROM,
     replyTo: env.MAIL_REPLY_TO || null,
+    resendApiKey: env.RESEND_API_KEY,
     mfaIssuer: env.SUPER_ADMIN_MFA_ISSUER, // respeta override actual del env
   };
 }

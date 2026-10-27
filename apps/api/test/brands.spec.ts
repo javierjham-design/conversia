@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   process.env.WEB_URL_CONVERSIA = "https://app.conversia.cl";
   process.env.MAIL_REPLY_TO = "respuestas-test@tubot.cl";
+  process.env.RESEND_API_KEY = "re_test_tubot";
+  process.env.RESEND_API_KEY_CONVERSIA = "re_test_conversia";
 });
 
 import { brandOf } from "@conversia/config";
@@ -33,6 +35,13 @@ describe("brandOf (marca por organización)", () => {
   it("MAIL_REPLY_TO llega al replyTo de AMBAS marcas (respuestas a un solo buzón)", () => {
     expect(brandOf({ brand: "conversia" }).replyTo).toBe("respuestas-test@tubot.cl");
     expect(brandOf({ brand: "tubot" }).replyTo).toBe("respuestas-test@tubot.cl");
+  });
+
+  it("cada marca usa SU key de Resend (restringidas por dominio)", () => {
+    // Las keys de Resend están scope-adas por dominio: la de conversia.cl no envía como
+    // tubot.cl. Por eso conversia usa su key propia y tubot la por defecto.
+    expect(brandOf({ brand: "conversia" }).resendApiKey).toBe("re_test_conversia");
+    expect(brandOf({ brand: "tubot" }).resendApiKey).toBe("re_test_tubot");
   });
 
   it("marca desconocida → fallback a tubot", () => {
