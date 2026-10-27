@@ -1,12 +1,12 @@
 import IORedis from "ioredis";
-import { getEnv } from "@conversia/config";
+import { getEnv, brandOf, messagingFuseKeys, resolveBrandCap, DEFAULT_BRAND } from "@conversia/config";
 import { getAdminPrisma, withTenant, raiseException } from "@conversia/database";
 import { debitForMessage, notifyWalletThresholds, refundForMessage, type DebitResult } from "./wallet";
 import { opsAlert } from "./ops-alert.js";
 import { countConversationOnce } from "./conversation-quota";
 import { isWithinServiceFreeTier, resolveServiceWindowTz } from "./service-metering";
 import { enqueueNotification } from "./notifications/queue";
-import { planDebitsConversation, conversationCreditMultiplier, debitConversation, creditsNotifyDecision } from "./conversation-credits";
+import { planDebitsConversation, conversationCreditMultiplier, debitConversation, creditsNotifyDecision, isConversiaOrg } from "./conversation-credits";
 
 /**
  * MITIGACIÓN PUENTE de exposición financiera (ver docs/SECURITY_AUDIT.md §6).
@@ -35,29 +35,63 @@ function conn(): IORedis {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-let capCache: { at: number; global: number; perTenantDefault: number } | null = null;
+/** Marca por defecto cuando la organización no la tiene puesta (comportamiento histórico). */
+const MARCA_BASE = DEFAULT_BRAND;
 
-/** Lee los topes de platform_settings (cache 60 s), con defaults de env. */
-async function readGlobalCaps(): Promise<{ global: number; perTenantDefault: number }> {
-  if (capCache && Date.now() - capCache.at < 60_000) return capCache;
+/**
+ * §6.1 — Marca de la organización, para que el fusible sea POR MARCA.
+ *
+ * El fusible global es una red de seguridad de plataforma: al cortar, deja a TODOS los
+ * tenants sin enviar. Con un solo contador compartido, un pico de Conversia cortaba los
+ * envíos de TuBot (y al revés): marcas distintas, clientes distintos, incidentes
+ * distintos. Ahora cada marca tiene su contador y su techo.
+ */
+async function brandOfOrganization(organizationId: string): Promise<string> {
+  try {
+    const org = await getAdminPrisma().organization.findUnique({
+      where: { id: organizationId },
+      select: { brand: true },
+    });
+    return brandOf(org).key;
+  } catch {
+    return MARCA_BASE; // no se pudo leer → se cuenta donde se contaba antes
+  }
+}
+
+const capCache = new Map<string, { at: number; global: number; perTenantDefault: number }>();
+
+/**
+ * Lee los topes de platform_settings (cache 60 s por marca), con defaults de env.
+ *
+ * §6.1 — el techo global se busca primero en `messagingCapGlobalDay:<marca>`. El
+ * fallback a la clave sin marca es SOLO para tubot: es el valor que el dueño ya
+ * configuró para TuBot, y heredarlo en otra marca le daría a Conversia un techo pensado
+ * para el volumen de TuBot. Las marcas nuevas caen al default de entorno.
+ */
+async function readGlobalCaps(brand: string): Promise<{ global: number; perTenantDefault: number }> {
+  const hit = capCache.get(brand);
+  if (hit && Date.now() - hit.at < 60_000) return hit;
   const env = getEnv();
   let global = env.MSG_CAP_GLOBAL_DAY;
   let perTenantDefault = env.MSG_CAP_PER_TENANT_DAY;
+  const brandKey = `messagingCapGlobalDay:${brand}`;
   try {
     const rows = await getAdminPrisma().platformSetting.findMany({
-      where: { key: { in: ["messagingCapGlobalDay", "messagingCapPerTenantDay"] } },
+      where: { key: { in: [brandKey, "messagingCapGlobalDay", "messagingCapPerTenantDay"] } },
     });
+    const byKey = new Map<string, number>();
     for (const r of rows) {
       const n = Number(r.value);
-      if (!Number.isFinite(n) || n <= 0) continue;
-      if (r.key === "messagingCapGlobalDay") global = n;
-      if (r.key === "messagingCapPerTenantDay") perTenantDefault = n;
+      if (Number.isFinite(n) && n > 0) byKey.set(r.key, n);
     }
+    global = resolveBrandCap(brand, { perBrand: byKey.get(brandKey), legacy: byKey.get("messagingCapGlobalDay"), fallback: global });
+    perTenantDefault = byKey.get("messagingCapPerTenantDay") ?? perTenantDefault;
   } catch {
     /* fail open a defaults */
   }
-  capCache = { at: Date.now(), global, perTenantDefault };
-  return capCache;
+  const value = { at: Date.now(), global, perTenantDefault };
+  capCache.set(brand, value);
+  return value;
 }
 
 /**
@@ -109,8 +143,10 @@ async function businessBlock(organizationId: string): Promise<SendGate | null> {
 /** Tope diario por tenant (rate-limit): evita vaciar toda la bolsa en un día. */
 async function perTenantCapBlock(organizationId: string): Promise<SendGate | null> {
   try {
-    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
-    const { perTenantDefault } = await readGlobalCaps();
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true, brand: true } });
+    // La marca sale de la org que ya cargamos (sin consulta extra). El tope POR TENANT no
+    // es por marca hoy, pero los topes se leen juntos y así no divergen.
+    const { perTenantDefault } = await readGlobalCaps(brandOf(org).key);
     const override = Number((org?.settings as any)?.messaging?.dailyCap);
     const cap = Number.isFinite(override) && override > 0 ? override : perTenantDefault;
     const key = `msgcap:t:${organizationId}:${today()}`;
@@ -125,16 +161,16 @@ async function perTenantCapBlock(organizationId: string): Promise<SendGate | nul
   return null;
 }
 
-/** Incrementa el fusible global del día; corta (y alerta) si supera el techo. */
-async function globalFuseBlock(): Promise<SendGate | null> {
+/** Incrementa el fusible global del día DE SU MARCA; corta (y alerta) si supera el techo. */
+async function globalFuseBlock(brand: string): Promise<SendGate | null> {
   try {
     const d = today();
-    const { global } = await readGlobalCaps();
-    const gKey = `msgcap:g:${d}`;
+    const { global } = await readGlobalCaps(brand);
+    const gKey = messagingFuseKeys(brand, d).templateCounter;
     const gN = await conn().incr(gKey);
     if (gN === 1) await conn().expire(gKey, 172_800);
     if (gN > global) {
-      await tripFuse(d, gN, global);
+      await tripFuse(brand, d, gN, global);
       return block("global_fuse", "Los envíos de plantilla están en pausa temporal por una medida de seguridad de la plataforma. Ya estamos revisándolo; tu conversación no se pierde.");
     }
   } catch {
@@ -207,9 +243,10 @@ export async function chargeTemplateSend(
   }
   if (!debit.already) void notifyWalletThresholds(organizationId, debit.balance);
 
-  // (3) Fusible global (última red) → fail open. Si corta tras debitar, se devuelve el crédito.
+  // (3) Fusible global DE SU MARCA (última red) → fail open. Si corta tras debitar, se
+  //     devuelve el crédito.
   try {
-    const fuse = await globalFuseBlock();
+    const fuse = await globalFuseBlock(await brandOfOrganization(organizationId));
     if (fuse) {
       await refundForMessage(organizationId, messageId).catch(() => undefined);
       return fuse;
@@ -225,11 +262,14 @@ function block(reason: string, userMessage: string): SendGate {
 }
 
 /** Marca el fusible (para /health/fuse) y alerta UNA vez por día. */
-async function tripFuse(date: string, count: number, cap: number): Promise<void> {
+async function tripFuse(brand: string, date: string, count: number, cap: number): Promise<void> {
   try {
-    await conn().set(`msgcap:fuse:${date}`, "1", "EX", 172_800);
-    const firstTrip = await conn().set(`msgcap:fuse-alerted:${date}`, "1", "EX", 172_800, "NX");
-    console.error(`🚨 FUSIBLE DE MENSAJERÍA CORTADO — ${count} plantillas hoy supera el techo global ${cap}. Envíos de plantilla en pausa para todos los tenants.`);
+    const k = messagingFuseKeys(brand, date);
+    await conn().set(k.templateFuse, "1", "EX", 172_800);
+    const firstTrip = await conn().set(k.templateAlerted, "1", "EX", 172_800, "NX");
+    // La marca va en el mensaje: al cortar, lo primero que hay que saber es a QUIÉN dejó
+    // sin enviar, porque ahora el corte NO alcanza a las dos marcas.
+    console.error(`🚨 FUSIBLE DE MENSAJERÍA CORTADO (${brand}) — ${count} plantillas hoy supera el techo global ${cap}. Envíos de plantilla en pausa para los tenants de ${brand}.`);
     if (firstTrip) {
       const url = getEnv().OPS_ALERT_WEBHOOK_URL;
       if (url) {
@@ -237,8 +277,8 @@ async function tripFuse(date: string, count: number, cap: number): Promise<void>
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            summary: "Fusible de mensajería cortado",
-            description: `Se superó el techo global diario de plantillas (${count} > ${cap}). Envíos de plantilla en pausa para todos los tenants hasta revisión.`,
+            summary: `Fusible de mensajería cortado (${brand})`,
+            description: `Se superó el techo global diario de plantillas de ${brand} (${count} > ${cap}). Envíos de plantilla en pausa para los tenants de ${brand} hasta revisión.`,
             severity: "critical",
           }),
         }).catch(() => undefined);
@@ -265,28 +305,33 @@ export async function isFuseTripped(): Promise<boolean> {
 // 10-100x y compartirlos dispararía el fusible de plantillas.
 // ───────────────────────────────────────────────────────────────────────────
 
-let svcCapCache: { at: number; global: number; perTenantDefault: number } | null = null;
+const svcCapCache = new Map<string, { at: number; global: number; perTenantDefault: number }>();
 
-async function readGlobalSvcCaps(): Promise<{ global: number; perTenantDefault: number }> {
-  if (svcCapCache && Date.now() - svcCapCache.at < 60_000) return svcCapCache;
+/** §6.1 — igual que `readGlobalCaps`, para el fusible de SERVICIO (ventana de 24 h). */
+async function readGlobalSvcCaps(brand: string): Promise<{ global: number; perTenantDefault: number }> {
+  const hit = svcCapCache.get(brand);
+  if (hit && Date.now() - hit.at < 60_000) return hit;
   const env = getEnv();
   let global = env.MSG_CAP_SVC_GLOBAL_DAY;
   let perTenantDefault = env.MSG_CAP_SVC_PER_TENANT_DAY;
+  const brandKey = `messagingCapSvcGlobalDay:${brand}`;
   try {
     const rows = await getAdminPrisma().platformSetting.findMany({
-      where: { key: { in: ["messagingCapSvcGlobalDay", "messagingCapSvcPerTenantDay"] } },
+      where: { key: { in: [brandKey, "messagingCapSvcGlobalDay", "messagingCapSvcPerTenantDay"] } },
     });
+    const byKey = new Map<string, number>();
     for (const r of rows) {
       const n = Number(r.value);
-      if (!Number.isFinite(n) || n <= 0) continue;
-      if (r.key === "messagingCapSvcGlobalDay") global = n;
-      if (r.key === "messagingCapSvcPerTenantDay") perTenantDefault = n;
+      if (Number.isFinite(n) && n > 0) byKey.set(r.key, n);
     }
+    global = resolveBrandCap(brand, { perBrand: byKey.get(brandKey), legacy: byKey.get("messagingCapSvcGlobalDay"), fallback: global });
+    perTenantDefault = byKey.get("messagingCapSvcPerTenantDay") ?? perTenantDefault;
   } catch {
     /* fail open a defaults */
   }
-  svcCapCache = { at: Date.now(), global, perTenantDefault };
-  return svcCapCache;
+  const value = { at: Date.now(), global, perTenantDefault };
+  svcCapCache.set(brand, value);
+  return value;
 }
 
 /** SETNX por período para avisos de cupo (una sola vez). */
@@ -320,8 +365,8 @@ async function resolveServiceHardCap(organizationId: string): Promise<boolean> {
 /** Tope diario de servicio por tenant (contador Redis separado del de plantillas). */
 async function perTenantSvcCapBlock(organizationId: string): Promise<SendGate | null> {
   try {
-    const { perTenantDefault } = await readGlobalSvcCaps();
-    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true, brand: true } });
+    const { perTenantDefault } = await readGlobalSvcCaps(brandOf(org).key);
     const override = Number((org?.settings as any)?.messaging?.dailySvcCap);
     const cap = Number.isFinite(override) && override > 0 ? override : perTenantDefault;
     const key = `msgcap:svc:t:${organizationId}:${today()}`;
@@ -336,16 +381,16 @@ async function perTenantSvcCapBlock(organizationId: string): Promise<SendGate | 
   return null;
 }
 
-/** Fusible global de servicio (separado del de plantillas). */
-async function globalSvcFuseBlock(): Promise<SendGate | null> {
+/** Fusible global de servicio (separado del de plantillas), POR MARCA. */
+async function globalSvcFuseBlock(brand: string): Promise<SendGate | null> {
   try {
     const d = today();
-    const { global } = await readGlobalSvcCaps();
-    const gKey = `msgcap:svc:g:${d}`;
+    const { global } = await readGlobalSvcCaps(brand);
+    const gKey = messagingFuseKeys(brand, d).serviceCounter;
     const gN = await conn().incr(gKey);
     if (gN === 1) await conn().expire(gKey, 172_800);
     if (gN > global) {
-      await tripSvcFuse(d, gN, global);
+      await tripSvcFuse(brand, d, gN, global);
       return block("svc_global_fuse", "Las respuestas automáticas están en pausa temporal por una medida de seguridad de la plataforma. Ya estamos revisándolo; tu conversación no se pierde.");
     }
   } catch {
@@ -354,11 +399,12 @@ async function globalSvcFuseBlock(): Promise<SendGate | null> {
   return null;
 }
 
-async function tripSvcFuse(date: string, count: number, cap: number): Promise<void> {
+async function tripSvcFuse(brand: string, date: string, count: number, cap: number): Promise<void> {
   try {
-    await conn().set(`msgcap:svc-fuse:${date}`, "1", "EX", 172_800);
-    const firstTrip = await conn().set(`msgcap:svc-fuse-alerted:${date}`, "1", "EX", 172_800, "NX");
-    console.error(`🚨 FUSIBLE DE SERVICIO CORTADO — ${count} respuestas de servicio hoy supera el techo global ${cap}. Respuestas automáticas en pausa para todos los tenants.`);
+    const k = messagingFuseKeys(brand, date);
+    await conn().set(k.serviceFuse, "1", "EX", 172_800);
+    const firstTrip = await conn().set(k.serviceAlerted, "1", "EX", 172_800, "NX");
+    console.error(`🚨 FUSIBLE DE SERVICIO CORTADO (${brand}) — ${count} respuestas de servicio hoy supera el techo global ${cap}. Respuestas automáticas en pausa para los tenants de ${brand}.`);
     if (firstTrip) {
       const url = getEnv().OPS_ALERT_WEBHOOK_URL;
       if (url) {
@@ -366,8 +412,8 @@ async function tripSvcFuse(date: string, count: number, cap: number): Promise<vo
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            summary: "Fusible de mensajes de servicio cortado",
-            description: `Se superó el techo global diario de servicio (${count} > ${cap}). Respuestas automáticas en pausa para todos los tenants hasta revisión.`,
+            summary: `Fusible de mensajes de servicio cortado (${brand})`,
+            description: `Se superó el techo global diario de servicio de ${brand} (${count} > ${cap}). Respuestas automáticas en pausa para los tenants de ${brand} hasta revisión.`,
             severity: "critical",
           }),
         }).catch(() => undefined);
@@ -378,10 +424,10 @@ async function tripSvcFuse(date: string, count: number, cap: number): Promise<vo
   }
 }
 
-/** ¿El fusible de servicio está cortado hoy? Lo expone /health/fuse. */
-export async function isServiceFuseTripped(): Promise<boolean> {
+/** ¿El fusible de servicio de esa marca está cortado hoy? (`/health/fuse` lee las claves). */
+export async function isServiceFuseTripped(brand: string = MARCA_BASE): Promise<boolean> {
   try {
-    return (await conn().get(`msgcap:svc-fuse:${today()}`)) === "1";
+    return (await conn().get(messagingFuseKeys(brand, today()).serviceFuse)) === "1";
   } catch {
     return false;
   }
@@ -448,9 +494,19 @@ async function outOfConversationCreditsPhrase(organizationId: string): Promise<s
   }
 }
 
-/** ¿El plan vigente de la org debita el servicio de la bolsa (feature serviceDebitsWallet)? */
+/**
+ * ¿El plan vigente de la org debita el servicio de la bolsa (feature serviceDebitsWallet)?
+ *
+ * §6.6 — DOBLE GUARDA: hace falta que la org sea de marca **conversia** Y que el plan
+ * traiga la feature. Cobrar el mensaje de servicio es un modelo de Conversia; en TuBot
+ * las respuestas dentro de las 24 h no se cobran. Con la feature sola, un plan de TuBot
+ * mal marcado —a mano en el Super Admin, por un seed, o por un loop que recorra todos los
+ * planes, como el incidente de V2-7— empezaría a cobrarle a los clientes de TuBot sin
+ * que nadie lo pidiera. La marca no se edita desde una pantalla de planes: es el cierre.
+ */
 async function planDebitsService(organizationId: string): Promise<boolean> {
   try {
+    if (!(await isConversiaOrg(organizationId))) return false;
     const prisma = getAdminPrisma();
     const sub = await prisma.subscription.findFirst({
       where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } },
@@ -544,7 +600,7 @@ export async function chargeServiceSend(
     // Tope diario de servicio por tenant → fusible global de servicio.
     const tCap = await perTenantSvcCapBlock(organizationId);
     if (tCap) return tCap;
-    const gFuse = await globalSvcFuseBlock();
+    const gFuse = await globalSvcFuseBlock(await brandOfOrganization(organizationId));
     if (gFuse) return gFuse;
   } catch {
     /* fail open: una caída de infraestructura no puede callar el bot. */

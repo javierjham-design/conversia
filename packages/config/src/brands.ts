@@ -178,6 +178,71 @@ export function brandFromOrigin(origin: string | undefined): string {
  * Los tokens de color de cada acento (ambos modos) viven en el design system del
  * frontend (apps/conversia-web/app/globals.css); aquí solo el mapa país → acento.
  */
+/** Marca por defecto cuando una organización no la tiene puesta (comportamiento histórico). */
+export const DEFAULT_BRAND = "tubot";
+
+export interface MessagingFuseKeys {
+  /** Contador diario de plantillas enviadas. */
+  templateCounter: string;
+  /** Bandera "el fusible de plantillas cortó hoy". */
+  templateFuse: string;
+  /** SETNX para alertar del corte una sola vez. */
+  templateAlerted: string;
+  serviceCounter: string;
+  serviceFuse: string;
+  serviceAlerted: string;
+}
+
+/**
+ * §6.1 — Claves de Redis del fusible de mensajería, POR MARCA.
+ *
+ * El fusible global es la última red de la plataforma: al cortar, deja a TODOS los
+ * tenants sin enviar. Con un contador único compartido, un pico de Conversia cortaba los
+ * envíos de TuBot y al revés — marcas distintas, clientes distintos, incidentes que no
+ * tienen nada que ver. Cada marca cuenta y corta por su cuenta.
+ *
+ * TuBot usa las claves SIN sufijo, que son las que están contando AHORA en producción:
+ * renombrárselas le reiniciaría el contador del día y le borraría el estado del fusible a
+ * mitad de jornada, que es lo único que no se puede hacer con un bot 24/7.
+ *
+ * Vive acá, y no en el worker, porque hay DOS lectores: el worker las escribe y
+ * `/health/fuse` de la API las lee para el monitor externo. Si cada uno armara la clave
+ * por su lado, el día que divergan el monitor diría "todo bien" con el fusible cortado.
+ */
+export function messagingFuseKeys(brand: string | null | undefined, date: string): MessagingFuseKeys {
+  const b = (brand ?? DEFAULT_BRAND).trim().toLowerCase() || DEFAULT_BRAND;
+  const seg = b === DEFAULT_BRAND ? "" : `${b}:`;
+  return {
+    templateCounter: `msgcap:g:${seg}${date}`,
+    templateFuse: `msgcap:fuse:${seg}${date}`,
+    templateAlerted: `msgcap:fuse-alerted:${seg}${date}`,
+    serviceCounter: `msgcap:svc:g:${seg}${date}`,
+    serviceFuse: `msgcap:svc-fuse:${seg}${date}`,
+    serviceAlerted: `msgcap:svc-fuse-alerted:${seg}${date}`,
+  };
+}
+
+/**
+ * §6.1 — Resuelve un tope GLOBAL por marca.
+ *
+ * Orden: el valor de la marca manda; si no hay, SOLO tubot hereda el valor de la clave
+ * sin marca (es el techo que el dueño ya configuró para TuBot, y heredarlo en otra marca
+ * le daría a Conversia un límite calculado para el volumen de TuBot); el resto cae al
+ * default de entorno.
+ *
+ * Es una función aparte, y pura, porque es la regla que decide si un fusible corta: se
+ * testea sin Redis ni base de datos.
+ */
+export function resolveBrandCap(
+  brand: string | null | undefined,
+  values: { perBrand?: number; legacy?: number; fallback: number },
+): number {
+  const b = (brand ?? DEFAULT_BRAND).trim().toLowerCase() || DEFAULT_BRAND;
+  const valido = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined);
+  const heredable = b === DEFAULT_BRAND ? valido(values.legacy) : undefined;
+  return valido(values.perBrand) ?? heredable ?? values.fallback;
+}
+
 export type AccentKey = "menta" | "artico" | "indigo" | "lima" | "oro" | "coral";
 
 export const ACCENTS: AccentKey[] = ["menta", "artico", "indigo", "lima", "oro", "coral"];
