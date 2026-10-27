@@ -2252,16 +2252,24 @@ export class PlatformController {
   // ---------------------------- Suscripciones ----------------------------
 
   /**
-   * §9.3 — Acredita el cupo de mensajes del período con la MISMA regla y la MISMA función
-   * que el cobro por pasarela (`refillMessageWallet`: min(saldo, cupo) + cupo, atómico,
-   * con asiento `plan_renewal`). Best-effort y ruidoso: si falla, no se cae la acción del
-   * Super Admin (el período ya quedó renovado) pero queda en el log.
+   * §9.3 — Acredita el cupo de mensajes del período con la MISMA función atómica que el
+   * cobro por pasarela (`refillMessageWallet`, con asiento `plan_renewal`), pero con
+   * `carryover: "keep"`.
+   *
+   * POR QUÉ SIN RECORTE (decisión del dueño, 27-oct): la renovación automática por
+   * pasarela aplica `min(saldo, cupo) + cupo`, o sea tope de carryover. Estas dos acciones
+   * son MANUALES del Super Admin (asignar suscripción / registrar un pago) y aplicarles el
+   * tope le borraría al cliente los packs que compró y todavía no usó. Acá se suma:
+   * `saldo + cupo`.
+   *
+   * Best-effort y ruidoso: si falla, no se cae la acción del Super Admin (el período ya
+   * quedó renovado) pero queda en el log.
    */
   private async rechargePlanWallet(organizationId: string, planId: string): Promise<boolean> {
     try {
       const plan = await this.prisma.admin.plan.findUnique({ where: { id: planId }, select: { features: true } });
       const included = messageWalletQuota(plan?.features ?? {}, getEnv().WALLET_DEFAULT_QUOTA);
-      await refillMessageWallet(this.prisma.admin, { organizationId, included });
+      await refillMessageWallet(this.prisma.admin, { organizationId, included, carryover: "keep" });
       return true;
     } catch (e) {
       console.error(`✖ platform: no se pudo recargar la bolsa de ${organizationId}:`, (e as Error).message);
