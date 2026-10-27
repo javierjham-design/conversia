@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // previo a los imports): habilita probar la familia de dominios conversia.
 vi.hoisted(() => {
   process.env.WEB_URL_CONVERSIA = "https://app.conversia.cl";
+  process.env.MAIL_REPLY_TO = "respuestas-test@tubot.cl";
 });
 
 import { brandOf } from "@conversia/config";
@@ -27,6 +28,11 @@ describe("brandOf (marca por organización)", () => {
     expect(b.mailFrom).toBe("Conversia <no-reply@conversia.cl>");
     expect(b.mfaIssuer).toBe("Conversia.cl");
     expect(b.paymentSubjectPrefix).toBe("Conversia");
+  });
+
+  it("MAIL_REPLY_TO llega al replyTo de AMBAS marcas (respuestas a un solo buzón)", () => {
+    expect(brandOf({ brand: "conversia" }).replyTo).toBe("respuestas-test@tubot.cl");
+    expect(brandOf({ brand: "tubot" }).replyTo).toBe("respuestas-test@tubot.cl");
   });
 
   it("marca desconocida → fallback a tubot", () => {
