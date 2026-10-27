@@ -25,6 +25,16 @@ if (!fs.existsSync(DIST)) {
   process.exit(2);
 }
 
+/*
+ * Nada de esto se CONECTA: el constructor de PrismaClient solo valida que la URL exista
+ * (`getAdminPrisma` lee `process.env` directo, sin pasar por el default de `getEnv()`), y
+ * el cliente de Redis se crea con `lazyConnect`. Se rellenan acá para que el chequeo
+ * corra en una máquina limpia o en CI, donde no hay `.env`: lo que se comprueba es el
+ * grafo de dependencias, no que haya base de datos.
+ */
+process.env.DATABASE_URL ||= "postgresql://chequeo:chequeo@127.0.0.1:5432/chequeo?schema=public";
+process.env.REDIS_URL ||= "redis://127.0.0.1:6379";
+
 require(path.join(API, "node_modules/reflect-metadata"));
 
 (async () => {
