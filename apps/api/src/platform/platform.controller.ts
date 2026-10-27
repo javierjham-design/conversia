@@ -1235,7 +1235,7 @@ export class PlatformController {
 <p>Se restableció el acceso a tu cuenta de ${brand.name}.</p>
 <p><b>Usuario:</b> ${res.email}<br/><b>Contraseña temporal:</b> ${res.tempPassword}</p>
 <p>Ingresa en <a href="${loginUrl}">${loginUrl.replace(/^https?:\/\//, "")}</a> y cámbiala.</p>`;
-    const sent = await sendEmail({ to: res.email, subject: `Restablecimiento de acceso · ${brand.name}`, html, from: brand.mailFrom, replyTo: brand.replyTo ?? undefined });
+    const sent = await sendEmail({ to: res.email, subject: `Restablecimiento de acceso · ${brand.name}`, html, from: brand.mailFrom, replyTo: brand.replyTo ?? undefined, apiKey: brand.resendApiKey });
     await this.audit(req, "platform.admin.send_reset", "user", res.userId, { email: res.email, sent });
     return { ok: true, email: res.email, sent, tempPassword: sent ? null : res.tempPassword };
   }

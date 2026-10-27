@@ -78,6 +78,10 @@ const envSchema = z.object({
   AI_FALLBACK_MODEL: z.string().default("claude-haiku-4-5"),
   // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
   RESEND_API_KEY: z.string().optional().default(""),
+  // Key de Resend específica de la marca Conversia (sus keys están restringidas por
+  // dominio: una key de conversia.cl no puede enviar como tubot.cl y viceversa). Vacío
+  // = usa RESEND_API_KEY (la de TuBot/por defecto) como respaldo.
+  RESEND_API_KEY_CONVERSIA: z.string().optional().default(""),
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
   // Reply-To de los correos de marca de la plataforma (verificación, reset): el remitente
   // sigue siendo no-reply@<marca>, pero las respuestas del cliente caen en este buzón.
