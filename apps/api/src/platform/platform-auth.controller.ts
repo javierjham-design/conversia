@@ -91,6 +91,65 @@ export class PlatformAuthController {
     };
   }
 
+  /**
+   * Login del super admin con Google (GIS). Valida el ID token con Google, resuelve la
+   * marca por el Origin (D8) y SOLO deja entrar a un super admin que YA existe para esa
+   * marca (no auto-registra). Mantiene el 2FA: si el admin lo tiene activo, exige el
+   * código igual que el login por contraseña (responde `mfaRequired`).
+   */
+  @Post("google")
+  async google(@Body() body: unknown, @Req() req: Request) {
+    const parsed = z
+      .object({ credential: z.string().min(10), code: z.string().trim().max(20).optional() })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const env = getEnv();
+    if (!env.GOOGLE_CLIENT_ID) throw new BadRequestException("El inicio con Google no está configurado.");
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    const gres = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(parsed.data.credential)}`,
+    );
+    const info: any = await gres.json().catch(() => ({}));
+    const emailVerified = info?.email_verified === true || info?.email_verified === "true";
+    if (!gres.ok || info?.aud !== env.GOOGLE_CLIENT_ID || !info?.email || !emailVerified) {
+      throw new UnauthorizedException("No se pudo validar tu cuenta de Google.");
+    }
+    const email = String(info.email).toLowerCase();
+    const rl = await this.rateLimit.custom(`rl:platform-google:${brand}:${email}`, 15, 900);
+    if (!rl.allowed) {
+      throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const admin = await this.prisma.admin.platformAdmin.findUnique({
+      where: { email_brand: { email, brand } },
+    });
+    if (!admin) throw new UnauthorizedException("Tu cuenta de Google no está autorizada en la consola.");
+
+    // Segundo factor: obligatorio si el admin lo tiene activo (igual que el login por contraseña).
+    if (admin.mfaEnabledAt) {
+      const code = parsed.data.code;
+      if (!code) {
+        throw new UnauthorizedException({ message: "Ingresa el código de verificación", mfaRequired: true });
+      }
+      const totpOk = admin.mfaSecret ? verifyTotp(admin.mfaSecret, code) : false;
+      const recoveryOk = totpOk ? false : await this.consumeRecoveryCode(admin.id, admin.mfaRecoveryCodes, code);
+      if (!totpOk && !recoveryOk) {
+        throw new UnauthorizedException({ message: "Código de verificación inválido", mfaRequired: true });
+      }
+    }
+
+    await this.prisma.admin.auditLog.create({
+      data: { actorType: "platform_admin", actorId: admin.id, action: "platform.login.google", entityType: "platform_admin", entityId: admin.id },
+    });
+    const jti = await this.sessions.create(admin.id);
+    return {
+      token: signPlatformToken({ sub: admin.id, email: admin.email, role: admin.role, brand: admin.brand, jti }),
+      name: admin.name,
+      role: admin.role,
+      brand: admin.brand,
+      mfaEnabled: !!admin.mfaEnabledAt,
+    };
+  }
+
   @Get("me")
   @UseGuards(PlatformGuard)
   async me(@Req() req: PlatformRequest) {
