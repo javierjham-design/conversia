@@ -171,21 +171,26 @@ export async function debitForMessage(
     ledgerCategory = norm;
   }
 
-  // Débito atómico: la fila se bloquea; sin saldo suficiente → 0 filas.
-  const rows = await prisma.$queryRaw<{ balance: number }[]>`
-    UPDATE message_wallets SET balance = balance - ${weight}, updated_at = now()
-    WHERE organization_id = ${organizationId} AND balance >= ${weight}
-    RETURNING balance`;
-  if (rows.length === 0) {
+  // Débito atómico + asiento del libro en el MISMO commit (§9.5).
+  // Antes el asiento iba por fuera y con `.catch(() => undefined)`: si fallaba, el saldo
+  // quedaba descontado SIN registro y —como la idempotencia se comprueba leyendo el libro—
+  // el mismo mensaje se podía volver a cobrar. Ahora o pasan las dos cosas, o ninguna.
+  const balance = await prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ balance: number }[]>`
+      UPDATE message_wallets SET balance = balance - ${weight}, updated_at = now()
+      WHERE organization_id = ${organizationId} AND balance >= ${weight}
+      RETURNING balance`;
+    if (rows.length === 0) return null; // sin saldo suficiente: no se descuenta nada
+    const after = rows[0].balance;
+    await tx.walletLedger.create({
+      data: { organizationId, delta: -weight, reason: "send_debit", balanceAfter: after, category: ledgerCategory, costUsd: costUsd ?? null, refType: "message", refId: messageId },
+    });
+    return after;
+  });
+  if (balance === null) {
     const w = await prisma.messageWallet.findUnique({ where: { organizationId }, select: { balance: true } });
     return { ok: false, reason: "no_balance", balance: w?.balance ?? 0 };
   }
-  const balance = rows[0].balance;
-  await prisma.walletLedger
-    .create({
-      data: { organizationId, delta: -weight, reason: "send_debit", balanceAfter: balance, category: ledgerCategory, costUsd: costUsd ?? null, refType: "message", refId: messageId },
-    })
-    .catch(() => undefined);
   return { ok: true, balance };
 }
 
