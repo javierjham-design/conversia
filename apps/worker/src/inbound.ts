@@ -344,8 +344,11 @@ export async function processInbound(job: InboundJob): Promise<void> {
       // Idempotencia por wamid
       const dup = await tx.message.findUnique({
         where: { organizationId_externalId: { organizationId, externalId: msg.externalId } },
+        select: { conversationId: true },
       });
-      if (dup) return null;
+      // §8.3 — en el camino duplicado devolvemos igual la conversación: hay que poder
+      // comprobar si el turno quedó pendiente (si no, el bot queda mudo para siempre).
+      if (dup) return { duplicate: true as const, conversationId: dup.conversationId };
 
       // Contacto por identidad de canal
       const channelType = msg.phoneNumberId.startsWith("mock:") ? "MOCK" : "WHATSAPP_CLOUD";
@@ -495,27 +498,63 @@ export async function processInbound(job: InboundJob): Promise<void> {
         },
       });
 
-      return { conversationId: conversation.id, contactId: contact.id, started };
+      return { duplicate: false as const, conversationId: conversation.id, contactId: contact.id, started };
     });
 
-    if (!result) continue; // duplicado
+    if (result.duplicate) {
+      // §8.3 — DUPLICADO significa que este job de ingreso se está REINTENTANDO: el mensaje
+      // ya quedó persistido en el intento anterior. Si en ese intento el turno nunca llegó a
+      // encolarse (falló un efecto secundario intermedio), el bot quedaba MUDO para siempre.
+      // Reencolamos SOLO si la conversación sigue sin respuesta; el encolado es idempotente
+      // por jobId, así que repetirlo es inofensivo.
+      try {
+        const sinResponder = await withTenant(organizationId, (tx) =>
+          conversationAwaitingReply(tx, organizationId, result.conversationId),
+        );
+        if (sinResponder) {
+          await enqueueDebouncedAgentTurn({ organizationId, conversationId: result.conversationId });
+        }
+      } catch (err) {
+        console.error(
+          `✖ Error al rescatar el turno de un ingreso duplicado (${result.conversationId}):`,
+          (err as Error).message,
+        );
+      }
+      continue;
+    }
 
     // Marca de inicio del ciclo de este mensaje: para saber qué runs de flujo lo
     // "tomaron" (arrancaron por él) y así el agente por defecto sea un FALLBACK,
     // no un bot omnipotente que compite con los flujos.
     const cycleStart = new Date();
 
+    // §8.3 — cada efecto secundario va en su PROPIO try/catch. El mensaje ya está persistido:
+    // si uno de estos falla, el job NO debe reintentarse desde cero (reintento = duplicado) ni
+    // impedir que el turno del agente llegue a encolarse más abajo. Antes, un fallo acá dejaba
+    // al bot MUDO para esa conversación.
     // Bandeja en vivo: nuevo mensaje entrante + conteos del clasificador.
-    const { publishRealtime } = await import("./realtime.js");
-    await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
-    await publishRealtime(organizationId, { type: "counters.dirty" });
+    try {
+      const { publishRealtime } = await import("./realtime.js");
+      await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
+      await publishRealtime(organizationId, { type: "counters.dirty" });
+    } catch (err) {
+      console.error(`✖ Error al publicar en tiempo real (${result.conversationId}):`, (err as Error).message);
+    }
 
     // Sincronización unidireccional a HubSpot (si el tenant la activó)
-    const { enqueueHubspotContact } = await import("./hubspot.js");
-    await enqueueHubspotContact(organizationId, result.contactId);
+    try {
+      const { enqueueHubspotContact } = await import("./hubspot.js");
+      await enqueueHubspotContact(organizationId, result.contactId);
+    } catch (err) {
+      console.error(`✖ Error al sincronizar con HubSpot (${result.contactId}):`, (err as Error).message);
+    }
 
     // El contacto respondió → cancelar seguimientos pendientes
-    await cancelTimersOnReply(organizationId, result.conversationId);
+    try {
+      await cancelTimersOnReply(organizationId, result.conversationId);
+    } catch (err) {
+      console.error(`✖ Error al cancelar seguimientos (${result.conversationId}):`, (err as Error).message);
+    }
     // …y continuar por la rama "Sí, respondió" los nodos "¿El contacto respondió?".
     await handleWaitReply(organizationId, result.conversationId).catch((err) => {
       console.error(`✖ Error al reanudar "¿respondió?" (${result.conversationId}):`, (err as Error).message);
@@ -539,19 +578,41 @@ export async function processInbound(job: InboundJob): Promise<void> {
       data: { text: text ?? "", isFirstMessage: result.started, channel: "whatsapp" },
       occurredAt: new Date().toISOString(),
     };
+    // §8.3 — cada disparo aislado: si un flujo o un evento falla, se registra y se sigue.
+    // El turno del agente (más abajo) NO puede perderse por esto.
     if (result.started) {
-      await dispatchEvent({ ...base, type: "conversation_started" });
-      await emitPlatformEvent(organizationId, "conversation.started", {
-        conversationId: result.conversationId,
-        contactId: result.contactId,
-      });
+      try {
+        await dispatchEvent({ ...base, type: "conversation_started" });
+      } catch (err) {
+        console.error(`✖ Error en flujos de conversación iniciada (${result.conversationId}):`, (err as Error).message);
+      }
+      try {
+        await emitPlatformEvent(organizationId, "conversation.started", {
+          conversationId: result.conversationId,
+          contactId: result.contactId,
+        });
+      } catch (err) {
+        console.error(`✖ Error al emitir conversation.started (${result.conversationId}):`, (err as Error).message);
+      }
     }
-    await dispatchEvent({ ...base, type: "message_received" });
-    await emitPlatformEvent(organizationId, "message.received", {
-      conversationId: result.conversationId,
-      text: (text ?? "").slice(0, 200),
-    });
-    await notifyHumanAttendedMessage(organizationId, result.conversationId, text ?? "");
+    try {
+      await dispatchEvent({ ...base, type: "message_received" });
+    } catch (err) {
+      console.error(`✖ Error en flujos de mensaje recibido (${result.conversationId}):`, (err as Error).message);
+    }
+    try {
+      await emitPlatformEvent(organizationId, "message.received", {
+        conversationId: result.conversationId,
+        text: (text ?? "").slice(0, 200),
+      });
+    } catch (err) {
+      console.error(`✖ Error al emitir message.received (${result.conversationId}):`, (err as Error).message);
+    }
+    try {
+      await notifyHumanAttendedMessage(organizationId, result.conversationId, text ?? "");
+    } catch (err) {
+      console.error(`✖ Error al notificar atención humana (${result.conversationId}):`, (err as Error).message);
+    }
 
     // Anuncios Click-to-WhatsApp: la atribución (ctwa_clid/ad_id/referral crudo)
     // ya la guardó buildContactCreate/Update en columnas estructuradas + meta;
@@ -630,14 +691,14 @@ export async function processInbound(job: InboundJob): Promise<void> {
         ),
       );
     if (!flowTookMessage) {
-      try {
-        // DEBOUNCE de ráfagas: no corremos el turno aquí mismo; lo encolamos con una ventana
-        // para que, si el contacto sigue escribiendo, se agrupen todos sus mensajes en UNA
-        // respuesta (mejor UX + menos costo). El turno lo corre el agentTurnWorker.
-        await enqueueDebouncedAgentTurn({ organizationId, conversationId: result.conversationId });
-      } catch (err) {
-        console.error(`✖ Error al encolar turno de agente (${result.conversationId}):`, (err as Error).message);
-      }
+      // DEBOUNCE de ráfagas: no corremos el turno aquí mismo; lo encolamos con una ventana
+      // para que, si el contacto sigue escribiendo, se agrupen todos sus mensajes en UNA
+      // respuesta (mejor UX + menos costo). El turno lo corre el agentTurnWorker.
+      //
+      // §8.3 — este error NO se traga: si el encolado falla, el job de ingreso debe FALLAR
+      // para que BullMQ lo reintente; en el reintento el mensaje es duplicado y el rescate
+      // de arriba vuelve a encolar el turno. Tragarlo dejaba al bot mudo en silencio.
+      await enqueueDebouncedAgentTurn({ organizationId, conversationId: result.conversationId });
     }
 
   }
@@ -752,8 +813,47 @@ export async function processInbound(job: InboundJob): Promise<void> {
       return { conversationId: conversation.id };
     });
     if (!result) continue; // duplicado
-    const { publishRealtime } = await import("./realtime.js");
-    await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
-    await publishRealtime(organizationId, { type: "counters.dirty" });
+    // §8.3 — los ECOS de coexistencia NO disparan al agente (son mensajes que el DUEÑO ya
+    // respondió a mano desde su app): acá NO se reencola ningún turno, o el bot le
+    // contestaría al propio dueño. Solo se refresca la Bandeja, aislado para que un fallo
+    // de tiempo real no haga reintentar el job.
+    try {
+      const { publishRealtime } = await import("./realtime.js");
+      await publishRealtime(organizationId, { type: "message.created", conversationId: result.conversationId });
+      await publishRealtime(organizationId, { type: "counters.dirty" });
+    } catch (err) {
+      console.error(`✖ Error al publicar eco en tiempo real (${result.conversationId}):`, (err as Error).message);
+    }
   }
+}
+
+/**
+ * ¿La conversación quedó SIN respuesta después del último mensaje ENTRANTE? (§8.3)
+ *
+ * Se usa en el camino "duplicado" del ingreso: cuando el job se reintenta, el mensaje ya está
+ * persistido y antes se salía con `continue`; si en el intento anterior el turno nunca llegó a
+ * encolarse, el bot quedaba MUDO para siempre. Con esto se reencola SOLO cuando de verdad
+ * nadie respondió todavía (y el encolado es idempotente por jobId).
+ */
+export async function conversationAwaitingReply(
+  tx: { message: { findFirst: (args: any) => Promise<{ createdAt: Date } | null> } },
+  organizationId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const ultimoEntrante = await tx.message.findFirst({
+    where: { organizationId, conversationId, direction: "INBOUND" },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (!ultimoEntrante) return false;
+  const respuesta = await tx.message.findFirst({
+    where: {
+      organizationId,
+      conversationId,
+      direction: "OUTBOUND",
+      createdAt: { gte: ultimoEntrante.createdAt },
+    },
+    select: { createdAt: true },
+  });
+  return !respuesta;
 }

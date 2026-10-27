@@ -2,6 +2,7 @@ import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
 import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
+import { claimSend, markSent, releaseSend } from "./send-claim";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
 import { chargeTemplateSend, chargeServiceSend } from "./messaging-guard";
 import { refundForMessage } from "./wallet";
@@ -177,8 +178,36 @@ export async function processOutbound(
     }
   }
 
+  // §4.5/§8.4 — DOBLE ENVÍO al reintentar: si el envío a Meta salió bien pero falló el update
+  // del estado, el mensaje quedaba PENDING, BullMQ reintentaba y el cliente lo recibía DOS
+  // veces. Claim atómico antes de despachar (ver send-claim.ts; va en Redis porque `SENDING`
+  // no existe en el enum y esta etapa no admite migraciones).
+  const claim = await claimSend(data.message.id);
+  if (!claim.ok) {
+    if (claim.alreadySent) {
+      // Ya se despachó: NO se reenvía. Se reintenta SOLO el update del estado.
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({
+          where: { id: data.message.id },
+          data: {
+            status: "SENT",
+            ...(claim.externalId ? { externalId: claim.externalId } : {}),
+            sentAt: new Date(),
+          },
+        }),
+      ).catch(() => undefined);
+      const { publishRealtime: pub } = await import("./realtime.js");
+      await pub(organizationId, { type: "message.updated", conversationId: data.message.conversationId });
+    }
+    return;
+  }
+
+  let dispatched = false;
   try {
     const sent = await getChannelProvider().send(auth.phoneNumberId, outbound, { accessToken: auth.accessToken });
+    // Marcamos ANTES del update: si el update falla, el reintento verá el marcador y no reenviará.
+    dispatched = true;
+    await markSent(data.message.id, sent.externalId ?? null);
     await withTenant(organizationId, (tx) =>
       tx.message.update({
         where: { id: data.message.id },
@@ -193,6 +222,19 @@ export async function processOutbound(
       await recordServiceSend(organizationId, data.message.id, data.message.conversationId, data.phone, auth.phoneNumberId);
     }
   } catch (err) {
+    if (dispatched) {
+      // §8.4 — el envío SÍ salió a Meta; lo que falló fue el update o un efecto posterior.
+      // NO se reenvía ni se marca FAILED: se reintenta SOLO el update y, si vuelve a fallar,
+      // lo reconcilia el próximo intento gracias al marcador. Tampoco se relanza el error.
+      console.error(`✖ Envío OK pero falló el post-envío (${data.message.id}):`, (err as Error).message);
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "SENT", sentAt: new Date() } }),
+      ).catch(() => undefined);
+      return;
+    }
+    // No llegó a despacharse: liberamos el claim para que el reintento SÍ pueda enviar
+    // (si no, el mensaje quedaría bloqueado en PENDING para siempre).
+    await releaseSend(data.message.id);
     // ¿Es un fallo terminal o habrá reintento de BullMQ? Auth/Config NO se reintentan
     // (no se arreglan solos). Los demás se reintentan hasta agotar maxAttempts.
     const isConfigErr = err instanceof ChannelAuthError || err instanceof ChannelConfigError;
