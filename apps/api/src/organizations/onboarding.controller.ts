@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post } from "@nestjs/common
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { requirePermission } from "../tenancy/permissions";
 import { templateGuideFor } from "./template-guide";
 import { VerticalService } from "./vertical.service";
 
@@ -141,7 +142,9 @@ export class OnboardingController {
   /** Instala el paquete vertical del rubro indicado en el tenant actual (idempotente). */
   @Post("vertical")
   async installVertical(@Body() body: unknown) {
-    const ctx = requireContext();
+    // §3.5 — instalar un paquete vertical siembra servicios, etiquetas y configuración
+    // del tenant: es configurar la cuenta, no usarla. Exige `settings:write`.
+    const ctx = requirePermission("settings:write");
     const parsed = z.object({ key: z.string().trim().min(2).max(40) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Falta el rubro (key) del paquete a instalar.");
     const result = await this.vertical.install(ctx.organizationId, parsed.data.key, { source: "tenant" });

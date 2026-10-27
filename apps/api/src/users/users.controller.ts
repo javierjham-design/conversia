@@ -16,6 +16,7 @@ import { getEnv } from "@conversia/config";
 import { PERMISSION_CATALOG, isAssignablePermission } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { signInviteToken } from "../auth/jwt";
+import { AuthService } from "../auth/auth.service";
 import { enforcePlanLimit } from "../common/plan-limits";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -70,7 +71,10 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 @Controller("users")
 export class UsersController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auth: AuthService,
+  ) {}
 
   /** Lista liviana para asignar conversaciones (cualquier rol con bandeja). */
   @Get("assignable")
@@ -273,10 +277,20 @@ export class UsersController {
         if (!role) throw new BadRequestException("Rol desconocido");
         roleId = role.id;
       }
-      return tx.organizationUser.update({
+      const updated = await tx.organizationUser.update({
         where: { id: membershipId },
         data: { roleId, ...(input.active !== undefined ? { active: input.active } : {}) },
       });
+      // §3.9 — desactivar a alguien o cambiarle el rol tiene que surtir efecto YA.
+      // Los permisos viajan DENTRO del access token, así que sin revocar, el usuario
+      // seguía entrando (y con sus permisos viejos) hasta que venciera el token y, con
+      // la sesión deslizante, se renovaba solo por 30 días más. No se baja
+      // JWT_EXPIRES_IN: eso castigaría a todos para resolver un caso puntual.
+      const cambioRol = input.roleCode !== undefined && roleId !== member.roleId;
+      if (input.active === false || cambioRol) {
+        await this.auth.revokeAllSessions(member.userId).catch(() => undefined);
+      }
+      return updated;
     });
   }
 

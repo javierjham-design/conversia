@@ -16,7 +16,7 @@ import { z } from "zod";
 import { getEnv, brandFromOrigin, ACCENTS } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
-import { requireContext } from "../tenancy/context";
+import { assertNotImpersonating, requireContext } from "../tenancy/context";
 import { verifyAppToken, verifyInviteToken, verifyMfaToken } from "./jwt";
 import { resolvePersonalization } from "../common/industries";
 import { AuthService } from "./auth.service";
@@ -58,8 +58,26 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data;
 }
 
+/**
+ * §3.7 — IP real del cliente.
+ *
+ * Express ya la calcula con `trust proxy` (ver main.ts): toma el salto de
+ * `X-Forwarded-For` que agregó NUESTRO proxy. Leer a mano el primer valor de la
+ * cabecera —como se hacía antes— deja que el cliente escriba el que quiera: bastaba
+ * mandar un `X-Forwarded-For` distinto en cada intento para saltarse cualquier límite
+ * por IP. `req.ip` no se puede falsificar desde afuera.
+ */
 function clientIp(req: Request): string {
-  return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
+  return req.ip || req.socket?.remoteAddress || "unknown";
+}
+
+/**
+ * §10.2 — modo de sesión que pide el cliente. `x-session-mode: sliding` = quiero refresh
+ * token (sesión deslizante). Sin la cabecera, decide la marca de la cuenta.
+ */
+function sessionMode(req: Request): string | undefined {
+  const v = req.headers["x-session-mode"];
+  return typeof v === "string" ? v : undefined;
 }
 
 @Controller("auth")
@@ -79,7 +97,7 @@ export class AuthController {
     }
     // La marca la fija el servidor por el Origin, no el body (no se puede forzar).
     const brand = brandFromOrigin(req.headers.origin as string | undefined);
-    return this.auth.register({ ...input, brand });
+    return this.auth.register({ ...input, brand, sessionMode: sessionMode(req) });
   }
 
   /** Verificación de correo (D6): confirma el correo con el token del link (público). */
@@ -100,9 +118,14 @@ export class AuthController {
   @Post("login")
   async login(@Body() body: unknown, @Req() req: Request) {
     const input = parse(loginSchema, body);
-    // Límite por EMAIL (credencial atacada, no spoofeable) — anti credential stuffing
-    const rl = await this.rateLimit.login(input.email);
-    if (!rl.allowed) {
+    // Dos límites que se complementan (§3.8): por EMAIL frena el credential stuffing
+    // contra una cuenta; por IP frena el password spraying (una contraseña común contra
+    // miles de correos, que nunca golpea dos veces la misma llave de email).
+    const [porEmail, porIp] = await Promise.all([
+      this.rateLimit.login(input.email),
+      this.rateLimit.loginByIp(clientIp(req)),
+    ]);
+    if (!porEmail.allowed || !porIp.allowed) {
       throw new HttpException(
         "Demasiados intentos de inicio de sesión. Espera unos minutos e intenta de nuevo.",
         HttpStatus.TOO_MANY_REQUESTS,
@@ -110,7 +133,7 @@ export class AuthController {
     }
     // La cuenta se resuelve en la marca del dominio de origen (D8): mismo correo, cuentas distintas.
     const brand = brandFromOrigin(req.headers.origin as string | undefined);
-    return this.auth.login({ ...input, brand });
+    return this.auth.login({ ...input, brand, sessionMode: sessionMode(req) });
   }
 
   /**
@@ -198,19 +221,26 @@ export class AuthController {
   // (Bearer de sesión para autoservicio, o mfaToken corto para el 2.º factor /
   // enrolamiento forzado). Nunca dan acceso a la app por sí solas.
 
-  /** Resuelve el usuario actor: sesión (Bearer) o mfaToken de propósito `setup`. */
-  private actorId(req: Request, mfaToken?: string): string {
+  /**
+   * Resuelve el usuario actor: sesión (Bearer) o mfaToken de propósito `setup`.
+   *
+   * Devuelve también `impersonatedBy` (claim `imp`): estas rutas son públicas para el
+   * middleware de tenancy, así que no hay contexto del request y el dato hay que sacarlo
+   * del token aquí mismo.
+   */
+  private actor(req: Request, mfaToken?: string): { userId: string; impersonatedBy?: string } {
     const h = req.headers.authorization;
     if (h?.startsWith("Bearer ")) {
       try {
-        return verifyAppToken(h.slice(7)).sub;
+        const claims = verifyAppToken(h.slice(7));
+        return { userId: claims.sub, ...(claims.imp ? { impersonatedBy: claims.imp } : {}) };
       } catch {
         /* cae al mfaToken */
       }
     }
     if (mfaToken) {
       try {
-        return verifyMfaToken(mfaToken, "setup").sub;
+        return { userId: verifyMfaToken(mfaToken, "setup").sub };
       } catch {
         /* no válido */
       }
@@ -218,9 +248,19 @@ export class AuthController {
     throw new UnauthorizedException("No autenticado");
   }
 
+  /**
+   * §3.2 — actor para una acción de CUENTA: la rechaza si la sesión es de impersonación.
+   * Un super admin ayudando al cliente no puede quedarse con su 2.º factor.
+   */
+  private actorPropio(req: Request, mfaToken: string | undefined, accion: string): string {
+    const actor = this.actor(req, mfaToken);
+    assertNotImpersonating(actor, accion);
+    return actor.userId;
+  }
+
   /** 2.º factor en el login: verifica el código y emite la sesión completa. */
   @Post("mfa/verify")
-  async mfaVerify(@Body() body: unknown) {
+  async mfaVerify(@Body() body: unknown, @Req() req: Request) {
     const input = parse(z.object({ mfaToken: z.string(), code: z.string().min(6).max(20) }), body);
     let userId: string;
     try {
@@ -230,28 +270,41 @@ export class AuthController {
     }
     const rl = await this.rateLimit.login(`mfa:${userId}`);
     if (!rl.allowed) throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
-    return this.auth.verifyMfaLogin(userId, input.code.trim());
+    return this.auth.verifyMfaLogin(userId, input.code.trim(), sessionMode(req));
   }
 
-  /** Genera el secreto TOTP y devuelve el URI para el QR (autoservicio o forzado). */
+  /**
+   * Genera el secreto TOTP y devuelve el URI para el QR (autoservicio o forzado).
+   * §3.3 — si ya hay MFA activo es un RE-enrolamiento: exige contraseña + código vigente.
+   */
   @Post("mfa/setup")
   async mfaSetup(@Req() req: Request, @Body() body: unknown) {
-    const input = parse(z.object({ mfaToken: z.string().optional() }), body ?? {});
-    return this.auth.beginMfaSetup(this.actorId(req, input.mfaToken));
+    const input = parse(
+      z.object({
+        mfaToken: z.string().optional(),
+        password: z.string().max(200).optional(),
+        code: z.string().max(20).optional(),
+      }),
+      body ?? {},
+    );
+    const userId = this.actorPropio(req, input.mfaToken, "cambiar la autenticación en dos pasos de este usuario");
+    return this.auth.beginMfaSetup(userId, { password: input.password, code: input.code });
   }
 
   /** Confirma el código, activa MFA y devuelve los códigos de recuperación (una vez) + sesión. */
   @Post("mfa/enable")
   async mfaEnable(@Req() req: Request, @Body() body: unknown) {
     const input = parse(z.object({ code: z.string().min(6).max(10), mfaToken: z.string().optional() }), body);
-    return this.auth.enableMfa(this.actorId(req, input.mfaToken), input.code.trim());
+    const userId = this.actorPropio(req, input.mfaToken, "activar la autenticación en dos pasos de este usuario");
+    return this.auth.enableMfa(userId, input.code.trim(), sessionMode(req));
   }
 
   /** Desactiva MFA (requiere sesión + un código válido). */
   @Post("mfa/disable")
   async mfaDisable(@Req() req: Request, @Body() body: unknown) {
     const input = parse(z.object({ code: z.string().min(6).max(20) }), body);
-    return this.auth.disableMfa(this.actorId(req), input.code.trim());
+    const userId = this.actorPropio(req, undefined, "desactivar la autenticación en dos pasos de este usuario");
+    return this.auth.disableMfa(userId, input.code.trim());
   }
 
   /** Estado MFA del usuario + si la organización lo exige a admins. */
@@ -273,6 +326,7 @@ export class AuthController {
   @Post("mfa/org-require")
   async mfaOrgRequire(@Req() req: Request, @Body() body: unknown) {
     const claims = this.claimsFromBearer(req);
+    assertNotImpersonating({ impersonatedBy: claims.imp }, "cambiar la política de MFA de esta organización");
     if (claims.role !== "owner") throw new UnauthorizedException("Solo el propietario puede cambiar esta política.");
     const input = parse(z.object({ enabled: z.boolean() }), body);
     const org = await this.prisma.admin.organization.findUnique({ where: { id: claims.orgId }, select: { settings: true } });
@@ -314,7 +368,7 @@ export class AuthController {
     }
     // D8 — la cuenta de Google se resuelve dentro de la marca del Origin (TuBot vs Conversia).
     const brand = brandFromOrigin(req.headers.origin as string | undefined);
-    return this.auth.loginWithGoogle(String(info.email).toLowerCase(), brand);
+    return this.auth.loginWithGoogle(String(info.email).toLowerCase(), brand, sessionMode(req));
   }
 
   /** Organizaciones del usuario actual + cuál está activa (selector de tenant). */
@@ -327,11 +381,15 @@ export class AuthController {
 
   /** Cambia la organización activa y devuelve un token nuevo para ese tenant. */
   @Post("switch")
-  async switch(@Body() body: unknown) {
+  async switch(@Body() body: unknown, @Req() req: Request) {
     const ctx = requireContext();
+    // §3.2 — el token de impersonación se emite para UNA organización (la que el super
+    // admin abrió, con auditoría). Permitir el cambio lo convertiría en una llave para
+    // pasearse por el resto de las orgs del cliente fuera de ese registro.
+    assertNotImpersonating(ctx, "cambiar de organización");
     const parsed = z.object({ organizationId: z.string().min(1) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("organizationId requerido");
-    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId);
+    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId, sessionMode(req));
   }
 
   @Get("me")
@@ -361,6 +419,7 @@ export class AuthController {
   @Patch("me")
   async updateMe(@Body() body: unknown) {
     const ctx = requireContext();
+    assertNotImpersonating(ctx, "editar el perfil de este usuario");
     const parsed = z.object({ name: z.string().min(2).max(80) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Nombre inválido (2-80)");
     await this.prisma.admin.user.update({ where: { id: ctx.userId }, data: { name: parsed.data.name.trim() } });
@@ -428,6 +487,10 @@ export class AuthController {
   @Post("change-password")
   async changePassword(@Body() body: unknown) {
     const ctx = requireContext();
+    // §3.2 — cambiar la contraseña con una sesión prestada deja al cliente FUERA de su
+    // propia cuenta. El super admin tiene `POST /platform/organizations/:id/admin/reset-password`,
+    // que avisa al dueño de la cuenta y queda auditado.
+    assertNotImpersonating(ctx, "cambiar la contraseña de este usuario");
     const parsed = z
       .object({
         current: z.string().min(1),
