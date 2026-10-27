@@ -38,6 +38,13 @@ jobs:
       - name: Levantar el stack de simulación
         run: pnpm sim:up
 
+      # Si el stack no arranca, el gate de up.sh corta ANTES de Playwright: no hay reporte
+      # que subir y los logs de los contenedores se iban con el runner, así que desde el
+      # log del job no se podía saber POR QUÉ no arrancó (pasó con el api dos veces).
+      - name: Logs de los contenedores (solo si algo falló)
+        if: failure()
+        run: docker compose -f tools/sim/docker-compose.sim.yml logs --tail=200 --no-color
+
       - run: pnpm --filter @conversia/conversia-web exec playwright install --with-deps chromium
 
       # En PR → subconjunto CRÍTICO (A viaje completo + B + D) en móvil+escritorio.
