@@ -79,8 +79,13 @@ export async function applyOutcome(port: BillingPort, sub: EngineSub, commerceOr
   const snap = toSnapshot(sub, now);
   if (ok) {
     const t = onChargeSucceeded(snap, sub.interval);
-    await port.markAttempt(commerceOrder, "succeeded", null, null);
+    // ORDEN (auditoría §9.4): PRIMERO se aplica la renovación y SOLO AL FINAL se marca el
+    // intento como `succeeded`. Al revés (como estaba), si `applySuccess` fallaba (timeout,
+    // colisión del número de factura) el cobro quedaba "exitoso" sin renovar → el próximo
+    // tick volvía a cobrarle la tarjeta. Mientras el intento siga `pending`, la suscripción
+    // cuenta como "cobro en vuelo" (`pendingSubscriptionIds`) y NO se le re-cobra.
     await port.applySuccess(sub, t.periodEnd!, t.dueAt!);
+    await port.markAttempt(commerceOrder, "succeeded", null, null);
     await port.notify(sub.organizationId, sub.state === "SUSPENDED" ? "reactivated" : "payment_succeeded", { periodEnd: t.periodEnd });
   } else {
     await port.markAttempt(commerceOrder, "failed", null, reason);

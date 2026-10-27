@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post, Put, Req, Unauthorize
 import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
+import { messageWalletQuota, refillMessageWallet } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -558,15 +559,27 @@ export class BillingController {
    */
   @Post("mock-confirm")
   async mockConfirm(@Body() body: unknown) {
-    const ctx = requireContext();
+    // Activa plan/pack SIN cobrar: exige permiso de facturación como el checkout real
+    // (auditoría §3.5/§9.5 — antes bastaba con tener sesión, cualquier rol).
+    const ctx = requirePermission("billing:write");
     const parsed = z.object({ planCode: z.string(), billingInterval: z.enum(["monthly", "yearly"]).optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("planCode requerido");
-    // SEGURIDAD (hallazgo sim 200, 2026-10-17): el guard solo miraba Stripe. En una
-    // producción con Flow o Lemon Squeezy (sin STRIPE_SECRET_KEY) este endpoint quedaba
-    // ABIERTO y cualquier tenant activaba planes/packs gratis. Ahora: en producción se
-    // bloquea si hay CUALQUIER pasarela real configurada (env o platform_settings).
+    // SEGURIDAD (hallazgo sim 200, 2026-10-17 + auditoría §9.5): el guard solo miraba
+    // Stripe y después dependía de poder LEER la configuración de pasarelas — si esa
+    // lectura fallaba, el endpoint quedaba ABIERTO en producción y cualquier tenant se
+    // activaba planes/packs gratis. Ahora en producción se bloquea SIEMPRE salvo
+    // interruptor explícito (BILLING_MOCK_ENABLED=true), y aun con el interruptor se
+    // bloquea si hay pasarela real configurada o si no se puede verificar (fail-closed).
     if (getEnv().NODE_ENV === "production") {
-      const gw = await this.paymentSettings.get();
+      if (!getEnv().BILLING_MOCK_ENABLED) {
+        throw new BadRequestException("Confirmación mock deshabilitada en producción");
+      }
+      let gw: { flow?: unknown; lemonSqueezy?: unknown };
+      try {
+        gw = await this.paymentSettings.get();
+      } catch {
+        throw new BadRequestException("Confirmación mock deshabilitada: no se pudo verificar la configuración de pasarelas");
+      }
       if (getEnv().STRIPE_SECRET_KEY || gw.flow || gw.lemonSqueezy) {
         throw new BadRequestException("Confirmación mock deshabilitada: hay pasarela real configurada");
       }
@@ -711,23 +724,64 @@ export class BillingController {
     const custom = event?.meta?.custom_data ?? {};
     const organizationId = custom.organization_id;
     const planCode = custom.plan_code;
-    const subId = event?.data?.id;
-    const updatedAt = event?.data?.attributes?.updated_at ?? "";
-    // Idempotencia (LS reintenta): dedup por evento+suscripción+fecha.
-    if (subId && (await this.alreadyProcessed("lemonsqueezy", `${eventName}:${subId}:${updatedAt}`, eventName))) {
+    const attrs = event?.data?.attributes ?? {};
+    const dataId = event?.data?.id != null ? String(event.data.id) : "";
+    const updatedAt = attrs.updated_at ?? "";
+    const isPayment = eventName === "subscription_payment_success";
+    // IDEMPOTENCIA POR PAGO (auditoría §9.2): antes se deduplicaba por
+    // `evento:suscripción:updated_at`, así que los 2-3 webhooks del MISMO cobro
+    // (`subscription_created` + `subscription_updated` + `subscription_payment_success`)
+    // pasaban el filtro y acreditaban 2-3 veces: cada uno sumaba un mes desde hoy,
+    // recargaba la bolsa y emitía factura. Ahora el pago se identifica por el id del
+    // objeto de PAGO (`data.id` de la subscription-invoice), idéntico en cada reintento.
+    const dedupeKey = isPayment ? `payment:${dataId}` : `${eventName}:${dataId}:${updatedAt}`;
+    if (dataId && (await this.alreadyProcessed("lemonsqueezy", dedupeKey, eventName))) {
       return { received: true, deduped: true };
     }
+    // DINERO: SOLO el evento de pago exitoso acredita/renueva.
+    if (isPayment && organizationId && planCode) {
+      await this.activateOrCredit(organizationId, planCode, "lemonsqueezy", dataId || undefined, custom.billing_interval === "yearly" ? "yearly" : "monthly");
+      return { received: true, credited: true };
+    }
+    // ESTADO: el resto de los eventos NO tocan dinero (ni período ni bolsa ni factura).
     if (
       organizationId &&
-      planCode &&
-      (eventName === "subscription_created" || eventName === "subscription_updated" || eventName === "subscription_payment_success")
+      (eventName === "subscription_created" ||
+        eventName === "subscription_updated" ||
+        eventName === "subscription_cancelled" ||
+        eventName === "subscription_expired")
     ) {
-      const status = event?.data?.attributes?.status; // active | on_trial | past_due | cancelled | expired | unpaid
-      if (status === "active" || status === "on_trial" || eventName === "subscription_payment_success") {
-        await this.activateOrCredit(organizationId, planCode, "lemonsqueezy", subId, custom.billing_interval === "yearly" ? "yearly" : "monthly");
-      }
+      await this.applyLemonSubscriptionState(organizationId, eventName, String(attrs.status ?? ""), dataId);
     }
     return { received: true };
+  }
+
+  /**
+   * Estado (NO dinero) de la suscripción en Lemon Squeezy. `cancelled`/`expired` marcan
+   * `cancelAtPeriodEnd` (el motor del worker suspende al vencer el período ya pagado — no
+   * se corta el servicio de un período pagado); el resto solo queda auditado. Aquí jamás
+   * se renueva el período ni se recarga la bolsa: eso es exclusivo del evento de pago.
+   */
+  private async applyLemonSubscriptionState(organizationId: string, eventName: string, status: string, providerRef: string) {
+    const cancelling =
+      eventName === "subscription_cancelled" || eventName === "subscription_expired" || status === "cancelled" || status === "expired";
+    const sub = await this.prisma.admin.subscription.findFirst({ where: { organizationId }, orderBy: { createdAt: "desc" }, select: { id: true } });
+    if (cancelling && sub) {
+      await this.prisma.admin.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: true } });
+    }
+    await this.prisma.admin.auditLog
+      .create({
+        data: {
+          organizationId,
+          actorType: "system",
+          actorId: "billing-webhook",
+          action: `billing.lemonsqueezy.${eventName}`,
+          entityType: "subscription",
+          entityId: sub?.id ?? organizationId,
+          after: { status, providerRef, cancelAtPeriodEnd: cancelling && !!sub },
+        },
+      })
+      .catch(() => undefined);
   }
 
   /** Enruta el pago confirmado: `pkg:<code>` acredita un paquete; si no, activa plan. */
@@ -787,6 +841,13 @@ export class BillingController {
   private async creditPackage(organizationId: string, code: string, provider: string, providerRef?: string) {
     const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code } });
     if (!pkg || !pkg.active) return;
+    // IDEMPOTENCIA POR PAGO (auditoría §9.5): confirmar DOS VECES el mismo pago no puede
+    // acreditar dos veces el pack. Los packs de CONVERSACIONES ya lo chequeaban por refId;
+    // los de MENSAJES (bolsa de plantillas) no tenían defensa propia. El marcador es
+    // atómico (unique provider+eventId de webhook_events) y se escribe ANTES de acreditar.
+    if (providerRef && (await this.alreadyProcessed("package", `${provider}:${providerRef}:${pkg.code}`, "package.credit"))) {
+      return;
+    }
     // V2-2 — packs de CONVERSACIONES (type "conversation") acreditan la bolsa V2 (lotes), no
     // la de plantillas. Idempotente por providerRef (dedup del webhook / commerceOrder).
     if (pkg.type === "conversation") return this.creditConversationPackage(organizationId, pkg, provider, providerRef);
@@ -1172,22 +1233,13 @@ export class BillingController {
     }
   }
 
-  /** Recarga la bolsa al renovar: balance = min(saldo, cupo) + cupo (carryover 1 mes). */
+  /**
+   * Recarga la bolsa al renovar: balance = min(saldo, cupo) + cupo (carryover 1 mes).
+   * La regla no cambió; la cuenta ahora la hace `refillMessageWallet` (@conversia/database)
+   * en UN solo UPDATE atómico, compartida con el worker y con el Super Admin (§9.3/§9.5).
+   */
   private async topUpWallet(organizationId: string, plan: { features: unknown }): Promise<void> {
-    const feats = (plan.features as Record<string, any>) ?? {};
-    const q = Number(feats.templateMessages);
-    // −1 = ilimitado (práctico); 0 = plan sin cupo (Free); sin definir = mínimo seguro.
-    const included = q === -1 ? 1_000_000 : Number.isFinite(q) && q >= 0 ? Math.round(q) : getEnv().WALLET_DEFAULT_QUOTA;
-    const w = await this.prisma.admin.messageWallet.findUnique({ where: { organizationId } });
-    const keep = w ? Math.min(w.balance, included) : 0; // carryover tope = 1 mes de bolsa
-    const balance = keep + included;
-    await this.prisma.admin.messageWallet.upsert({
-      where: { organizationId },
-      create: { organizationId, balance, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
-      update: { balance, includedPerPeriod: included, carryoverCap: included, periodStart: new Date() },
-    });
-    await this.prisma.admin.walletLedger.create({
-      data: { organizationId, delta: balance - (w?.balance ?? 0), reason: "plan_renewal", balanceAfter: balance, refType: "invoice" },
-    });
+    const included = messageWalletQuota(plan.features, getEnv().WALLET_DEFAULT_QUOTA);
+    await refillMessageWallet(this.prisma.admin, { organizationId, included });
   }
 }
