@@ -8,15 +8,15 @@ import type { ReactNode } from "react";
  */
 export const LEGAL = {
   marca: "Conversia",
-  razonSocial: "[RAZÓN SOCIAL — completar]",
-  rut: "[RUT — completar]",
-  domicilio: "[Ciudad/Comuna, Chile — completar]",
-  comunaJurisdiccion: "[Comuna — completar]",
+  razonSocial: "Sociedad de Inversiones H y A SpA",
+  rut: "77.145.971-4",
+  domicilio: "Manuel Montt 820, oficina 21, Temuco, Región de La Araucanía, Chile",
+  comunaJurisdiccion: "Temuco",
   sitio: "conversia.cl",
   emailContacto: "contacto@conversia.cl",
   emailPrivacidad: "privacidad@conversia.cl",
   // Fecha de última actualización (YYYY-MM-DD). Súbela cuando edites los textos.
-  actualizado: "2026-10-15",
+  actualizado: "2026-10-27",
 };
 
 function fechaLarga(iso: string): string {
