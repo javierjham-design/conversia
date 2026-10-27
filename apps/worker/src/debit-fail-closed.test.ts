@@ -82,7 +82,7 @@ describe("§9.5 débito de bolsa fail-closed", () => {
       throw new Error("BD caída");
     };
     const gate = await chargeTemplateSend("org-1", "msg-1", "marketing");
-    expect(gate.blocked).toBe(true);
+    if (!gate.blocked) throw new Error("se esperaba que BLOQUEARA el envío");
     expect(gate.reason).toBe("debit_unavailable");
     expect(alertas.some((s) => /Débito de bolsa caído/i.test(s))).toBe(true);
   });
@@ -90,7 +90,7 @@ describe("§9.5 débito de bolsa fail-closed", () => {
   it("sin saldo sigue bloqueando por saldo (no se confunde con el fallo de infraestructura)", async () => {
     debitBehavior = async () => ({ ok: false, reason: "no_balance", balance: 0 });
     const gate = await chargeTemplateSend("org-1", "msg-2", "marketing");
-    expect(gate.blocked).toBe(true);
+    if (!gate.blocked) throw new Error("se esperaba que BLOQUEARA por saldo");
     expect(gate.reason).toBe("no_balance");
   });
 
