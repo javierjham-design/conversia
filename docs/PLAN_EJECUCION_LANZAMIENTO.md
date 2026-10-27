@@ -93,7 +93,7 @@ pueden ir en un PR cada una o en dos, a tu criterio, siempre sin mezclar con otr
 
 | # | Paso | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|---|
-| 1 | AUD 2 — Aislamiento | pendiente | | | |
+| 1 | AUD 2 — Aislamiento | ✅ en PR #545 | #545 | 2026-10-27 | Filtro de organización explícito en api, worker y `packages/database`. Cierra modo dueño cruzado (§2.1/§7.5) y fallback de número de otro cliente (§2.0 fila 4). Chequeo de rol de BD al arrancar → `dbRoleOk` en `/health/status`. 18 tests nuevos (worker 337/337, api 195/195). Sin migraciones ni cambios de entorno; TuBot sin impacto visible. Pendiente anotado: unique compuesto `(organizationId,id)` para cerrar los `update`/`delete` por id (requiere OK del dueño). |
 | 2 | AUD 3 — Confiabilidad 24/7 | pendiente | | | |
 | 3 | COP 0 — Camino a bot activo y pagado | pendiente | | | |
 | 4 | AUD 4 — Dinero | pendiente | | | |
