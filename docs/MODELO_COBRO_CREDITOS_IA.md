@@ -126,9 +126,23 @@ reales:
 
 ### 5. Precios (calibrados con los datos reales del §7; metas de margen del dueño, 27-oct)
 
-**Metas del dueño:** plan Base de **$18.990/mes** con pocos créditos incluidos y margen de
-**al menos 70%**; packs chicos con **80%** de margen; packs grandes (sobre $100.000) con
-**70%**. Siempre editables desde el catálogo, nunca en el código.
+**Regla del dueño (27-oct, corregida):** **ganancia mínima de 300% sobre el costo** en todo
+pack, que es lo mismo que un **margen mínimo de 75% sobre el precio neto**. Precios **con
+IVA incluido**. Siempre editables desde el catálogo, nunca en el código.
+
+> **"Margen" y "ganancia" NO son lo mismo — conviene no confundirlos:**
+> - **Margen sobre el precio** = `ganancia / precio neto`. Responde *"de cada $100 que
+>   entran, ¿cuánto me queda?"*. Nunca puede pasar de 100%.
+> - **Ganancia sobre el costo** = `ganancia / costo`. Responde *"¿cuántas veces recupero lo
+>   que gasté?"*. No tiene techo.
+>
+> Son dos formas de decir lo mismo: si de $100 netos el costo es $25 y la ganancia $75, el
+> **margen es 75%** y la **ganancia es 300%** (75 es 3 veces 25). Por eso la regla "300% de
+> ganancia mínima" equivale a "75% de margen mínimo".
+>
+> El **costo** acá incluye las tres cosas: los créditos consumidos ($2,1 c/u), la comisión
+> de Flow (3,81% del precio cobrado) y, solo en el plan Base, el costo fijo por cliente.
+> El **plan Base es la única excepción** a la regla de 300% (ver más abajo).
 
 **Supuestos del cálculo (conservadores):**
 - Costo por crédito: **$2,1 CLP**. Es el costo real promedio de una llamada a gpt-4o-mini
@@ -164,23 +178,35 @@ incluía el modelo anterior.
 
 #### Opción B — precios con IVA incluido (lo que paga el cliente final) — ✅ ELEGIDA por el dueño (27-oct)
 
-Si los $18.990 ya incluyen IVA, el ingreso neto baja a $15.958 y los números cambian:
+Los $18.990 ya incluyen IVA, así que el ingreso **neto** es $15.958 (`precio / 1,19`).
+Costos: **$2,1 por crédito** + **3,81% de Flow** sobre el precio cobrado.
 
-| Producto | Créditos | Precio IVA incl. | CLP por crédito | Margen | Alcanza para aprox. |
-|---|---|---|---|---|---|
-| **Plan Base mensual** | **250** | **$18.990/mes** | — | **70,2%** | ~60 conversaciones |
-| **Recarga básica** (la más barata; la de la recarga automática) | **1.150** | **$18.990** | 16,51 | **80,3%** | ~270 conversaciones |
-| Pack chico | 2.500 | $40.990 | 16,40 | 80,2% | ~600 conversaciones |
-| Pack mediano | 5.000 | $59.990 | 12,00 | 74,6% | ~1.200 conversaciones |
-| Pack grande | 11.000 | $109.990 | 10,00 | 70,5% | ~2.600 conversaciones |
-| Pack grande | 20.000 | $199.990 | 10,00 | 70,5% | ~4.800 conversaciones |
+| Producto | Créditos | Precio IVA incl. | CLP por crédito | **Ganancia sobre costo** | Margen sobre neto | Alcanza para aprox. |
+|---|---|---|---|---|---|---|
+| Prueba gratis | 200 | $0 | — | — (costo de adquisición ~$420) | — | ~48 conversaciones |
+| **Plan Base mensual** | **100** | **$18.990/mes** | — | **260%** ⚠ excepción | 72,2% | ~24 conversaciones |
+| **Recarga básica** (la más barata; la de la recarga automática) | **1.000** | **$18.990** | 18,99 | **465%** | 82,3% | ~240 conversaciones |
+| Pack | 3.000 | $49.990 | 16,66 | **412%** | 80,5% | ~710 conversaciones |
+| Pack | 6.000 | $89.990 | 15,00 | **372%** | 78,8% | ~1.430 conversaciones |
+| Pack | 8.500 | $109.990 | 12,94 | **319%** | 76,2% | ~2.020 conversaciones |
+| Pack | 16.000 | $199.990 | 12,50 | **308%** | 75,5% | ~3.810 conversaciones |
 
-Con IVA incluido, el plan Base solo admite ~250 créditos para mantener el 70%.
+Todos los packs cumplen la regla: **≥ 300% de ganancia sobre el costo** (≥ 75% de margen).
+El más grande es el que queda más al límite (308%), así que es el primero a revisar si sube
+el costo del dólar o de los modelos.
 
-**Decisión del dueño (27-oct):** la recarga más barata vale lo mismo que el plan Base,
-**$18.990**, y trae 1.150 créditos (80% de margen). Rinde más créditos que el plan porque
-el plan además paga la plataforma. Es el pack que se cobra solo con la **recarga
-automática** (§6) cuando el saldo se está agotando.
+**Por qué el plan Base es la excepción (260%).** Además de los créditos y la comisión, el
+plan carga el **costo fijo por cliente** (~$3.500: infraestructura, copiloto y asistente del
+panel). Con 100 créditos incluidos, el costo total queda en ~$4.434 contra $15.958 netos →
+260%. Subir el precio o bajar más los créditos haría el plan poco atractivo: **la ganancia
+del negocio viene de las recargas**, no del plan. El plan es la puerta de entrada.
+
+**La recarga básica vale lo mismo que el plan ($18.990) pero trae 1.000 créditos** (465%),
+diez veces más que el plan, justamente porque el plan además paga la plataforma. Es el pack
+que se cobra solo con la **recarga automática** (§6) cuando el saldo se está agotando.
+
+> **Packs eliminados** (versión anterior del documento): 1.150, 2.500, 5.000, 11.000 y
+> 20.000. No cumplían la regla de 300%.
 
 **Sensibilidad:** si el costo por crédito sube 10% (dólar más caro o prompts más largos),
 cada margen baja ~2 puntos. Por eso el reporte mensual de la Etapa 4 recalibra los precios.
@@ -204,7 +230,7 @@ Meta directo.
 - **Recarga automática con tarjeta de crédito** (decisión del dueño, 27-oct; ya existe en
   el código y se adapta a créditos):
   - Cuando el saldo baja de **50 créditos** (~12 conversaciones), se cobra sola la
-    **recarga básica de $18.990 (1.150 créditos)** a la tarjeta guardada con Flow. Se
+    **recarga básica de $18.990 (1.000 créditos)** a la tarjeta guardada con Flow. Se
     dispara antes de llegar a 0 para que el bot no se corte mientras se procesa el pago.
   - Se ofrece **activada por defecto** al registrar la tarjeta, con una casilla de
     consentimiento explícito ("Recargar automáticamente $18.990 cuando mis créditos se
@@ -253,10 +279,16 @@ Lo que muestran los datos:
 ### 8. Decisiones del dueño
 
 1. **Unidad:** ¿aprobado "Créditos IA" con 1 respuesta estándar = 1 crédito?
-2. ~~Precios~~ **Decidido (27-oct): opción B del §5, precios con IVA incluido.** Plan Base
-   $18.990/mes con 250 créditos; recarga básica 1.150/$18.990 (la más barata y la de la
-   recarga automática); packs 2.500/$40.990, 5.000/$59.990, 11.000/$109.990 y
-   20.000/$199.990.
+2. ~~Precios~~ **Decidido (27-oct, corregido): opción B del §5, precios con IVA incluido y
+   regla de ganancia mínima de 300% sobre el costo** (= 75% de margen sobre el neto):
+   - Plan Base **$18.990/mes con 100 créditos** (260%: única excepción, por el costo fijo
+     por cliente; la ganancia del negocio viene de las recargas).
+   - Recarga básica **1.000 créditos a $18.990** (465%) — la más barata y la que usa la
+     recarga automática.
+   - Packs: **3.000/$49.990** (412%) · **6.000/$89.990** (372%) · **8.500/$109.990** (319%)
+     · **16.000/$199.990** (308%).
+   - Prueba gratis **200** créditos; gracia **100**.
+   - Se **eliminan** los packs anteriores de 1.150, 2.500, 5.000, 11.000 y 20.000.
 3. ~~Modelo estándar~~ **Decidido (27-oct):** gpt-4o-mini por defecto; modelos más
    avanzados solo los activa el equipo de Conversia desde el super admin, con el cliente
    avisado y conforme (§4).
@@ -315,11 +347,12 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
   saldo concurrente (dos turnos a la vez), y que TuBot no cambie.
 
 ### Etapa 2 — Catálogo, migración y cobro
-- Catálogo nuevo: plan Base de $18.990/mes, prueba de 200 créditos, gracia de 100 y los
-  packs de la **opción B** de la Parte A §5 (precios con IVA incluido, elegida por el dueño):
-  Base 250 créditos, recarga básica 1.150 créditos a $18.990 y packs 2.500 / 5.000 /
-  11.000 / 20.000. Sembrados
-  **inactivos** con el script idempotente de catálogo; se activan con el OK del dueño.
+- Catálogo nuevo con los precios de la **opción B** de la Parte A §5 (IVA incluido, regla de
+  ganancia mínima de 300% sobre el costo): plan **Base $18.990/mes con 100 créditos**,
+  **recarga básica 1.000 créditos a $18.990**, packs **3.000 / 6.000 / 8.500 / 16.000**
+  ($49.990 / $89.990 / $109.990 / $199.990), prueba de **200** créditos y gracia de **100**.
+  Los packs viejos (1.150, 2.500, 5.000, 11.000, 20.000) **no se siembran**. Todo sembrado
+  **INACTIVO** con el script idempotente de catálogo; se activa con el OK del dueño.
 - **IVA incluido:** hoy el cobro no suma IVA (Flow cobra el `priceClp` tal cual), lo que
   calza con esta decisión; **no agregar un 19% encima**. Los textos de precios (landing,
   `/cobros`, copiloto, correos) dicen "IVA incluido", y cualquier comprobante o reporte que
@@ -331,7 +364,7 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
   original, en un script con **dry-run por defecto** que imprime el antes y el después por
   organización. Asiento auditado por cada conversión. Nadie pierde saldo.
 - **Recarga automática con tarjeta** según la Parte A §6: umbral de 50 créditos, cobra la
-  recarga básica de $18.990 (1.150 créditos) a la tarjeta guardada con Flow, ofrecida
+  recarga básica de $18.990 (1.000 créditos) a la tarjeta guardada con Flow, ofrecida
   activada al registrar la tarjeta con consentimiento explícito y registrado, tope mensual
   obligatorio (por defecto 3 recargas), correo y notificación por cada cobro, y aviso
   inmediato más gracia si la tarjeta es rechazada. Idempotente: un solo cobro por umbral
