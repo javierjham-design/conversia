@@ -79,6 +79,10 @@ const envSchema = z.object({
   // Email transaccional (Resend). Vacío = no se envían correos (fallback manual).
   RESEND_API_KEY: z.string().optional().default(""),
   RESEND_FROM: z.string().default("TuBot <no-reply@tubot.cl>"),
+  // Reply-To de los correos de marca de la plataforma (verificación, reset): el remitente
+  // sigue siendo no-reply@<marca>, pero las respuestas del cliente caen en este buzón.
+  // Vacío = sin Reply-To (las respuestas al no-reply rebotan, comportamiento clásico).
+  MAIL_REPLY_TO: z.string().optional().default(""),
   // Destinatario de los avisos de soporte in-app (vacío = sin correo, solo panel).
   SUPPORT_NOTIFY_EMAIL: z.string().optional().default(""),
   // Fusible de mensajería: URL de alerta inmediata (BetterStack incoming webhook,

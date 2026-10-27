@@ -13,14 +13,16 @@ export interface BrandConfig {
   name: string;
   webUrl: string;
   mailFrom: string;
+  /** Reply-To de los correos de marca (null = sin Reply-To). Sale de MAIL_REPLY_TO. */
+  replyTo: string | null;
   mfaIssuer: string;
   paymentSubjectPrefix: string;
   userAgent: string;
   logoPath: string;
 }
 
-/** Valores estáticos por marca (los dinámicos —webUrl/mailFrom de tubot— los pone brandOf). */
-export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom">> = {
+/** Valores estáticos por marca (los dinámicos —webUrl/mailFrom/replyTo— los pone brandOf). */
+export const BRANDS: Record<string, Omit<BrandConfig, "webUrl" | "mailFrom" | "replyTo">> = {
   tubot: {
     key: "tubot",
     name: "TuBot",
@@ -52,12 +54,14 @@ export function brandOf(org: { brand?: string | null } | null | undefined): Bran
       ...BRANDS.conversia,
       webUrl: env.WEB_URL_CONVERSIA ?? env.WEB_URL,
       mailFrom: "Conversia <no-reply@conversia.cl>",
+      replyTo: env.MAIL_REPLY_TO || null,
     };
   }
   return {
     ...BRANDS.tubot,
     webUrl: env.WEB_URL,
     mailFrom: env.RESEND_FROM,
+    replyTo: env.MAIL_REPLY_TO || null,
     mfaIssuer: env.SUPER_ADMIN_MFA_ISSUER, // respeta override actual del env
   };
 }
