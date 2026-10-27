@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { Queue } from "bullmq";
+import { Queue, type DefaultJobOptions } from "bullmq";
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import {
@@ -19,30 +19,45 @@ import {
 } from "@conversia/types";
 import type { NotifJob } from "@conversia/notifications";
 
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): Redis no es un archivo histórico. Sin esto,
+ * BullMQ guarda PARA SIEMPRE cada job completado/fallido y la memoria crece sin techo.
+ * Completados: se borran a las 24 h o pasados los 5.000 más recientes; fallidos: 7 días
+ * (margen para diagnosticar).
+ *
+ * SOLO retención: no define `attempts` ni `backoff`, así que NO cambia el
+ * comportamiento de reintentos. Y como las opciones del `add()` y las propias de cada
+ * cola ganan sobre `defaultJobOptions`, lo que ya se declaraba sigue mandando.
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
+
 @Injectable()
 export class QueueService implements OnModuleDestroy {
   // Expuesta para health checks (ping + lectura del latido del worker).
   readonly connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
-  readonly inbound = new Queue<InboundJob>(QUEUE_NAMES.inbound, { connection: this.connection });
+  readonly inbound = new Queue<InboundJob>(QUEUE_NAMES.inbound, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
   // Reintentos reales de la cola de salida: 3 intentos con backoff exponencial. El
   // comentario viejo "BullMQ reintenta según la política del worker" era falso sin
   // esto (BullMQ usa 1 intento por defecto). Seguro: el débito de bolsa es idempotente
   // por messageId y el gate corta con return (sin throw). Cubre panel y difusiones.
   readonly outbound = new Queue<OutboundJob>(QUEUE_NAMES.outbound, {
     connection: this.connection,
-    defaultJobOptions: { attempts: 3, backoff: { type: "exponential", delay: 3000 } },
+    defaultJobOptions: { ...JOB_RETENTION, attempts: 3, backoff: { type: "exponential", delay: 3000 } },
   });
-  readonly events = new Queue<EventJob>(QUEUE_NAMES.events, { connection: this.connection });
-  readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection });
-  readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection });
-  readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection });
-  readonly messageImports = new Queue<MessageImportJob>(QUEUE_NAMES.messageImports, { connection: this.connection });
-  readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection });
-  readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection });
-  readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection });
-  readonly agentTurn = new Queue<AgentTurnJob>(QUEUE_NAMES.agentTurn, { connection: this.connection });
-  readonly workflowRetry = new Queue<WorkflowRetryJob>(QUEUE_NAMES.workflow, { connection: this.connection });
-  readonly broadcast = new Queue<BroadcastJob>(QUEUE_NAMES.broadcast, { connection: this.connection });
+  readonly events = new Queue<EventJob>(QUEUE_NAMES.events, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly webhooks = new Queue<WebhookDeliveryJob>(QUEUE_NAMES.webhooks, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly capi = new Queue<CapiJob>(QUEUE_NAMES.capi, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly imports = new Queue<ContactImportJob>(QUEUE_NAMES.imports, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly messageImports = new Queue<MessageImportJob>(QUEUE_NAMES.messageImports, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly sync = new Queue<SyncJob>(QUEUE_NAMES.sync, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly emails = new Queue<EmailJob>(QUEUE_NAMES.emails, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly notifications = new Queue<NotifJob>(QUEUE_NAMES.notifications, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly agentTurn = new Queue<AgentTurnJob>(QUEUE_NAMES.agentTurn, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly workflowRetry = new Queue<WorkflowRetryJob>(QUEUE_NAMES.workflow, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
+  readonly broadcast = new Queue<BroadcastJob>(QUEUE_NAMES.broadcast, { connection: this.connection, defaultJobOptions: { ...JOB_RETENTION } });
 
   /** Reintenta una ejecución de flujo fallida desde el paso que falló (efectos reales). */
   async enqueueWorkflowRetry(job: WorkflowRetryJob): Promise<void> {

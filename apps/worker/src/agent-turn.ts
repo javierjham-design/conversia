@@ -10,6 +10,9 @@ import {
 } from "@conversia/agents";
 import { getEnv, brandOf } from "@conversia/config";
 import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
+import { acquireConversationLock, newLockToken, releaseConversationLock } from "./conversation-lock";
+import { requeueAgentTurn } from "./agent-turn-queue";
+import { pauseAiWithFallback } from "./ai-paused-fallback";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { recordServiceSend } from "./service-metering";
@@ -100,6 +103,27 @@ function buildKnownContactBlock(contact: {
   );
 }
 
+/**
+ * Medianoche de HOY en la zona horaria de la ORGANIZACIÓN, como instante absoluto (§8.6).
+ * El tope diario de tokens se contaba con la medianoche del SERVIDOR (UTC en Railway), así
+ * que a un tenant chileno el día se le reiniciaba a las 21:00. Zona inválida → se cae al
+ * comportamiento anterior (medianoche local) para no romper nada.
+ */
+export function startOfDayInTimezone(timezone: string, now: Date = new Date()): Date {
+  try {
+    const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now); // YYYY-MM-DD
+    const medianocheUtc = new Date(`${ymd}T00:00:00Z`).getTime();
+    const offsetMs =
+      new Date(now.toLocaleString("en-US", { timeZone: timezone })).getTime() -
+      new Date(now.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+    return new Date(medianocheUtc - offsetMs);
+  } catch {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+}
+
 /** Normaliza un teléfono a solo dígitos para comparar ("+56 9 1234" == "5691234"). */
 export function phoneDigits(v: string | null | undefined): string {
   return (v ?? "").replace(/\D/g, "");
@@ -161,14 +185,82 @@ export async function resolveOwnerContext(
   });
 }
 
-export async function runAgentTurn(opts: {
+export type AgentTurnOpts = {
   organizationId: string;
   conversationId: string;
   agentSlug?: string;
   depth?: number;
   /** Objetivo puntual inyectado al prompt (nodo de workflow "Agente IA"). */
   objective?: string;
-}): Promise<void> {
+};
+
+/** ¿El agente YA respondió después del último mensaje entrante? (§8.1) */
+export async function alreadyAnsweredAfterLastInbound(
+  organizationId: string,
+  conversationId: string,
+): Promise<boolean> {
+  try {
+    return await withTenant(organizationId, async (tx) => {
+      const ultimoEntrante = await tx.message.findFirst({
+        where: { organizationId, conversationId, direction: "INBOUND" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      });
+      if (!ultimoEntrante) return false;
+      const respuesta = await tx.message.findFirst({
+        where: {
+          organizationId,
+          conversationId,
+          direction: "OUTBOUND",
+          authorType: "AGENT",
+          createdAt: { gte: ultimoEntrante.createdAt },
+        },
+        select: { id: true },
+      });
+      return !!respuesta;
+    });
+  } catch {
+    return false; // ante la duda, responder: la regla de oro es CERO SILENCIOS
+  }
+}
+
+/**
+ * CERROJO POR CONVERSACIÓN (§8.1). Dos turnos simultáneos sobre la misma conversación
+ * producían respuestas duplicadas o entremezcladas (el segundo lee el historial sin la
+ * respuesta que el primero aún no escribió). Si la conversación está tomada, el turno se
+ * reencola a los 3 s en vez de responder en paralelo.
+ *
+ * Alcance DELIBERADAMENTE acotado al turno "normal" del ingreso, que es donde ocurría el
+ * problema:
+ * - Los turnos ANIDADOS (derivación entre agentes, `depth > 0`) ya corren dentro del cerrojo
+ *   del turno padre: aplicarlo otra vez los bloquearía contra sí mismos.
+ * - Los turnos con `objective`/`agentSlug` vienen de un flujo y NO se pueden reencolar sin
+ *   perder ese contexto (`AgentTurnJob` solo lleva organizationId + conversationId).
+ * Esos dos casos se comportan exactamente como hasta ahora.
+ */
+export async function runAgentTurn(opts: AgentTurnOpts): Promise<void> {
+  const { organizationId, conversationId } = opts;
+  const serializable = !opts.objective && !opts.agentSlug && (opts.depth ?? 0) === 0;
+  if (!serializable) return runAgentTurnLocked(opts);
+
+  const token = newLockToken();
+  if (!(await acquireConversationLock(conversationId, token))) {
+    await requeueAgentTurn({ organizationId, conversationId }, 3000).catch((err) =>
+      console.error(`✖ No se pudo reencolar el turno tomado (${conversationId}):`, (err as Error).message),
+    );
+    return;
+  }
+  try {
+    // Si el bot ya contestó el último entrante (reintento, ráfaga ya atendida o un flujo que
+    // respondió primero), este turno sobra: responder de nuevo sería duplicar.
+    if (await alreadyAnsweredAfterLastInbound(organizationId, conversationId)) return;
+    await runAgentTurnLocked(opts);
+  } finally {
+    await releaseConversationLock(conversationId, token);
+  }
+}
+
+async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
   const { organizationId, conversationId } = opts;
   const depth = opts.depth ?? 0;
 
@@ -229,17 +321,14 @@ export async function runAgentTurn(opts: {
   const env = getEnv();
   const orgSettings = (org?.settings ?? {}) as Record<string, any>;
   if (env.AI_GLOBAL_KILL_SWITCH || orgSettings.aiKillSwitch === true) {
+    const motivo = env.AI_GLOBAL_KILL_SWITCH ? "IA pausada globalmente" : "IA pausada por la organización";
     await withTenant(organizationId, (tx) =>
       tx.integrationEvent.create({
-        data: {
-          organizationId,
-          provider: "ai",
-          type: "ai.kill_switch",
-          status: "warning",
-          message: env.AI_GLOBAL_KILL_SWITCH ? "IA pausada globalmente" : "IA pausada por la organización",
-        },
+        data: { organizationId, provider: "ai", type: "ai.kill_switch", status: "warning", message: motivo },
       }),
     );
+    // §8.6 — antes se hacía `return` a secas y el bot quedaba MUDO sin que nadie se enterara.
+    await pauseAiWithFallback(organizationId, conversationId, motivo);
     return;
   }
   // Suspensión real: si la organización está SUSPENDED/CANCELLED, la IA deja de
@@ -285,8 +374,9 @@ export async function runAgentTurn(opts: {
     return env.AI_DAILY_TOKEN_BUDGET_PER_ORG;
   });
   if (budget > 0) {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    // §8.6 — el día se corta en la zona horaria DE LA ORGANIZACIÓN, no en la del servidor:
+    // con el servidor en UTC, un tenant chileno veía reiniciarse el tope a las 21:00.
+    const startOfDay = startOfDayInTimezone(org?.timezone ?? "America/Santiago");
     const spent = await withTenant(organizationId, (tx) =>
       tx.usageEvent.aggregate({
         where: { organizationId, type: "ai_tokens", occurredAt: { gte: startOfDay } },
@@ -294,17 +384,16 @@ export async function runAgentTurn(opts: {
       }),
     );
     if (Number(spent._sum.quantity ?? 0) >= budget) {
+      // El mensaje lleva el tope EFECTIVO (override del tenant → plan → default), no el
+      // default de la plataforma: antes decía un número que muchas veces no era el que aplicaba.
+      const motivo = `Tope diario de tokens IA alcanzado (${budget})`;
       await withTenant(organizationId, (tx) =>
         tx.integrationEvent.create({
-          data: {
-            organizationId,
-            provider: "ai",
-            type: "ai.budget_exceeded",
-            status: "warning",
-            message: `Tope diario de tokens IA alcanzado (${env.AI_DAILY_TOKEN_BUDGET_PER_ORG})`,
-          },
+          data: { organizationId, provider: "ai", type: "ai.budget_exceeded", status: "warning", message: motivo },
         }),
       );
+      // §8.6 — antes se hacía `return` a secas y el bot quedaba MUDO el resto del día.
+      await pauseAiWithFallback(organizationId, conversationId, motivo);
       return;
     }
   }

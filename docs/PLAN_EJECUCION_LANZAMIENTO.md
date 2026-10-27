@@ -94,7 +94,7 @@ pueden ir en un PR cada una o en dos, a tu criterio, siempre sin mezclar con otr
 | # | Paso | Estado | PR | Fecha | Notas |
 |---|---|---|---|---|---|
 | 1 | AUD 2 — Aislamiento | ✅ en PR #545 | #545 | 2026-10-27 | Filtro de organización explícito en api, worker y `packages/database`. Cierra modo dueño cruzado (§2.1/§7.5) y fallback de número de otro cliente (§2.0 fila 4). Chequeo de rol de BD al arrancar → `dbRoleOk` en `/health/status`. 18 tests nuevos (worker 337/337, api 195/195). Sin migraciones ni cambios de entorno; TuBot sin impacto visible. Pendiente anotado: unique compuesto `(organizationId,id)` para cerrar los `update`/`delete` por id (requiere OK del dueño). |
-| 2 | AUD 3 — Confiabilidad 24/7 | pendiente | | | |
+| 2 | AUD 3 — Confiabilidad 24/7 | ✅ en PR #546 | #546 | 2026-10-27 | Cerrojo por conversación, rescate del turno en el camino duplicado (bot mudo), claim anti doble-envío, tope de tokens con frase de respaldo en vez de silencio, recuperación del scheduler y apagado ordenado de los 14 workers. Retención de jobs en las 21 colas + `tools/ops/clean-queues.mjs`. 18 tests (worker 355/355, api 195/195). Migraciones anotadas: `SENDING` en MessageStatus y `scheduled_jobs.updated_at`. |
 | 3 | COP 0 — Camino a bot activo y pagado | pendiente | | | |
 | 4 | AUD 4 — Dinero | ✅ en PR #548 | #548 | 2026-10-27 | Proveedor falso nunca en prod, orden intento/renovación, recarga de bolsa compartida y atómica, mock-confirm cerrado, y débito de bolsa FAIL-CLOSED con asiento en la misma transacción. Flow es el único método activo; Lemon queda inerte. 6 tests (worker 344/344, api 195/195). ⚠ Revisar antes del merge: assignSubscription/register_payment ahora aplican el tope de carryover. |
 | 5 | AUD 6 — Marcas y fusibles | pendiente | | | |
