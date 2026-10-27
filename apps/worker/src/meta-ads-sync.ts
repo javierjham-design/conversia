@@ -160,7 +160,7 @@ export async function syncMetaAds(organizationId: string): Promise<SyncResult> {
       if (seen.size > 0) {
         await withTenant(organizationId, (tx) =>
           tx.metaAd.updateMany({
-            where: { adAccountId: acc.externalId, adExternalId: { notIn: [...seen] }, available: true },
+            where: { organizationId, adAccountId: acc.externalId, adExternalId: { notIn: [...seen] }, available: true },
             data: { available: false },
           }),
         );

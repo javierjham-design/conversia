@@ -803,7 +803,7 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
           });
           return { kind: "assigned" as const, label: m.user.name };
         }
-        const agent = await resolveAgentByNameOrSlug(tx, target);
+        const agent = await resolveAgentByNameOrSlug(tx, target, orgId);
         if (agent && agent.active) {
           return { kind: "agent" as const, slug: agent.slug, name: agent.name };
         }

@@ -163,7 +163,7 @@ export class MetaCrmController {
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conn = await tx.metaCrmConnection.findUnique({ where: { organizationId: ctx.organizationId } });
       if (!conn) return { ok: true };
-      if (conn.credentialId) await tx.integrationCredential.deleteMany({ where: { id: conn.credentialId } });
+      if (conn.credentialId) await tx.integrationCredential.deleteMany({ where: { organizationId: ctx.organizationId, id: conn.credentialId } });
       await tx.metaCrmConnection.update({ where: { organizationId: ctx.organizationId }, data: { status: "DISCONNECTED", credentialId: null } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "meta_crm.disconnect", entityType: "meta_crm_connection" },

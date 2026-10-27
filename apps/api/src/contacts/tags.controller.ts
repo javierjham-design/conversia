@@ -119,7 +119,7 @@ export class TagsController {
       const tag = await tx.tag.findUnique({ where: { id } });
       if (!tag) throw new NotFoundException("Etiqueta no encontrada");
       const usage = await tx.tagAssignment.count({ where: { tagId: id } });
-      await tx.tagAssignment.deleteMany({ where: { tagId: id } });
+      await tx.tagAssignment.deleteMany({ where: { organizationId: ctx.organizationId, tagId: id } });
       await tx.tag.delete({ where: { id } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "settings.tag_delete", entityType: "tag", entityId: id, after: { name: tag.name, usage } },

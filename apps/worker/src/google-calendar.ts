@@ -18,7 +18,7 @@ interface CalendarConfig {
 
 async function getCalendarConfig(organizationId: string): Promise<CalendarConfig | null> {
   return withTenant(organizationId, async (tx) => {
-    const conn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
+    const conn = await tx.integrationConnection.findFirst({ where: { organizationId, provider: "google" } });
     if (!conn) return null;
     const cfg = (conn.config as Record<string, any>) ?? {};
     if (!cfg.calendarSync || !cfg.calendarId) return null;
@@ -118,7 +118,7 @@ export async function syncAppointmentToGoogle(
   const event: any = await res.json();
   if (!eventId && event?.id) await saveEventId(organizationId, appt.id, meta, event.id);
   await withTenant(organizationId, (tx) =>
-    tx.integrationConnection.updateMany({ where: { provider: "google" }, data: { lastSyncAt: new Date() } }),
+    tx.integrationConnection.updateMany({ where: { organizationId, provider: "google" }, data: { lastSyncAt: new Date() } }),
   ).catch(() => undefined);
   await log("ok", eventId ? "Cita actualizada en Google Calendar" : "Cita creada en Google Calendar");
 }

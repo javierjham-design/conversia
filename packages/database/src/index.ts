@@ -30,6 +30,48 @@ function withPoolParams(rawUrl: string | undefined, defaultLimit: number): strin
 }
 
 /**
+ * Estado del chequeo de rol de BD del cliente de TENANT (auditoría §2.0, etapa 2).
+ * `null` = todavía no verificado (o no aplica, p. ej. fuera de producción).
+ * `false` = el usuario de `DATABASE_URL` puede SALTARSE la RLS.
+ */
+let dbRoleOk: boolean | null = null;
+
+/**
+ * Lo consume `/health/status` para avisar si el aislamiento entre clientes está
+ * dependiendo solo de los filtros del código (y no de la RLS).
+ */
+export function getDbRoleStatus(): { checked: boolean; ok: boolean | null } {
+  return { checked: dbRoleOk !== null, ok: dbRoleOk };
+}
+
+/**
+ * Verifica que el rol de `DATABASE_URL` NO pueda saltarse la RLS. Deliberadamente
+ * NO tumba el proceso: TuBot tiene clientes 24/7 y un arranque fallido sería peor
+ * que el aviso. Solo deja registro ruidoso y marca `/health/status` en 503.
+ */
+async function checkTenantDbRole(client: PrismaClient): Promise<void> {
+  try {
+    const rows = await client.$queryRaw<Array<{ rolsuper: boolean; rolbypassrls: boolean }>>`
+      SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user
+    `;
+    const row = rows[0];
+    if (!row) return; // no se pudo determinar: se deja sin verificar
+    const bypasses = row.rolsuper === true || row.rolbypassrls === true;
+    dbRoleOk = !bypasses;
+    if (bypasses) {
+      console.error(
+        "✖ SEGURIDAD (aislamiento entre clientes): el usuario de DATABASE_URL puede saltarse la RLS " +
+          "(rolsuper o rolbypassrls). Las políticas RLS NO están protegiendo nada y el aislamiento " +
+          "depende solo de los filtros del código. Hay que apuntar DATABASE_URL a un rol restringido " +
+          "(conversia_app) definiendo además DIRECT_DATABASE_URL como admin. Ver docs/PROMPT_CORRECCIONES_AUDITORIA.md §2.0.",
+      );
+    }
+  } catch {
+    // Un fallo del chequeo no debe afectar el arranque ni el tráfico.
+  }
+}
+
+/**
  * Cliente de TENANT (DATABASE_URL). En producción debe conectar como rol
  * `conversia_app` (sin BYPASSRLS): las políticas RLS son la barrera real.
  * Úsalo SOLO a través de withTenant().
@@ -38,6 +80,8 @@ export function getPrisma(): PrismaClient {
   if (!tenantClient) {
     const url = withPoolParams(process.env.DATABASE_URL, 5);
     tenantClient = url ? new PrismaClient({ datasources: { db: { url } } }) : new PrismaClient();
+    // Solo en producción: en dev/tests el rol suele ser el dueño de la BD a propósito.
+    if (process.env.NODE_ENV === "production") void checkTenantDbRole(tenantClient);
   }
   return tenantClient;
 }
@@ -51,6 +95,15 @@ export function getPrisma(): PrismaClient {
  */
 export function getAdminPrisma(): PrismaClient {
   if (!adminClient) {
+    // Si falta DIRECT_DATABASE_URL, el cliente "admin" cae al mismo rol del tenant: con un
+    // rol restringido (conversia_app) se rompen login, registro y ruteo de webhooks, que
+    // por diseño cruzan tenants (auditoría §2.0).
+    if (!process.env.DIRECT_DATABASE_URL) {
+      console.warn(
+        "⚠ DIRECT_DATABASE_URL no está definida: el cliente ADMIN usará DATABASE_URL. " +
+          "Si ese rol es restringido (sin BYPASSRLS), login, registro y ruteo de webhooks fallarán.",
+      );
+    }
     const url = withPoolParams(process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL, 3);
     adminClient = new PrismaClient({ datasources: { db: { url } } });
   }
@@ -118,17 +171,20 @@ export function normalizeAgentKey(s: string): string {
 
 /**
  * Resuelve un agente por SLUG o NOMBRE (insensible a mayúsculas/acentos/guiones).
- * `tx` ya está acotado al tenant por withTenant (RLS), así que la búsqueda es por org.
+ * `organizationId` es OBLIGATORIO y va explícito en el `where`: aunque `withTenant` ya
+ * acota por RLS, una derivación entre agentes jamás debe poder resolver al agente de
+ * otro cliente (auditoría §2.0, etapa 2).
  * Devuelve null si no hay match. NO filtra por `active` (el caller decide).
  */
 export async function resolveAgentByNameOrSlug(
   tx: TenantTx,
   raw: string,
+  organizationId: string,
 ): Promise<{ id: string; slug: string; name: string; active: boolean } | null> {
   const key = normalizeAgentKey(raw ?? "");
   if (!key) return null;
   const agents = await tx.agent.findMany({
-    where: { deletedAt: null },
+    where: { organizationId, deletedAt: null },
     select: { id: true, slug: true, name: true, active: true },
   });
   return agents.find((a) => normalizeAgentKey(a.slug) === key || normalizeAgentKey(a.name) === key) ?? null;

@@ -60,7 +60,7 @@ export class NotificationsController {
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       await tx.notification.updateMany({
-        where: { userId: ctx.userId, readAt: null, ...(parsed.data.id ? { id: parsed.data.id } : {}) },
+        where: { organizationId: ctx.organizationId, userId: ctx.userId, readAt: null, ...(parsed.data.id ? { id: parsed.data.id } : {}) },
         data: { readAt: new Date() },
       });
       return { ok: true };
@@ -226,7 +226,7 @@ export class NotificationsController {
     const ctx = requireContext();
     if (!endpoint) throw new BadRequestException("endpoint requerido");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.pushDevice.deleteMany({ where: { userId: ctx.userId, identifier: endpoint } });
+      await tx.pushDevice.deleteMany({ where: { organizationId: ctx.organizationId, userId: ctx.userId, identifier: endpoint } });
       return { ok: true };
     });
   }

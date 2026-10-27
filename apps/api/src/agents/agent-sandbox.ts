@@ -290,7 +290,7 @@ export async function buildSandboxServices(
         const members = await tx.organizationUser.findMany({ where: { active: true }, include: { user: true } });
         const m = members.find((mm) => mm.user.name.toLowerCase() === target.toLowerCase());
         if (m) return { kind: "assigned" as const, label: m.user.name };
-        const agent = await resolveAgentByNameOrSlug(tx, target);
+        const agent = await resolveAgentByNameOrSlug(tx, target, orgId);
         if (agent && agent.active) return { kind: "agent" as const, slug: agent.slug, name: agent.name };
         return { kind: "none" as const };
       });

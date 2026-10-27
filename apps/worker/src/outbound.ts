@@ -44,7 +44,22 @@ export async function processOutbound(
     await publishRealtime(organizationId, { type: "message.updated", conversationId: data.conversationId });
     return;
   }
-  const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId });
+  // La resolución del canal puede FALLAR en firme (la org no tiene un canal de
+  // WhatsApp activo PROPIO: jamás se envía por el número de otro cliente). Es terminal
+  // —no se arregla con reintentos—, así que el mensaje queda FAILED con el motivo claro
+  // en la Bandeja en vez de quedarse PENDING en silencio.
+  const auth = await resolveChannelAuth(organizationId, { channelConnectionId: data.channelConnectionId }).catch(
+    async (err: unknown) => {
+      if (!(err instanceof ChannelConfigError)) throw err;
+      await withTenant(organizationId, (tx) =>
+        tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: err.userMessage } }),
+      );
+      const { publishRealtime } = await import("./realtime.js");
+      await publishRealtime(organizationId, { type: "message.updated", conversationId: data.conversationId });
+      return null;
+    },
+  );
+  if (!auth) return; // sin canal propio: el mensaje ya quedó FAILED con el motivo claro
 
   // No MARTILLAR un token ya marcado muerto: si el canal está en "error" (token caído, lo fijó
   // markChannelAuthError), NO llamamos a Meta — el mensaje queda FAILED con el motivo claro hasta

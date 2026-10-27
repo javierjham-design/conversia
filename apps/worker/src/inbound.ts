@@ -202,7 +202,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
     const failed = status.status === "failed";
     await withTenant(tenant.organizationId, (tx) =>
       tx.message.updateMany({
-        where: { externalId: status.externalId },
+        where: { organizationId: tenant.organizationId, externalId: status.externalId },
         data: {
           status: status.status === "read" ? "READ" : status.status === "delivered" ? "DELIVERED" : failed ? "FAILED" : "SENT",
           // Guardamos el MOTIVO que manda Meta para que se vea en la Bandeja

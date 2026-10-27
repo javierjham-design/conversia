@@ -492,7 +492,7 @@ export class IntegrationsController {
   disconnectEmail() {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.integrationConnection.deleteMany({ where: { provider: "email" } });
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "email" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.email_disconnect", entityType: "integration_connection" },
       });
@@ -587,12 +587,12 @@ export class IntegrationsController {
       });
       const cfg = (conn?.config as Record<string, any>) ?? {};
       if (cfg.webhookEndpointId) {
-        await tx.webhookEndpoint.updateMany({ where: { id: cfg.webhookEndpointId }, data: { active: false } });
+        await tx.webhookEndpoint.updateMany({ where: { id: cfg.webhookEndpointId, organizationId: ctx.organizationId }, data: { active: false } });
       }
       if (cfg.apiKeyId) {
-        await tx.apiKey.updateMany({ where: { id: cfg.apiKeyId, revokedAt: null }, data: { revokedAt: new Date() } });
+        await tx.apiKey.updateMany({ where: { id: cfg.apiKeyId, organizationId: ctx.organizationId, revokedAt: null }, data: { revokedAt: new Date() } });
       }
-      await tx.integrationConnection.deleteMany({ where: { provider: kind } });
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: kind } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: `integration.${kind}_disconnect`, entityType: "integration_connection" },
       });
@@ -678,7 +678,7 @@ export class IntegrationsController {
   disconnectCustomScheduling() {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.schedulingConnection.deleteMany({ where: { provider: "CUSTOM" } });
+      await tx.schedulingConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "CUSTOM" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.custom_scheduling_disconnect", entityType: "scheduling_connection" },
       });
@@ -777,7 +777,7 @@ export class IntegrationsController {
   disconnectDentalink() {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.schedulingConnection.deleteMany({ where: { provider: "DENTALINK" } });
+      await tx.schedulingConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "DENTALINK" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.dentalink_disconnect", entityType: "scheduling_connection" },
       });
@@ -976,7 +976,7 @@ export class IntegrationsController {
       const data: Record<string, unknown> = {};
       if (input.active !== undefined) data.active = input.active;
       if (input.botDescription !== undefined) data.botDescription = input.botDescription || null;
-      await tx.catalogItem.updateMany({ where: { id }, data });
+      await tx.catalogItem.updateMany({ where: { organizationId: ctx.organizationId, id }, data });
       return { ok: true };
     });
   }
@@ -1007,7 +1007,7 @@ export class IntegrationsController {
         const externalId = (it.sku || it.name).trim().toLowerCase().slice(0, 120);
         const data = { name: it.name, sku: it.sku ?? null, price: it.price ?? null, category: it.category ?? null, stock: it.stock ?? null, trackStock: it.stock != null, description: it.description ?? null, currency, available: it.stock == null || it.stock > 0 };
         const existing = await tx.catalogItem.findFirst({ where: { source: "csv", externalId }, select: { id: true } });
-        if (existing) { await tx.catalogItem.updateMany({ where: { id: existing.id }, data }); updated++; }
+        if (existing) { await tx.catalogItem.updateMany({ where: { organizationId: ctx.organizationId, id: existing.id }, data }); updated++; }
         else { await tx.catalogItem.create({ data: { organizationId: ctx.organizationId, source: "csv", externalId, kind: "product", ...data } }); created++; }
       }
     });
@@ -1169,7 +1169,7 @@ export class IntegrationsController {
   disconnectGa4() {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.integrationConnection.deleteMany({ where: { provider: "ga4" } });
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "ga4" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.ga4_disconnect", entityType: "integration_connection" },
       });
@@ -1590,7 +1590,7 @@ export class IntegrationsController {
   removeWebhook(@Param("id") id: string) {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.webhookDelivery.deleteMany({ where: { endpointId: id } });
+      await tx.webhookDelivery.deleteMany({ where: { organizationId: ctx.organizationId, endpointId: id } });
       await tx.webhookEndpoint.delete({ where: { id } });
       return { ok: true };
     });

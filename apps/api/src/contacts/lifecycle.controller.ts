@@ -125,7 +125,7 @@ export class LifecycleController {
     if (!parsed.success) throw new BadRequestException("ids requeridos");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       for (let i = 0; i < parsed.data.ids.length; i++) {
-        await tx.leadStatus.updateMany({ where: { id: parsed.data.ids[i] }, data: { order: i } });
+        await tx.leadStatus.updateMany({ where: { organizationId: ctx.organizationId, id: parsed.data.ids[i] }, data: { order: i } });
       }
       return { ok: true };
     });
@@ -147,7 +147,7 @@ export class LifecycleController {
         }
         const target = await tx.leadStatus.findUnique({ where: { id: migrateTo } });
         if (!target) throw new BadRequestException("Etapa destino no encontrada");
-        await tx.lead.updateMany({ where: { statusId: id }, data: { statusId: target.id } });
+        await tx.lead.updateMany({ where: { organizationId: ctx.organizationId, statusId: id }, data: { statusId: target.id } });
         await tx.auditLog.create({
           data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "lifecycle.stage_migrate", entityType: "lead_status", entityId: id, after: { to: target.code, moved: inUse } },
         });

@@ -100,6 +100,67 @@ function buildKnownContactBlock(contact: {
   );
 }
 
+/** Normaliza un teléfono a solo dígitos para comparar ("+56 9 1234" == "5691234"). */
+export function phoneDigits(v: string | null | undefined): string {
+  return (v ?? "").replace(/\D/g, "");
+}
+
+/** Vista mínima del cliente de BD que necesita `resolveOwnerContext` (permite mockearlo en tests). */
+export type OwnerCtxTx = {
+  channelConnection: { findFirst: (args: any) => Promise<{ type: string } | null> };
+  contactIdentity: { findFirst: (args: any) => Promise<{ externalId: string } | null> };
+  role: { findMany: (args: any) => Promise<Array<{ id: string }>> };
+  organizationUser: { findMany: (args: any) => Promise<Array<{ user: { phone: string | null } | null }>> };
+};
+
+/**
+ * MODO DUEÑO (F8, corregido en auditoría §2.1 y §7.5). El contacto es "dueño" solo si el
+ * número con el que escribe por **WhatsApp** coincide con el de un usuario owner/admin
+ * ACTIVO de ESTA organización.
+ *
+ * Dos cosas que antes fallaban:
+ * - La identidad se tomaba de `contact.phone`, que una tool puede escribir
+ *   (`updateContactFields`): por Instagram/Messenger alguien podía fijarse el teléfono del
+ *   dueño y heredar sus tools. Ahora sale de `contact_identities.externalId` del canal
+ *   WHATSAPP_CLOUD, que lo pone Meta. Fuera de WhatsApp siempre es `false`.
+ * - Las consultas de roles/membresías no filtraban por organización: un teléfono podía
+ *   matchear al admin de OTRO cliente. Ahora todas llevan `organizationId` explícito
+ *   (defensa en profundidad por encima de la RLS).
+ */
+export async function resolveOwnerContext(
+  tx: OwnerCtxTx,
+  args: { organizationId: string; contactId: string; channelConnectionId: string | null },
+): Promise<boolean> {
+  const { organizationId, contactId, channelConnectionId } = args;
+  if (!channelConnectionId) return false;
+  const channel = await tx.channelConnection.findFirst({
+    where: { id: channelConnectionId, organizationId },
+    select: { type: true },
+  });
+  if (channel?.type !== "WHATSAPP_CLOUD") return false;
+
+  const identity = await tx.contactIdentity.findFirst({
+    where: { organizationId, contactId, channelType: "WHATSAPP_CLOUD" },
+    select: { externalId: true },
+  });
+  const waPhone = phoneDigits(identity?.externalId);
+  if (!waPhone) return false;
+
+  const roles = await tx.role.findMany({
+    where: { organizationId, code: { in: ["owner", "admin"] } },
+    select: { id: true },
+  });
+  if (!roles.length) return false;
+  const members = await tx.organizationUser.findMany({
+    where: { organizationId, active: true, roleId: { in: roles.map((r) => r.id) } },
+    select: { user: { select: { phone: true } } },
+  });
+  return members.some((m) => {
+    const p = phoneDigits(m.user?.phone);
+    return p.length > 0 && p === waPhone;
+  });
+}
+
 export async function runAgentTurn(opts: {
   organizationId: string;
   conversationId: string;
@@ -145,7 +206,7 @@ export async function runAgentTurn(opts: {
       tx.organization.findUnique({ where: { id: organizationId } }),
       conversation.clinicId
         ? tx.clinic.findUnique({ where: { id: conversation.clinicId } })
-        : tx.clinic.findFirst({ where: { active: true } }),
+        : tx.clinic.findFirst({ where: { organizationId, active: true } }),
       tx.message.findMany({
         where: { conversationId, visibility: "PUBLIC", type: { notIn: ["SYSTEM", "NOTE"] } },
         orderBy: { createdAt: "desc" },
@@ -213,7 +274,7 @@ export async function runAgentTurn(opts: {
     const override = (orgSettings.limits as Record<string, number> | undefined)?.aiTokensDaily;
     if (typeof override === "number") return override;
     const sub = await tx.subscription.findFirst({
-      where: { status: { in: ["ACTIVE", "TRIALING"] } },
+      where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } },
       orderBy: { createdAt: "desc" },
     });
     if (sub) {
@@ -228,7 +289,7 @@ export async function runAgentTurn(opts: {
     startOfDay.setHours(0, 0, 0, 0);
     const spent = await withTenant(organizationId, (tx) =>
       tx.usageEvent.aggregate({
-        where: { type: "ai_tokens", occurredAt: { gte: startOfDay } },
+        where: { organizationId, type: "ai_tokens", occurredAt: { gte: startOfDay } },
         _sum: { quantity: true },
       }),
     );
@@ -514,20 +575,18 @@ export async function runAgentTurn(opts: {
       appointmentDurationMin: typeof cfg.scheduling?.appointmentDurationMin === "number" ? (cfg.scheduling.appointmentDurationMin as number) : null,
     },
   );
-  // MODO DUEÑO (F8): el contacto es dueño si su teléfono coincide con el de un usuario
-  // admin/owner del tenant. Habilita las tools de administración de agenda (ownerOnly).
+  // MODO DUEÑO (F8): habilita las tools de administración (ownerOnly). La identidad sale
+  // del canal de WhatsApp y de ESTA organización — ver `resolveOwnerContext` (§2.1, §7.5).
   // Si no se puede resolver, queda en false (cliente final) — nunca abre por defecto.
   let ownerContext = false;
   try {
-    const phone = conversation.contact.phone;
-    if (phone) {
-      ownerContext = await withTenant(organizationId, async (tx) => {
-        const roles = await tx.role.findMany({ where: { code: { in: ["owner", "admin"] } }, select: { id: true } });
-        if (!roles.length) return false;
-        const m = await tx.organizationUser.findFirst({ where: { active: true, roleId: { in: roles.map((r) => r.id) }, user: { phone } }, select: { id: true } });
-        return !!m;
-      });
-    }
+    ownerContext = await withTenant(organizationId, (tx) =>
+      resolveOwnerContext(tx as unknown as OwnerCtxTx, {
+        organizationId,
+        contactId: conversation.contactId,
+        channelConnectionId: conversation.channelConnectionId,
+      }),
+    );
   } catch {
     ownerContext = false;
   }
@@ -783,7 +842,7 @@ export async function runAgentTurn(opts: {
   const rawTransferTarget = result.transferToAgentSlug ?? extractHandoffSlug(result.toolEvents);
   if (rawTransferTarget && depth < 1) {
     const outcome = await withTenant(organizationId, async (tx) => {
-      const target = await resolveAgentByNameOrSlug(tx, rawTransferTarget);
+      const target = await resolveAgentByNameOrSlug(tx, rawTransferTarget, organizationId);
       if (!target || !target.active) return { kind: "notfound" as const };
       if (target.slug === agent.slug) return { kind: "self" as const };
       // Transferencia a otro agente de IA: la IA SIGUE respondiendo (no apagar aiEnabled).

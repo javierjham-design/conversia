@@ -109,7 +109,7 @@ export class ContactFieldsController {
     if (!parsed.success) throw new BadRequestException("ids requeridos");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       for (let i = 0; i < parsed.data.ids.length; i++) {
-        await tx.customFieldDefinition.updateMany({ where: { id: parsed.data.ids[i], entity: "contact" }, data: { order: i } });
+        await tx.customFieldDefinition.updateMany({ where: { organizationId: ctx.organizationId, id: parsed.data.ids[i], entity: "contact" }, data: { order: i } });
       }
       return { ok: true };
     });

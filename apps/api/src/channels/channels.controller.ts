@@ -1060,7 +1060,7 @@ export class ChannelsController {
       }
       const existing = await tx.whatsappTemplate.findMany({ where: { accountId }, select: { id: true, name: true, language: true } });
       const stale = existing.filter((e) => !seen.has(`${e.name}::${e.language}`));
-      if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+      if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { organizationId, id: { in: stale.map((s) => s.id) } } });
     });
     return synced;
   }
@@ -1316,7 +1316,7 @@ export class ChannelsController {
       if (!channel) throw new NotFoundException("Canal no encontrado");
       const phones = await tx.whatsappPhoneNumber.findMany({ where: { channelConnectionId: id }, select: { accountId: true } });
       const accountIds = [...new Set(phones.map((p) => p.accountId))];
-      if (phones.length) await tx.whatsappPhoneNumber.deleteMany({ where: { channelConnectionId: id } });
+      if (phones.length) await tx.whatsappPhoneNumber.deleteMany({ where: { organizationId: ctx.organizationId, channelConnectionId: id } });
       // Borra la WABA + credencial solo si ya no le quedan números (evita romper
       // otro canal que comparta la misma WABA).
       for (const accId of accountIds) {
@@ -1324,7 +1324,7 @@ export class ChannelsController {
         if (remaining === 0) {
           const acc = await tx.whatsappAccount.findUnique({ where: { id: accId }, select: { credentialId: true } });
           await tx.whatsappAccount.delete({ where: { id: accId } });
-          if (acc?.credentialId) await tx.integrationCredential.deleteMany({ where: { id: acc.credentialId } });
+          if (acc?.credentialId) await tx.integrationCredential.deleteMany({ where: { organizationId: ctx.organizationId, id: acc.credentialId } });
         }
       }
       await tx.channelConnection.delete({ where: { id } });

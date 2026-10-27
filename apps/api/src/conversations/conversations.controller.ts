@@ -475,18 +475,18 @@ export class ConversationsController {
   async deleteConversation(@Param("id") id: string) {
     const ctx = requirePermission("inbox:write");
     await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const conversation = await tx.conversation.findUnique({ where: { id } });
+      const conversation = await tx.conversation.findFirst({ where: { id, organizationId: ctx.organizationId } });
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
       // Referencias que deben sobrevivir al borrado (histórico de negocio)
-      await tx.appointment.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
-      await tx.workflowRun.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
-      await tx.aiRequest.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
-      await tx.approvalRequest.updateMany({ where: { conversationId: id }, data: { conversationId: null } });
+      await tx.appointment.updateMany({ where: { conversationId: id, organizationId: ctx.organizationId }, data: { conversationId: null } });
+      await tx.workflowRun.updateMany({ where: { conversationId: id, organizationId: ctx.organizationId }, data: { conversationId: null } });
+      await tx.aiRequest.updateMany({ where: { conversationId: id, organizationId: ctx.organizationId }, data: { conversationId: null } });
+      await tx.approvalRequest.updateMany({ where: { conversationId: id, organizationId: ctx.organizationId }, data: { conversationId: null } });
       // Dependientes de la conversación
-      await tx.conversationAiNote.deleteMany({ where: { conversationId: id } });
-      await tx.agentHandoff.deleteMany({ where: { conversationId: id } });
-      await tx.humanHandoff.deleteMany({ where: { conversationId: id } });
-      await tx.message.deleteMany({ where: { conversationId: id } }); // adjuntos en cascada
+      await tx.conversationAiNote.deleteMany({ where: { conversationId: id, organizationId: ctx.organizationId } });
+      await tx.agentHandoff.deleteMany({ where: { conversationId: id, organizationId: ctx.organizationId } });
+      await tx.humanHandoff.deleteMany({ where: { conversationId: id, organizationId: ctx.organizationId } });
+      await tx.message.deleteMany({ where: { conversationId: id, organizationId: ctx.organizationId } }); // adjuntos en cascada
       await tx.conversation.delete({ where: { id } });
       await tx.auditLog.create({
         data: {
@@ -1217,7 +1217,7 @@ export class ConversationsController {
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
       await tx.conversation.update({ where: { id }, data: { aiEnabled: true } });
       await tx.humanHandoff.updateMany({
-        where: { conversationId: id, status: "ACTIVE" },
+        where: { conversationId: id, organizationId: ctx.organizationId, status: "ACTIVE" },
         data: { status: "RETURNED_TO_AI", resolvedAt: new Date() },
       });
       await this.systemMessage(tx, ctx.organizationId, id, `🤖 Control devuelto a la IA por ${await this.userName(tx, ctx.userId)}`);
@@ -1252,7 +1252,7 @@ export class ConversationsController {
       await tx.conversation.update({ where: { id }, data: { activeAgentId: agentId, aiEnabled: !!agentId } });
       if (agentId) {
         await tx.humanHandoff.updateMany({
-          where: { conversationId: id, status: "ACTIVE" },
+          where: { conversationId: id, organizationId: ctx.organizationId, status: "ACTIVE" },
           data: { status: "RETURNED_TO_AI", resolvedAt: new Date() },
         });
       }

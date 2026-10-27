@@ -35,12 +35,19 @@ export function startRetentionPurge(): () => void {
           //    y adjuntos). Se conserva el contacto.
           if (convCut) {
             const old = await tx.conversation.findMany({
-              where: { OR: [{ lastMessageAt: { lt: convCut } }, { lastMessageAt: null, createdAt: { lt: convCut } }] },
+              where: {
+                organizationId: org.id,
+                OR: [{ lastMessageAt: { lt: convCut } }, { lastMessageAt: null, createdAt: { lt: convCut } }],
+              },
               select: { id: true },
               take: 5000,
             });
             if (old.length) {
-              const res = await tx.conversation.deleteMany({ where: { id: { in: old.map((c) => c.id) } } });
+              // `organizationId` explícito también en el borrado: esto es un deleteMany y no
+              // puede depender solo de la RLS (auditoría §2.0 fila 1).
+              const res = await tx.conversation.deleteMany({
+                where: { organizationId: org.id, id: { in: old.map((c) => c.id) } },
+              });
               deletedConvs = res.count;
             }
           }
@@ -49,7 +56,7 @@ export function startRetentionPurge(): () => void {
           //    el registro del mensaje.
           if (trxCut) {
             const res = await tx.message.updateMany({
-              where: { type: "AUDIO", body: { not: null }, createdAt: { lt: trxCut } },
+              where: { organizationId: org.id, type: "AUDIO", body: { not: null }, createdAt: { lt: trxCut } },
               data: { body: null },
             });
             clearedTranscripts = res.count;

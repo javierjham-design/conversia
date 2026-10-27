@@ -192,7 +192,7 @@ export class InboxController {
   deleteView(@Param("id") id: string) {
     const ctx = requireContext();
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.inboxView.deleteMany({ where: { id } });
+      await tx.inboxView.deleteMany({ where: { organizationId: ctx.organizationId, id } });
       return { ok: true };
     });
   }
@@ -259,7 +259,7 @@ export class InboxController {
       if (snip?.scope === "mine" && snip.createdById !== ctx.userId) {
         throw new BadRequestException("Esta respuesta es personal de otro usuario");
       }
-      await tx.snippet.deleteMany({ where: { id } });
+      await tx.snippet.deleteMany({ where: { organizationId: ctx.organizationId, id } });
       return { ok: true };
     });
   }

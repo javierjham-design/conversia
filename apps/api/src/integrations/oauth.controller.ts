@@ -161,7 +161,7 @@ export class OAuthController {
       await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(tokens.refresh_token ?? tokens.access_token)}`, { method: "POST" }).catch(() => undefined);
     }
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.integrationConnection.deleteMany({ where: { provider: "google" } });
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "google" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.google_disconnect", entityType: "integration_connection" },
       });
@@ -193,7 +193,7 @@ export class OAuthController {
       .object({ calendarId: z.string().max(300).optional(), calendarSync: z.boolean().optional() })
       .parse(body ?? {});
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "google" } });
       if (!conn) throw new BadRequestException("Conecta tu cuenta de Google primero");
       const config = { ...((conn.config as object) ?? {}), ...parsed } as object;
       await tx.integrationConnection.update({ where: { id: conn.id }, data: { config } });
@@ -208,7 +208,7 @@ export class OAuthController {
     try {
       const { calendars } = await this.googleCalendars();
       await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-        await tx.integrationConnection.updateMany({ where: { provider: "google" }, data: { lastSyncAt: new Date(), lastError: null, status: "active" } });
+        await tx.integrationConnection.updateMany({ where: { organizationId: ctx.organizationId, provider: "google" }, data: { lastSyncAt: new Date(), lastError: null, status: "active" } });
         await tx.integrationEvent.create({
           data: { organizationId: ctx.organizationId, provider: "google", type: "google.test", status: "ok", message: `Prueba OK: ${calendars.length} calendario(s) visibles` },
         });
@@ -217,7 +217,7 @@ export class OAuthController {
     } catch (err) {
       const message = (err as Error).message;
       await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-        await tx.integrationConnection.updateMany({ where: { provider: "google" }, data: { lastError: message } });
+        await tx.integrationConnection.updateMany({ where: { organizationId: ctx.organizationId, provider: "google" }, data: { lastError: message } });
         await tx.integrationEvent.create({
           data: { organizationId: ctx.organizationId, provider: "google", type: "google.test", status: "error", message },
         });
@@ -288,7 +288,7 @@ export class OAuthController {
       const info: any = await res.json();
       const detail = `✔ Conectado al portal ${info.hub_domain ?? "?"} (hub #${info.hub_id ?? "?"}) como ${info.user ?? "?"}`;
       await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-        await tx.integrationConnection.updateMany({ where: { provider: "hubspot" }, data: { lastSyncAt: new Date(), lastError: null, status: "active" } });
+        await tx.integrationConnection.updateMany({ where: { organizationId: ctx.organizationId, provider: "hubspot" }, data: { lastSyncAt: new Date(), lastError: null, status: "active" } });
         await tx.integrationEvent.create({
           data: { organizationId: ctx.organizationId, provider: "hubspot", type: "hubspot.test", status: "ok", message: detail },
         });
@@ -316,7 +316,7 @@ export class OAuthController {
       })
       .parse(body ?? {});
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "hubspot" } });
       if (!conn) throw new BadRequestException("Conecta tu cuenta de HubSpot primero");
       const config = { ...((conn.config as object) ?? {}), ...parsed } as object;
       await tx.integrationConnection.update({ where: { id: conn.id }, data: { config } });
@@ -329,7 +329,7 @@ export class OAuthController {
   async hubspotSyncAll() {
     const ctx = requirePermission("integrations:write");
     const contacts = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "hubspot" } });
       if (!conn) throw new BadRequestException("Conecta tu cuenta de HubSpot primero");
       return tx.contact.findMany({
         where: { deletedAt: null, OR: [{ phone: { not: null } }, { email: { not: null } }] },
@@ -358,7 +358,7 @@ export class OAuthController {
   hubspotDisconnect() {
     const ctx = requirePermission("integrations:write");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      await tx.integrationConnection.deleteMany({ where: { provider: "hubspot" } });
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "hubspot" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.hubspot_disconnect", entityType: "integration_connection" },
       });
@@ -391,7 +391,7 @@ export class OAuthController {
     }
     if (!patch || !Object.keys(patch).length) return;
     await this.prisma.withTenant(orgId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: orgId, provider } });
       if (!conn) return;
       await tx.integrationConnection.update({ where: { id: conn.id }, data: { config: { ...((conn.config as object) ?? {}), ...patch } as object } });
     });
@@ -404,7 +404,7 @@ export class OAuthController {
       });
       // Conservar el refresh_token anterior si Google no reenvía uno nuevo.
       if (!tokens.refresh_token && existing?.credentialId) {
-        const prev = await tx.integrationCredential.findUnique({ where: { id: existing.credentialId } });
+        const prev = await tx.integrationCredential.findFirst({ where: { id: existing.credentialId, organizationId: orgId } });
         if (prev) {
           try {
             tokens.refresh_token = (JSON.parse(decryptSecret(prev.ciphertext)) as OAuthTokens).refresh_token;
@@ -437,9 +437,9 @@ export class OAuthController {
   async freshToken(orgId: string, provider: "google" | "hubspot"): Promise<string> {
     const env = getEnv();
     const stored = await this.prisma.withTenant(orgId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: orgId, provider } });
       if (!conn?.credentialId) return null;
-      const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+      const cred = await tx.integrationCredential.findFirst({ where: { id: conn.credentialId, organizationId: orgId } });
       if (!cred) return null;
       try {
         return { connId: conn.id, credId: cred.id, tokens: JSON.parse(decryptSecret(cred.ciphertext)) as OAuthTokens };
@@ -469,7 +469,7 @@ export class OAuthController {
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok || !data.access_token) {
       await this.prisma.withTenant(orgId, (tx) =>
-        tx.integrationConnection.updateMany({ where: { provider }, data: { status: "reauthorize", lastError: "El acceso fue revocado: vuelve a conectar la cuenta" } }),
+        tx.integrationConnection.updateMany({ where: { organizationId: orgId, provider }, data: { status: "reauthorize", lastError: "El acceso fue revocado: vuelve a conectar la cuenta" } }),
       ).catch(() => undefined);
       throw new BadRequestException("El acceso fue revocado: vuelve a conectar la cuenta");
     }
@@ -487,9 +487,9 @@ export class OAuthController {
 
   private async readTokens(orgId: string, provider: string): Promise<OAuthTokens | null> {
     return this.prisma.withTenant(orgId, async (tx) => {
-      const conn = await tx.integrationConnection.findFirst({ where: { provider } });
+      const conn = await tx.integrationConnection.findFirst({ where: { organizationId: orgId, provider } });
       if (!conn?.credentialId) return null;
-      const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+      const cred = await tx.integrationCredential.findFirst({ where: { id: conn.credentialId, organizationId: orgId } });
       if (!cred) return null;
       try {
         return JSON.parse(decryptSecret(cred.ciphertext)) as OAuthTokens;

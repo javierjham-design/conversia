@@ -146,15 +146,17 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
   }
 
   const result = await withTenant(organizationId, async (tx) => {
-    // Idempotencia por leadgen_id
+    // Idempotencia por leadgen_id, POR TENANT (nunca el evento de otro cliente)
     const dup = await tx.integrationEvent.findFirst({
-      where: { provider: "lead_ads", type: "lead.received", payload: { path: ["leadgenId"], equals: change.leadgen_id } },
+      where: { organizationId, provider: "lead_ads", type: "lead.received", payload: { path: ["leadgenId"], equals: change.leadgen_id } },
     });
     if (dup) return null;
 
+    // El mapeo de campos es del tenant resuelto: nunca el de otro cliente que
+    // tenga el mismo form_id (o el comodín formExternalId: null).
     const mappingRow =
-      (await tx.metaFieldMapping.findFirst({ where: { formExternalId: change.form_id } })) ??
-      (await tx.metaFieldMapping.findFirst({ where: { formExternalId: null } }));
+      (await tx.metaFieldMapping.findFirst({ where: { organizationId, formExternalId: change.form_id } })) ??
+      (await tx.metaFieldMapping.findFirst({ where: { organizationId, formExternalId: null } }));
     const mappings: Array<{ source: string; target: string }> = (mappingRow?.mappings as any[]) ?? [
       { source: "full_name", target: "firstName" },
       { source: "phone_number", target: "phone" },
@@ -195,7 +197,9 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
         cands.push(c9, "+" + c9);
       }
     }
-    let contact = cands.length ? await tx.contact.findFirst({ where: { phone: { in: cands }, deletedAt: null }, orderBy: { createdAt: "asc" } }) : null;
+    let contact = cands.length
+      ? await tx.contact.findFirst({ where: { organizationId, phone: { in: cands }, deletedAt: null }, orderBy: { createdAt: "asc" } })
+      : null;
     if (!contact) {
       contact = await tx.contact.create({
         data: {
@@ -238,8 +242,8 @@ export async function processLeadgen(change: LeadgenChange, internal = false): P
       : null;
     if (!status || !status.active) {
       status =
-        (await tx.leadStatus.findFirst({ where: { category: "OPEN", active: true }, orderBy: { order: "asc" } })) ??
-        (await tx.leadStatus.findFirst({ where: { active: true }, orderBy: { order: "asc" } }));
+        (await tx.leadStatus.findFirst({ where: { organizationId, category: "OPEN", active: true }, orderBy: { order: "asc" } })) ??
+        (await tx.leadStatus.findFirst({ where: { organizationId, active: true }, orderBy: { order: "asc" } }));
     }
     let leadId: string | null = null;
     if (status) {

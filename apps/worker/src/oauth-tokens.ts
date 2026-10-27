@@ -32,9 +32,9 @@ function tokenEndpoint(provider: OAuthProvider): { url: string; clientId: string
  */
 export async function getFreshOAuthToken(organizationId: string, provider: OAuthProvider): Promise<string> {
   const { conn, credId, tokens } = await withTenant(organizationId, async (tx) => {
-    const conn = await tx.integrationConnection.findFirst({ where: { provider } });
+    const conn = await tx.integrationConnection.findFirst({ where: { organizationId, provider } });
     if (!conn?.credentialId) throw new NoConnectionError(provider);
-    const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+    const cred = await tx.integrationCredential.findFirst({ where: { id: conn.credentialId, organizationId } });
     if (!cred) throw new NoConnectionError(provider);
     return { conn, credId: cred.id, tokens: JSON.parse(decryptCredential(cred.ciphertext)) as StoredTokens };
   });
@@ -82,7 +82,7 @@ export async function getFreshOAuthToken(organizationId: string, provider: OAuth
 async function markReauthorize(organizationId: string, provider: OAuthProvider, reason: string): Promise<void> {
   const label = provider === "google" ? "Google" : "HubSpot";
   await withTenant(organizationId, async (tx) => {
-    await tx.integrationConnection.updateMany({ where: { provider }, data: { status: "reauthorize", lastError: reason } });
+    await tx.integrationConnection.updateMany({ where: { organizationId, provider }, data: { status: "reauthorize", lastError: reason } });
     await tx.integrationEvent.create({
       data: { organizationId, provider, type: `${provider}.reauthorize`, status: "error", message: `${label}: ${reason}` },
     });

@@ -48,7 +48,7 @@ export async function appendSheetRow(
     return;
   }
   await withTenant(organizationId, (tx) =>
-    tx.integrationConnection.updateMany({ where: { provider: "google" }, data: { lastSyncAt: new Date() } }),
+    tx.integrationConnection.updateMany({ where: { organizationId, provider: "google" }, data: { lastSyncAt: new Date() } }),
   ).catch(() => undefined);
   await log("ok", "Fila agregada en Google Sheets");
 }
