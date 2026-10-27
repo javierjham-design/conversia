@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
-import { leerRetorno } from "@/lib/cobros-retorno";
+import { leerRetorno, type Retorno } from "@/lib/cobros-retorno";
 
 /**
  * COBROS — la pantalla de dinero del cliente de Conversia (su plan, sus créditos y su
@@ -85,6 +85,21 @@ function barColor(pct: number): string {
 type Aviso = { kind: "ok" | "info" | "warn" | "error"; text: string };
 const AVISO_COLOR: Record<Aviso["kind"], string> = { ok: "var(--ok)", info: "var(--acc-deep)", warn: "var(--warn)", error: "var(--danger)" };
 
+/**
+ * El retorno de la pasarela se captura al CARGAR EL MÓDULO, no dentro de un efecto.
+ *
+ * Por qué: la pasarela devuelve al cliente con una navegación COMPLETA
+ * (`/cobros?pago=ok`), y leer la URL recién en un efecto es frágil — si algo la limpia
+ * antes, o si el subárbol se vuelve a montar después de que ya la limpiamos nosotros, el
+ * aviso se pierde y el cliente queda mirando una pantalla que no le dice si pagó o no.
+ * Eso es justamente lo que detectó la jornada G en CI: la región de estado quedaba vacía.
+ * Al capturarlo acá queda fijado antes de que corra cualquier efecto.
+ *
+ * Solo aplica a navegaciones completas (que es como vuelve la pasarela); si alguien llega
+ * a /cobros navegando dentro de la app, no hay retorno que leer.
+ */
+const RETORNO_AL_CARGAR: Retorno = typeof window === "undefined" ? null : leerRetorno(window.location.search);
+
 export default function Cobros() {
   const [me, setMe] = useState<Me | null>(null);
   const [s, setS] = useState<Summary | null>(null);
@@ -114,7 +129,7 @@ export default function Cobros() {
     void load();
     if (retornoLeido.current) return;
     retornoLeido.current = true;
-    const retorno = leerRetorno(window.location.search);
+    const retorno = RETORNO_AL_CARGAR;
     if (!retorno) return;
     // Limpia la URL para que un refresco no repita el aviso ni la confirmación.
     window.history.replaceState(null, "", window.location.pathname);
