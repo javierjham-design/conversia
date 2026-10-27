@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, OnModuleDestroy, Optional } from "@nestjs/common";
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 
@@ -82,8 +82,21 @@ export class RateLimitService implements OnModuleDestroy {
    */
   private fallback: RateLimiter;
 
-  /** Los limitadores se pueden inyectar en tests (sin Redis real). En prod se omiten. */
-  constructor(limiter?: RateLimiter, fallback?: RateLimiter) {
+  /**
+   * Los limitadores se pueden inyectar en tests (sin Redis real). En prod se omiten.
+   *
+   * `@Optional()` NO es decorativo: con `emitDecoratorMetadata`, TypeScript emite
+   * `design:paramtypes = [RateLimiter, RateLimiter]` aunque los parámetros sean
+   * opcionales en TS. Sin `@Optional()`, Nest busca un provider `RateLimiter`, no lo
+   * encuentra y el proceso MUERE al arrancar con `UnknownDependenciesException`
+   * (pasó: el contenedor del api no levantaba y el único rastro estaba en sus logs,
+   * que el CI no guardaba). Con `@Optional()` inyecta `undefined` y se usan los de
+   * siempre.
+   */
+  constructor(
+    @Optional() limiter?: RateLimiter,
+    @Optional() fallback?: RateLimiter,
+  ) {
     this.fallback = fallback ?? new RateLimiter(new MemoryRateStore());
     if (limiter) {
       this.limiter = limiter;

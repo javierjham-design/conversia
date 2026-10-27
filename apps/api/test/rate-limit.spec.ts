@@ -1,3 +1,4 @@
+import "reflect-metadata"; // necesario para leer la metadata de los decoradores de Nest
 import { describe, expect, it } from "vitest";
 import { MemoryRateStore, RateLimiter, RateLimitService, type RateStore } from "../src/common/rate-limit";
 
@@ -123,6 +124,25 @@ describe("§3.8 — respaldo en memoria para credenciales", () => {
     await allow("rl:login:ip:10.0.0.3", 1, 60, true);
     expect((await allow("rl:login:ip:10.0.0.3", 1, 60, true)).allowed).toBe(false); // agotada
     expect((await allow("rl:login:ip:10.0.0.4", 1, 60, true)).allowed).toBe(true); // otra IP, intacta
+  });
+
+  /**
+   * REGRESIÓN parcial: el contenedor del api se quedó sin arrancar por este constructor.
+   *
+   * `RateLimitService` recibe sus limitadores por constructor para poder testearlo sin
+   * Redis. Con `emitDecoratorMetadata`, tsc emite `design:paramtypes = [RateLimiter,
+   * RateLimiter]` aunque en TS sean opcionales: Nest busca un provider `RateLimiter`, no
+   * lo encuentra y MATA el proceso al arrancar. Se arregla con `@Optional()`.
+   *
+   * OJO: esto NO se puede testear acá. vitest transpila con esbuild, que **no emite**
+   * metadata de decoradores, así que `design:paramtypes` viene vacío y cualquier
+   * aserción sobre ella sería vacua. El guardián de verdad es
+   * `tools/ops/check-di.cjs`, que arranca el grafo de Nest sobre el `dist` que produce
+   * tsc; corre en CI después del build. Acá solo queda lo que sí se puede comprobar:
+   * que construirlo como lo hace Nest (sin argumentos) funciona.
+   */
+  it("construido SIN argumentos (como lo hace Nest) sigue funcionando", () => {
+    expect(() => new RateLimitService()).not.toThrow();
   });
 
   it("los límites NO de credenciales siguen fail-open: no tocan el respaldo", async () => {
