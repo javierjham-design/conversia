@@ -100,7 +100,7 @@ pueden ir en un PR cada una o en dos, a tu criterio, siempre sin mezclar con otr
 | 5 | AUD 6 — Marcas y fusibles | pendiente | | | |
 | 6 | CRE 1 — Motor de Créditos IA | pendiente | | | |
 | 7 | CRE 2 — Catálogo y migración | pendiente | | | |
-| 8 | AUD 5 — Auth y permisos | pendiente | | | |
+| 8 | AUD 5 — Auth y permisos | ✅ en PR #551 | #551 | 2026-10-27 | Los 10 puntos de la etapa. Agujeros cerrados: entrar con Google saltaba el 2.º factor; una sesión robada podía reenrolar el MFA sin saber la contraseña; la IP se tomaba de `X-Forwarded-For` (falsificable) y con eso se saltaba la allowlist del super admin; la exención de MFA del panel se activaba con `?x=/platform/auth/`; nueve acciones de escritura de la Bandeja no pedían permiso; desactivar a alguien no cortaba su sesión; y el link de invitación estaba ROTO (el frontend lo llama sin Bearer y el middleware lo rechazaba). Nuevo: límite por IP en el login con respaldo en memoria si Redis cae, y bitácora de todo lo que hace una sesión de impersonación. 60 tests nuevos + 91 casos en `platform-policy.spec.ts`; api 279/279, worker 362/362. Sin migraciones. REQUIERE TU OK: la etapa saca del rol OPERADOR las acciones por-org de dinero y de apropiación de cuenta (incluida `impersonate`), que F10 daba por permitidas. |
 | 9 | AUD 7 — WhatsApp y canales | pendiente | | | |
 | 10 | COP 1 — Copiloto que actúa | pendiente | | | |
 | 11 | COP 2 — Personaje y experiencia | pendiente | | | |
