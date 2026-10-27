@@ -1,4 +1,4 @@
-import { Queue } from "bullmq";
+import { Queue, type DefaultJobOptions } from "bullmq";
 import IORedis from "ioredis";
 import { createHash } from "node:crypto";
 import { getEnv } from "@conversia/config";
@@ -12,13 +12,23 @@ import { decryptCredential } from "./credentials";
  * espejo opcional de los eventos CAPI. Reintentos vía la cola integration-sync.
  */
 
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): completados 24 h o 5.000, fallidos 7 días —
+ * sin esto Redis guarda cada job para siempre. SOLO retención: no define
+ * `attempts`/`backoff`, y lo que declara cada `add()` le gana.
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
+
 let connection: IORedis | undefined;
 let syncQueue: Queue<SyncJob> | undefined;
 
 export function getSyncQueue(): Queue<SyncJob> {
   if (!syncQueue) {
     connection = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: null });
-    syncQueue = new Queue(QUEUE_NAMES.sync, { connection });
+    syncQueue = new Queue(QUEUE_NAMES.sync, { connection, defaultJobOptions: { ...JOB_RETENTION } });
   }
   return syncQueue;
 }
