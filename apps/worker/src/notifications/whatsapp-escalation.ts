@@ -1,4 +1,4 @@
-import { Queue } from "bullmq";
+import { Queue, type DefaultJobOptions } from "bullmq";
 import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
@@ -24,6 +24,18 @@ export interface WaEscalationJob {
   contactName: string;
 }
 
+/**
+ * RETENCIÓN de jobs (auditoría §8.2): completados 24 h o 5.000, fallidos 7 días —
+ * sin esto Redis guarda cada job para siempre. SOLO retención: no define
+ * `attempts`/`backoff`, y lo que declara el `add()` de abajo (delay, jobId y sus
+ * límites por cantidad) le gana. Los avisos AGENDADOS están `delayed`, no
+ * `completed`: la retención no los adelanta ni los borra.
+ */
+const JOB_RETENTION: DefaultJobOptions = {
+  removeOnComplete: { age: 86400, count: 5000 },
+  removeOnFail: { age: 604800 },
+};
+
 let connection: IORedis | undefined;
 let queue: Queue<WaEscalationJob> | undefined;
 
@@ -33,7 +45,7 @@ function conn(): IORedis {
 }
 
 export function getWaEscalationQueue(): Queue<WaEscalationJob> {
-  if (!queue) queue = new Queue(QUEUE_NAMES.whatsappEscalation, { connection: conn() });
+  if (!queue) queue = new Queue(QUEUE_NAMES.whatsappEscalation, { connection: conn(), defaultJobOptions: { ...JOB_RETENTION } });
   return queue;
 }
 
