@@ -18,6 +18,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [expired, setExpired] = useState(false);
   const [volver, setVolver] = useState<string | null>(null);
+  const [googleReady, setGoogleReady] = useState(false);
 
   // Lee el motivo (?expirada=1) y la ruta a la que volver (?volver=) del querystring. Vía
   // window.location para no exigir un <Suspense> alrededor de useSearchParams (Next 15).
@@ -26,6 +27,59 @@ export default function Login() {
     setExpired(q.get("expirada") === "1");
     setVolver(safeVolver(q.get("volver")));
   }, []);
+
+  // Botón "Continuar con Google" (Google Identity Services). El backend valida el ID token
+  // y resuelve la marca por el Origin (app.conversia.cl → conversia); emite la MISMA sesión
+  // deslizante que el login con correo (setSession). Es SOLO acceso: no crea cuentas nuevas.
+  // Si Google no está configurado o lo bloquea el navegador, el login con correo sigue intacto.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cfg = await api<{ clientId: string }>("/auth/google-config");
+        if (!cfg.clientId || cancelled) return;
+        await new Promise<void>((resolve, reject) => {
+          if ((window as any).google?.accounts?.id) return resolve();
+          const s = document.createElement("script");
+          s.src = "https://accounts.google.com/gsi/client";
+          s.async = true;
+          s.defer = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("gsi"));
+          document.head.appendChild(s);
+        });
+        if (cancelled) return;
+        const g = (window as any).google;
+        g.accounts.id.initialize({
+          client_id: cfg.clientId,
+          callback: async (resp: { credential?: string }) => {
+            setError(null);
+            try {
+              const r = await api<{ token: string; refreshToken?: string }>("/auth/google", {
+                method: "POST",
+                body: JSON.stringify({ credential: resp.credential }),
+              });
+              setSession(r);
+              const back = safeVolver(new URLSearchParams(window.location.search).get("volver"));
+              router.replace(back ?? "/inicio");
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          },
+        });
+        const el = document.getElementById("google-btn");
+        if (el) {
+          g.accounts.id.renderButton(el, { theme: "outline", size: "large", width: 324, text: "continue_with" });
+          setGoogleReady(true);
+        }
+      } catch {
+        /* Google no configurado o bloqueado: solo se oculta el botón. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,6 +123,12 @@ export default function Login() {
           <p style={{ fontSize: 13, margin: "0 0 16px", padding: "10px 12px", borderRadius: 10, background: "var(--acc-dim)", color: "var(--acc-deep)", lineHeight: 1.45 }}>
             Tu sesión expiró por seguridad. Entra de nuevo y seguimos donde estabas.
           </p>
+        ) : null}
+        <div id="google-btn" style={{ display: "flex", justifyContent: "center" }} />
+        {googleReady ? (
+          <div className="text-dim" style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0", fontSize: 12 }}>
+            <span style={{ height: 1, flex: 1, background: "var(--line)" }} />o<span style={{ height: 1, flex: 1, background: "var(--line)" }} />
+          </div>
         ) : null}
         <label style={{ fontSize: 13 }} className="text-dim">
           Correo
