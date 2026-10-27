@@ -80,9 +80,15 @@ export class RateLimitService implements OnModuleDestroy {
    * que aprovecha un ataque de fuerza bruta. El contador en memoria es por instancia,
    * no global, así que es más laxo que el de Redis: alcanza para frenar el abuso.
    */
-  private fallback = new RateLimiter(new MemoryRateStore());
+  private fallback: RateLimiter;
 
-  constructor() {
+  /** Los limitadores se pueden inyectar en tests (sin Redis real). En prod se omiten. */
+  constructor(limiter?: RateLimiter, fallback?: RateLimiter) {
+    this.fallback = fallback ?? new RateLimiter(new MemoryRateStore());
+    if (limiter) {
+      this.limiter = limiter;
+      return;
+    }
     this.redis.on("error", () => undefined); // no romper el request si Redis cae
     void this.redis.connect().catch(() => undefined);
     this.limiter = new RateLimiter(new RedisRateStore(this.redis));

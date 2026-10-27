@@ -33,7 +33,7 @@ export function assertTubotBrand(req: PlatformRequest): void {
  * mandando `X-Forwarded-For: <una de la lista>`. Era la 2ª capa de defensa del panel
  * más sensible del sistema.
  */
-function clientIp(req: Request): string {
+export function clientIp(req: Request): string {
   return req.ip || req.socket?.remoteAddress || "";
 }
 
@@ -45,7 +45,7 @@ function clientIp(req: Request): string {
  * prefijo. Con `includes()` sobre la URL completa, cualquier ruta del panel se eximía
  * del MFA colgándole `?x=/platform/auth/` al final.
  */
-function isMfaExempt(req: Request): boolean {
+export function isMfaExempt(req: Request): boolean {
   const path = (req.originalUrl || req.url || "").split("?")[0];
   return path.startsWith("/platform/auth/");
 }

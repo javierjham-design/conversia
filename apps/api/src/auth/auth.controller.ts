@@ -67,7 +67,7 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
  * mandar un `X-Forwarded-For` distinto en cada intento para saltarse cualquier límite
  * por IP. `req.ip` no se puede falsificar desde afuera.
  */
-function clientIp(req: Request): string {
+export function clientIp(req: Request): string {
   return req.ip || req.socket?.remoteAddress || "unknown";
 }
 
@@ -75,7 +75,7 @@ function clientIp(req: Request): string {
  * §10.2 — modo de sesión que pide el cliente. `x-session-mode: sliding` = quiero refresh
  * token (sesión deslizante). Sin la cabecera, decide la marca de la cuenta.
  */
-function sessionMode(req: Request): string | undefined {
+export function sessionMode(req: Request): string | undefined {
   const v = req.headers["x-session-mode"];
   return typeof v === "string" ? v : undefined;
 }
