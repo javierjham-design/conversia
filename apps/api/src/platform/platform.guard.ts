@@ -10,6 +10,22 @@ export interface PlatformRequest extends Request {
   platformAdmin?: PlatformClaims;
 }
 
+/** Marca del super admin que hace la petición. Default `tubot` (comportamiento histórico). */
+export function platformReqBrand(req: PlatformRequest): string {
+  return req.platformAdmin?.brand ?? "tubot";
+}
+
+/**
+ * §6.2 — Bloquea una escritura de configuración GLOBAL (pagos, etc.) si el admin no es de TuBot.
+ * Las credenciales de Flow/Lemon son globales y compartidas: un admin de Conversia podía pisar
+ * las de TuBot. Hasta tener claves por marca, solo TuBot administra esos ajustes globales.
+ */
+export function assertTubotBrand(req: PlatformRequest): void {
+  if (platformReqBrand(req) !== "tubot") {
+    throw new ForbiddenException("Esta configuración global solo la administra TuBot");
+  }
+}
+
 function clientIp(req: Request): string {
   return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
 }

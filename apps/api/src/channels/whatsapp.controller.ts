@@ -14,6 +14,28 @@ import { QueueService } from "../queues";
 import { verifyMetaSignature } from "./signature";
 
 /**
+ * ¿El payload apunta a un canal SIMULADO? Se decide por el `phone_number_id` REAL del
+ * webhook (`entry[].changes[].value.metadata.phone_number_id` que empieza con "mock:"),
+ * NUNCA por el texto serializado del cuerpo (§4.1): un cliente podía escribir `hola "mock:`
+ * (o ponerlo en su nombre de perfil) y, al hacer `JSON.stringify(body)`, disparar el 403 que
+ * tumbaba el lote COMPLETO de mensajes reales — un DoS de ingreso sin autenticación.
+ */
+export function isMockWhatsappPayload(body: unknown): boolean {
+  const entries = (body as { entry?: unknown } | null | undefined)?.entry;
+  if (!Array.isArray(entries)) return false;
+  for (const entry of entries) {
+    const changes = (entry as { changes?: unknown } | null | undefined)?.changes;
+    if (!Array.isArray(changes)) continue;
+    for (const change of changes) {
+      const pnid = (change as { value?: { metadata?: { phone_number_id?: unknown } } } | null | undefined)?.value?.metadata
+        ?.phone_number_id;
+      if (typeof pnid === "string" && pnid.startsWith("mock:")) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Webhook de WhatsApp Cloud API (Meta).
  * El tenant se resuelve en el worker por metadata.phone_number_id — este
  * endpoint solo valida y encola, respondiendo 200 lo antes posible.
@@ -45,8 +67,10 @@ export class WhatsappController {
 
     // Aislamiento: los payloads que apuntan a canales simulados ("mock:<slug>")
     // exigen el token del simulador — nadie puede inyectar mensajes a un
-    // tenant ajeno conociendo solo su slug.
-    if (rawText.includes('"mock:')) {
+    // tenant ajeno conociendo solo su slug. Se decide por el phone_number_id real,
+    // no por el texto del cuerpo (§4.1), para no descartar mensajes reales que
+    // contengan la cadena `"mock:`.
+    if (isMockWhatsappPayload(req.body)) {
       // SEGURIDAD (auditoría sim 250, 2026-10-17): en producción con proveedor real la
       // ruta mock queda CERRADA aunque el token coincida — el default del token viene
       // en .env.example (público) y bastaba el slug del tenant para inyectarle mensajes
