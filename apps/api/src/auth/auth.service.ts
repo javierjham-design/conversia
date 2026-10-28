@@ -79,6 +79,32 @@ function slugify(name: string): string {
     .slice(0, 40);
 }
 
+/** Códigos de los planes de prueba de Conversia, del modelo NUEVO al viejo. */
+export const TRIAL_PLAN_CODES = ["conversia_creditos_trial", "conversia_v2_trial"] as const;
+
+/**
+ * CRE 2 — plan de prueba para una cuenta nueva: el de Créditos IA si el dueño ya activó
+ * ese catálogo, y si no el de conversaciones (lo de hoy).
+ *
+ * Se decide por el plan que está ACTIVO, no por un flag aparte: "activar el catálogo
+ * nuevo" y "las cuentas nuevas entran al modelo nuevo" tienen que ser la misma acción. Con
+ * dos interruptores, el día que se encienda uno y no el otro quedarían clientes nuevos
+ * contratando un modelo que ya no vendemos, o al revés, sin saldo con que operar.
+ */
+export async function resolveTrialPlan(
+  db: { plan: { findUnique: (args: { where: { code: string } }) => Promise<{ id: string; active: boolean; features: unknown } | null> } },
+): Promise<{ id: string; active: boolean; features: unknown } | null> {
+  let fallback: { id: string; active: boolean; features: unknown } | null = null;
+  for (const code of TRIAL_PLAN_CODES) {
+    const plan = await db.plan.findUnique({ where: { code } }).catch(() => null);
+    if (plan?.active) return plan;
+    if (plan && !fallback) fallback = plan;
+  }
+  // Ninguno activo: se devuelve el primero que exista para no dejar el registro sin plan
+  // (quedaría en el plan free y sin bolsa, que es peor que un plan inactivo asignado).
+  return fallback;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -101,6 +127,17 @@ export class AuthService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * CRE 2 — regalo de bienvenida de la cuenta nueva, leído del PLAN
+   * (`features.signupGiftCredits`), no de una constante: el plan por conversación trae 30
+   * y el de Créditos IA, 200. Así el regalo cambia al activar el catálogo nuevo, sin
+   * desplegar y sin que queden dos números peleando en el código.
+   */
+  private signupGift(plan: { features: unknown } | null): number {
+    const n = Number(((plan?.features ?? {}) as Record<string, unknown>).signupGiftCredits);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 30;
   }
 
   /**
@@ -154,7 +191,12 @@ export class AuthService {
     // tarjeta. TuBot y los planes conversia V1 (grandfathered) no se tocan.
     const selfServeV2On = isConversia && (await this.selfServeV2Enabled("conversia"));
     const v2Mode = isConversia && (selfServeV2On || !!draftValid);
-    const v2TrialPlan = v2Mode ? await db.plan.findUnique({ where: { code: "conversia_v2_trial" } }) : null;
+    // CRE 2 — qué plan de prueba recibe la cuenta nueva. Mientras el catálogo de Créditos
+    // IA esté inactivo, el de siempre (`conversia_v2_trial`, por conversación). Cuando el
+    // dueño active el catálogo nuevo, el de créditos. Se elige por el plan que está ACTIVO
+    // en el catálogo, no por un flag aparte: así "activar el catálogo" y "los clientes
+    // nuevos entran al modelo nuevo" son la misma acción y no pueden quedar desfasados.
+    const v2TrialPlan = v2Mode ? await resolveTrialPlan(db) : null;
 
     const result = await db.$transaction(async (tx) => {
       // Marca derivada server-side (nunca del body); país del registro → moneda (CL=CLP,
@@ -301,10 +343,12 @@ export class AuthService {
       }
     }
 
-    // V2-3/V2-9 — 30 conversaciones de regalo (sin tarjeta) a TODA cuenta conversia en
-    // modo V2 (venga o no del generador /crear). El plan de prueba debita de la bolsa, así
-    // que estas 30 cuentan de verdad. Si vino de un draft, además se marca materializado.
+    // V2-3/V2-9 — regalo de bienvenida (sin tarjeta) a TODA cuenta conversia en modo V2
+    // (venga o no del generador /crear). El plan de prueba debita de la bolsa, así que
+    // este saldo cuenta de verdad. Si vino de un draft, además se marca materializado.
+    // CRE 2: el monto sale del plan (30 por conversación · 200 en Créditos IA).
     if (v2Mode) {
+      const regalo = this.signupGift(v2TrialPlan);
       try {
         const expiresAt = new Date(Date.now() + 60 * 24 * 3600 * 1000); // regalo: 60 días
         const refId = draftValid ? draft!.token : `signup:${result.org.id}`;
@@ -316,13 +360,13 @@ export class AuthService {
           // Idempotente por refId (no duplica el regalo si se reintenta).
           const dup = await tx.conversationCreditLedger.findFirst({ where: { organizationId: result.org.id, refType: "signup_gift", refId }, select: { id: true } });
           if (!dup) {
-            await tx.conversationCreditLot.create({ data: { organizationId: result.org.id, source: "bonus", amount: 30, remaining: 30, expiresAt, refType: "signup_gift", refId } });
-            await tx.conversationCreditLedger.create({ data: { organizationId: result.org.id, delta: 30, reason: "admin_adjust", balanceAfter: 30, refType: "signup_gift", refId } });
+            await tx.conversationCreditLot.create({ data: { organizationId: result.org.id, source: "bonus", amount: regalo, remaining: regalo, expiresAt, refType: "signup_gift", refId } });
+            await tx.conversationCreditLedger.create({ data: { organizationId: result.org.id, delta: regalo, reason: "admin_adjust", balanceAfter: regalo, refType: "signup_gift", refId } });
           }
         });
         if (draftValid) await db.draftSession.update({ where: { id: draft!.id }, data: { status: "materialized", materializedOrgId: result.org.id } });
       } catch (e) {
-        console.error(`✖ No se pudieron acreditar las 30 conversaciones de regalo en ${result.org.id}:`, (e as Error).message);
+        console.error(`✖ No se pudo acreditar el regalo de bienvenida (${regalo}) en ${result.org.id}:`, (e as Error).message);
       }
     }
 

@@ -5,6 +5,7 @@ import { createAIProvider } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
 import { getSetupChecklist } from "../onboarding/setup-checklist";
+import { packUnitForOrg } from "../billing/pack-unit";
 
 /**
  * BLOQUE B — "Asistente Conversia": un chat in-app que LIDERA la implementación y da
@@ -139,11 +140,27 @@ export class AssistantService {
       return { content: JSON.stringify({ servicios: list.map((s) => ({ nombre: s.name, precio: s.price != null ? `$${Number(s.price).toLocaleString("es-CL")}` : "sin precio", duracionMin: s.durationMin })) }) };
     }
     if (name === "ofrecerRecarga") {
+      // CRE 2 — el asistente ofrece los packs de la unidad que cobra el plan del cliente, y
+      // los nombra como son. Ofrecerle "conversaciones" a quien paga por Créditos IA sería
+      // ofrecerle algo que no existe en su cuenta.
+      const unit = await packUnitForOrg(ctx.organizationId);
       const [base, packs] = await Promise.all([
-        admin.plan.findUnique({ where: { code: "conversia_v2_base" }, select: { priceClp: true } }),
-        admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: "conversation" }, orderBy: { order: "asc" }, select: { name: true, credits: true, priceClp: true } }),
+        admin.plan.findUnique({ where: { code: unit === "credit" ? "conversia_creditos_base" : "conversia_v2_base" }, select: { priceClp: true } }),
+        admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: unit }, orderBy: { order: "asc" }, select: { name: true, credits: true, priceClp: true } }),
       ]);
-      return { content: JSON.stringify({ base: base ? `Base $${Number(base.priceClp).toLocaleString("es-CL")}/mes` : null, packs: packs.map((p) => ({ nombre: p.name, conversaciones: p.credits, precio: `$${Number(p.priceClp).toLocaleString("es-CL")}` })), link: "/cobros" }) };
+      const ivaIncluido = unit === "credit";
+      return {
+        content: JSON.stringify({
+          unidad: unit === "credit" ? "créditos de IA" : "conversaciones",
+          base: base ? `Base $${Number(base.priceClp).toLocaleString("es-CL")}/mes${ivaIncluido ? " (IVA incluido)" : ""}` : null,
+          packs: packs.map((p) => ({
+            nombre: p.name,
+            cantidad: p.credits,
+            precio: `$${Number(p.priceClp).toLocaleString("es-CL")}${ivaIncluido ? " (IVA incluido)" : ""}`,
+          })),
+          link: "/cobros",
+        }),
+      };
     }
     if (name === "escalarAHumano") {
       const code = `CV-${Math.floor(1000 + Math.random() * 9000)}`;
