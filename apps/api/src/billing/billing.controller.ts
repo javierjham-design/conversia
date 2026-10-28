@@ -1022,11 +1022,15 @@ export class BillingController {
     if (d.enabled && !consentAt) {
       throw new BadRequestException("Para activar la recarga automática tienes que aceptar que cobremos el pack a tu tarjeta cuando tus créditos se estén agotando.");
     }
+    // Los defaults dependen de la UNIDAD, igual que en el GET: 50 créditos / 20
+    // conversaciones. Si acá cayeran siempre a los de créditos, a un cliente por
+    // conversación le quedaría un umbral de 50 conversaciones, que es otra cosa.
+    const unitPut = await packUnitForOrg(ctx.organizationId);
     const nextAr = {
       enabled: d.enabled,
-      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? 50,
+      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? (unitPut === "credit" ? 50 : 20),
       packCode: d.packCode ?? prevAr.packCode ?? null,
-      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? 56970,
+      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? (unitPut === "credit" ? 56970 : 40000),
       consentAt,
       ...(consentAt && !prevAr.consentAt ? { consentBy: ctx.userId } : prevAr.consentBy ? { consentBy: prevAr.consentBy } : {}),
     };
