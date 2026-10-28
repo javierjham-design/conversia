@@ -101,7 +101,7 @@ pueden ir en un PR cada una o en dos, a tu criterio, siempre sin mezclar con otr
 | 6 | CRE 1 — Motor de Créditos IA | pendiente | | | |
 | 7 | CRE 2 — Catálogo y migración | pendiente | | | |
 | 8 | AUD 5 — Auth y permisos | pendiente | | | |
-| 9 | AUD 7 — WhatsApp y canales | pendiente | | | |
+| 9 | AUD 7 — WhatsApp y canales | ✅ en PR #553 | #553 | 2026-10-27 | Lo más grave que cierra: el id de la WABA y del número entraban por el formulario y se guardaban sin comprobar, así que una cuenta podía declarar el número de OTRA y quedar recibiendo y enviando como ella — ahora Meta lo confirma con el token del propio cliente, en los 4 caminos de entrada. Además: el token global de la plataforma sale de los endpoints de tenant; la ventana de 24 h cerrada y los números que no reciben dejan de reintentarse y explican qué hacer; los rate limit de Meta esperan en vez de insistir, con tope de ritmo en la cola; el webhook de Meta CRM ya no acepta cuerpos sin firma en producción; el eco del dueño en coexistencia calla al bot 2 h (antes el cliente recibía dos respuestas); y los estados de mensaje ya no van hacia atrás. 32 tests; api 296/296, worker 378/378. Sin migraciones. REQUIERE TU DECISIÓN: el token global en el ENVÍO quedó visible pero no cortado, a la espera de que confirmes que nadie depende de él (`WA_GLOBAL_TOKEN_FALLBACK=block`). |
 | 10 | COP 1 — Copiloto que actúa | pendiente | | | |
 | 11 | COP 2 — Personaje y experiencia | pendiente | | | |
 | 12 | CRE 3 + COP 3 — Transparencia, avisos y pago | pendiente | | | |

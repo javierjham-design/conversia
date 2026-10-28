@@ -19,6 +19,7 @@ import {
   type WorkflowRetryJob,
 } from "@conversia/types";
 import { processCapiJob } from "./capi";
+import { MetaRateLimitError } from "./channel-auth";
 import { processClarivaWebhook, type ClarivaWebhookData } from "./clariva-webhook";
 import { processContactImport } from "./contact-import";
 import { processBroadcast } from "./broadcast";
@@ -75,12 +76,37 @@ async function main() {
     async (job) => processInbound(job.data),
     { connection, concurrency: env.WORKER_CONCURRENCY, lockDuration: AI_LOCK_DURATION_MS },
   );
-  const outboundWorker = new Worker<OutboundJob>(
+  /**
+   * §4.5 — Tope de RITMO de envío + respuesta al rate limit de Meta.
+   *
+   * `limiter` pone un techo de mensajes por segundo para toda la cola: antes no había
+   * ninguno, así que una difusión o una ráfaga salía tan rápido como podía y lo que
+   * frenaba era el 130429 de Meta (que además castiga la calidad de la cuenta). El
+   * default (60/s) está por ENCIMA del techo real medido del worker (~50 msg/s, ver
+   * docs de la tanda de carga), así que no cambia nada en la práctica: es un cinturón.
+   *
+   * Y cuando Meta igual nos limita, se frena la COLA el tiempo que haga falta en vez de
+   * reintentar ese mensaje enseguida — `rateLimit()` + `RateLimitError` le dice a BullMQ
+   * que esto no gasta un intento.
+   */
+  const outboundWorker: Worker<OutboundJob> = new Worker<OutboundJob>(
     QUEUE_NAMES.outbound,
-    async (job) => processOutbound(job.data, { attemptsMade: job.attemptsMade, maxAttempts: job.opts.attempts ?? 1 }),
+    async (job) => {
+      try {
+        await processOutbound(job.data, { attemptsMade: job.attemptsMade, maxAttempts: job.opts.attempts ?? 1 });
+      } catch (err) {
+        if (err instanceof MetaRateLimitError) {
+          console.warn(`⏳ Meta nos está limitando: pauso la cola de envío ${Math.round(err.retryAfterMs / 1000)}s — ${err.message}`);
+          await outboundWorker.rateLimit(err.retryAfterMs);
+          throw Worker.RateLimitError();
+        }
+        throw err;
+      }
+    },
     {
       connection,
       concurrency: env.WORKER_CONCURRENCY,
+      limiter: { max: env.WA_SEND_MAX_PER_SECOND, duration: 1000 },
     },
   );
   const webhookWorker = new Worker<WebhookDeliveryJob>(
