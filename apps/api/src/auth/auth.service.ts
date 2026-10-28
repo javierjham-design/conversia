@@ -16,6 +16,39 @@ const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 /** Costo bcrypt (ASVS 2.4): 12 es el mínimo recomendado actual. */
 export const BCRYPT_COST = 12;
 
+/** Días de prueba de TuBot y días hasta la purga (7 + 7). No se tocan. */
+export const TRIAL_DAYS = 7;
+export const TRIAL_PURGE_DAYS = 14;
+
+export interface TrialWindow {
+  startedAt: string;
+  endsAt: string;
+  purgeAt: string;
+  state: "active";
+  warnedDays: number[];
+}
+
+/**
+ * §6.10 — Ventana de prueba de una cuenta nueva, SEGÚN SU MARCA.
+ *
+ * TuBot: 7 días de prueba y purga a los 14 (el "7+7" de siempre). Conversia NO usa el
+ * trial de autoservicio: la cuenta nace "pendiente de implementación", sin countdown ni
+ * purga, y el ciclo de cobro arranca al ENTREGAR (B6/F5).
+ *
+ * Está extraída de `register` para poder fijarla con un test sin levantar la base: es una
+ * de las cosas que la etapa 6 promete no haberle cambiado a TuBot.
+ */
+export function trialWindowFor(brand: string | null | undefined, now: Date): TrialWindow | null {
+  if ((brand ?? "tubot") === "conversia") return null;
+  return {
+    startedAt: now.toISOString(),
+    endsAt: new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString(),
+    purgeAt: new Date(now.getTime() + TRIAL_PURGE_DAYS * 86_400_000).toISOString(),
+    state: "active",
+    warnedDays: [],
+  };
+}
+
 /** De dónde sale la sesión: la marca de la cuenta y el modo que pidió el cliente. */
 export interface SessionHint {
   brand?: string | null;
@@ -103,16 +136,8 @@ export class AuthService {
     // implementación" (sin countdown ni purga) y el ciclo de cobro arranca al ENTREGAR.
     const isConversia = brand === "conversia";
     const now = new Date();
-    const endsAt = new Date(now.getTime() + 7 * 86_400_000).toISOString();
-    const trial = isConversia
-      ? null
-      : {
-          startedAt: now.toISOString(),
-          endsAt,
-          purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
-          state: "active",
-          warnedDays: [],
-        };
+    const trial = trialWindowFor(brand, now);
+    const endsAt = trial?.endsAt ?? new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
 
     // La cuenta nace ASIGNADA al plan Free (no "sin plan / todo en 0"): se crea una
     // suscripción TRIALING al plan gratuito para que la plataforma quede OPERATIVA
