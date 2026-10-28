@@ -253,6 +253,21 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/facturacion",
   },
   {
+    // CRE 1 (§4) — el equipo propone un modelo de IA más potente para un asistente. El
+    // cliente tiene que aceptarlo porque le cambia cuánto le rinde el saldo.
+    key: "ai.model_change_pending",
+    title: "Te propusimos un modelo de IA más potente",
+    body:
+      "Para {agentName} proponemos un modelo más potente: cada respuesta consumiría {creditsPerReply} créditos. " +
+      "Con tu saldo actual te alcanzaría para ~{conversationsAfter} conversaciones en vez de ~{conversationsBefore}. " +
+      "Revísalo y acéptalo si te acomoda; mientras no lo aceptes, nada cambia.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "info",
+    channels: ["in_app", "email"],
+    defaultChannels: ["in_app", "email"],
+    link: "/ajustes",
+  },
+  {
     key: "ai.token_cap",
     title: "Tope de tokens de IA alcanzado",
     body: "Se alcanzó el tope diario de tokens de IA. La IA queda en pausa.",

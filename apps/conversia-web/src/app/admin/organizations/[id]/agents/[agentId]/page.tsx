@@ -45,6 +45,13 @@ interface OrgAiInfo {
   agents?: { id: string; name: string; model: string | null; effectiveModel: string }[];
 }
 
+/** CRE 1 (§4) — impacto del cambio de modelo traducido a lo que entiende el cliente. */
+interface ModelImpact {
+  from: { model: string; creditsPerReply: number; level: string; conversations: number };
+  to: { model: string; creditsPerReply: number; level: string; conversations: number };
+  cheaper: boolean;
+}
+
 const KINDS: [string, string][] = [
   ["orchestrator", "Recepcionista / Orquestador"],
   ["receptionist", "Recepcionista"],
@@ -151,6 +158,10 @@ export default function AgentConfigurator({ params }: { params: Promise<{ id: st
   const [systemPrompt, setSystemPrompt] = useState("");
   const [model, setModel] = useState("");
   const [modelOverride, setModelOverride] = useState<string | null>(null); // override del super admin (POST .../model)
+  // CRE 1 (§4) — un modelo más caro queda esperando que el CLIENTE lo acepte.
+  const [pendingChange, setPendingChange] = useState<{ requested: string; impact?: ModelImpact } | null>(null);
+  const [forceReason, setForceReason] = useState("");
+  const [modelWeights, setModelWeights] = useState<Record<string, { level: string; creditsPerReply: number }>>({});
   const [maxTokens, setMaxTokens] = useState<string>("");
   const [maxToolRounds, setMaxToolRounds] = useState<string>("");
   const [language, setLanguage] = useState("es");
@@ -232,6 +243,14 @@ export default function AgentConfigurator({ params }: { params: Promise<{ id: st
   useEffect(() => {
     load().catch((e) => setError((e as Error).message));
   }, [load]);
+
+  // CRE 1 (§4) — pesos en créditos de cada modelo, para que el selector no sea a ciegas.
+  // Si falla, el selector sigue funcionando: muestra los nombres sin el peso.
+  useEffect(() => {
+    padmin<{ options: { model: string; level: string; creditsPerReply: number }[] }>("/platform/ai/model-options")
+      .then((r) => setModelWeights(Object.fromEntries((r.options ?? []).map((o) => [o.model, { level: o.level, creditsPerReply: o.creditsPerReply }]))))
+      .catch(() => undefined);
+  }, []);
 
   const current = JSON.stringify({ emoji, name, kind, description, systemPrompt, model, maxTokens, maxToolRounds, language, actions, knowledgeSources, schedulingProfs, apptDuration });
   const dirty = snapshot !== "" && current !== snapshot;
@@ -341,11 +360,30 @@ export default function AgentConfigurator({ params }: { params: Promise<{ id: st
     try { await padmin(`/platform/organizations/${orgId}/agents/${agentId}/active`, { method: "POST", body: JSON.stringify({ active: !agent.active }) }); await load(); }
     catch (e) { setError((e as Error).message); }
   }
-  async function saveModelOverride(value: string) {
+  async function saveModelOverride(value: string, force = false) {
     try {
-      await padmin(`/platform/organizations/${orgId}/agents/${agentId}/model`, { method: "POST", body: JSON.stringify({ model: value || null }) });
+      // CRE 1 (§4): si el plan del cliente cobra Créditos IA y el modelo es MÁS CARO, el
+      // backend NO lo aplica: le manda el aviso al cliente y espera su aceptación. Acá se
+      // refleja eso en vez de mentir con un "listo".
+      const r = await padmin<{ pending?: boolean; forced?: boolean; impact?: ModelImpact; requested?: string }>(
+        `/platform/organizations/${orgId}/agents/${agentId}/model`,
+        { method: "POST", body: JSON.stringify({ model: value || null, ...(force ? { force: true, reason: forceReason } : {}) }) },
+      );
+      if (r?.pending) {
+        setPendingChange({ requested: r.requested ?? value, impact: r.impact });
+        setMsg(`Le avisamos al cliente y queda esperando su aceptación. El agente sigue con ${modelOverride ?? "el modelo actual"}.`);
+        return;
+      }
+      setPendingChange(null);
+      setForceReason("");
       setModelOverride(value || null);
-      setMsg(value ? `Modelo forzado a ${value} para este agente.` : "Override de modelo quitado (usa el del tenant/plataforma).");
+      setMsg(
+        value
+          ? r?.forced
+            ? `Modelo forzado a ${value} sin esperar al cliente (quedó el motivo registrado).`
+            : `Modelo cambiado a ${value} para este agente.`
+          : "Override de modelo quitado (usa el del tenant/plataforma).",
+      );
     } catch (e) { setError((e as Error).message); }
   }
   async function setChannelDefault(channelId: string, use: boolean) {
@@ -510,14 +548,49 @@ export default function AgentConfigurator({ params }: { params: Promise<{ id: st
             </div>
             {/* Override del super admin (fuera del borrador: se aplica al instante vía POST .../model) */}
             <div style={{ marginTop: 14, borderTop: "1px solid var(--hairline)", paddingTop: 14 }}>
-              <label style={LABEL}>Override de modelo (super admin · fuerza el modelo de ESTE agente, ignora el del tenant)</label>
+              <label style={LABEL}>Modelo de ESTE agente (super admin · ignora el del tenant)</label>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <select style={{ ...FIELD, flex: "1 1 220px" }} value={modelOverride ?? ""} onChange={(e) => void saveModelOverride(e.target.value)}>
                   <option value="">— sin override (usa el del tenant/plataforma) —</option>
-                  {availableModels.map((m) => (<option key={m} value={m}>{m}</option>))}
+                  {availableModels.map((m) => {
+                    // CRE 1 (§4): el peso en créditos va en la opción misma. Sin esto, elegir
+                    // un modelo es elegir a ciegas cuánto le va a consumir al cliente.
+                    const w = modelWeights[m];
+                    const etiqueta = w ? `${m} · ${w.creditsPerReply} crédito${w.creditsPerReply === 1 ? "" : "s"} por respuesta${w.level === "premium" ? " · premium (no autoservicio)" : ""}` : m;
+                    return (<option key={m} value={m}>{etiqueta}</option>);
+                  })}
                 </select>
               </div>
-              <p className="text-dim" style={{ fontSize: 11, margin: "6px 0 0" }}>Se guarda al instante (no depende del borrador). Útil para probar un modelo más potente en un solo agente.</p>
+              <p className="text-dim" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                Se guarda al instante (no depende del borrador). Si el cliente paga con Créditos IA y el modelo es más caro, no se aplica
+                hasta que él lo acepte: le llega el aviso con el impacto en su saldo.
+              </p>
+              {pendingChange ? (
+                <div className="card" style={{ marginTop: 12, padding: 12, borderColor: "var(--acc)" }}>
+                  <p style={{ margin: 0, fontSize: 12.5 }}>
+                    <b>Esperando que el cliente acepte {pendingChange.requested}.</b>{" "}
+                    {pendingChange.impact
+                      ? `Pasaría de ${pendingChange.impact.from.creditsPerReply} a ${pendingChange.impact.to.creditsPerReply} créditos por respuesta (~${pendingChange.impact.to.conversations} conversaciones con su saldo, en vez de ~${pendingChange.impact.from.conversations}).`
+                      : null}
+                  </p>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
+                    <input
+                      style={{ ...FIELD, flex: "1 1 240px" }}
+                      placeholder="Motivo para aplicarlo sin esperar (queda registrado)"
+                      value={forceReason}
+                      onChange={(e) => setForceReason(e.target.value)}
+                    />
+                    <button
+                      onClick={() => void saveModelOverride(pendingChange.requested, true)}
+                      disabled={forceReason.trim().length < 10}
+                      className="card"
+                      style={{ cursor: forceReason.trim().length < 10 ? "not-allowed" : "pointer", fontSize: 12.5, padding: "8px 12px" }}
+                    >
+                      Aplicar igual
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </Section>
 

@@ -25,6 +25,17 @@ import { enforcePlanLimit } from "../common/plan-limits";
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
 import { runQaBattery } from "../agents/agent-qa";
 import { defaultAgentModel } from "../agents/model-policy";
+import {
+  applyAgentModel,
+  buildImpact,
+  clearPendingModelChange,
+  decideModelChange,
+  modelOptions,
+  planChargesAiCredits,
+  savePendingModelChange,
+} from "../agents/model-change";
+import { readAiModelPolicy } from "../agents/model-policy";
+import { weightOfModel } from "@conversia/agents";
 import { raiseException, messageWalletQuota, refillMessageWallet } from "@conversia/database"; // V2-8 cola de excepciones · §9.3 recarga compartida
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
@@ -815,7 +826,14 @@ export class PlatformController {
     @Req() req: PlatformRequest,
   ) {
     await this.assertOrgBrand(req, id);
-    const parsed = z.object({ model: z.string().min(1).max(60).nullable() }).safeParse(body);
+    const parsed = z
+      .object({
+        model: z.string().min(1).max(60).nullable(),
+        /** Aplica sin esperar al cliente. Exige motivo, que queda auditado (§4). */
+        force: z.boolean().optional(),
+        reason: z.string().max(300).optional(),
+      })
+      .safeParse(body);
     if (!parsed.success) throw new BadRequestException("model requerido (o null para heredar del tenant)");
     if (parsed.data.model && !MODEL_PRICING[parsed.data.model]) {
       throw new BadRequestException("Modelo no reconocido");
@@ -823,15 +841,101 @@ export class PlatformController {
     const db = this.prisma.admin;
     const agent = await db.agent.findFirst({ where: { id: agentId, organizationId: id, deletedAt: null } });
     if (!agent) throw new NotFoundException("Agente no encontrado");
-    const versions = await db.agentVersion.findMany({ where: { agentId }, select: { id: true, config: true } });
-    for (const v of versions) {
-      const config = { ...((v.config ?? {}) as Record<string, any>) };
-      if (parsed.data.model) config.model = parsed.data.model;
-      else delete config.model;
-      await db.agentVersion.update({ where: { id: v.id }, data: { config } });
+
+    // CRE 1 (§4) — un modelo MÁS CARO multiplica el consumo de Créditos IA del cliente,
+    // así que no se activa a sus espaldas: se le avisa con el impacto en su saldo y lo
+    // acepta. Volver al estándar es más barato y se aplica al instante.
+    //
+    // La aceptación se exige solo donde el aviso es VERDADERO: en planes que cobran
+    // Créditos IA. Con el cobro por conversación, cambiar el modelo no cambia lo que paga
+    // el cliente, y mandarle "tus créditos ahora rinden menos" sería falso.
+    const destino = parsed.data.model;
+    {
+      const actual = await this.efectivoDelAgente(id, agentId);
+      const policy = await readAiModelPolicy();
+      const accion = decideModelChange({
+        current: actual,
+        requested: destino,
+        chargesCredits: await planChargesAiCredits(id),
+        force: parsed.data.force,
+        creditsOf: (m) => weightOfModel(m, policy).credits,
+      });
+      if (destino && accion !== "aplicar") {
+        const impact = await buildImpact(id, actual, destino);
+        if (accion === "pedir_aceptacion") {
+          await savePendingModelChange(id, {
+            agentId,
+            agentName: agent.name,
+            from: actual,
+            to: destino,
+            requestedAt: new Date().toISOString(),
+            requestedByAdminId: req.platformAdmin?.sub ?? null,
+            impact,
+          });
+          await this.queues
+            .notify({
+              eventKey: "ai.model_change_pending",
+              organizationId: id,
+              data: {
+                agentName: agent.name,
+                creditsPerReply: impact.to.creditsPerReply,
+                conversationsBefore: impact.from.conversations,
+                conversationsAfter: impact.to.conversations,
+              },
+            })
+            .catch(() => undefined);
+          await this.audit(req, "platform.agent.model_change_requested", "agent", agentId, {
+            organizationId: id,
+            from: actual,
+            to: destino,
+            impact,
+          });
+          return { ok: true, pending: true as const, model: actual, requested: destino, impact };
+        }
+        // Forzado: se aplica, pero el motivo queda escrito (es plata del cliente).
+        const motivo = (parsed.data.reason ?? "").trim();
+        if (motivo.length < 10) {
+          throw new BadRequestException("Para forzar un modelo más caro sin la aceptación del cliente hay que escribir el motivo (10 caracteres o más).");
+        }
+        await clearPendingModelChange(id, agentId);
+        await applyAgentModel(id, agentId, destino);
+        await this.audit(req, "platform.agent.model_forced", "agent", agentId, {
+          organizationId: id,
+          from: actual,
+          to: destino,
+          reason: motivo,
+          impact,
+        });
+        return { ok: true, model: destino, forced: true as const };
+      }
     }
-    await this.audit(req, "platform.agent.model", "agent", agentId, { model: parsed.data.model ?? null, organizationId: id });
-    return { ok: true, model: parsed.data.model ?? null };
+
+    await clearPendingModelChange(id, agentId);
+    await applyAgentModel(id, agentId, destino ?? null);
+    await this.audit(req, "platform.agent.model", "agent", agentId, { model: destino ?? null, organizationId: id });
+    return { ok: true, model: destino ?? null };
+  }
+
+  /** Modelo que realmente usa hoy el agente: el suyo → el del tenant → el de plataforma. */
+  private async efectivoDelAgente(organizationId: string, agentId: string): Promise<string> {
+    const db = this.prisma.admin;
+    const version = await db.agentVersion.findFirst({
+      where: { agentId },
+      orderBy: [{ status: "asc" }, { version: "desc" }],
+      select: { config: true },
+    });
+    const propio = (version?.config as Record<string, unknown> | null)?.model;
+    if (typeof propio === "string" && propio) return propio;
+    const org = await db.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+    const delTenant = ((org?.settings as Record<string, any> | null)?.ai ?? {}).model;
+    if (typeof delTenant === "string" && delTenant) return delTenant;
+    return defaultAgentModel();
+  }
+
+  /** Opciones de modelo con su peso en créditos, para el selector de la consola (§4). */
+  @Get("ai/model-options")
+  async aiModelOptions() {
+    return { options: await modelOptions() };
   }
 
   /** Detalle de UN agente del tenant (prompt/tools/estado de la versión vigente) para editar. */

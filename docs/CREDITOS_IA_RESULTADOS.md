@@ -6,7 +6,7 @@ cerrar cada etapa.
 | Etapa | Estado | PR |
 |---|---|---|
 | 1 — Motor de Créditos IA | ✅ construida (apagada) | #557 |
-| 1b — Selector de modelo del super admin + aceptación del cliente | pendiente | |
+| 1 — Selector de modelo + aceptación del cliente | ✅ construida | #557 |
 | 2 — Catálogo, migración y cobro | pendiente | |
 | 3 — Transparencia y avisos | pendiente | |
 | 4 — Margen y calibración | pendiente | |
@@ -124,11 +124,28 @@ Según tu decisión del 27-oct:
   montaje asistido no expone ese campo).
 - TuBot sigue exactamente como estaba.
 
-**Falta de esta etapa, en un PR aparte:** el selector de modelo en tu consola que muestre
-el peso en créditos y, antes de aplicar uno más caro, le mande al cliente el aviso con el
-impacto estimado y el botón "Acepto". La función que traduce el cambio a lenguaje del
-cliente ("tus 1.000 créditos rinden ~60 conversaciones en vez de ~240") ya está escrita y
-probada.
+### Cómo se activa un modelo más potente
+
+En la ficha del agente, en tu consola, **cada opción del selector dice cuánto consume**
+("gpt-4o · 12 créditos por respuesta"), y las premium quedan marcadas como no
+autoservicio. Elegir un modelo **más caro** ya no lo aplica de inmediato:
+
+1. Al cliente le llega un aviso (en el panel y por correo) con el impacto en **su** saldo
+   real: "cada respuesta consumiría 12 créditos; con tu saldo te alcanzaría para ~19
+   conversaciones en vez de ~238".
+2. El bot **sigue con el modelo que tenía** mientras el cliente no responda.
+3. En su Inicio el cliente ve el aviso con **Acepto** / **No, gracias**. Su decisión queda
+   registrada con fecha y usuario (`agent.model_change_accepted` o `_declined`).
+4. Si necesitas aplicarlo sin esperar, hay un **"Aplicar igual"** que exige escribir el
+   motivo, y ese motivo queda guardado (`platform.agent.model_forced`).
+
+**Volver al modelo estándar** (o a cualquiera más barato) se aplica al instante: nadie
+tiene que aceptar que le baje el consumo.
+
+La aceptación se exige **solo** en planes que cobran Créditos IA. Con el cobro por
+conversación, cambiar el modelo no cambia lo que paga el cliente, así que el aviso "tus
+créditos rinden menos" sería falso — y mandarle un aviso equivocado a un cliente real es
+peor que no mandarlo. En esos planes el cambio se aplica como siempre.
 
 ### Para ti: los agentes que usan gpt-4o
 
