@@ -75,15 +75,28 @@ export class AssistantService {
     const checklist = await getSetupChecklist(this.prisma, organizationId, { userId, org });
     const { steps, percent: checklistPct, nextStep } = checklist;
 
-    // Saldo (modelo por conversación) best-effort.
+    // Saldo del monedero, best-effort.
+    //
+    // CRE 2 dejó esto a medias: la condición miraba SOLO `conversationDebitsWallet`, así que
+    // un cliente con plan de Créditos IA (`aiCreditsWallet`) veía el saldo EN BLANCO en el
+    // copiloto — justo el cliente al que el saldo le importa más, porque se gasta por
+    // respuesta. Ahora cubre las dos unidades y la nombra como corresponde. El NÚMERO sale
+    // aparte de la frase porque COP 2 lo necesita para avisar de saldo bajo sin parsear texto.
     let saldo: string | null = null;
+    let saldoRestante: number | null = null;
+    let saldoUnidad: "conversation" | "credit" | null = null;
     try {
       const sub = await admin.subscription.findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } });
       const plan = sub?.planId ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { features: true } }) : null;
-      if ((plan?.features as any)?.conversationDebitsWallet === true) {
+      const feats = (plan?.features ?? {}) as Record<string, unknown>;
+      const porCreditos = feats.aiCreditsWallet === true;
+      const porConversaciones = feats.conversationDebitsWallet === true;
+      if (porCreditos || porConversaciones) {
         const lots = await admin.conversationCreditLot.aggregate({ _sum: { remaining: true }, where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } });
         const w = await admin.conversationWallet.findUnique({ where: { organizationId }, select: { graceUsed: true } });
-        saldo = `${(lots._sum.remaining ?? 0) - (w?.graceUsed ?? 0)} conversaciones disponibles`;
+        saldoRestante = Math.max(0, (lots._sum.remaining ?? 0) - (w?.graceUsed ?? 0));
+        saldoUnidad = porCreditos ? "credit" : "conversation";
+        saldo = `${saldoRestante} ${porCreditos ? "créditos" : "conversaciones"} disponibles`;
       }
     } catch { /* noop */ }
 
@@ -93,14 +106,25 @@ export class AssistantService {
       orderBy: { createdAt: "desc" }, select: { message: true, createdAt: true },
     }).catch(() => null);
 
+    // COP 2 — en MODO ASISTENCIA (montaje terminado) el copiloto avisa de lo que importa en
+    // vez de esperar a que le pregunten. Citas por confirmar de las próximas 48 h: pasado
+    // eso ya no es "por confirmar", es un no-show que no se puede evitar.
+    const en48h = new Date(Date.now() + 48 * 3600_000);
+    const citasPorConfirmar = await admin.appointment
+      .count({ where: { organizationId, status: "PENDING", startsAt: { gte: new Date(), lte: en48h } } })
+      .catch(() => 0);
+
     return {
       businessName: org?.name ?? "tu negocio",
       currency: org?.currency ?? "CLP",
-      steps, checklistPct, nextStep, saldo,
+      steps, checklistPct, nextStep, saldo, saldoRestante, saldoUnidad,
       // "Paso 3 de 7": cuántos pasos BLOQUEANTES van (los opcionales no cuentan).
       blockingCompleted: checklist.blockingCompleted,
       blockingTotal: checklist.blockingTotal,
+      // COP 2 — "faltan ~N min" en la barra de progreso del copiloto.
+      remainingMinutes: checklist.remainingMinutes,
       lastChannelError: lastErr?.message ?? null,
+      citasPorConfirmar: citasPorConfirmar,
       mode: assistantMode(checklistPct),
     };
   }
@@ -285,9 +309,13 @@ AUTONOMÍA:
       checklistPct: 0,
       nextStep: null,
       saldo: null,
+      saldoRestante: null,
+      saldoUnidad: null,
       blockingCompleted: 0,
       blockingTotal: 0,
+      remainingMinutes: 0,
       lastChannelError: null,
+      citasPorConfirmar: 0,
       mode: assistantMode(0),
     };
   }

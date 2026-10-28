@@ -34,6 +34,14 @@ export interface SetupChecklistStep {
   blocking: boolean;
   /** Ruta REAL de conversia-web a la que se manda al cliente. */
   href: string;
+  /**
+   * COP 2 — minutos estimados del paso, para la barra de progreso del copiloto
+   * ("Paso 3 de 7 · faltan ~4 min"). Estiman el tiempo REAL de la tarea, no el de un clic:
+   * conectar WhatsApp pasa por el diálogo de Meta y la prueba depende de que el dueño
+   * agarre otro teléfono. Mejor quedarse corto en la promesa: decirle "2 min" a algo que
+   * toma 6 es peor que no decir nada.
+   */
+  minutes: number;
   // --- Compatibilidad: `GET /onboarding` ya devolvía esta forma y la UI la consume
   // (apps/conversia-web/src/app/canales/page.tsx lee steps[].key/.done). Superset, no reemplazo.
   title: string;
@@ -112,6 +120,7 @@ function step(s: {
   href: string;
   done: boolean;
   blocking: boolean;
+  minutes: number;
 }): SetupChecklistStep {
   return {
     key: s.key,
@@ -119,6 +128,7 @@ function step(s: {
     done: s.done,
     blocking: s.blocking,
     href: s.href,
+    minutes: s.minutes,
     title: s.label,
     description: s.description,
     cta: { label: s.ctaLabel, href: s.href },
@@ -139,6 +149,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Completar datos",
       href: "/ajustes",
       done: facts.hasBusinessName && facts.hasIndustry && facts.hasAddress && facts.hasBusinessHours,
+      minutes: 3,
       blocking: true,
     }),
     step({
@@ -148,6 +159,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Cargar servicios",
       href: "/agenda/configurar",
       done: facts.servicesPriced > 0,
+      minutes: 4,
       blocking: true,
     }),
   ];
@@ -162,6 +174,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
         ctaLabel: "Configurar agenda",
         href: "/agenda/configurar",
         done: facts.professionalsWithHours > 0,
+        minutes: 3,
         blocking: true,
       }),
     );
@@ -175,6 +188,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Publicar mi asistente",
       href: "/inicio",
       done: facts.publishedAgents > 0,
+      minutes: 3,
       blocking: true,
     }),
     step({
@@ -184,6 +198,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Conectar WhatsApp",
       href: "/canales",
       done: facts.whatsappConnected && facts.channelsWithAgent > 0,
+      minutes: 4,
       blocking: true,
     }),
     step({
@@ -193,6 +208,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Ver la conversación",
       href: "/conversaciones",
       done: facts.botReplied,
+      minutes: 2,
       blocking: true,
     }),
     step({
@@ -202,6 +218,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Activar mi plan",
       href: "/cobros",
       done: facts.planActive || facts.hasPaymentMethod,
+      minutes: 2,
       blocking: true,
     }),
     // ---- Opcionales: suman, pero JAMÁS impiden llegar al 100% ----
@@ -212,6 +229,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Ver mi página",
       href: "/mini-sitio",
       done: facts.miniSiteEnabled,
+      minutes: 1,
       blocking: false,
     }),
     step({
@@ -221,6 +239,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Invitar equipo",
       href: "/ajustes",
       done: facts.teamMembers > 1,
+      minutes: 2,
       blocking: false,
     }),
     step({
@@ -230,6 +249,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Cómo instalarla",
       href: "/ajustes",
       done: facts.pwaInstalled,
+      minutes: 1,
       blocking: false,
     }),
     step({
@@ -239,6 +259,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Activar avisos",
       href: "/ajustes",
       done: facts.pushDevices > 0,
+      minutes: 1,
       blocking: false,
     }),
     step({
@@ -248,6 +269,7 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       ctaLabel: "Reenviar verificación",
       href: "/inicio",
       done: facts.emailVerified,
+      minutes: 1,
       blocking: false,
     }),
   );
@@ -269,6 +291,8 @@ export interface SetupChecklist {
   blockingTotal: number;
   /** Siguiente paso BLOQUEANTE pendiente (lo que el copiloto propone hacer). */
   nextStep: SetupChecklistStep | null;
+  /** COP 2 — minutos estimados de lo que FALTA (solo bloqueantes). 0 si ya está todo. */
+  remainingMinutes: number;
 }
 
 export function summarizeSetupChecklist(steps: SetupChecklistStep[]): SetupChecklist {
@@ -284,6 +308,9 @@ export function summarizeSetupChecklist(steps: SetupChecklistStep[]): SetupCheck
     blockingCompleted,
     blockingTotal,
     nextStep: blocking.find((s) => !s.done) ?? null,
+    // Solo lo que falta y solo lo bloqueante: los pasos opcionales no entran en la promesa
+    // de "faltan ~N min" para dejar el bot andando.
+    remainingMinutes: blocking.filter((s) => !s.done).reduce((t, s) => t + s.minutes, 0),
   };
 }
 

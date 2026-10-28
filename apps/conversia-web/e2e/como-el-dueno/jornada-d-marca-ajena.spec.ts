@@ -46,8 +46,8 @@ test.describe("Jornada D — marca ajena en conversia-web", () => {
     // Dejo asentar el render (el widget ya decidió su elegibilidad): NO hay botón flotante del
     // asistente para esta cuenta. (Robusto al timing: afirmo ausencia tras asentar, no "aún no".)
     await page.waitForTimeout(800);
-    await expect(page.getByRole("button", { name: "Asistente" })).toHaveCount(0);
-    await expect(page.getByText("Asistente Conversia")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Convi/i })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: /Convi/i })).toHaveCount(0);
 
     // Disparo el error del popup como Javier: "Conectar mi WhatsApp".
     const conectar = page.getByRole("button", { name: /Conectar mi WhatsApp/i });
@@ -72,7 +72,7 @@ test.describe("Jornada D — marca ajena en conversia-web", () => {
     await page.waitForTimeout(1500);
     // …y verifico que NADA de eso pasó: ni "(Not Found)" crudo, ni burbuja, ni llamada al asistente.
     await expect(page.getByText(/not found/i)).toHaveCount(0);
-    await expect(page.getByText("Asistente Conversia")).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: /Convi/i })).toHaveCount(0);
     expect(mensajeAlAsistente, "'Pedir ayuda' no debe llamar a /assistant/message en una cuenta inelegible").toBe(false);
 
     // Consola: en este escenario DEGRADADO POR DISEÑO hay dos ruidos esperados y benignos —
@@ -93,16 +93,20 @@ test.describe("Jornada D — marca ajena en conversia-web", () => {
     await page.goto("/inicio", { waitUntil: "domcontentloaded" });
     expect((await ctx).status(), "El asistente debe aceptar una org conversia").toBe(200);
 
-    // Elegibilidad: para una cuenta conversia SÍ existe la burbuja flotante (lo contrario del
-    // caso tubot). Visible = la cuenta puede usar el asistente.
-    const burbuja = page.getByRole("button", { name: "Asistente" });
-    await expect(burbuja).toBeVisible({ timeout: 15_000 });
+    // Elegibilidad: para una cuenta conversia Convi SÍ está (lo contrario del caso tubot).
+    // Puede estar ya abierto —COP 2: en modo montaje se presenta solo en la primera entrada,
+    // acoplado en escritorio y compacto en móvil— o como acceso con su anillo de progreso.
+    // Afirmo que ALGUNA de las dos formas existe: lo que se prueba es la elegibilidad, no en
+    // qué forma apareció.
+    await expect
+      .poll(async () => (await page.getByRole("button", { name: /Convi/i }).count()) + (await page.getByRole("dialog", { name: /Convi/i }).count()), { timeout: 15_000 })
+      .toBeGreaterThan(0);
 
-    // La abro por el EVENTO del producto (el mismo que usan el menú y el checklist), que en una
-    // cuenta elegible la burbuja "toma" y abre. Es robusto en móvil (no depende del hit-test del
+    // Lo abro por el EVENTO del producto (el mismo que usan el menú y el checklist), que en una
+    // cuenta elegible Convi "toma" y abre. Es robusto en móvil (no depende del hit-test del
     // botón fijo sobre el contenido scrolleable, que Playwright marca como interceptado).
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("conversia:assistant:open", { detail: { topic: "menu" } })));
-    await expect(page.getByText("Asistente Conversia")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: /Convi/i })).toBeVisible();
     // Jamás un "(Not Found)" tampoco aquí.
     await expect(page.getByText(/not found/i)).toHaveCount(0);
   });

@@ -249,6 +249,18 @@ body::after {
 }
 .shell-body {
   margin-left: 68px;
+  transition: margin-right .2s ease;
+}
+/* COP 2 — Convi ACOPLADO. Con el panel abierto en escritorio el contenido se CORRE en vez
+   de quedar tapado: es un panel lateral, no un globo encima de la pantalla. Así el dueño
+   sigue viendo y usando la pantalla mientras Convi le explica qué tocar en ella. */
+@media (min-width: 768px) {
+  :root[data-convi="abierto"] .shell-body {
+    margin-right: 404px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell-body { transition: none; }
 }
 .shell-tabs {
   display: none;

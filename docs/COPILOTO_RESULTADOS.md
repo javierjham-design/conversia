@@ -105,3 +105,67 @@ la web, plantilla pisando el modelo de la plataforma y enlace externo convertido
 
 **Sin migraciones.** TuBot no se toca: el asistente está gateado a `brand=conversia` desde
 antes (`assertConversia` responde 404 al resto).
+
+## Etapa 2 — Experiencia: Convi, protagonista del montaje
+
+### Lo que cambió para el dueño
+
+El copiloto tenía forma de burbuja de soporte: un ícono genérico abajo a la derecha que
+había que descubrir. Ahora es **Convi**, un personaje con cara, nombre y progreso visible.
+
+- **Avatar propio** en SVG inline, con cinco estados: saludando, pensando, hablando,
+  celebrando y preocupado cuando algo falló. Todos los colores salen de los tokens de
+  `globals.css`, así que sigue el tema claro/oscuro y el acento que el dueño eligió.
+- **Se presenta solo en la primera entrada** del montaje: en escritorio como panel
+  **acoplado** (el contenido se corre, Convi no tapa la pantalla que está explicando) y en
+  móvil **compacto** —saludo y progreso en una barra baja— expandible al toque.
+- **Barra de progreso** con los pasos clicables y los minutos que faltan: *"Paso 3 de 7 ·
+  faltan ~12 min"*.
+- **Si lo cierran, el acceso lleva el avatar con su anillo de progreso**, no un ícono
+  genérico: el dueño ve cuánto le falta sin abrir nada.
+- **Vuelve a ofrecer ayuda cuando la pantalla queda quieta** más de un minuto en un paso
+  pendiente, una sola vez por paso.
+- **Al terminar el montaje avisa de lo importante** sin que le pregunten: saldo agotado o
+  bajo, canal caído, citas por confirmar en 48 horas.
+- **Chips sugeridos dinámicos** según el paso pendiente (antes eran tres frases fijas).
+
+### Decisiones
+
+- **El panel de escritorio se acopla, no se superpone.** Un panel que tapa la pantalla que
+  está explicando es un estorbo: con Convi abierto, el armazón corre el contenido a la
+  derecha. En móvil no hay a dónde correrse, y una hoja a pantalla casi completa en la
+  primera entrada le esconde el panel justo cuando quiere verlo, así que ahí se presenta
+  compacto y se expande cuando él decide.
+- **Se abre solo UNA vez por sesión y respeta el cierre.** Un panel que se abre en cada
+  navegación no acompaña, molesta.
+- **El umbral de saldo bajo se calcula sobre el número, no sobre la frase**, y es distinto
+  por unidad: 100 créditos se van en unas pocas respuestas y 100 conversaciones no. Parsear
+  el texto se rompía al cambiar una palabra.
+- **Los avisos no muestran el error técnico.** "Hubo un problema con tu WhatsApp, ¿lo reviso
+  contigo?" en lugar del mensaje que devolvió Meta.
+- **Los minutos por paso estiman la tarea, no el clic.** Conectar WhatsApp pasa por el
+  diálogo de Meta y la prueba depende de que el dueño agarre otro teléfono. Prefiero
+  quedarme corto: decir "2 min" a algo que toma 6 es peor que no decir nada. Un test
+  comprueba que el total del montaje queda entre 10 y 30 minutos.
+
+### Bug encontrado y arreglado por el camino
+
+**El copiloto se quedó ciego al saldo de los clientes de Créditos IA.** CRE 2 cambió la
+unidad de cobro, pero la consulta de saldo del copiloto siguió mirando solo
+`conversationDebitsWallet`: un cliente con plan de créditos veía el saldo **en blanco** en
+el copiloto, justo el cliente al que el saldo le importa más porque se le gasta por
+respuesta del bot. Ahora cubre las dos unidades y las nombra como corresponde. Reintroducir
+la regresión tumba 3 tests.
+
+### Qué NO entró
+
+- El **Playwright "dueño nuevo desde cero" medido de punta a punta** es la Etapa 4. Lo que
+  sí hice fue actualizar las tres jornadas del dueño que tocan el copiloto, así que la
+  presentación de Convi, su progreso y su elegibilidad por marca se verifican en navegador
+  real (desktop + iphone) en cada PR.
+
+### Verificación
+
+**api 601/601** (12 nuevos), **conversia-web 62/62** (35 nuevos), build de conversia-web
+completo, jornadas A/B/D actualizadas y verdes en el job `dueno`. El guardián del saldo lo
+rompí a propósito para verlo fallar. **Sin migraciones.**
