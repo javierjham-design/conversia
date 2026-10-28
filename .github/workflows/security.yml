@@ -140,3 +140,9 @@ jobs:
       - run: pnpm --filter @conversia/database db:seed
       - name: Verificar aislamiento (rol conversia_app, sin BYPASSRLS)
         run: pnpm --filter @conversia/database verify:isolation
+      # CRE 3 — las dos consultas que alimentan el medidor de créditos del cliente son SQL
+      # crudo y todos sus tests las sustituyen por un doble: hasta acá nunca se habían
+      # ejecutado. Un nombre de columna o un tipo equivocado no lo ve el typecheck y
+      # aparecería recién el día del go-live, en la pantalla del primer cliente que paga.
+      - name: Medidor de créditos contra Postgres real (consultas + RLS)
+        run: pnpm --filter @conversia/database verify:credit-meter
