@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:pwa": "playwright test pwa"
+    "test:e2e:pwa": "playwright test pwa admin-login"
   },
   "dependencies": {
     "lucide-react": "^1.27.0",
