@@ -87,7 +87,7 @@ async function seedTenant(fileName: string, adminEmail: string) {
     update: { roleId: ownerRole.id },
     create: { organizationId: org.id, userId: user.id, roleId: ownerRole.id },
   });
-  console.log(`✔ Usuario admin ${adminEmail} (password: valor de SEED_ADMIN_PASSWORD o 'conversia-dev')`);
+  console.log(`✔ Usuario admin ${adminEmail} (password: SEED_ADMIN_PASSWORD${process.env.SEED_ADMIN_PASSWORD ? "" : " — sin definir, se usó el de desarrollo"})`);
 
   // Datos del tenant (sedes, equipos, estados, servicios, profesionales, etiquetas,
   // agentes, flujos, conocimiento, canal). Loaders compartidos con el instalador de
@@ -332,7 +332,7 @@ async function main() {
     update: {},
     create: { email: platformEmail, brand: "tubot", name: "Super Admin", passwordHash: bcrypt.hashSync(platformPassword, 12) },
   });
-  console.log(`✔ Admin de plataforma ${platformEmail} (password: valor de PLATFORM_ADMIN_PASSWORD o 'conversia-platform-dev')`);
+  console.log(`✔ Admin de plataforma ${platformEmail} (password: PLATFORM_ADMIN_PASSWORD${process.env.PLATFORM_ADMIN_PASSWORD ? "" : " — sin definir, se usó el de desarrollo"})`);
 
   await seedTenant("digital-dent.json", "admin@digital-dent.local");
   await seedTenant("demo-clinic.json", "admin@clinica-demo.local");
