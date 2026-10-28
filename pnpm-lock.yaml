@@ -284,7 +284,7 @@ importers:
   packages/agents:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: latest
+        specifier: ^0.135.0
         version: 0.135.0(zod@3.25.76)
       '@conversia/types':
         specifier: workspace:*

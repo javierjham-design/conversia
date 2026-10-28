@@ -1,4 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
+import { toCsvRows } from "@conversia/types";
 import { brandOf } from "@conversia/config";
 import { filterRecipientsByPref, getEmailQueue } from "./mailer.js";
 
@@ -10,14 +11,13 @@ import { filterRecipientsByPref, getEmailQueue } from "./mailer.js";
 
 const MAX_ROWS = 50_000;
 
-/** Escapa un valor para CSV (comillas, saltos de línea, separador). */
-export function csvCell(value: unknown): string {
-  const s = value == null ? "" : String(value);
-  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+// §10.5 — el escape vive en @conversia/types (una sola implementación para los cuatro
+// exportadores) y además NEUTRALIZA FÓRMULAS: estos CSV llevan nombres y mensajes que
+// escribieron contactos, y una celda que empieza con `=` la ejecuta Excel al abrirla.
+export { csvCell } from "@conversia/types";
 
 export function toCsv(headers: string[], rows: unknown[][]): string {
-  return [headers.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n");
+  return toCsvRows(headers, rows);
 }
 
 export async function processExport(organizationId: string, payload: { exportId: string }): Promise<void> {
