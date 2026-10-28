@@ -91,9 +91,22 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(data.title || "TuBot", options));
 });
 
+/**
+ * §10.6 — El destino del clic solo puede ser una RUTA DE ESTA APP.
+ *
+ * `link` llega dentro del payload del push y se usaba tal cual en `openWindow`. Un valor
+ * como `https://sitio-malo/` o `javascript:…` abría eso desde una notificación que el
+ * usuario ve como nuestra. Se exige una ruta relativa: empieza con `/` y no con `//`
+ * (que el navegador lee como "otro dominio con el mismo protocolo").
+ */
+function rutaSegura(valor, porDefecto) {
+  if (typeof valor !== "string" || !valor.startsWith("/") || valor.startsWith("//")) return porDefecto;
+  return valor;
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const link = (event.notification.data && event.notification.data.link) || "/inbox";
+  const link = rutaSegura(event.notification.data && event.notification.data.link, "/inbox");
   event.waitUntil(
     (async () => {
       const clientsArr = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
