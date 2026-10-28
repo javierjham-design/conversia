@@ -120,6 +120,8 @@ export class AnthropicProvider implements AIProvider {
       stopReason: stopMap[resp.stop_reason] ?? "other",
       usage,
       latencyMs,
+      model: req.model, // el modelo con el que REALMENTE se llamó (ya resuelto por el router)
+      provider: this.kind,
     };
   }
 
@@ -206,7 +208,7 @@ export class OpenAIProvider implements AIProvider {
       content_filter: "refusal",
     };
 
-    return { text, toolCalls, stopReason: stopMap[choice.finish_reason] ?? "other", usage, latencyMs };
+    return { text, toolCalls, stopReason: stopMap[choice.finish_reason] ?? "other", usage, latencyMs, model: req.model, provider: this.kind };
   }
 
   async embed(texts: string[], model = "text-embedding-3-small"): Promise<{ vectors: number[][]; usage: AIUsage }> {
@@ -250,6 +252,8 @@ export class MockAIProvider implements AIProvider {
         costUsd: 0,
       },
       latencyMs: 5,
+      model: req.model,
+      provider: this.kind,
     };
   }
 

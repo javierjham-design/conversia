@@ -51,6 +51,14 @@ export interface OrchestrateResult {
   transferToAgentSlug?: string;
   /** true si se escaló a humano (la IA debe silenciarse) */
   humanHandoff?: boolean;
+  /**
+   * Modelo y proveedor que REALMENTE respondió el turno. Pueden diferir de `agent.model`: el
+   * router cae a un modelo compatible del proveedor disponible y la capa resiliente cae a
+   * `fallbackModel`. Quien registra el costo (ai_requests, Créditos IA) debe guardar ESTE,
+   * no el configurado, o la etiqueta del modelo no calza con el costo.
+   */
+  model?: string;
+  provider?: string;
 }
 
 /** Renderiza {{path.de.variable}} sanitizando cada valor interpolado. */
@@ -81,6 +89,10 @@ export async function orchestrate(
   let humanHandoff = false;
   let finalText: string | null = null;
   let stopReason = "end_turn";
+  // Modelo/proveedor que efectivamente atendió el turno (ver OrchestrateResult.model): lo
+  // reporta el proveedor en cada respuesta y puede diferir de agent.model (router/resiliencia).
+  let respModel: string | undefined;
+  let respProvider: string | undefined;
   // Texto que el modelo dijo JUNTO a una llamada de herramienta (preámbulo). Si el
   // turno termina sin texto final, lo usamos para no dejar al cliente sin respuesta.
   let lastToolRoundText = "";
@@ -99,6 +111,8 @@ export async function orchestrate(
     usage.costUsd += resp.usage.costUsd;
     latencyMs += resp.latencyMs;
     stopReason = resp.stopReason;
+    respModel = resp.model ?? respModel;
+    respProvider = resp.provider ?? respProvider;
 
     if (resp.stopReason !== "tool_use" || resp.toolCalls.length === 0) {
       finalText = resp.text;
@@ -215,5 +229,7 @@ export async function orchestrate(
     stopReason,
     transferToAgentSlug,
     humanHandoff,
+    model: respModel,
+    provider: respProvider,
   };
 }
