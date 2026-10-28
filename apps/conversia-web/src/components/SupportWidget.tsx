@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import { Send, Sparkles, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { CreditCard, ExternalLink, MessageCircle, Send, Sparkles, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { COPILOT_ACTION_CSS, celebrar, renderMarkdown, resaltar, type AssistantAction } from "@/lib/copilot-actions";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; actions?: AssistantAction[] };
 type Ctx = { mode: "implementacion" | "asistencia"; checklistPct: number; nextStep: { label: string } | null; saldo: string | null; canConfigure: boolean } | null;
 
 const SUPPORT_WA = process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP;
@@ -17,6 +18,7 @@ const SUPPORT_WA = process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP;
  */
 export function SupportWidget() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [ctx, setCtx] = useState<Ctx>(null);
   // Elegibilidad: null = aún no sabemos; true = esta cuenta es de Conversia (mostrar burbuja);
@@ -54,21 +56,61 @@ export function SupportWidget() {
       });
   }, []);
 
+  /**
+   * COP 1 — ejecuta las acciones del turno. Llegan ya validadas por el servidor, así que
+   * acá solo se obedecen. Las que mueven la pantalla van primero (el servidor las ordena).
+   *
+   * El resaltado se REINTENTA una vez: cuando el copiloto navega y resalta en el mismo
+   * turno, el elemento de la pantalla nueva todavía no está montado en el primer intento.
+   */
+  const ejecutarAcciones = useCallback(
+    (actions: AssistantAction[]) => {
+      for (const a of actions) {
+        if (a.type === "navigate") {
+          router.push(a.to);
+        } else if (a.type === "highlight") {
+          if (!resaltar(a.target, a.text)) window.setTimeout(() => resaltar(a.target, a.text), 700);
+        } else if (a.type === "celebrate") {
+          celebrar();
+        } else if (a.type === "checklist_refresh") {
+          api<NonNullable<Ctx>>("/assistant/context").then(setCtx).catch(() => undefined);
+          // El checklist de /inicio escucha este evento y se recarga sin recargar la página.
+          window.dispatchEvent(new CustomEvent("conversia:checklist:refresh"));
+        }
+        // `button` no se "ejecuta": se dibuja en el chat y el clic es del dueño.
+      }
+    },
+    [router],
+  );
+
+  /** Clic del dueño en un botón que el copiloto ofreció. */
+  const tocarBoton = useCallback(
+    (a: Extract<AssistantAction, { type: "button" }>) => {
+      if (a.kind === "pago") router.push("/cobros");
+      else if (a.kind === "whatsapp") router.push("/canales");
+      else if (a.kind === "interno" && a.payload) router.push(a.payload);
+      else if (a.kind === "externo" && a.payload) window.open(a.payload, "_blank", "noopener,noreferrer");
+    },
+    [router],
+  );
+
   const ask = useCallback(async (userText: string) => {
     const body = userText.trim();
     if (!body || busy) return;
-    const history = msgs.slice(-12);
+    const history = msgs.slice(-12).map((m) => ({ role: m.role, content: m.content }));
     setMsgs((m) => [...m, { role: "user", content: body }]);
     setText("");
     setBusy(true);
     try {
-      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null }>("/assistant/message", {
+      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[] }>("/assistant/message", {
         method: "POST",
         body: JSON.stringify({ message: body, route: pathname, history }),
       });
       let reply = r.reply;
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
-      setMsgs((m) => [...m, { role: "assistant", content: reply }]);
+      const actions = r.actions ?? [];
+      setMsgs((m) => [...m, { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button") }]);
+      ejecutarAcciones(actions);
     } catch (e) {
       // NUNCA mostrar el error técnico crudo al dueño (jamás un "(Not Found)"). Mensaje humano
       // y accionable; si hay WhatsApp de soporte lo ofrecemos como salida.
@@ -86,7 +128,7 @@ export function SupportWidget() {
     } finally {
       setBusy(false);
     }
-  }, [busy, msgs, pathname]);
+  }, [busy, msgs, pathname, ejecutarAcciones]);
 
   // Saludo líder la primera vez que se abre (según el modo).
   function openWidget() {
@@ -153,7 +195,29 @@ export function SupportWidget() {
               const mine = m.role === "user";
               return (
                 <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "84%" }}>
-                  <div style={{ padding: "8px 12px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word", background: mine ? "var(--acc)" : "var(--surface-solid)", color: mine ? "var(--acc-ink)" : "var(--ink)", border: mine ? "none" : "1px solid var(--hairline)" }}>{m.content.replace(/\*\*(.+?)\*\*/g, "$1")}</div>
+                  {/* COP 1 — el markdown se RENDERIZA (negritas, listas, enlaces internos).
+                      Antes se aplanaba, y "te falta **conectar tu WhatsApp**" perdía justo
+                      el énfasis que marca la acción. `aria-live` para los lectores. */}
+                  <div
+                    aria-live={mine ? undefined : "polite"}
+                    style={{ padding: "8px 12px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, wordBreak: "break-word", background: mine ? "var(--acc)" : "var(--surface-solid)", color: mine ? "var(--acc-ink)" : "var(--ink)", border: mine ? "none" : "1px solid var(--hairline)" }}
+                  >
+                    {mine ? <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span> : renderMarkdown(m.content)}
+                  </div>
+                  {/* Botones del copiloto: pagar y conectar WhatsApp SOLO pasan por acá, con
+                      el clic del dueño (el popup de Meta se bloquea si no nace de un clic). */}
+                  {m.actions?.length ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                      {m.actions.map((a, j) =>
+                        a.type === "button" ? (
+                          <button key={j} onClick={() => tocarBoton(a)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "7px 12px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {a.kind === "pago" ? <CreditCard size={14} /> : a.kind === "whatsapp" ? <MessageCircle size={14} /> : a.kind === "externo" ? <ExternalLink size={14} /> : null}
+                            {a.label}
+                          </button>
+                        ) : null,
+                      )}
+                    </div>
+                  ) : null}
                   <div className="text-dim" style={{ fontSize: 10, marginTop: 2, textAlign: mine ? "right" : "left" }}>{mine ? "Tú" : "Asistente"}</div>
                 </div>
               );
@@ -182,7 +246,7 @@ export function SupportWidget() {
           </form>
         </div>
       )}
-      <style>{`.cv-asst-pulse { animation: cvasst 1.8s ease-in-out 2; } @keyframes cvasst { 0%,100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--acc) 30%, transparent); } }`}</style>
+      <style>{`.cv-asst-pulse { animation: cvasst 1.8s ease-in-out 2; } @keyframes cvasst { 0%,100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--acc) 30%, transparent); } }${COPILOT_ACTION_CSS}`}</style>
     </>
   );
 }

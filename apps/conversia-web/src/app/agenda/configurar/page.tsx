@@ -67,7 +67,7 @@ export default function ConfigurarAgenda() {
 
         {/* Reglas */}
         {cfg ? (
-          <form onSubmit={saveCfg} className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <form onSubmit={saveCfg} className="card" style={{ padding: 20, marginBottom: 16 }} data-copilot="reglas-reserva">
             <h2 className="display" style={{ fontSize: 17, margin: "0 0 12px" }}>Reglas de reserva</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
               <label style={{ fontSize: 12, color: "var(--ink-dim)" }}>Bloque (min)
@@ -88,7 +88,7 @@ export default function ConfigurarAgenda() {
         ) : null}
 
         {/* Equipo / recursos */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 12px" }} data-copilot="profesionales">
           <h2 className="display" style={{ fontSize: 18, margin: 0 }}>Equipo y recursos</h2>
           <button className="btn-accent" onClick={() => setEditingPro("new")} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={16} /> Agregar</button>
         </div>
@@ -112,7 +112,7 @@ export default function ConfigurarAgenda() {
         )}
 
         {/* Servicios */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "24px 0 12px" }} data-copilot="servicios">
           <h2 className="display" style={{ fontSize: 18, margin: 0 }}>Servicios</h2>
           <button className="btn-accent" onClick={() => setEditingSvc("new")} style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}><Plus size={16} /> Agregar</button>
         </div>

@@ -69,6 +69,12 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["anthropic", "openai", "mock"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   AI_DEFAULT_MODEL: z.string().default("gpt-4o-mini"),
+  // COP 1 — Modelo del COPILOTO de montaje, separado a propósito del de los bots de los
+  // clientes: el copiloto encadena herramientas (lee el estado, crea, prueba, publica) y
+  // con un modelo barato se enreda o deja el montaje a medias. Vacío = usa el default del
+  // proveedor (ver `resolveAssistantModel`). Su costo lo paga Conversia, no el cliente:
+  // NUNCA se debita de los Créditos IA del tenant.
+  ASSISTANT_MODEL: z.string().default(""),
   // Org de TuBot (el proveedor del "montaje asistido"): el cliente autoriza a ESTE
   // org a escribir su configuración durante la implementación. Default = tenant de TuBot.
   ASSISTED_SETUP_PROVIDER_ORG_ID: z.string().default("cms5zmgtz0001od01t30lw4t6"),

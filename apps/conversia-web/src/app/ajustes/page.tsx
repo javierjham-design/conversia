@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, LogOut, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { BusinessSettings } from "@/components/BusinessSettings";
 import { NotificationsSettings } from "@/components/NotificationsSettings";
 import { api, logout } from "@/lib/api";
 
@@ -109,6 +110,10 @@ export default function Ajustes() {
         <h1 className="display" style={{ fontSize: 28, margin: "0 0 20px" }}>Ajustes</h1>
         {msg ? <p style={{ color: "var(--ok)", fontSize: 13 }}>{msg}</p> : null}
         {error ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p> : null}
+
+        {/* COP 1 — primero el negocio: es el paso bloqueante nº1 del montaje y el checklist
+            manda a esta pantalla. La apariencia y el perfil personal van después. */}
+        <BusinessSettings />
 
         <div className="card" style={{ padding: 20, marginBottom: 16 }}>
           <h2 className="display" style={{ fontSize: 18, margin: "0 0 14px" }}>Apariencia</h2>

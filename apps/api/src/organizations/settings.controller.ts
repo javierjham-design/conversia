@@ -9,6 +9,7 @@ import { requirePermission } from "../tenancy/permissions";
 import { signAppToken } from "../auth/jwt";
 import { validateUploadedImage } from "../common/images";
 import { BASE_VOCAB, INDUSTRIES, resolvePersonalization } from "../common/industries";
+import { businessDataSchema, businessHoursSchema, guardarDatosNegocio, leerDatosNegocio } from "./business-data";
 
 const generalSchema = z.object({
   name: z.string().min(2).max(80).optional(),
@@ -237,6 +238,33 @@ export class SettingsController {
     return this.mergeSettings(ctx.organizationId, ctx.userId, "inbox", parsed.data, "settings.inbox_update");
   }
 
+  // ------------------------- Datos del negocio (paso 1 del montaje) -------------------------
+
+  /**
+   * COP 1 — lo que el paso bloqueante "Completa los datos de tu negocio" necesita, en un
+   * solo lugar: nombre, rubro, dirección y descripción. Antes `/ajustes` solo tenía los
+   * datos PERSONALES del usuario (nombre, tema, avisos), así que el paso no se podía
+   * completar desde el panel y el checklist se quedaba clavado.
+   *
+   * Comparte el escritor con la herramienta `completarDatosNegocio` del copiloto
+   * (`business-data.ts`), para que los dos caminos guarden en el mismo sitio.
+   */
+  @Get("business")
+  business() {
+    const ctx = requireContext();
+    return leerDatosNegocio(this.prisma, ctx.organizationId);
+  }
+
+  @Put("business")
+  async updateBusiness(@Body() body: unknown) {
+    const ctx = requirePermission("settings:write");
+    const parsed = businessDataSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues[0]?.message ?? "Datos inválidos");
+    const r = await guardarDatosNegocio(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId }, parsed.data);
+    if (!r.ok) throw new BadRequestException(r.error ?? "Datos inválidos");
+    return { ok: true, guardado: r.guardado };
+  }
+
   // ------------------------- Horario de atención -------------------------
 
   /** Horario org (mismo formato que el nodo «Fecha y hora»: hours + holidays). */
@@ -253,13 +281,9 @@ export class SettingsController {
   @Put("hours")
   updateHours(@Body() body: unknown) {
     const ctx = requirePermission("settings:write");
-    const interval = z.object({ from: z.string().regex(/^d{2}:d{2}$/), to: z.string().regex(/^d{2}:d{2}$/) });
-    const parsed = z
-      .object({
-        hours: z.record(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]), z.array(interval).max(4)),
-        holidays: z.array(z.string().regex(/^d{4}-d{2}-d{2}$/)).max(60),
-      })
-      .safeParse(body);
+    // El esquema vive en `business-data.ts` (exportado y testeado). Tenía un bug que hacía
+    // imposible guardar CUALQUIER horario real; el detalle está en el comentario de allá.
+    const parsed = businessHoursSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException("Horario inválido");
     return this.mergeSettings(ctx.organizationId, ctx.userId, "businessHours", parsed.data, "settings.hours_update");
   }

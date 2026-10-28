@@ -900,3 +900,49 @@ export const DEFAULT_LEAD_STATUSES = [
   { code: "cold_lead", name: "Lead frío", emoji: "🧊", category: "LOST", order: 4 },
   { code: "no_contactar", name: "No contactar", emoji: "🚫", category: "FROZEN", order: 5 },
 ] as const;
+
+// ============================================================
+// Copiloto de montaje — protocolo de ACCIONES (COP Etapa 1)
+// ============================================================
+
+/**
+ * Lo que el copiloto puede pedirle a la interfaz además de hablar. Hasta la Etapa 1 el
+ * asistente solo devolvía texto: para que el dueño hiciera algo tenía que leer "anda a
+ * Canales y toca Conectar", buscarlo y acertar. Con esto el copiloto NAVEGA, RESALTA y
+ * entrega BOTONES, que es la diferencia entre un chat que explica y uno que acompaña.
+ *
+ * Reglas del protocolo (las impone el servidor en `apps/api/src/assistant/actions.ts`,
+ * no la buena voluntad del modelo):
+ * - `navigate` solo a rutas que EXISTEN en conversia-web (lista blanca verificada contra
+ *   el árbol real de páginas), para que el copiloto no pueda mandar a un 404.
+ * - `highlight` solo a elementos marcados con `data-copilot="<id>"`, que son contrato.
+ * - `button` es la ÚNICA vía para pagar o conectar WhatsApp: esas dos cosas exigen un
+ *   clic del dueño (el navegador bloquea el popup de Meta si no viene de un clic, y
+ *   cobrar sin que lo toque él no se hace).
+ */
+export type AssistantAction =
+  /** Lleva al cliente a una pantalla del panel. La UI la ejecuta sola. */
+  | { type: "navigate"; to: string }
+  /** Resalta un elemento con un globo explicativo (coach mark). */
+  | { type: "highlight"; target: string; text: string }
+  /** Botón dentro del chat, para lo que REQUIERE un clic del dueño. */
+  | { type: "button"; label: string; kind: AssistantButtonKind; payload?: string }
+  /** La UI recarga el avance del montaje (tras un cambio que lo mueve). */
+  | { type: "checklist_refresh" }
+  /** Celebración corta al completar un paso del montaje. */
+  | { type: "celebrate"; step: string };
+
+/**
+ * Qué hace el botón al tocarlo. `whatsapp` y `pago` son los dos casos que NO pueden
+ * ocurrir sin clic; `interno` navega dentro del panel y `externo` abre un enlace.
+ */
+export type AssistantButtonKind = "whatsapp" | "pago" | "interno" | "externo";
+
+/** Respuesta de `POST /assistant/message`. */
+export interface AssistantTurn {
+  reply: string;
+  mode: string;
+  wrote: boolean;
+  qa?: { passed: boolean } | null;
+  actions: AssistantAction[];
+}

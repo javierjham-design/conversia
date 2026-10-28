@@ -81,7 +81,14 @@ export default function Canales() {
     setChannels(chs);
     setWhatsappDone(onb.steps.find((s) => s.key === "whatsapp")?.done ?? chs.some((c) => c.type === "WHATSAPP_CLOUD" && c.status === "active"));
   }
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    // COP 1 — cuando el copiloto completa un paso del montaje emite esta señal y la pantalla
+    // se refresca sola. Antes había que recargar a mano para ver el estado real del canal.
+    const onRefresh = () => void load();
+    window.addEventListener("conversia:checklist:refresh", onRefresh);
+    return () => window.removeEventListener("conversia:checklist:refresh", onRefresh);
+  }, []);
 
   // Config del SDK por marca (sin hardcodear nada en el build) + listener del popup.
   // Dos configs: coexistencia (recomendado) y número dedicado (Embedded Signup normal).
@@ -328,7 +335,7 @@ export default function Canales() {
               {/* Vía 1 (recomendada): tu número. Con "Phone Number First" el diálogo de Meta pide
                   el número al inicio y, si ya lo usas en la app de WhatsApp Business, lo conecta en
                   coexistencia automáticamente (sin selector de "cuenta existente"). */}
-              <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
+              <div data-copilot="conectar-whatsapp" style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   <MessageCircle size={17} style={{ color: "var(--acc-deep)" }} />
                   <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
