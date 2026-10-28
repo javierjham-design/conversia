@@ -11,6 +11,7 @@ import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStr
 import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus } from "./flow-subscriptions";
 import { PaymentSettingsService } from "./payment-settings.service";
 import { isLotPack, packUnitForOrg } from "./pack-unit";
+import { resolveConsent } from "./auto-recharge-consent";
 
 /**
  * Facturación del TENANT (su propia suscripción). Vista del plan actual, uso
@@ -968,12 +969,19 @@ export class BillingController {
     // CRE 2 — los packs que se ofrecen son los de la unidad que cobra SU plan.
     const unit = await packUnitForOrg(ctx.organizationId);
     const packs = await this.prisma.admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: unit }, orderBy: { order: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } });
+    // CRE 2 (§6) — con Créditos IA los defaults son otros: dispara bajo 50 créditos y el
+    // tope son 3 recargas básicas al mes. El umbral de 20 era "conversaciones".
+    const defThreshold = unit === "credit" ? 50 : 20;
+    const defCap = unit === "credit" ? 56970 : 40000;
     return {
       unit,
       enabled: ar.enabled === true,
-      thresholdRemaining: Number.isFinite(ar.thresholdRemaining) ? ar.thresholdRemaining : 20,
+      thresholdRemaining: Number.isFinite(ar.thresholdRemaining) ? ar.thresholdRemaining : defThreshold,
       packCode: typeof ar.packCode === "string" ? ar.packCode : (packs[0]?.code ?? null),
-      monthlyCapClp: Number.isFinite(ar.monthlyCapClp) ? ar.monthlyCapClp : 40000,
+      monthlyCapClp: Number.isFinite(ar.monthlyCapClp) ? ar.monthlyCapClp : defCap,
+      // Sin consentimiento registrado NO se cobra, aunque `enabled` esté en true: el
+      // worker lo exige. La pantalla lo muestra para que se pueda volver a pedir.
+      consentAt: typeof ar.consentAt === "string" ? ar.consentAt : null,
       packs: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp })),
     };
   }
@@ -987,6 +995,8 @@ export class BillingController {
         thresholdRemaining: z.number().int().min(1).max(10000).optional(),
         packCode: z.string().max(60).optional(),
         monthlyCapClp: z.number().int().min(0).max(100000000).optional(),
+        /** CRE 2 (§6): casilla explícita "recargar automáticamente cuando se agoten". */
+        consent: z.boolean().optional(),
       })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Config de auto-recarga inválida");
@@ -1004,11 +1014,25 @@ export class BillingController {
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const prev = (org?.settings as Record<string, unknown> | null) ?? {};
     const prevAr = (prev.autoRecharge as Record<string, any>) ?? {};
+    // CRE 2 (§6) — CONSENTIMIENTO EXPLÍCITO Y REGISTRADO. Activar la recarga automática es
+    // autorizarnos a cobrarle a su tarjeta sin que él vuelva a apretar nada, así que queda
+    // la fecha y el usuario. Si ya lo había dado, no se vuelve a pedir; al apagarla se
+    // borra, para que volver a encenderla exija aceptar de nuevo.
+    const consentAt = resolveConsent({ enabled: d.enabled, previo: prevAr.consentAt, consent: d.consent });
+    if (d.enabled && !consentAt) {
+      throw new BadRequestException("Para activar la recarga automática tienes que aceptar que cobremos el pack a tu tarjeta cuando tus créditos se estén agotando.");
+    }
+    // Los defaults dependen de la UNIDAD, igual que en el GET: 50 créditos / 20
+    // conversaciones. Si acá cayeran siempre a los de créditos, a un cliente por
+    // conversación le quedaría un umbral de 50 conversaciones, que es otra cosa.
+    const unitPut = await packUnitForOrg(ctx.organizationId);
     const nextAr = {
       enabled: d.enabled,
-      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? 20,
+      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? (unitPut === "credit" ? 50 : 20),
       packCode: d.packCode ?? prevAr.packCode ?? null,
-      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? 40000,
+      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? (unitPut === "credit" ? 56970 : 40000),
+      consentAt,
+      ...(consentAt && !prevAr.consentAt ? { consentBy: ctx.userId } : prevAr.consentBy ? { consentBy: prevAr.consentBy } : {}),
     };
     await this.prisma.admin.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...prev, autoRecharge: nextAr } as object } });
     await this.prisma.withTenant(ctx.organizationId, (tx) =>

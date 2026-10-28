@@ -253,6 +253,46 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     link: "/facturacion",
   },
   {
+    // CRE 2 (§6) — se cobró la recarga automática. El cliente tiene que enterarse de CADA
+    // cobro a su tarjeta: es plata suya saliendo sin que él apriete nada.
+    key: "credits.auto_recharge",
+    title: "Recargamos tus Créditos IA",
+    body:
+      "Tu saldo se estaba agotando, así que cobramos ${amountClp} a tu tarjeta y sumamos {credits} Créditos IA. " +
+      "Tu asistente sigue atendiendo sin cortes. Puedes desactivar la recarga automática cuando quieras en Cobros.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "info",
+    channels: ["in_app", "email"],
+    defaultChannels: ["in_app", "email"],
+    link: "/cobros",
+  },
+  {
+    // La tarjeta falló: aviso INMEDIATO. Al bot le queda la gracia, que existe para esto.
+    key: "credits.auto_recharge_failed",
+    title: "No pudimos recargar tus Créditos IA",
+    body:
+      "Intentamos cobrar la recarga automática y tu tarjeta no la aceptó. Tu asistente sigue atendiendo con el saldo de " +
+      "cortesía, pero conviene revisar el medio de pago o recargar a mano para no quedarte sin atención automática.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email", "whatsapp"],
+    defaultChannels: ["in_app", "email"],
+    link: "/cobros",
+  },
+  {
+    // Tope mensual alcanzado: no se cobra más. Se avisa una vez por mes.
+    key: "credits.auto_recharge_cap",
+    title: "Alcanzaste tu tope de recarga automática",
+    body:
+      "Tu recarga automática llegó al tope mensual que fijaste (${monthlyCapClp}), así que no cobramos más. " +
+      "Si necesitas seguir, puedes subir el tope o recargar a mano en Cobros.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "email"],
+    defaultChannels: ["in_app", "email"],
+    link: "/cobros",
+  },
+  {
     // CRE 1 (§4) — el equipo propone un modelo de IA más potente para un asistente. El
     // cliente tiene que aceptarlo porque le cambia cuánto le rinde el saldo.
     key: "ai.model_change_pending",

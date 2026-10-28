@@ -399,6 +399,9 @@ export default function Cobros() {
           </>
         ) : null}
 
+        {/* CRE 2 (§6) — recarga automática: solo con Flow (tarjeta guardada) */}
+        {conFlow ? <RecargaAutomatica tieneTarjeta={Boolean(me?.paymentMethod)} /> : null}
+
         {/* Método de pago (cobro automático con tarjeta en Flow) */}
         {conFlow ? (
           <div className="card" data-copilot="cobros-metodo-pago" style={{ padding: 22, marginTop: 24 }}>
@@ -449,5 +452,142 @@ export default function Cobros() {
         ) : null}
       </main>
     </AppShell>
+  );
+}
+
+/* ─────────────────────── CRE 2 (§6) — RECARGA AUTOMÁTICA ───────────────────────
+ * Cuando el saldo baja del umbral, cobramos un pack a la tarjeta guardada para que el bot
+ * no se corte. Es plata del cliente saliendo sin que él apriete nada, así que la pantalla
+ * es explícita en las tres cosas que la decisión del dueño (§6) exige: qué se cobra, con
+ * qué tope, y una casilla de consentimiento que hay que marcar para activarla.
+ *
+ * Hasta este PR esta pantalla no existía (y nada disparaba la recarga): el cliente no
+ * tenía forma de activarla ni de saber que existía.
+ */
+type AutoRecargaCfg = {
+  unit?: "conversation" | "credit";
+  enabled: boolean;
+  thresholdRemaining: number;
+  packCode: string | null;
+  monthlyCapClp: number;
+  consentAt: string | null;
+  packs: Array<{ code: string; name: string; credits: number; priceClp: number }>;
+};
+
+/** La recarga automática es solo con Flow, o sea CLP: formateador local y explícito. */
+const clpRec = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
+
+function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
+  const [cfg, setCfg] = useState<AutoRecargaCfg | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<AutoRecargaCfg>("/billing/auto-recharge")
+      .then((r) => { setCfg(r); setConsent(Boolean(r.consentAt)); })
+      .catch(() => setCfg(null));
+  }, []);
+
+  if (!cfg) return null;
+  const unidad = cfg.unit === "credit" ? "créditos" : "conversaciones";
+  const pack = cfg.packs.find((p) => p.code === cfg.packCode) ?? cfg.packs[0] ?? null;
+  const topeVeces = pack && pack.priceClp > 0 ? Math.floor(cfg.monthlyCapClp / pack.priceClp) : 0;
+
+  async function guardar(enabled: boolean, cambios: Partial<AutoRecargaCfg> = {}) {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const body = {
+        enabled,
+        consent,
+        thresholdRemaining: cambios.thresholdRemaining ?? cfg!.thresholdRemaining,
+        packCode: (cambios.packCode ?? cfg!.packCode ?? pack?.code) || undefined,
+        monthlyCapClp: cambios.monthlyCapClp ?? cfg!.monthlyCapClp,
+      };
+      const r = await api<AutoRecargaCfg & { ok: boolean }>("/billing/auto-recharge", { method: "PUT", body: JSON.stringify(body) });
+      setCfg({ ...cfg!, ...r });
+      setMsg(enabled ? "Recarga automática activada." : "Recarga automática desactivada.");
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" data-copilot="cobros-recarga-automatica" style={{ padding: 22, marginTop: 24 }}>
+      <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Recarga automática</h2>
+      <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
+        {pack
+          ? `Cuando te queden menos de ${cfg.thresholdRemaining} ${unidad}, cobramos ${pack.name.toLowerCase()} (${clpRec(pack.priceClp)}) a tu tarjeta para que tu asistente no se corte. Se dispara antes de llegar a cero, mientras el pago se procesa.`
+          : "Todavía no hay packs disponibles para recargar."}
+      </p>
+
+      {!tieneTarjeta ? (
+        <p className="text-dim" style={{ fontSize: 12.5, margin: 0 }}>
+          Primero registra tu tarjeta más abajo: sin tarjeta guardada no podemos recargar solos.
+        </p>
+      ) : !pack ? null : (
+        <>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13.5, cursor: "pointer", marginBottom: 12 }}>
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} disabled={busy} style={{ marginTop: 3 }} />
+            <span>
+              Autorizo a cobrar <b>{clpRec(pack.priceClp)}</b> a mi tarjeta cuando mis {unidad} se estén agotando,
+              con un tope de <b>{clpRec(cfg.monthlyCapClp)}</b> al mes{topeVeces > 0 ? ` (hasta ${topeVeces} ${topeVeces === 1 ? "recarga" : "recargas"})` : ""}.
+              Puedo desactivarlo cuando quiera.
+            </span>
+          </label>
+
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+            <label style={{ fontSize: 12.5 }}>
+              <span className="text-dim" style={{ display: "block", marginBottom: 4 }}>Avisar y recargar bajo</span>
+              <input
+                type="number"
+                min={1}
+                value={cfg.thresholdRemaining}
+                onChange={(e) => setCfg({ ...cfg, thresholdRemaining: Math.max(1, Number(e.target.value) || 1) })}
+                disabled={busy}
+                style={{ width: 110, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--surface)", color: "var(--ink)" }}
+              />
+            </label>
+            <label style={{ fontSize: 12.5 }}>
+              <span className="text-dim" style={{ display: "block", marginBottom: 4 }}>Tope mensual (CLP)</span>
+              <input
+                type="number"
+                min={pack.priceClp}
+                step={pack.priceClp}
+                value={cfg.monthlyCapClp}
+                onChange={(e) => setCfg({ ...cfg, monthlyCapClp: Math.max(0, Number(e.target.value) || 0) })}
+                disabled={busy}
+                style={{ width: 140, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--surface)", color: "var(--ink)" }}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {cfg.enabled ? (
+              <>
+                <span style={{ fontSize: 13, color: "var(--ok)", fontWeight: 600 }}>● Activada</span>
+                <button onClick={() => void guardar(true)} disabled={busy || !consent} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>
+                  Guardar cambios
+                </button>
+                <button onClick={() => void guardar(false)} disabled={busy} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>
+                  Desactivar
+                </button>
+              </>
+            ) : (
+              <button onClick={() => void guardar(true)} disabled={busy || !consent} className="btn-accent" style={{ border: "none", cursor: busy || !consent ? "not-allowed" : "pointer", fontSize: 13, padding: "8px 14px", opacity: busy || !consent ? 0.5 : 1 }}>
+                {busy ? "Guardando…" : "Activar recarga automática"}
+              </button>
+            )}
+          </div>
+          {!consent && !cfg.enabled ? (
+            <p className="text-dim" style={{ fontSize: 12, margin: "10px 0 0" }}>Marca la autorización para poder activarla.</p>
+          ) : null}
+          {msg ? <p className="text-dim" style={{ fontSize: 12.5, margin: "10px 0 0" }}>{msg}</p> : null}
+        </>
+      )}
+    </div>
   );
 }

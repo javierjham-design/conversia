@@ -8,7 +8,7 @@ cerrar cada etapa.
 | 1 — Motor de Créditos IA | ✅ construida (apagada) | #557 |
 | 1 — Selector de modelo + aceptación del cliente | ✅ construida | #557 |
 | 2 — Catálogo y migración de saldos | ✅ construida (inactiva) | #558 |
-| 2b — Recarga automática con tarjeta | pendiente | |
+| 2 — Recarga automática con tarjeta | ✅ construida | #559 |
 | 3 — Transparencia y avisos | pendiente | |
 | 4 — Margen y calibración | pendiente | |
 
@@ -247,13 +247,54 @@ el go-live y su rollback dejan el catálogo como estaba.
 3. **Al activar los créditos, el cliente perdía el medidor de su Inicio** (la pantalla
    miraba solo la unidad vieja).
 
-### Lo que falta de esta etapa
+## Recarga automática con tarjeta (PR #559)
 
-La **recarga automática con tarjeta** (§6): umbral de 50 créditos, cobro de la recarga
-básica a la tarjeta guardada con Flow, consentimiento explícito al registrarla, tope
-mensual obligatorio y aviso por cada cobro. Va en un PR aparte porque mueve plata de
-verdad. Importante: hoy la auto-recarga **tiene pantalla de configuración pero nada la
-dispara** — está a medio construir desde V2-2, y el PR que viene la completa.
+**Lo primero: esto no existía.** Había dos endpoints de configuración desde V2-2, pero
+**nada disparaba la recarga y tampoco había pantalla donde activarla**. Un cliente no
+podía usarla ni enterarse de que existía.
+
+Ahora: cuando el saldo baja de **50 créditos** (≈12 conversaciones), se cobra la **recarga
+básica de $18.990 (1.000 créditos)** a la tarjeta guardada con Flow. Se dispara antes de
+llegar a cero para que el bot no se corte mientras el pago se procesa.
+
+Como esto **cobra plata de verdad**, cada forma de que salga mal tiene su freno, y cada
+freno tiene su test:
+
+| Riesgo | Freno |
+|---|---|
+| Cobrar sin permiso | **Consentimiento explícito y registrado** (fecha + usuario). Sin él no se cobra, aunque el interruptor esté encendido. Al desactivar se borra: volver a encenderla exige aceptar de nuevo. |
+| Cobrar de más | **Tope mensual obligatorio** (por defecto 3 recargas = $56.970). Se mide con el cobro incluido, así que un tope de 3 permite exactamente 3. Al alcanzarlo se avisa una vez y no se cobra más. |
+| Cobrar varias veces seguidas | **Un cobro a la vez.** El saldo sigue bajo hasta que el webhook confirme, y el tick corre cada 15 min: sin este freno se cobrarían varios packs. Los pendientes también cuentan contra el tope. |
+| Cobrar y que el pack no llegue | El cobro viaja con la metadata que el webhook necesita para acreditar (`pkg:<pack>` + monto esperado), por el **mismo camino idempotente** que una compra manual. Hay test de que esa metadata va. |
+| Tarjeta rechazada | Intento marcado como fallido y **aviso inmediato** al cliente. El bot sigue con la gracia, que existe justo para esto. |
+| Vender saldo inservible | Un pack inactivo o de otra unidad no se cobra. |
+
+### Un riesgo que encontré al construirlo
+
+Los cobros de recarga y los de la mensualidad viven en la **misma tabla** y van a la misma
+tarjeta. Si el motor de suscripciones hubiera visto los de recarga, pasaban dos cosas:
+
+1. **Le habría renovado el mes gratis** al cliente: la reconciliación toma cada cobro
+   pendiente, le pregunta a Flow y, si salió bien, extiende el período y acredita el plan.
+   Una recarga cobrada se habría leído como "pagó la mensualidad".
+2. **Habría frenado la mensualidad** mientras una recarga estaba en vuelo.
+
+Los cobros de recarga llevan el prefijo `rec-` y las dos consultas del motor los excluyen.
+Hay un test que mira las consultas que se emiten de verdad (es la única forma de pinchar
+algo que vive en un `where`), y lo verifiqué quitando la exclusión a propósito: se cae.
+
+### Lo que ves y lo que ve el cliente
+
+- En **Cobros** hay una tarjeta nueva: dice exactamente qué se cobra, con qué tope y cuántas
+  recargas son, con la casilla de autorización que hay que marcar para activarla. Sin
+  tarjeta guardada, lo dice en vez de ofrecer un botón que no funciona.
+- Tres avisos nuevos: **se recargó** (con monto y créditos), **la tarjeta falló** (inmediato,
+  también por WhatsApp) y **se alcanzó el tope** (una vez al mes).
+
+### Lo que falta
+
+Nada de esta etapa. Queda la Etapa 3 (medidor, estimador y avisos al 75/90/0%) y la 4
+(margen por cliente).
 
 ### Nada que aplicar en producción
 
