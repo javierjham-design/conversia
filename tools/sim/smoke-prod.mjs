@@ -545,6 +545,80 @@ async function checkWhatsappTokenHealth() {
   return rollup(subs);
 }
 
+/**
+ * 12. ¿Lo que sirve producción es lo que hay en `main`?
+ *
+ * El 28-oct-2026 producción servía un commit de la mañana con TRECE ya en main —arreglos de
+ * cobro incluidos— y nada lo decía: el workflow de deploy se saltaba el `railway up` por
+ * falta de `RAILWAY_TOKEN` y terminaba en VERDE. Este punto es la segunda red: compara el
+ * `sha` de `version.json` con el `main` del checkout.
+ *
+ * - FAIL si producción sirve un commit que NO está en `main` (nadie sabe qué está corriendo)
+ *   o si `version.json` no se puede leer.
+ * - WARN si está atrás, con cuántos commits y de cuándo es el build.
+ *
+ * Se pide con un parámetro anti-caché porque el HTML de este dominio lo cachea Cloudflare.
+ */
+async function checkDeployedSha() {
+  const { execFileSync } = await import("node:child_process");
+  const subs = [];
+  let data;
+  try {
+    const r = await fetchT(`https://app.conversia.cl/version.json?t=${Date.now()}`, { cache: "no-store" });
+    data = await r.json();
+  } catch (e) {
+    return { status: "FAIL", detail: `version.json → ERROR ${e.message}`, extra: null };
+  }
+  const sha = String(data?.sha ?? "");
+  const builtAt = String(data?.builtAt ?? "");
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) {
+    return { status: "FAIL", detail: `version.json sin sha utilizable: ${JSON.stringify(data)}`, extra: null };
+  }
+  const dias = builtAt ? Math.floor((Date.now() - new Date(builtAt).getTime()) / 86_400_000) : null;
+
+  subs.push({ ok: true, label: `producción sirve ${sha.slice(0, 8)}${builtAt ? ` (build de ${builtAt}${dias != null ? `, hace ${dias} día(s)` : ""})` : ""}` });
+
+  // "No hay git acá" y "ese commit no está en main" son cosas DISTINTAS y no pueden dar el
+  // mismo resultado: la primera es correr el script fuera del repo (normal, no es un fallo)
+  // y la segunda es producción corriendo código que nadie puede revisar.
+  const hayRepo = (() => {
+    try {
+      execFileSync("git", ["rev-parse", "--git-dir"], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  if (!hayRepo) {
+    return {
+      status: "WARN",
+      detail: subs.map((s) => `· ${s.label}`).join("\n    ") + "\n    ! sin repo git acá: no se pudo comparar con main",
+      extra: { sha, builtAt },
+    };
+  }
+
+  let detras = null;
+  try {
+    execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { stdio: "ignore" });
+    execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { stdio: "ignore" });
+    detras = Number(execFileSync("git", ["rev-list", "--count", `${sha}..HEAD`]).toString().trim());
+  } catch {
+    subs.push({ ok: false, label: `el commit ${sha.slice(0, 8)} NO está en esta rama: producción corre código que nadie puede revisar` });
+    return rollup(subs);
+  }
+  if (detras > 0) {
+    return {
+      status: "WARN",
+      detail:
+        subs.map((s) => `· ${s.label}`).join("\n    ") +
+        `\n    ! main tiene ${detras} commit(s) que producción NO sirve → falta desplegar (railway up --service conversia-web --ci)`,
+      extra: { sha, builtAt, detras },
+    };
+  }
+  subs.push({ ok: true, label: "al día con main" });
+  return rollup(subs);
+}
+
 // ───────────────────────────── Runner ─────────────────────────────
 
 async function main() {
@@ -563,6 +637,7 @@ async function main() {
   await runCheck("9-security", "Seguridad de borde (rechazos esperados, no destructivo)", checkSecurityEdges);
   await runCheck("10-assistant", "Asistente: burbuja útil en conversia + 404 en marca ajena (opt-in QA)", checkAssistant);
   await runCheck("11-wa-token", "Salud de tokens de WhatsApp (whatsappTokenOk en /health/status)", checkWhatsappTokenHealth);
+  await runCheck("12-despliegue", "Lo que sirve producción es lo que hay en main (version.json)", checkDeployedSha);
 
   // Resumen legible.
   const icon = { PASS: C.green("PASS"), FAIL: C.red("FAIL"), WARN: C.yellow("WARN"), SKIP: C.gray("SKIP") };
