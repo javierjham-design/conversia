@@ -9,7 +9,34 @@ import { padmin, PlatformApiError, setPlatformToken } from "@/lib/platform-api";
  * el super admin de Conversia. Si el admin tiene MFA, el backend responde `mfaRequired`
  * y mostramos el campo de código. También admite "Continuar con Google" (GIS): el backend
  * valida el ID token (/platform/auth/google) y exige el mismo 2FA.
+ *
+ * EL PASO DEL CÓDIGO ES UNA PANTALLA APARTE (28-oct-2026). Antes seguía mostrando los campos
+ * de correo y contraseña, solo que `disabled`. Chrome los autocompletaba con cualquier cuenta
+ * guardada de este dominio, así que al entrar con Google la pantalla mostraba un correo ajeno
+ * —uno de un tenant de prueba— mientras por detrás se verificaba la credencial de Google.
+ * Encima no había vuelta atrás: el botón de Google desaparecía y solo se salía recargando.
+ * Resultado real: el dueño leyó un correo que no era el suyo, creyó que el login estaba roto
+ * y quedó trabado. Ahora el paso del código dice CON QUÉ IDENTIDAD vas a entrar y tiene
+ * "Usar otra cuenta".
  */
+/**
+ * Correo del ID token de Google, SOLO PARA MOSTRARLO. No se usa para decidir nada: quien
+ * valida la firma es el backend contra Google. Sirve para que el paso del código diga con
+ * qué cuenta estás entrando en vez de dejar que el autocompletado invente una.
+ */
+function correoDeGoogle(credential: string | null): string | null {
+  if (!credential) return null;
+  try {
+    const payload = credential.split(".")[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const email = JSON.parse(json)?.email;
+    return typeof email === "string" && email ? email : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function AdminLogin() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -113,6 +140,18 @@ export default function AdminLogin() {
     return void submitPassword(mfa ? code : undefined);
   }
 
+  /** Vuelve al primer paso. Sin esto, del paso del código solo se salía recargando la página. */
+  function volver() {
+    setMfa(false);
+    setGoogleCred(null);
+    setCode("");
+    setError(null);
+  }
+
+  // Lo que se va a enviar de verdad: el correo del token de Google si venimos de ahí, y si no
+  // el que el usuario escribió. Nunca lo que el navegador haya autocompletado por su cuenta.
+  const identidad = correoDeGoogle(googleCred) ?? (email || null);
+
   const field: React.CSSProperties = {
     width: "100%",
     padding: "11px 13px",
@@ -131,7 +170,21 @@ export default function AdminLogin() {
         <h1 className="display" style={{ fontSize: 26, margin: "4px 0 20px" }}>
           Super <span className="display-italic">admin</span>
         </h1>
-        {!mfa ? (
+        {mfa ? (
+          <>
+            {/* Con qué identidad se va a entrar. El autocompletado del navegador ya no puede
+                contradecir esto, porque los campos de contraseña no se renderizan acá. */}
+            <p className="text-dim" style={{ fontSize: 13, margin: "0 0 16px" }}>
+              Entrando como <strong style={{ color: "var(--ink)" }}>{identidad ?? "tu cuenta"}</strong>
+              {googleCred ? " (Google)" : null}
+            </p>
+            <label style={{ fontSize: 13, display: "block" }} className="text-dim">
+              Código de verificación (2FA)
+              <input style={field} inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required autoFocus placeholder="123456" autoComplete="one-time-code" />
+              <span style={{ fontSize: 11, color: "var(--ink-subtle, #94a3b8)" }}>También podés usar un código de recuperación.</span>
+            </label>
+          </>
+        ) : (
           <>
             <div id="admin-google-btn" style={{ display: "flex", justifyContent: "center" }} />
             {googleReady ? (
@@ -139,27 +192,30 @@ export default function AdminLogin() {
                 <span style={{ height: 1, flex: 1, background: "var(--line)" }} />o<span style={{ height: 1, flex: 1, background: "var(--line)" }} />
               </div>
             ) : null}
+            <label style={{ fontSize: 13 }} className="text-dim">
+              Correo
+              <input style={field} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+            </label>
+            <label style={{ fontSize: 13, display: "block", marginTop: 14 }} className="text-dim">
+              Contraseña
+              <input style={field} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+            </label>
           </>
-        ) : null}
-        <label style={{ fontSize: 13 }} className="text-dim">
-          Correo
-          <input style={field} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" disabled={mfa} />
-        </label>
-        <label style={{ fontSize: 13, display: "block", marginTop: 14 }} className="text-dim">
-          Contraseña
-          <input style={field} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required={!googleCred} autoComplete="current-password" disabled={mfa} />
-        </label>
-        {mfa ? (
-          <label style={{ fontSize: 13, display: "block", marginTop: 14 }} className="text-dim">
-            Código de verificación (2FA)
-            <input style={field} inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required autoFocus placeholder="123456" />
-            <span style={{ fontSize: 11, color: "var(--ink-subtle, #94a3b8)" }}>También podés usar un código de recuperación.</span>
-          </label>
-        ) : null}
+        )}
         {error ? <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 12 }}>{error}</p> : null}
         <button className="btn-accent" type="submit" disabled={loading} style={{ width: "100%", marginTop: 20, opacity: loading ? 0.6 : 1 }}>
           {loading ? "Entrando…" : mfa ? "Verificar" : "Entrar"}
         </button>
+        {mfa ? (
+          <button
+            type="button"
+            onClick={volver}
+            className="text-dim"
+            style={{ width: "100%", marginTop: 12, background: "none", border: 0, cursor: "pointer", fontSize: 13, textDecoration: "underline" }}
+          >
+            Usar otra cuenta
+          </button>
+        ) : null}
       </form>
     </main>
   );
