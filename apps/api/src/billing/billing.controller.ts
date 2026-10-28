@@ -419,8 +419,12 @@ export class BillingController {
     // Y solo los del MODELO de la cuenta (auditoría sim 250): a una cuenta V2 (debita
     // conversaciones) se le ofrecían también los sobres de MENSAJES al mismo precio —
     // compraba el producto equivocado hacia una bolsa que su plan no consume.
+    // CRE 2: y con Créditos IA, los packs de CRÉDITOS. Sin esta rama, a un cliente de
+    // créditos se le ofrecerían sobres de PLANTILLAS — el mismo error que se arregló para
+    // las cuentas V2, con el mismo resultado: compra saldo que su plan no consume.
     const feats = await this.activePlanFeatures(ctx.organizationId);
-    const type = feats.conversationDebitsWallet === true ? "conversation" : "message";
+    const type =
+      feats.aiCreditsWallet === true ? "credit" : feats.conversationDebitsWallet === true ? "conversation" : "message";
     const [wallet, packages] = await Promise.all([
       this.prisma.withTenant(ctx.organizationId, (tx) => tx.messageWallet.findUnique({ where: { organizationId: ctx.organizationId } })),
       this.prisma.admin.messagePackage.findMany({ where: { active: true, brand, type }, orderBy: { order: "asc" } }),
