@@ -272,6 +272,14 @@ export interface AIChatResponse {
   stopReason: "end_turn" | "tool_use" | "max_tokens" | "refusal" | "other";
   usage: AIUsage;
   latencyMs: number;
+  /**
+   * Modelo que REALMENTE respondió y proveedor que lo atendió. Pueden diferir del `model`
+   * pedido: el router cae a un modelo compatible del proveedor disponible (SAFE_MODEL) y la
+   * capa resiliente cae a `fallbackModel`. Quien registra el costo DEBE guardar este modelo,
+   * no el configurado, o la etiqueta no calza con el costo (ai_requests, Créditos IA).
+   */
+  model?: string;
+  provider?: string;
 }
 
 export interface AIProvider {

@@ -791,8 +791,11 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
         agentId: agent.id,
         agentVersionId: version.id,
         conversationId,
-        provider: ai.kind,
-        model: runtime.model,
+        // Modelo/proveedor que REALMENTE respondió (no la etiqueta configurada): si el router
+        // cae a un modelo compatible del proveedor disponible —p. ej. gpt-* → claude-haiku-4-5
+        // cuando OpenAI no está— la fila debe reflejar ESE, o el costo no calza con el modelo.
+        provider: result.provider ?? ai.kind,
+        model: result.model ?? runtime.model,
         purpose: "CHAT",
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
@@ -852,7 +855,9 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     await debitAiCreditsForTurn(organizationId, {
       conversationId,
       turnId,
-      model: runtime.model,
+      // El modelo que RESPONDIÓ (ver TurnUsage.model): el peso de crédito y la excepción
+      // "modelo sin peso" deben calcularse con el modelo real, no con la etiqueta configurada.
+      model: result.model ?? runtime.model,
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
       costUsd: result.usage.costUsd,
