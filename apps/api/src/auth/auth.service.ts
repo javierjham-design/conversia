@@ -4,6 +4,8 @@ import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
 import { brandOf, accentForCountry } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
+import { informarHitoCapiApi } from "../common/funnel-capi";
 import { VerticalService } from "../organizations/vertical.service";
 import { applyDraftToOrganization, type ApplyDraftTx } from "./apply-draft";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken, signPasswordResetToken, verifyPasswordResetToken, passwordFingerprint } from "./jwt";
@@ -111,6 +113,8 @@ export class AuthService {
     private prisma: PrismaService,
     private vertical: VerticalService,
     private refreshSessions: RefreshSessionService,
+    // COP 4 — cola para la señal "cuenta creada" hacia Meta Ads (apagada por bandera).
+    private queues: QueueService,
   ) {}
 
   /**
@@ -369,6 +373,12 @@ export class AuthService {
         console.error(`✖ No se pudo acreditar el regalo de bienvenida (${regalo}) en ${result.org.id}:`, (e as Error).message);
       }
     }
+
+    // COP 4 — SEÑAL "cuenta creada" hacia Meta Ads. Idempotente por organización y APAGADA
+    // por bandera (`FUNNEL_CAPI_ENABLED` nace en false): mandarle eventos a Meta es
+    // irreversible, entrenan el modelo del conjunto de anuncios. Nunca lanza: una señal de
+    // marketing no puede hacer fallar un registro.
+    await informarHitoCapiApi(this.prisma, this.queues, result.org.id, "registro").catch(() => undefined);
 
     // Verificación de correo (D6): solo marca conversia envía el link al registrarse.
     // Best-effort: si el correo no sale, la cuenta igual queda creada (verificación blanda).

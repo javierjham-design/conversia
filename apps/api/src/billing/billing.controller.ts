@@ -5,6 +5,8 @@ import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, refillMessageWallet } from "@conversia/database";
 import { CLP_PER_USD_REF, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
+import { informarHitoCapiApi } from "../common/funnel-capi";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { getTemplateUsage } from "../common/plan-limits";
@@ -24,6 +26,8 @@ export class BillingController {
   constructor(
     private prisma: PrismaService,
     private paymentSettings: PaymentSettingsService,
+    // COP 4 — cola para la señal del embudo hacia Meta Ads (apagada por bandera).
+    private queues: QueueService,
   ) {}
 
   @Get("me")
@@ -1379,6 +1383,14 @@ export class BillingController {
     // Bolsa prepagada: el período pagado recarga el cupo del plan, acumulando el
     // saldo no usado hasta 1 mes de bolsa (docs/PREPAID_WALLET_DESIGN.md).
     await this.topUpWallet(organizationId, plan).catch(() => undefined);
+
+    // COP 4 — SEÑAL "plan activado" hacia Meta Ads, con su valor en CLP (es lo que le
+    // permite optimizar por ingreso y no por volumen). Idempotente por organización y
+    // APAGADA por bandera: `FUNNEL_CAPI_ENABLED` nace en false. Va DESPUÉS de dejar el plan
+    // activo, para no informar una compra que después falló.
+    await informarHitoCapiApi(this.prisma, this.queues, organizationId, "plan_activado", {
+      valorClp: Number(plan.priceClp) || null,
+    }).catch(() => undefined);
 
     const totalDue = lines.reduce((a, l) => a + l.amount, 0);
     if (totalDue > 0) {

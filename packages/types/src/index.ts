@@ -946,3 +946,60 @@ export interface AssistantTurn {
   qa?: { passed: boolean } | null;
   actions: AssistantAction[];
 }
+
+// ============================================================
+// Señales del EMBUDO hacia Meta Ads (COP Etapa 4)
+// ============================================================
+
+/**
+ * Hitos del montaje que se le informan a Meta, con el nombre de evento que espera. La
+ * campaña va a optimizar por estos eventos, así que Meta tiene que recibir las señales
+ * reales del negocio y no solo el clic.
+ *
+ * Vive en los contratos porque lo usan las DOS puntas: el API (cuenta creada, plan
+ * activado) y el worker (bot activo). Con dos copias, el día que alguien renombre un
+ * evento la mitad de las señales llegaría con el nombre viejo y Meta las contaría como
+ * otro evento distinto.
+ */
+export const HITOS_CAPI = {
+  /** Cuenta creada (registro completado). */
+  registro: { evento: "CompleteRegistration", conValor: false },
+  /** El bot respondió su primer mensaje real: el momento en que el producto sirve. */
+  bot_activo: { evento: "ConversiaBotActivo", conValor: false },
+  /** Plan activado, con el valor en CLP del plan. */
+  plan_activado: { evento: "Purchase", conValor: true },
+} as const;
+
+export type HitoCapi = keyof typeof HITOS_CAPI;
+
+/**
+ * Decide si corresponde mandarle la señal a Meta. Pura: separa la DECISIÓN del efecto.
+ *
+ * Reglas, en orden:
+ *  1. Bandera apagada → no se manda nada. Es el candado principal: mandarle eventos a Meta
+ *     es irreversible (entrenan el modelo del conjunto de anuncios) y hacerlo con datos de
+ *     prueba ensucia la cuenta publicitaria de forma que no se limpia.
+ *  2. Solo marca `conversia`: TuBot no tiene campaña y sus datos no deben entrenar la de
+ *     Conversia.
+ *  3. Un hito ya informado no se repite.
+ *  4. `Purchase` SIN valor no se manda: un evento de compra con valor 0 le enseña a Meta
+ *     que ese público no vale nada, que es peor que no mandarlo.
+ */
+export function decidirSenalCapi(input: {
+  habilitado: boolean;
+  brand: string;
+  hito: HitoCapi;
+  yaEnviado: boolean;
+  valorClp?: number | null;
+}): { enviar: boolean; motivo: "ok" | "apagado" | "otra_marca" | "ya_enviado" | "sin_valor" } {
+  if (!input.habilitado) return { enviar: false, motivo: "apagado" };
+  if (input.brand !== "conversia") return { enviar: false, motivo: "otra_marca" };
+  if (input.yaEnviado) return { enviar: false, motivo: "ya_enviado" };
+  if (HITOS_CAPI[input.hito].conValor && !(input.valorClp && input.valorClp > 0)) {
+    return { enviar: false, motivo: "sin_valor" };
+  }
+  return { enviar: true, motivo: "ok" };
+}
+
+/** Proveedor con que se sella en `integration_events` que un hito ya se informó. */
+export const CAPI_FUNNEL_PROVIDER = "capi_funnel";

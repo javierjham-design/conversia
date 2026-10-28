@@ -395,7 +395,7 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
 - Landing y `/crear`: la sección de precios muestra Créditos IA con la equivalencia
   aproximada en conversaciones.
 
-### Etapa 4 — Margen y calibración
+### Etapa 4 — Margen y calibración — ✅ #564
 - Reporte en el super admin: por organización y mes, ingresos contra costo real de IA
   (`ai_requests.costUsd`) e infraestructura estimada, con el margen. Alerta si una org baja
   de 40% de margen.

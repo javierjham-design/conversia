@@ -48,10 +48,14 @@ jobs:
 
       - run: pnpm --filter @conversia/conversia-web exec playwright install --with-deps chromium
 
-      # En PR → subconjunto CRÍTICO (A viaje completo + B + D) en móvil+escritorio.
+      # En PR → subconjunto CRÍTICO (A viaje + B + D + G pago + H de cero a activo) en
+      # móvil+escritorio. H es el recorrido COMPLETO medido que pide COP Etapa 4: corre en
+      # cada PR a propósito, porque un recorrido que solo corre de noche no lo mira nadie y
+      # la promesa de "andando en minutos" se degrada sin que nadie se entere. Si alguna vez
+      # se vuelve inestable, se mueve al nightly en vez de bajarle las aserciones.
       # Nightly / manual → suite COMPLETA (todos los proyectos, 14 rubros, C incluido).
       # workers=2 + 1 retry: el sim es un solo contenedor; evita falsos rojos por sobrecarga.
-      - name: e2e como el dueño (crítico A+B+D+G)
+      - name: e2e como el dueño (crítico A+B+D+G+H)
         if: github.event_name == 'pull_request'
         env:
           RUN_DUENO: "1"
@@ -59,7 +63,7 @@ jobs:
           SIM_API: http://localhost:4000
         run: >-
           pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
-          --grep "viaje completo|me cuida|marca ajena|pago mi plan"
+          --grep "viaje completo|me cuida|marca ajena|pago mi plan|de cero a bot activo"
           --project=desktop --project=iphone
           --workers=2 --retries=1
 

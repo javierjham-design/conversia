@@ -36,14 +36,34 @@ interface MarginRow {
   id: string;
   name: string;
   revenueClp: number;
-  metaCostClp: number;
   aiCostClp: number;
+  infraCostClp: number;
   marginClp: number;
   marginPct: number | null;
+  alerta: boolean;
+  /** Informativo: lo que Meta le cobro AL CLIENTE con su propia tarjeta. No afecta el margen. */
+  metaDelClienteClp: number;
+  /** Parte del costo de IA que se fue en MONTAR al cliente (copiloto + probador). */
+  montajeClp: number;
 }
 interface Margins {
   month: string;
+  umbralPct: number;
+  usdToClp: number;
   rows: MarginRow[];
+  alertas: number;
+}
+/** CRE 4 - recomendacion de calibracion del mes. */
+interface Calibracion {
+  mes: string;
+  tokensPorCreditoVigente: number;
+  precioCreditoClp: number;
+  creditosPorConversacion: number;
+  tokensPorTurno: number;
+  costoPorCreditoClp: number;
+  margenSobreCostoPct: number | null;
+  recomendacion: string | null;
+  tokensPorCreditoSugerido: number | null;
 }
 
 // ------------------------------- Utilidades UI --------------------------------
@@ -90,6 +110,7 @@ export default function AdminBilling() {
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [invError, setInvError] = useState<string | null>(null);
   const [margins, setMargins] = useState<Margins | null>(null);
+  const [calib, setCalib] = useState<Calibracion | null>(null);
   const [marError, setMarError] = useState<string | null>(null);
 
   // Formularios de credenciales (SOLO escritura: vacío = no cambiar, nunca mostramos secretos).
@@ -114,6 +135,7 @@ export default function AdminBilling() {
     void loadInvoices();
     padmin<Recurring>("/platform/billing/recurring").then(setRecurring).catch((e) => setRecError(msg(e)));
     padmin<Margins>("/platform/margins").then(setMargins).catch((e) => setMarError(msg(e)));
+    padmin<Calibracion>("/platform/calibration").then(setCalib).catch(() => setCalib(null));
   }, [loadProviders, loadInvoices]);
 
   async function saveProvider(provider: "flow" | "lemonsqueezy") {
@@ -344,8 +366,15 @@ export default function AdminBilling() {
       <section style={{ marginBottom: 12 }}>
         <h2 className="display" style={{ fontSize: 18, margin: "0 0 4px" }}>Margen por cliente</h2>
         <p className="text-dim" style={{ fontSize: 13, margin: "0 0 10px" }}>
-          Ingreso cobrado del mes menos el costo real de Meta (mensajería) e IA, por tenant. Los que pierden plata aparecen primero.
+          Ingreso cobrado del mes menos lo que de verdad paga Conversia: IA (respuestas del bot + copiloto de montaje)
+          e infraestructura estimada. <b>El costo de Meta NO se resta</b>: lo paga cada cliente con su tarjeta, y se
+          muestra aparte solo para que lo veas. Los que pierden plata aparecen primero.
         </p>
+        {margins && margins.alertas > 0 ? (
+          <p style={{ fontSize: 13, margin: "0 0 10px", color: "var(--danger)" }}>
+            &#9888; {margins.alertas} {margins.alertas === 1 ? "cuenta" : "cuentas"} por debajo del {margins.umbralPct}% de margen.
+          </p>
+        ) : null}
         {marError ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{marError}</p> : null}
         {!margins ? (
           <p className="text-dim">Cargando…</p>
@@ -361,10 +390,11 @@ export default function AdminBilling() {
                   <tr>
                     <th style={th}>Tenant</th>
                     <th style={{ ...th, textAlign: "right" }}>Ingreso</th>
-                    <th style={{ ...th, textAlign: "right" }}>Costo Meta</th>
                     <th style={{ ...th, textAlign: "right" }}>Costo IA</th>
+                    <th style={{ ...th, textAlign: "right" }}>Infra</th>
                     <th style={{ ...th, textAlign: "right" }}>Margen</th>
                     <th style={{ ...th, textAlign: "right" }}>%</th>
+                    <th style={{ ...th, textAlign: "right" }} title="Informativo: lo paga el cliente a Meta">Meta (cliente)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -374,10 +404,11 @@ export default function AdminBilling() {
                       <tr key={r.id} style={neg ? { background: "color-mix(in srgb, var(--danger) 10%, transparent)" } : undefined}>
                         <td style={{ ...td, fontWeight: 600 }}>{neg ? "▼ " : ""}{r.name}</td>
                         <td style={{ ...td, textAlign: "right" }}>{clp(r.revenueClp)}</td>
-                        <td style={{ ...td, textAlign: "right", color: "var(--ink-dim)" }}>{clp(r.metaCostClp)}</td>
-                        <td style={{ ...td, textAlign: "right", color: "var(--ink-dim)" }}>{clp(r.aiCostClp)}</td>
+                        <td style={{ ...td, textAlign: "right", color: "var(--ink-dim)" }} title={r.montajeClp > 0 ? `De eso, ${clp(r.montajeClp)} se fue en montar al cliente (copiloto + pruebas).` : undefined}>{clp(r.aiCostClp)}</td>
+                        <td style={{ ...td, textAlign: "right", color: "var(--ink-dim)" }}>{clp(r.infraCostClp)}</td>
                         <td style={{ ...td, textAlign: "right", fontWeight: 600, color: neg ? "var(--danger)" : "var(--ok)" }}>{clp(r.marginClp)}</td>
-                        <td style={{ ...td, textAlign: "right", color: neg ? "var(--danger)" : "var(--ink-dim)" }}>{r.marginPct === null ? "—" : `${r.marginPct}%`}</td>
+                        <td style={{ ...td, textAlign: "right", color: r.alerta ? "var(--danger)" : "var(--ink-dim)" }}>{r.marginPct === null ? "\u2014" : `${r.alerta ? "\u26a0 " : ""}${r.marginPct}%`}</td>
+                        <td style={{ ...td, textAlign: "right", color: "var(--ink-dim)" }} title="Lo cobra Meta a la tarjeta del cliente; no afecta el margen de Conversia.">{clp(r.metaDelClienteClp)}</td>
                       </tr>
                     );
                   })}
@@ -385,8 +416,31 @@ export default function AdminBilling() {
               </table>
             </div>
             <p className="text-dim" style={{ fontSize: 12, marginTop: 8 }}>
-              Mes {margins.month}. Costos convertidos a CLP con el tipo de cambio del Super Admin. Un margen negativo = ese cliente cuesta más de lo que paga.
+              Mes {margins.month}. Costos convertidos a CLP con el tipo de cambio del Super Admin ({margins.usdToClp.toLocaleString("es-CL")} por dolar).
+              Un margen negativo = ese cliente cuesta mas de lo que paga. El costo de IA sale de la tabla de peticiones de
+              IA, que es donde queda el costo de cada respuesta del bot.
             </p>
+
+            {/* CRE 4 - RECOMENDACION DE CALIBRACION. Los precios se fijaron con el consumo
+                historico; si el consumo real cambia, el margen por credito se cae sin que
+                nadie se entere hasta que llega la factura del proveedor. */}
+            {calib ? (
+              <div className="card" style={{ padding: 18, marginTop: 14 }}>
+                <h3 className="display" style={{ fontSize: 16, margin: "0 0 8px" }}>Calibracion del mes</h3>
+                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, marginBottom: 10 }}>
+                  <span><b>{calib.creditosPorConversacion}</b> creditos por conversacion</span>
+                  <span><b>{calib.tokensPorTurno.toLocaleString("es-CL")}</b> tokens por respuesta</span>
+                  <span>bloque vigente: <b>{calib.tokensPorCreditoVigente.toLocaleString("es-CL")}</b></span>
+                  <span>un credito cuesta <b>${calib.costoPorCreditoClp}</b> y se vende a <b>${calib.precioCreditoClp}</b></span>
+                  <span>margen sobre el costo: <b style={{ color: calib.margenSobreCostoPct != null && calib.margenSobreCostoPct < 300 ? "var(--danger)" : "var(--ok)" }}>{calib.margenSobreCostoPct == null ? "\u2014" : `${calib.margenSobreCostoPct}%`}</b></span>
+                </div>
+                {calib.recomendacion ? (
+                  <p style={{ fontSize: 13.5, margin: 0, lineHeight: 1.5 }}>{calib.recomendacion}</p>
+                ) : (
+                  <p className="text-dim" style={{ fontSize: 13.5, margin: 0 }}>Nada que ajustar: el bloque de tokens y los pesos estan en rango.</p>
+                )}
+              </div>
+            ) : null}
           </>
         )}
       </section>
