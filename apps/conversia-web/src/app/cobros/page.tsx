@@ -334,7 +334,7 @@ export default function Cobros() {
         {/* Comprar créditos */}
         {pkgs.length ? (
           <>
-            <h2 className="display" style={{ fontSize: 18, margin: "22px 0 12px" }}>Comprar créditos</h2>
+            <h2 className="display" style={{ fontSize: 18, margin: "22px 0 12px" }} data-copilot="comprar-creditos">Comprar créditos</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
               {pkgs.map((p) => (
                 <div key={p.code} className="card" style={{ padding: 18, display: "flex", flexDirection: "column" }}>
@@ -353,7 +353,7 @@ export default function Cobros() {
         {/* Plan */}
         {plans.length ? (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "28px 0 12px" }}>
+            <div data-copilot="plan" style={{ display: "flex", alignItems: "center", gap: 12, margin: "28px 0 12px" }}>
               <h2 className="display" style={{ fontSize: 18, margin: 0 }}>Plan</h2>
               <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "var(--acc-dim)", borderRadius: 999, padding: 3 }}>
                 {(["monthly", "yearly"] as const).map((iv) => (

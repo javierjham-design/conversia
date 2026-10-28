@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec } from "@conversia/types";
+import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec, AssistantAction } from "@conversia/types";
 import { getEnv } from "@conversia/config";
-import { createAIProvider } from "@conversia/agents";
+import { computeCostUsd, createAIProvider } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
 import { getSetupChecklist } from "../onboarding/setup-checklist";
+import { sanitizeActions } from "./actions";
+import { SETUP_TOOL_NAMES, isSetupWriteTool, runSetupTool, setupToolSpecs } from "./setup-tools";
 import { packUnitForOrg } from "../billing/pack-unit";
 
 /**
@@ -111,16 +113,24 @@ export class AssistantService {
       { name: "ofrecerRecarga", description: "Devuelve los packs de conversaciones y el link para comprarlos. El asistente NUNCA cobra; solo entrega el link.", inputJsonSchema: { type: "object", properties: {} } },
       { name: "escalarAHumano", description: "Crea un ticket de soporte para que una persona del equipo siga el caso. Úsalo cuando el usuario lo pida o no puedas resolver.", inputJsonSchema: { type: "object", properties: { motivo: { type: "string", description: "Resumen del caso" } }, required: ["motivo"] } },
     ];
-    if (!owner) return read;
+    // COP 1 — el copiloto ACTÚA: a las de siempre se suman las herramientas de montaje
+    // (datos del negocio, horario, agenda, armar/probar/publicar el asistente, diagnóstico
+    // de WhatsApp, página del negocio) y las de acompañamiento, que navegan y resaltan.
+    const setup = setupToolSpecs();
+    if (!owner) return [...read, ...setup.read];
     const write: AIToolSpec[] = [
       { name: "crearServicio", description: "Crea un servicio nuevo del negocio (con precio y duración opcionales). Úsalo si el servicio no existe aún. CONFIRMA con el usuario antes de llamar.", inputJsonSchema: { type: "object", properties: { nombre: { type: "string" }, precio: { type: "number" }, duracionMin: { type: "number" } }, required: ["nombre"] } },
       { name: "configurarPrecioServicio", description: "Fija el PRECIO (y opcionalmente la duración en minutos) de un servicio EXISTENTE, buscándolo por nombre. Si no existe, usa crearServicio. CONFIRMA antes de llamar.", inputJsonSchema: { type: "object", properties: { servicio: { type: "string" }, precio: { type: "number" }, duracionMin: { type: "number" } }, required: ["servicio", "precio"] } },
-      { name: "configurarDatosNegocio", description: "Actualiza datos de texto del negocio (nombre, descripción o dirección) que el asistente usa al atender. CONFIRMA antes de llamar.", inputJsonSchema: { type: "object", properties: { campo: { type: "string", enum: ["nombre", "descripcion", "direccion"] }, valor: { type: "string" } }, required: ["campo", "valor"] } },
     ];
-    return [...read, ...write];
+    return [...read, ...setup.read, ...write, ...setup.write];
   }
 
-  private async executeTool(ctx: AssistantCtx, name: string, input: any): Promise<{ content: string; isError?: boolean; didWrite?: boolean }> {
+  private async executeTool(
+    ctx: AssistantCtx,
+    name: string,
+    input: any,
+    route?: string,
+  ): Promise<{ content: string; isError?: boolean; didWrite?: boolean; actions?: AssistantAction[] }> {
     const admin = this.prisma.admin;
     if (name === "verEstado") {
       const c = await this.buildContext(ctx.organizationId, ctx.userId);
@@ -160,6 +170,9 @@ export class AssistantService {
           })),
           link: "/cobros",
         }),
+        // COP 1 — el copiloto NUNCA cobra: entrega el botón y el clic es del dueño. Antes
+        // decía "anda a /cobros" y el cliente tenía que encontrarlo solo.
+        actions: [{ type: "button", label: unit === "credit" ? "Recargar créditos" : "Recargar conversaciones", kind: "pago" }],
       };
     }
     if (name === "escalarAHumano") {
@@ -171,6 +184,17 @@ export class AssistantService {
         else await tx.supportTicket.create({ data: { organizationId: ctx.organizationId, userId: ctx.userId ?? null, message: String(input?.motivo ?? "Soporte"), code, thread: [msg] as object } });
       });
       return { content: `Listo, dejé tu caso en manos del equipo. Puedes seguirlo por aquí o por WhatsApp.` };
+    }
+    // ---- COP 1 — herramientas de MONTAJE (módulo aparte, `setup-tools.ts`) ----
+    // El gate de dueño se vuelve a comprobar ACÁ: el caller ya no ofrece las de escritura a
+    // un viewer, pero una herramienta que escribe la configuración del negocio no puede
+    // depender de que el filtro de specs esté bien puesto en el único sitio donde se arma.
+    if (SETUP_TOOL_NAMES.has(name)) {
+      if (isSetupWriteTool(name) && !isWebOwner(ctx.role)) {
+        return { content: "Esta acción solo la puede hacer el dueño o un administrador.", isError: true };
+      }
+      const out = await runSetupTool(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId, route }, name, input);
+      if (out) return out;
     }
     // ---- Escrituras (solo owner; el caller ya filtró specs, revalidamos por defensa) ----
     if (!isWebOwner(ctx.role)) return { content: "Esta acción solo la puede hacer el dueño o un administrador.", isError: true };
@@ -206,21 +230,9 @@ export class AssistantService {
         return { content: `Listo: "${matches[0].name}" quedó en $${precio.toLocaleString("es-CL")}${dur ? ` · ${dur} min` : ""}.`, didWrite: true };
       });
     }
-    if (name === "configurarDatosNegocio") {
-      const campo = String(input?.campo ?? "");
-      const valor = String(input?.valor ?? "").trim().slice(0, 500);
-      if (!["nombre", "descripcion", "direccion"].includes(campo) || !valor) return { content: "Dime qué dato actualizar (nombre, descripción o dirección) y su valor.", isError: true };
-      if (campo === "nombre") {
-        await admin.organization.update({ where: { id: ctx.organizationId }, data: { name: valor } });
-      } else {
-        const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
-        const prev = (org?.settings as Record<string, unknown> | null) ?? {};
-        const biz = { ...((prev.business as Record<string, unknown>) ?? {}), [campo]: valor };
-        await admin.organization.update({ where: { id: ctx.organizationId }, data: { settings: { ...prev, business: biz } as object } });
-      }
-      await admin.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId ?? "assistant", action: "assistant.config_business", entityType: "organization", entityId: ctx.organizationId, after: { [campo]: valor } as object } });
-      return { content: `Actualicé ${campo === "nombre" ? "el nombre" : campo === "descripcion" ? "la descripción" : "la dirección"} de tu negocio.`, didWrite: true };
-    }
+    // `configurarDatosNegocio` (un campo por llamada) la reemplazó `completarDatosNegocio`
+    // de `setup-tools.ts`: acepta nombre, rubro, dirección y descripción en una sola pasada
+    // y además mueve el checklist. Tener las dos haría que el modelo eligiera a la suerte.
     return { content: "No reconozco esa acción.", isError: true };
   }
 
@@ -238,15 +250,24 @@ ${ctx.lastChannelError ? `- Último error de canal: ${ctx.lastChannelError}` : "
 
 REGLAS:
 - Nunca inventes precios de planes/packs: usa la herramienta ofrecerRecarga o verEstado.
-- Jamás cobras tú: solo entregas el link.
+- Jamás cobras tú ni abres la conexión con Meta por tu cuenta: esas dos cosas necesitan un clic del dueño, y tus herramientas ya le entregan el botón.
 - Si piden hablar con una persona, usa escalarAHumano.
 - CONEXIÓN DE WHATSAPP: hay dos caminos en "Canales". (1) RECOMENDADO — "Conecta el WhatsApp que ya usas" (coexistencia): el dueño escanea/ingresa un código desde su app WhatsApp Business, mantiene su teléfono y sus chats, y NO necesita página web ni cuenta de Facebook; el asistente atiende en paralelo y lo que el dueño responda a mano también aparece en la Bandeja. (2) "Número nuevo dedicado" para quien no quiere tocar su número. Si el dueño dice que ya atiende por WhatsApp y quiere seguir con ese número, guíalo al camino (1). Toma ~3 minutos. Si al armar un número NUEVO Meta pide "verificación del negocio", explícalo simple (es un trámite único de Meta para confirmar que el negocio existe; no es culpa suya) y ofrécele que una persona del equipo lo acompañe HOY a dejarlo listo — usa escalarAHumano. Recuérdale que el camino (1), conectar el número que ya usa, normalmente NO necesita esa verificación.
-- Para horarios por profesional/agenda, GUÍA a "Agenda → Configurar" (no los cambias tú aquí; tienen efecto sobre citas existentes).`;
+- ACOMPAÑA, no dictes indicaciones: cuando propongas un paso o te pregunten dónde está algo, llama acompañarPaso con la clave del paso (negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio). Eso lo lleva a la pantalla y le resalta qué tocar, que es mucho mejor que explicarle la ruta.
+- Antes de hablar de WhatsApp, llama diagnosticarWhatsapp: puede estar conectado pero sin asistente asignado, y entonces el número recibe y nadie contesta.`;
     const modeBlock = ctx.mode === "implementacion"
       ? `\n\nMODO IMPLEMENTACIÓN (avance < 100%): LIDERA. Saluda proponiendo el siguiente paso pendiente ("${ctx.nextStep?.label ?? ""}") y ofrécete a hacerlo juntos.`
       : `\n\nMODO ASISTENCIA (todo listo): resuelve dudas; si no puedes, escala a un humano.`;
     const ownerBlock = owner
-      ? `\n\nPuedes CONFIGURAR conversando: crear servicios (crearServicio), fijar su precio/duración (configurarPrecioServicio), y datos del negocio (configurarDatosNegocio). Primero mira lo que hay con listarServicios si hace falta. CONFIRMA con el usuario antes de aplicar un cambio ("¿Dejo el corte en $12.000?") y recién entonces llama la herramienta.`
+      ? `\n\nPuedes MONTAR el negocio conversando, no solo explicar cómo: datos del negocio y rubro (completarDatosNegocio), horario de atención (configurarHorarioAtencion), servicios con precio (crearServicio, configurarPrecioServicio), quién atiende y su horario (crearProfesional), cómo se ofrecen las horas (configurarAgenda), y el asistente completo: armarlo desde una plantilla del rubro (listarPlantillasAsistente, crearAsistente), ajustarle tono/reglas/preguntas frecuentes (ajustarAsistente), PROBARLO con un mensaje de cliente (probarAsistente) y publicarlo (publicarAsistente). También la página del negocio (activarMiniSitio).
+
+AUTONOMÍA:
+- Leer, navegar y resaltar: hazlo sin preguntar.
+- Cambiar configuración: propón el cambio CONCRETO y aplícalo con UN "sí" ("¿Dejo el corte en $12.000?" → sí → llamas la herramienta). No pidas permiso dos veces para lo mismo.
+- Si el dueño dice "arma todo tú" o algo equivalente, puedes aplicar varios cambios seguidos y mostrarle un resumen al final.
+- Pagar y conectar WhatsApp: SIEMPRE con su clic en el botón. Tú diagnosticas y le das el botón.
+- NUNCA cambias el modelo de IA del asistente: eso lo fija Conversia.
+- Después de crear el asistente, pruébalo con un mensaje realista de su rubro ANTES de ofrecer publicarlo: que el dueño vea cómo atiende.`
       : `\n\nEste usuario NO es dueño ni administrador: NO configures nada. Solo informa y, si hace falta, escala a un humano.`;
     return base + modeBlock + ownerBlock;
   }
@@ -271,8 +292,13 @@ REGLAS:
     };
   }
 
-  /** Corre un turno del asistente. Devuelve la respuesta + si hubo cambios de config. */
-  async run(ctx: AssistantCtx, userMessage: string, history: AIChatMessage[], route?: string): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null }> {
+  /** Corre un turno del asistente. Devuelve la respuesta, las acciones y si hubo cambios. */
+  async run(
+    ctx: AssistantCtx,
+    userMessage: string,
+    history: AIChatMessage[],
+    route?: string,
+  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[] }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
     // ROBUSTEZ (Bloque 3): el contexto se arma FUERA del loop de IA, pero un fallo suyo no debe
@@ -293,22 +319,35 @@ REGLAS:
     const specs = this.toolSpecs(owner);
     const messages: AIChatMessage[] = [...history.slice(-12), { role: "user", content: userMessage }];
     const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
-    // Modelo COMPATIBLE con el proveedor (ver resolveAssistantModel): el default de config es un
-    // modelo OpenAI, así que con AI_PROVIDER=anthropic hay que elegir uno de Anthropic, no mandarle gpt-*.
-    const model = resolveAssistantModel(env.AI_PROVIDER, env.AI_DEFAULT_MODEL);
+    // Modelo COMPATIBLE con el proveedor (ver resolveAssistantModel). COP 1: el copiloto tiene
+    // su PROPIO modelo (`ASSISTANT_MODEL`), separado del de los bots de los clientes, porque
+    // encadena herramientas —lee el estado, crea, prueba, publica— y con un modelo barato deja
+    // el montaje a medias. Si no está configurado, cae en el de siempre.
+    const model = resolveAssistantModel(env.AI_PROVIDER, env.ASSISTANT_MODEL || env.AI_DEFAULT_MODEL);
     let reply = "";
     let wrote = false;
+    let publicoAgente = false;
+    const acciones: AssistantAction[] = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     // ROBUSTEZ (F4.4): si el proveedor de IA está caído/lento, el asistente NUNCA queda mudo
     // ni rompe la página — responde un fallback claro (CERO SILENCIOS), nunca un 500.
     try {
-      for (let round = 0; round < 4; round++) {
-        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route), messages, tools: specs, maxTokens: 700, toolTranscript });
+      // COP 1 — 8 rondas (antes 4): armar el asistente son varias herramientas seguidas
+      // (ver el estado → listar plantillas → crearlo → probarlo → publicarlo) y con 4 el
+      // copiloto se quedaba a mitad de camino sin decir por qué.
+      for (let round = 0; round < 8; round++) {
+        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route), messages, tools: specs, maxTokens: 1200, toolTranscript });
+        inputTokens += resp.usage?.inputTokens ?? 0;
+        outputTokens += resp.usage?.outputTokens ?? 0;
         if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
         const results: AIToolResult[] = [];
         for (const call of resp.toolCalls as AIToolCall[]) {
-          const out = await this.executeTool(ctx, call.name, call.input).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false }));
+          const out = await this.executeTool(ctx, call.name, call.input, route).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false, actions: undefined }));
           if (out.didWrite) wrote = true;
+          if (out.didWrite && call.name === "publicarAsistente") publicoAgente = true;
+          if (out.actions?.length) acciones.push(...out.actions);
           results.push({ toolCallId: call.id, content: out.content, isError: out.isError });
         }
         if (resp.text?.trim()) reply = resp.text;
@@ -325,14 +364,47 @@ REGLAS:
       }
     }
 
+    // COP 1 — COSTO DEL MONTAJE. Se registra para saber lo que cuesta de verdad llevar a un
+    // cliente de la cuenta nueva al bot andando (CRE 4 lo usa para el margen por cliente).
+    //
+    // Va en `usage_events` y NO en `ai_requests` por dos razones: `AiPurpose` no tiene un
+    // valor para el copiloto (agregarlo es una migración de enum) y, sobre todo, una fila de
+    // `ai_requests` es la UNIDAD DE COBRO de los Créditos IA. Este costo lo paga Conversia,
+    // no el cliente: dejarlo ahí sería invitar a que algún día se le debite al tenant el
+    // copiloto que lo ayudó a montarse. Mismo patrón que el probador de agentes
+    // (`meta.source`), así que los reportes de consumo ya lo saben leer.
+    if (inputTokens + outputTokens > 0) {
+      await this.prisma.admin.usageEvent
+        .create({
+          data: {
+            organizationId: ctx.organizationId,
+            type: "ai_tokens",
+            quantity: inputTokens + outputTokens,
+            costUsd: computeCostUsd(model, inputTokens, outputTokens),
+            meta: { source: "copilot_setup", model, provider: env.AI_PROVIDER, inputTokens, outputTokens, mode: context.mode, wrote } as object,
+          },
+        })
+        .catch(() => undefined);
+    }
+
     // Tras un cambio de configuración, corre el auto-QA (V2-6) best-effort y cuéntalo.
+    // Si lo que hizo fue PUBLICAR, la batería ya corrió dentro de `publicarAsistente`:
+    // repetirla serían 4+ llamadas al proveedor por nada.
     let qa: { passed: boolean } | null = null;
-    if (wrote) {
+    if (wrote && !publicoAgente) {
       try {
         const agent = await this.prisma.admin.agent.findFirst({ where: { organizationId: ctx.organizationId, deletedAt: null, active: true }, select: { id: true } });
         if (agent) { const r = await runQaBattery(this.prisma, ctx.organizationId, agent.id, { autoPublish: false }); qa = { passed: !!r.passed }; }
       } catch { /* noop */ }
     }
-    return { reply: reply || "Estoy aquí para ayudarte con tu asistente. ¿Qué necesitas?", mode: context.mode, wrote, qa };
+    return {
+      reply: reply || "Estoy aquí para ayudarte con tu asistente. ¿Qué necesitas?",
+      mode: context.mode,
+      wrote,
+      qa,
+      // Lo que sale hacia la UI pasa SIEMPRE por la lista blanca (rutas que existen,
+      // `data-copilot` conocidos, enlaces https): la UI no vuelve a validar nada.
+      actions: sanitizeActions(acciones),
+    };
   }
 }

@@ -55,7 +55,7 @@ sin salida no sirve.
 
 ---
 
-## ETAPA 0 — Que el camino hasta "bot activo y pagado" exista (prioridad 1)
+## ETAPA 0 — Que el camino hasta "bot activo y pagado" exista (prioridad 1) — ✅ #550 + #560
 
 - **Checklist único de montaje** como fuente de verdad, en un servicio de la API reutilizado
   por `/assistant/context`, `/onboarding` (cuando la marca es conversia) y la UI. Los pasos,
@@ -87,7 +87,7 @@ sin salida no sirve.
   (dirección, horario y servicios si se detectaron) y el prompt del borrador al agente
   instalado. Sin pisar lo que el vertical ya trae si el scrape no encontró el dato.
 
-## ETAPA 1 — Protocolo de acciones: el copiloto actúa, no solo conversa
+## ETAPA 1 — Protocolo de acciones: el copiloto actúa, no solo conversa — ✅ #561
 
 - La respuesta de `POST /assistant/message` agrega `actions: Action[]`, tipadas en
   `@conversia/types` y validadas con zod. Tipos mínimos:
