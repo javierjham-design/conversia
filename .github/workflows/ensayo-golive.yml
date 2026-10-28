@@ -1,0 +1,46 @@
+name: ensayo go-live créditos
+
+# ENSAYO del go-live de Créditos IA contra el STACK DOCKER (jamás producción).
+#
+# Se corre A MANO, y conviene correrlo justo ANTES de encender el modelo nuevo en producción:
+# recorre con los scripts REALES del dueño el camino que ninguna otra suite recorre —siembra
+# del catálogo, go-live, una cuenta nueva que nace en créditos con su regalo, el cobro por
+# RESPUESTA, el medidor con consumo real en la base, la recarga de un pack y el rollback— y
+# falla si algo de eso no se cumple.
+#
+# No va en los PRs a propósito: el go-live cambia el catálogo ENTERO del stack (apaga el
+# modelo por conversación), así que no puede compartir stack con las jornadas del dueño, que
+# afirman el modelo viejo.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ensayo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Levantar el stack de simulación
+        run: pnpm sim:up
+
+      - name: Ensayo del go-live de Créditos IA
+        run: node tools/sim/ensayo-golive.mjs
+
+      - name: Logs de los contenedores (solo si algo falló)
+        if: failure()
+        run: docker compose -f tools/sim/docker-compose.sim.yml logs --tail=200 --no-color
+
+      - name: Bajar el stack
+        if: always()
+        run: DOWN=1 bash tools/sim/up.sh

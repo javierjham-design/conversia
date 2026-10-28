@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CREDITOS_POR_CONVERSACION_POR_DEFECTO,
   MIN_CONVERSACIONES_PARA_PROMEDIO_PROPIO,
+  MIN_DIAS_PARA_RITMO,
   estimarAlcance,
   explicarBase,
   frasePorSaldo,
@@ -50,6 +51,24 @@ describe("de dónde sale el promedio", () => {
     const e = estimarAlcance({ restantes: 900, propio: { conversaciones: 0, creditos: 0, dias: 0 } });
     expect(e.base).toBe("defecto");
     expect(e.creditosPorConversacion).toBe(CREDITOS_POR_CONVERSACION_POR_DEFECTO);
+  });
+
+  /**
+   * Lo encontró el ensayo del go-live contra el stack Docker: una cuenta recién creada, con
+   * UNA conversación de un crédito en su primer día, mostraba "≈ 199 días a tu ritmo". Un
+   * crédito por día era, literalmente, su ritmo observado. Prometer siete meses de bot a
+   * alguien que lleva un día es exactamente lo que el estimador salió a evitar.
+   */
+  it("con menos de una semana de datos NO se promete un ritmo", () => {
+    const primerDia = estimarAlcance({ restantes: 199, propio: { conversaciones: 1, creditos: 1, dias: 1 } });
+    expect(primerDia.dias).toBeNull();
+    expect(primerDia.conversaciones).toBeGreaterThan(0); // el saldo y las conversaciones sí se muestran
+  });
+
+  it("el mínimo de días es el límite exacto", () => {
+    const muestra = (dias: number) => estimarAlcance({ restantes: 700, propio: { conversaciones: 30, creditos: 700, dias } });
+    expect(muestra(MIN_DIAS_PARA_RITMO - 1).dias).toBeNull();
+    expect(muestra(MIN_DIAS_PARA_RITMO).dias).toBe(7); // 700 / (700/7) = 7
   });
 
   it("un rubro con promedio 0 o negativo no se usa", () => {

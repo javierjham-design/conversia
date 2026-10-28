@@ -233,7 +233,22 @@ export class MockAIProvider implements AIProvider {
       text,
       toolCalls: [],
       stopReason: "end_turn",
-      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      // Tokens ESTIMADOS (≈4 caracteres por token), no cero.
+      //
+      // Con cero, en el simulador no se cobraba NADA: la fórmula de Créditos IA no cobra un
+      // turno sin tokens —y hace bien, porque un turno sin tokens es un proveedor caído y
+      // nuestras caídas no se le cobran al cliente— así que todo el camino del dinero
+      // (débito por respuesta, libro, medidor con datos reales, avisos de 75/90%, margen)
+      // quedaba invisible en la única prueba que recorre el producto como el dueño. El
+      // ensayo del go-live lo encontró: el bot respondía dos veces y el saldo seguía en 200.
+      //
+      // El COSTO sigue en 0 a propósito: el mock no gasta plata y decir lo contrario haría
+      // mentir al reporte de margen del simulador.
+      usage: {
+        inputTokens: Math.max(1, Math.ceil((req.system.length + req.messages.reduce((a, m) => a + (m.content?.length ?? 0), 0)) / 4)),
+        outputTokens: Math.max(1, Math.ceil(text.length / 4)),
+        costUsd: 0,
+      },
       latencyMs: 5,
     };
   }

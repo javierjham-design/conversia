@@ -20,6 +20,18 @@
 /** Mínimo de conversaciones propias para fiarse del promedio de la org. */
 export const MIN_CONVERSACIONES_PARA_PROMEDIO_PROPIO = 20;
 
+/**
+ * Días mínimos de consumo para hablar de un RITMO.
+ *
+ * Una semana, porque el ritmo de un negocio es semanal: un sábado de barbería no se parece
+ * a un lunes, y el promedio de dos días cae del lado que toque. Lo cazó el ensayo del
+ * go-live en Docker: una cuenta recién creada, con UNA conversación de un crédito en su
+ * primer día, mostraba "≈ 199 días a tu ritmo" —199 créditos a 1 por día—. Es el mismo
+ * problema que el mínimo de conversaciones y la regla es la misma: antes de prometer, hay
+ * que tener de dónde. Sin la semana no se muestran días; el saldo y las conversaciones sí.
+ */
+export const MIN_DIAS_PARA_RITMO = 7;
+
 /** Promedio de respaldo cuando no hay datos ni de la org ni del rubro. */
 export const CREDITOS_POR_CONVERSACION_POR_DEFECTO = 9;
 
@@ -91,9 +103,10 @@ export function estimarAlcance(input: EntradaEstimacion): Estimacion {
 
   // El ritmo diario SIEMPRE sale del consumo real de la org: el promedio del rubro dice
   // cuánto cuesta una conversación, no cuántas tiene este negocio por día. Sin consumo
-  // propio no hay ritmo que medir y se devuelve null en vez de inventar una cifra.
+  // propio —o con menos de una semana, que no alcanza para un ritmo— se devuelve null en
+  // vez de inventar una cifra.
   let dias: number | null = null;
-  if (input.propio.dias > 0 && input.propio.creditos > 0) {
+  if (input.propio.dias >= MIN_DIAS_PARA_RITMO && input.propio.creditos > 0) {
     const porDia = input.propio.creditos / input.propio.dias;
     if (porDia > 0) dias = Math.floor(restantes / porDia);
   }
