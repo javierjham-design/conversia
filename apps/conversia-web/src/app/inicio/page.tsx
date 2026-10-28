@@ -207,6 +207,9 @@ export default function Home() {
         {/* V2-9 — prueba/activación (modelo por conversación) o migración grandfathering */}
         <V2Banner />
 
+        {/* CRE 1 — cambio de modelo de IA propuesto por el equipo: lo decide el cliente */}
+        <ModelChangeBanner />
+
         {/* 4 KPIs */}
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14, marginBottom: 18 }}>
           <Kpi label="Citas hoy" value={appts === null ? "…" : String(upcoming.length)} hint={appts === null ? "" : `${(appts ?? []).length} en total`} />
@@ -333,6 +336,78 @@ type V2Sim = {
   v2: { included: number; estimatedMonthly: number; extraConversations: number };
   savesMoney: boolean;
 };
+
+/**
+ * CRE 1 (§4) — el equipo de Conversia propuso un modelo de IA más potente para un
+ * asistente. Como le cambia cuánto le rinde el saldo de créditos, lo decide el cliente:
+ * acá ve el impacto en conversaciones —no en tokens, que no le dicen nada— y acepta o no.
+ * Mientras no responda, su bot sigue con el modelo que tenía.
+ */
+type PendingModelChange = {
+  agentId: string;
+  agentName: string;
+  from: string;
+  to: string;
+  impact: {
+    from: { creditsPerReply: number; conversations: number };
+    to: { creditsPerReply: number; conversations: number };
+  };
+};
+
+function ModelChangeBanner() {
+  const [pending, setPending] = useState<PendingModelChange[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<{ pending: PendingModelChange[] }>("/agents/model-changes")
+      .then((r) => setPending(r.pending ?? []))
+      .catch(() => setPending([]));
+  }, []);
+
+  async function decidir(p: PendingModelChange, accept: boolean) {
+    setBusy(p.agentId);
+    setMsg(null);
+    try {
+      await api(`/agents/model-changes/${p.agentId}`, { method: "POST", body: JSON.stringify({ accept }) });
+      setPending((xs) => xs.filter((x) => x.agentId !== p.agentId));
+      setMsg(accept ? `Listo: ${p.agentName} ya está usando el modelo nuevo.` : `Sin cambios: ${p.agentName} sigue como estaba.`);
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (pending.length === 0) return msg ? <p className="text-dim" style={{ fontSize: 12.5, margin: "0 0 14px" }}>{msg}</p> : null;
+
+  return (
+    <>
+      {pending.map((p) => (
+        <div key={p.agentId} className="card" style={{ padding: 18, marginBottom: 18, borderColor: "var(--acc)" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ width: 38, height: 38, borderRadius: 11, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Sparkles size={19} /></span>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>Te proponemos una IA más potente para {p.agentName}</h2>
+              <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>
+                Responde mejor, pero consume más: <b>{p.impact.to.creditsPerReply} créditos por respuesta</b> en vez de {p.impact.from.creditsPerReply}.
+                Con tu saldo de hoy te alcanzaría para <b>~{p.impact.to.conversations} conversaciones</b> en vez de ~{p.impact.from.conversations}.
+                Mientras no lo aceptes, tu asistente sigue igual.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => void decidir(p, false)} disabled={busy === p.agentId} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>No, gracias</button>
+              <button onClick={() => void decidir(p, true)} disabled={busy === p.agentId} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Acepto <ArrowRight size={15} />
+              </button>
+            </div>
+          </div>
+          {msg ? <p className="text-dim" style={{ margin: "10px 0 0", fontSize: 12.5 }}>{msg}</p> : null}
+        </div>
+      ))}
+    </>
+  );
+}
 
 function V2Banner() {
   const [st, setSt] = useState<V2Status | null>(null);

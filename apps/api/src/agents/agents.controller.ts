@@ -11,6 +11,8 @@ import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify, ru
 import { runQaBattery } from "./agent-qa";
 import { explainQaResults, qaHeadline } from "./qa-report";
 import { assignPublishedAgentToChannelsSafe } from "./assign-agent-to-channels";
+import { applyModelLock, defaultAgentModel } from "./model-policy";
+import { applyAgentModel, clearPendingModelChange, readPendingModelChanges } from "./model-change";
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -106,7 +108,9 @@ export class AgentsController {
           version: 1,
           status: "DRAFT",
           systemPrompt: DEFAULT_PROMPT,
-          config: { model: "gpt-4o-mini", maxTokens: 400, maxToolRounds: 5, language: "es" },
+          // CRE 1 — el modelo del bot nuevo sale de configuración (platform_settings),
+          // no de una constante acá: el equipo de Conversia cambia el estándar sin desplegar.
+          config: { model: await defaultAgentModel(), maxTokens: 400, maxToolRounds: 5, language: "es" },
           tools: ["getServices", "getServicePrice", "searchKnowledgeBase", "transferToHuman"],
           changelog: "Borrador inicial",
           createdById: ctx.userId,
@@ -127,6 +131,52 @@ export class AgentsController {
   }
 
   /** Lista liviana de agentes activos para asignar en la bandeja (cualquier miembro). */
+  /**
+   * CRE 1 (§4) — cambios de modelo de IA que el equipo de Conversia propuso y esperan tu
+   * aceptación. El panel los muestra como aviso con el impacto en el saldo. Si no hay
+   * ninguno, devuelve la lista vacía (el banner no aparece).
+   *
+   * Va ANTES de `@Get(":id")` a propósito: si no, Nest tomaría "model-changes" como un id.
+   */
+  @Get("model-changes")
+  async modelChanges() {
+    const ctx = requirePermission("agents:read");
+    return { pending: await readPendingModelChanges(ctx.organizationId) };
+  }
+
+  /**
+   * El cliente ACEPTA (o rechaza) el modelo propuesto. Su decisión queda registrada con
+   * fecha y usuario, que es lo que pedía la decisión del dueño: nadie le sube el consumo
+   * sin que él lo haya dicho.
+   */
+  @Post("model-changes/:agentId")
+  async decideModelChange(@Param("agentId") agentId: string, @Body() body: unknown) {
+    const ctx = requirePermission("agents:write");
+    const parsed = z.object({ accept: z.boolean() }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException("accept requerido (true o false)");
+    const pendientes = await readPendingModelChanges(ctx.organizationId);
+    const pedido = pendientes.find((p) => p.agentId === agentId);
+    if (!pedido) throw new NotFoundException("No hay un cambio de modelo pendiente para ese asistente");
+
+    if (parsed.data.accept) await applyAgentModel(ctx.organizationId, agentId, pedido.to);
+    await clearPendingModelChange(ctx.organizationId, agentId);
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: parsed.data.accept ? "agent.model_change_accepted" : "agent.model_change_declined",
+          entityType: "agent",
+          entityId: agentId,
+          before: { model: pedido.from },
+          after: { model: parsed.data.accept ? pedido.to : pedido.from, requestedAt: pedido.requestedAt },
+        },
+      }),
+    );
+    return { ok: true, applied: parsed.data.accept, model: parsed.data.accept ? pedido.to : pedido.from };
+  }
+
   @Get("assignable")
   assignable() {
     const ctx = requireContext();
@@ -225,9 +275,32 @@ export class AgentsController {
         where: { agentId: id },
         orderBy: { version: "desc" },
       });
+      // CRE 1 — CANDADO DE MODELO (§4): en Conversia el modelo lo fija la plataforma. Se
+      // conserva el que ya tenía el agente y se ignora el que venga en el cuerpo. Sin
+      // esto, un cliente podía pasarse a claude-opus con curl y multiplicar por 50 su
+      // consumo de créditos sin saberlo.
+      const candado = await applyModelLock({
+        organizationId: ctx.organizationId,
+        incoming: input.config as Record<string, unknown>,
+        current: (latest?.config ?? null) as Record<string, unknown> | null,
+      });
+      if (candado.overridden) {
+        await tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "agent.model_change_rejected",
+            entityType: "agent",
+            entityId: id,
+            before: { model: candado.requested ?? null },
+            after: { model: candado.config.model ?? null },
+          },
+        });
+      }
       const data = {
         systemPrompt: input.systemPrompt,
-        config: input.config as object,
+        config: candado.config as object,
         tools: input.tools,
         changelog: input.changelog ?? null,
         createdById: ctx.userId,

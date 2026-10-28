@@ -483,7 +483,7 @@ async function logServiceBlocked(
 }
 
 /** V2-1 — frase de respaldo (configurable por org) cuando se agota la gracia de conversaciones. */
-async function outOfConversationCreditsPhrase(organizationId: string): Promise<string> {
+export async function outOfConversationCreditsPhrase(organizationId: string): Promise<string> {
   const DEFAULT = "Por ahora no puedo responderte automáticamente, pero no te preocupes: un miembro del equipo te atenderá a la brevedad.";
   try {
     const org = await getAdminPrisma().organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
@@ -514,7 +514,12 @@ async function planDebitsService(organizationId: string): Promise<boolean> {
       select: { planId: true },
     });
     const plan = sub?.planId ? await prisma.plan.findUnique({ where: { id: sub.planId }, select: { features: true } }) : null;
-    return ((plan?.features as any)?.serviceDebitsWallet) === true;
+    const feats = (plan?.features ?? {}) as Record<string, unknown>;
+    // CRE 1 — con Créditos IA, el mensaje de WhatsApp lo paga el CLIENTE con su tarjeta
+    // directo a Meta: la plataforma cobra la IA, no el envío. Si además debitáramos el
+    // servicio de la bolsa, el cliente pagaría dos veces el mismo mensaje.
+    if (feats.aiCreditsWallet === true) return false;
+    return feats.serviceDebitsWallet === true;
   } catch {
     return false;
   }
