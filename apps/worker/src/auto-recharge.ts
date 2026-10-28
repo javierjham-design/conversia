@@ -28,6 +28,27 @@ import type { SubscriptionProvider } from "./subscription-billing/provider";
 /** Prefijo que distingue un cobro de RECARGA de uno de suscripción. */
 export const RECHARGE_ORDER_PREFIX = "rec-";
 
+/**
+ * Horas de espera tras un cobro RECHAZADO antes de volver a intentar.
+ *
+ * Sin esto el tick (cada 15 min) reintentaba la MISMA tarjeta rechazada indefinidamente:
+ * el intento fallido no cuenta contra el tope mensual —que mide cobros exitosos y en
+ * vuelo— ni queda "en vuelo", así que el saldo seguía bajo el umbral y la decisión volvía
+ * a ser "cobrar". Son 96 cobros rechazados y 96 avisos "tu tarjeta falló" por día, a un
+ * cliente que ya se enteró con el primero. Los emisores penalizan el reintento en ráfaga,
+ * y un rechazo por fondos insuficientes no se arregla en 15 minutos: se arregla mañana.
+ */
+export const HORAS_ESPERA_TRAS_FALLO = 24;
+
+/** Rechazos SEGUIDOS tras los cuales se deja de intentar: hace falta otra tarjeta. */
+export const MAX_FALLOS_SEGUIDOS = 3;
+
+/** Rechazos consecutivos de recarga (desde el último cobro que no falló). */
+export interface FallosDeRecarga {
+  seguidos: number;
+  ultimoAt: Date | null;
+}
+
 /** ¿Este cobro es una recarga automática? (lo usa el motor de suscripciones para ignorarla) */
 export function esRecarga(commerceOrder: string): boolean {
   return commerceOrder.startsWith(RECHARGE_ORDER_PREFIX);
@@ -52,7 +73,9 @@ export type RechargeDecision =
   | "sin_tarjeta"
   | "saldo_suficiente"
   | "tope_mensual"
-  | "en_vuelo";
+  | "en_vuelo"
+  | "espera_tras_fallo"
+  | "tarjeta_agotada";
 
 /**
  * ¿Hay que cobrar? Pura. El orden de las guardas importa: primero las que son "no, y punto"
@@ -70,6 +93,10 @@ export function decidirRecarga(input: {
   tieneTarjeta: boolean;
   /** ¿Hay un cobro de recarga pendiente de confirmación? */
   enVuelo: boolean;
+  /** Rechazos seguidos. Ausente = ninguno (el caso de todos los días). */
+  fallos?: FallosDeRecarga;
+  /** Momento de la pasada, para medir la espera tras un rechazo. */
+  now?: Date;
 }): RechargeDecision {
   const { cfg } = input;
   if (!cfg.enabled) return "apagada";
@@ -78,6 +105,16 @@ export function decidirRecarga(input: {
   if (!input.tieneTarjeta) return "sin_tarjeta";
   if (input.enVuelo) return "en_vuelo";
   if (input.saldo >= cfg.thresholdRemaining) return "saldo_suficiente";
+  // Rechazos: primero el que es definitivo (la tarjeta no va a funcionar sola) y después
+  // la espera. Van DESPUÉS del saldo para que una cuenta que ya recargó a mano —y por lo
+  // tanto no necesita nada— no se reporte como bloqueada por un rechazo viejo.
+  const fallos = input.fallos;
+  if (fallos && fallos.seguidos >= MAX_FALLOS_SEGUIDOS) return "tarjeta_agotada";
+  if (fallos?.ultimoAt) {
+    const esperaMs = HORAS_ESPERA_TRAS_FALLO * 3_600_000;
+    const desde = (input.now ?? new Date()).getTime() - fallos.ultimoAt.getTime();
+    if (desde < esperaMs) return "espera_tras_fallo";
+  }
   // El tope se mide con ESTE cobro incluido: si pasarlo lo supera, no se cobra. Un tope de
   // $56.970 (3 recargas) tiene que permitir exactamente 3, no 3 y un poquito más.
   if (input.gastadoEsteMesClp + input.precioClp > cfg.monthlyCapClp) return "tope_mensual";
@@ -121,6 +158,8 @@ export interface AutoRechargePort {
   spentThisMonth(organizationId: string, now: Date): Promise<number>;
   /** ¿Hay un cobro de recarga pendiente de confirmación? */
   hasPendingRecharge(organizationId: string): Promise<boolean>;
+  /** Rechazos SEGUIDOS de recarga (desde el último cobro que no falló) y cuándo fue el último. */
+  failedRecharges(organizationId: string): Promise<FallosDeRecarga>;
   createAttempt(input: { organizationId: string; subscriptionId: string | null; commerceOrder: string; amount: number; currency: string }): Promise<void>;
   markAttempt(commerceOrder: string, status: "pending" | "failed", providerRef: string | null, reason: string | null): Promise<void>;
   notify(
@@ -130,6 +169,14 @@ export interface AutoRechargePort {
   ): Promise<void>;
   /** Una sola vez por mes y motivo (para no repetir el aviso de tope en cada tick). */
   firstTimeThisMonth(key: string): Promise<boolean>;
+  /**
+   * Excepción para la consola de operación (V2-8). OPCIONAL a propósito: el cobro no puede
+   * depender de que exista, y los dobles de test de este módulo no la implementan.
+   */
+  raiseOps?(
+    organizationId: string,
+    input: { type: string; title: string; detail: string; dedupeKey: string; severity: "warning" | "critical" },
+  ): Promise<void>;
 }
 
 export interface AutoRechargeResult {
@@ -163,8 +210,32 @@ export async function runAutoRecharge(
       gastadoEsteMesClp: await port.spentThisMonth(c.organizationId, now),
       tieneTarjeta: Boolean(c.customerRef),
       enVuelo: await port.hasPendingRecharge(c.organizationId),
+      fallos: await port.failedRecharges(c.organizationId),
+      now,
     });
     out.motivos[decision] = (out.motivos[decision] ?? 0) + 1;
+
+    // Se dejó de intentar: el cliente tiene que cambiar la tarjeta o recargar a mano, y
+    // esto no puede quedar solo en un aviso que quizá no lea — es un cliente que paga y
+    // cuyo bot se va a cortar cuando se le acabe la gracia. Una vez por mes, y además a la
+    // cola de operación para que se vea en la consola.
+    if (decision === "tarjeta_agotada") {
+      if (await port.firstTimeThisMonth(`agotada:${c.organizationId}:${now.getUTCFullYear()}-${now.getUTCMonth()}`)) {
+        await port.notify(c.organizationId, "recharge_failed", { reason: "tarjeta_agotada" }).catch(() => undefined);
+        await port
+          .raiseOps?.(c.organizationId, {
+            type: "recarga_fallida",
+            severity: "critical",
+            title: "Recarga automática DETENIDA: la tarjeta falló 3 veces",
+            detail: `Se dejó de reintentar tras ${MAX_FALLOS_SEGUIDOS} rechazos seguidos. El bot sigue con la gracia; hay que cambiar el medio de pago o recargar a mano.`,
+            dedupeKey: `agotada:${now.getUTCFullYear()}-${now.getUTCMonth()}`,
+          })
+          .catch(() => undefined);
+      }
+      continue;
+    }
+    // Esperando tras un rechazo: sin aviso y sin ruido. El cliente ya se enteró cuando falló.
+    if (decision === "espera_tras_fallo") continue;
 
     if (decision === "tope_mensual") {
       // Al llegar al tope se avisa UNA vez en el mes: el cliente tiene que poder subirlo o
@@ -219,6 +290,19 @@ export async function runAutoRecharge(
       // gracia, que es justo para esto.
       await port
         .notify(c.organizationId, "recharge_failed", { reason: r.reason ?? "rechazada", credits: pack.credits, amountClp: pack.priceClp })
+        .catch(() => undefined);
+      // Y el dueño se entera desde el PRIMER rechazo, no cuando ya se agotó la tarjeta: un
+      // cobro que no pasa es un bot que se va a cortar en unos días.
+      await port
+        .raiseOps?.(c.organizationId, {
+          type: "recarga_fallida",
+          severity: "warning",
+          title: "La tarjeta rechazó la recarga automática",
+          detail: `Motivo: ${r.reason ?? "rechazada"}. Se reintenta en ${HORAS_ESPERA_TRAS_FALLO} h; tras ${MAX_FALLOS_SEGUIDOS} rechazos seguidos se deja de intentar.`,
+          // Clave distinta de la del aviso de "se dejó de intentar": si fuera la misma, la
+          // deduplicación taparía justo el aviso grave con el leve que llegó primero.
+          dedupeKey: `fallo:${now.getUTCFullYear()}-${now.getUTCMonth()}`,
+        })
         .catch(() => undefined);
       continue;
     }
