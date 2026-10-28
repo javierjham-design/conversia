@@ -99,9 +99,24 @@ export function PwaManager() {
         });
       });
     });
+    // BUG ARREGLADO (jornada G, 28-oct): esto recargaba la página en la PRIMERA visita de
+    // cada cliente. El service worker nuevo llama a `clients.claim()` al activarse, así que
+    // toma el control de una pestaña que todavía no tenía ninguno → `controllerchange` →
+    // recarga. No había nada que refrescar: la página que se estaba viendo ya era la nueva.
+    //
+    // Lo que rompía: al volver de la pasarela a `/cobros?pago=ok`, la pantalla alcanzaba a
+    // mostrar "Pago recibido" y limpiaba la query; medio segundo después la recarga traía
+    // `/cobros` sin query y el aviso desaparecía. El cliente que acababa de pagar no veía
+    // ninguna confirmación. En el e2e se veía como una carrera: el proyecto `iphone` pasaba
+    // y `desktop` fallaba con el mismo código.
+    //
+    // La recarga tiene sentido SOLO cuando un service worker nuevo reemplaza a uno que ya
+    // estaba controlando la pestaña (ahí sí cambió el código servido). Si no había
+    // controlador, el cambio es la instalación inicial y no se recarga nada.
+    const habiaControlador = Boolean(navigator.serviceWorker.controller);
     let reloaded = false;
     const onControllerChange = () => {
-      if (reloaded) return;
+      if (reloaded || !habiaControlador) return;
       reloaded = true;
       window.location.reload();
     };
