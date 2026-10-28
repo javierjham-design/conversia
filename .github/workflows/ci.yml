@@ -33,6 +33,11 @@ jobs:
       # contraseña en prosa no calza con ningún patrón de proveedor), así que esto los busca.
       - name: Sin credenciales en claro en el repo
         run: node tools/ops/check-plaintext-credentials.cjs
+      # El guardián que comprueba que un deploy llegó de verdad a producción. Se prueba a sí
+      # mismo sin red: si alguien afloja la comparación de SHA, el deploy volvería a dar verde
+      # sirviendo código viejo, que es exactamente el error del 28-oct.
+      - name: El verificador de despliegue distingue un deploy real de uno fallido
+        run: node tools/ops/verificar-despliegue.mjs --autoprueba
       - run: pnpm typecheck
       - run: pnpm test
 

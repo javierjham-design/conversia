@@ -15,6 +15,14 @@ name: deploy-conversia-web
 # cobro— y no había una sola señal roja en ninguna parte. Un rojo por merge es molesto; creer que
 # algo se desplegó cuando no, cuesta mucho más. No bloquea nada: corre DESPUÉS del merge y no es
 # un check requerido.
+#
+# Y DESPUÉS DE DESPLEGAR, SE COMPRUEBA (28-oct-2026, misma tarde). Con el token ya puesto, el
+# builder de Railway falló tras 24 minutos ("Failed to build an image") con un commit que compila
+# sin problemas —el mismo Dockerfile y el mismo commit construyen en 62s en local— y un `railway
+# up` idéntico, repetido 20 minutos después, funcionó. O sea: el deploy puede caerse por razones
+# que no están en el código. Por eso ahora se reintenta una vez, y al final se lee
+# /version.json desde fuera: que el comando devuelva 0 no es prueba de que la web nueva esté
+# arriba; que producción sirva este SHA, sí.
 
 on:
   push:
@@ -60,4 +68,14 @@ jobs:
             exit 1
           fi
           npm i -g @railway/cli
-          railway up --service conversia-web --ci
+          # Un reintento: el builder de Railway se cae solo de vez en cuando (ver cabecera).
+          # Más de dos intentos no: si falla dos veces seguidas es del código y hay que mirarlo.
+          if ! railway up --service conversia-web --ci; then
+            echo "::warning title=Primer intento fallido::El deploy falló; reintentando una vez en 30s."
+            sleep 30
+            railway up --service conversia-web --ci
+          fi
+      # `railway up` devolvió 0, pero eso no dice que la web nueva esté sirviendo. Lo único que lo
+      # dice es leer /version.json desde fuera. Si no aparece este SHA, el job se pone rojo.
+      - name: Producción sirve este commit
+        run: node tools/ops/verificar-despliegue.mjs https://app.conversia.cl/version.json
