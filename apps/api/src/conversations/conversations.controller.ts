@@ -389,7 +389,7 @@ export class ConversationsController {
   /** Cierra la conversación; nota de cierre opcional como comentario interno. */
   @Post(":id/close")
   close(@Param("id") id: string, @Body() body?: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const note = z.object({ note: z.string().max(2000).optional() }).safeParse(body ?? {}).data?.note;
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conversation = await tx.conversation.findUnique({ where: { id } });
@@ -521,7 +521,7 @@ export class ConversationsController {
   /** Asigna a un usuario y/o equipo (null = quitar). Deja evento en el hilo. */
   @Post(":id/assign")
   async assign(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = z
       .object({ userId: z.string().nullable().optional(), teamId: z.string().nullable().optional() })
       .safeParse(body);
@@ -635,7 +635,7 @@ export class ConversationsController {
   /** Envío manual de un evento CAPI de conversión desde la cabecera (opt-in). */
   @Post(":id/capi")
   async sendCapi(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = z
       .object({ eventName: z.string().min(1).max(60), value: z.number().optional(), currency: z.string().max(3).optional() })
       .safeParse(body);
@@ -663,7 +663,7 @@ export class ConversationsController {
   /** Atajo manual: ejecutar un flujo publicado sobre esta conversación. */
   @Post(":id/run-workflow")
   async runWorkflow(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = z.object({ workflowId: z.string().min(1) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("workflowId requerido");
     const info = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -860,7 +860,7 @@ export class ConversationsController {
    */
   @Post(":id/messages")
   async send(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = sendMessageSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException("Texto requerido");
     const internal = parsed.data.internal === true;
@@ -1043,7 +1043,7 @@ export class ConversationsController {
    */
   @Post("start")
   async start(@Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = z
       .object({
         contactId: z.string().min(1).optional(),
@@ -1125,7 +1125,7 @@ export class ConversationsController {
 
   @Post(":id/send-template")
   async sendTemplate(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const parsed = z.object({ templateId: z.string().min(1) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("templateId requerido");
     const message = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -1180,7 +1180,7 @@ export class ConversationsController {
   /** Toma de control humano: la IA deja de responder. */
   @Post(":id/takeover")
   async takeover(@Param("id") id: string) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const r = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conversation = await tx.conversation.findUnique({ where: { id } });
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
@@ -1211,7 +1211,7 @@ export class ConversationsController {
   /** Devuelve el control a la IA (retoma con historial + indicaciones activas). */
   @Post(":id/release")
   async release(@Param("id") id: string) {
-    const ctx = requireContext();
+    const ctx = requirePermission("inbox:write");
     const r = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conversation = await tx.conversation.findUnique({ where: { id } });
       if (!conversation) throw new NotFoundException("Conversación no encontrada");
@@ -1236,7 +1236,9 @@ export class ConversationsController {
   /** Asigna (o cambia) el agente de IA a cargo. */
   @Post(":id/agent")
   async setAgent(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    // Elegir QUÉ agente de IA atiende una conversación es configurar el bot, no atender:
+    // va con `agents:write` (supervisor tiene `agents:read`, así que ya no alcanza).
+    const ctx = requirePermission("agents:write");
     const parsed = z.object({ agentId: z.string().min(1).nullable() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("agentId inválido");
     const r = await this.prisma.withTenant(ctx.organizationId, async (tx) => {

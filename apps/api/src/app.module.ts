@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { BillingSuspensionGuard } from "./tenancy/billing-suspension.guard";
+import { ImpersonationAuditInterceptor } from "./tenancy/impersonation-audit.interceptor";
 import { AgentsController } from "./agents/agents.controller";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
@@ -105,7 +106,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }],
+  providers: [PrismaService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
