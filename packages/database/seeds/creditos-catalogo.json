@@ -1,0 +1,44 @@
+{
+  "_doc": "CRE 2 — catálogo de Créditos IA aprobado por el dueño el 27-oct-2026 (docs/MODELO_COBRO_CREDITOS_IA.md §5 opción B y §8.2). Precios CON IVA INCLUIDO. Regla: ganancia mínima de 300% sobre el costo (= 75% de margen sobre el neto), con el plan Base como única excepción (260%), porque además carga el costo fijo por cliente. Lo verifica apps/api/test/creditos-catalogo.spec.ts; si se cambia un precio acá y deja de cumplir la regla, ese test se cae.",
+  "supuestos": {
+    "costoPorCreditoClp": 2.1,
+    "comisionFlowPct": 3.81,
+    "costoFijoPorClienteClp": 3500,
+    "ivaPct": 19,
+    "creditosPorConversacion": 4.2,
+    "gananciaMinimaPct": 300,
+    "gananciaMinimaPlanBasePct": 260
+  },
+  "planes": [
+    {
+      "code": "conversia_creditos_base",
+      "name": "Base",
+      "priceClp": 18990,
+      "priceUsd": 19,
+      "order": 11,
+      "creditos": 100,
+      "esPlanBase": true
+    },
+    {
+      "code": "conversia_creditos_trial",
+      "name": "Prueba",
+      "priceClp": 0,
+      "priceUsd": 0,
+      "order": 10,
+      "creditos": 0,
+      "regaloBienvenida": 200,
+      "trial": true
+    }
+  ],
+  "packs": [
+    { "code": "conversia-cred-1000", "name": "Recarga 1.000 créditos", "credits": 1000, "priceClp": 18990, "priceUsd": 19, "order": 30, "esRecargaBasica": true },
+    { "code": "conversia-cred-3000", "name": "Pack 3.000 créditos", "credits": 3000, "priceClp": 49990, "priceUsd": 50, "order": 31 },
+    { "code": "conversia-cred-6000", "name": "Pack 6.000 créditos", "credits": 6000, "priceClp": 89990, "priceUsd": 90, "order": 32 },
+    { "code": "conversia-cred-8500", "name": "Pack 8.500 créditos", "credits": 8500, "priceClp": 109990, "priceUsd": 110, "order": 33 },
+    { "code": "conversia-cred-16000", "name": "Pack 16.000 créditos", "credits": 16000, "priceClp": 199990, "priceUsd": 200, "order": 34 }
+  ],
+  "packsEliminados": {
+    "_doc": "Packs de la versión anterior del documento que NO se siembran: no cumplían la regla de 300% de ganancia (§5).",
+    "creditos": [1150, 2500, 5000, 11000, 20000]
+  }
+}

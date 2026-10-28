@@ -7,6 +7,7 @@ import { createAIRouter, fetchWebPageText } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { INDUSTRIES } from "../common/industries";
+import { packUnitForBrand } from "../billing/pack-unit";
 
 /**
  * API PÚBLICA para la web (www.tubot.cl). Sin auth. Precios públicos + captura de
@@ -49,11 +50,15 @@ export class PublicController {
   @Get("conversation-packs")
   async conversationPacks(@Query("brand") brand?: string) {
     const b = (brand ?? "conversia").toLowerCase();
+    // CRE 2 — la web pública muestra los packs del catálogo que está ACTIVO: créditos si el
+    // dueño ya encendió ese modelo, conversaciones si no. `unit` viaja en la respuesta para
+    // que la página sepa cómo nombrarlos (y si decir "IVA incluido").
+    const unit = await packUnitForBrand(b);
     const packs = await this.prisma.admin.messagePackage.findMany({
-      where: { active: true, brand: b, type: "conversation" },
+      where: { active: true, brand: b, type: unit },
       orderBy: { order: "asc" },
     });
-    return packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), order: p.order }));
+    return packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), order: p.order, unit }));
   }
 
   /**

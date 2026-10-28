@@ -296,11 +296,11 @@ export default function Home() {
                     ) : (
                       <>
                         <p style={{ margin: 0, fontSize: 14 }}>Te quedan <b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.balance.toLocaleString("es-CL")}</b> {wallet.unit === "conversation" ? "conversaciones" : "créditos"} de prueba</p>
-                        <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Al activar tu plan tendrás 100 al mes y recargas cuando quieras.</p>
+                        <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Al activar tu plan tendrás saldo todos los meses, y recargas cuando quieras.</p>
                       </>
                     )}
                     <a href="/cobros" className="btn-accent" style={{ display: "inline-block", textDecoration: "none", fontSize: 13, padding: "8px 14px" }}>
-                      {wallet.unit === "conversation" ? "Recargar +100 conversaciones · $21.900" : "Comprar sobre +500 · $21.900"}
+                      {wallet.unit === "conversation" ? "Recargar conversaciones" : wallet.unit === "credit" ? "Recargar créditos" : "Comprar sobre de créditos"}
                     </a>
                   </div>
                 </div>
@@ -324,6 +324,7 @@ export default function Home() {
 type V2Status = {
   isV2: boolean;
   lifecycle: string | null;
+  unit?: "conversation" | "credit";
   trial: { active: boolean; freeRemaining: number; freeTotal: number } | null;
   wallet: { remaining: number; graceUsed: number } | null;
   activation: { basePlanCode: string; basePriceClp: number; basePriceUsd: number; baseIncluded: number } | null;
@@ -477,18 +478,21 @@ function V2Banner() {
     const left = st.trial.freeRemaining;
     const used = st.trial.freeTotal - left;
     const urgent = left <= 5;
-    const price = st.activation ? clpN(st.activation.basePriceClp) : "$18.900";
+    const price = st.activation ? clpN(st.activation.basePriceClp) : "$18.990";
     const included = st.activation?.baseIncluded ?? 100;
+    // CRE 2 — la unidad la manda el backend: a quien paga con Créditos IA no se le habla
+    // de conversaciones, porque los números no son los mismos (1 conversación ≈ 4 créditos).
+    const unidad = st.unit === "credit" ? "créditos" : "conversaciones";
     return (
       <div className="card" style={{ padding: 18, marginBottom: 18, borderColor: urgent ? "var(--warn)" : "var(--acc)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <span style={{ width: 38, height: 38, borderRadius: 11, background: urgent ? "color-mix(in srgb, var(--warn) 18%, transparent)" : "var(--acc-dim)", color: urgent ? "var(--warn)" : "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Zap size={19} /></span>
           <div style={{ flex: 1, minWidth: 220 }}>
             <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>
-              {left > 0 ? <>Te quedan <span style={{ color: urgent ? "var(--warn)" : "var(--acc-deep)" }}>{left}</span> de {st.trial.freeTotal} conversaciones gratis</> : <>Usaste tus {st.trial.freeTotal} conversaciones gratis</>}
+              {left > 0 ? <>Te quedan <span style={{ color: urgent ? "var(--warn)" : "var(--acc-deep)" }}>{left}</span> de {st.trial.freeTotal} {unidad} gratis</> : <>Usaste tus {st.trial.freeTotal} {unidad} gratis</>}
             </h2>
             <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>
-              {left > 0 ? `Tu asistente ya atendió ${used}. Actívalo cuando quieras para no cortarte: ${price}/mes incluye ${included} conversaciones.` : `Tu asistente atendió ${st.trial.freeTotal} conversaciones. Actívalo (${price}/mes, ${included} incluidas) para seguir atendiendo. Mientras, queda en modo copiloto por 7 días.`}
+              {left > 0 ? `Tu asistente ya usó ${used}. Actívalo cuando quieras para no cortarte: ${price}/mes incluye ${included.toLocaleString("es-CL")} ${unidad}.` : `Tu asistente usó tus ${st.trial.freeTotal} ${unidad} de prueba. Actívalo (${price}/mes, ${included.toLocaleString("es-CL")} incluidos) para seguir atendiendo. Mientras, queda en modo copiloto por 7 días.`}
             </p>
           </div>
           <button onClick={activate} disabled={busy} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13.5, padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 6 }}>Activar · {price}<ArrowRight size={15} /></button>

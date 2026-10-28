@@ -38,12 +38,23 @@ export default function Landing() {
 
   // Precios reales del catálogo público V2 (si el go-live está encendido).
   useEffect(() => {
-    api<Plan[]>("/public/plans?brand=conversia").then((p) => setBase(p.find((x) => x.code === "conversia_v2_base") ?? null)).catch(() => {});
+    api<Plan[]>("/public/plans?brand=conversia")
+      .then((p) => setBase(p.find((x) => x.code === "conversia_creditos_base") ?? p.find((x) => x.code === "conversia_v2_base") ?? null))
+      .catch(() => {});
     api<Pack[]>("/public/conversation-packs?brand=conversia").then(setPacks).catch(() => {});
   }, []);
 
-  const basePrice = base ? clp(base.priceClp) : "$18.900";
-  const baseIncluded = base ? (Number(base.features?.conversationsIncluded) || 100) : 100;
+  // CRE 2 — la sección de precios sigue al catálogo que está ACTIVO. Si el dueño enciende
+  // los Créditos IA, el plan que llega es el de créditos y la unidad cambia de nombre: decir
+  // "100 conversaciones incluidas" cuando lo que trae son 100 CRÉDITOS (≈24 conversaciones)
+  // sería una promesa falsa en la página de precios.
+  // El copy completo de la landing con la equivalencia en conversaciones es del paso 12
+  // (CRE 3); acá solo se evita que quede un número o una unidad que no corresponde.
+  const esCreditos = base?.code === "conversia_creditos_base";
+  const unidad = esCreditos ? "créditos" : "conversaciones";
+  const basePrice = base ? clp(base.priceClp) : "$18.990";
+  const baseIncluded = base ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || 100 : 100;
+  const pruebaGratis = esCreditos ? 200 : 30;
 
   return (
     <div className="lp">
@@ -81,13 +92,13 @@ export default function Landing() {
           <div className="lp-hero-copy lp-fade">
             <span className="lp-eyebrow"><Sparkles size={14} /> Atención por WhatsApp con IA</span>
             <h1 className="display">Tu negocio, atendido en WhatsApp <span className="display-italic lp-accent">las 24 horas</span>. Sin que muevas un dedo.</h1>
-            <p className="lp-sub">Conversia responde, agenda y cotiza por ti con un asistente que <strong>se arma solo</strong> en minutos. Pruébalo con <strong>30 conversaciones gratis</strong>, sin tarjeta.</p>
+            <p className="lp-sub">Conversia responde, agenda y cotiza por ti con un asistente que <strong>se arma solo</strong> en minutos. Pruébalo con <strong>{pruebaGratis} {unidad} gratis</strong>, sin tarjeta.</p>
             <div className="lp-hero-ctas">
               <a href="/crear" className="lp-btn lp-btn-lg">Crear mi asistente gratis <ArrowRight size={18} /></a>
               <a href="#como" className="lp-ghost lp-ghost-lg">Ver cómo funciona</a>
             </div>
             <ul className="lp-trust">
-              <li><Check size={15} /> 30 conversaciones gratis</li>
+              <li><Check size={15} /> {pruebaGratis} {unidad} gratis</li>
               <li><Check size={15} /> Sin tarjeta</li>
               <li><Check size={15} /> Listo en minutos</li>
             </ul>
@@ -179,7 +190,7 @@ export default function Landing() {
           <div className="lp-price card">
             <span className="lp-price-tag lp-price-tag-free"><Gift size={14} /> Para empezar</span>
             <h3 className="display">Gratis</h3>
-            <p className="lp-price-amount display">30 <span>conversaciones</span></p>
+            <p className="lp-price-amount display">{pruebaGratis} <span>{unidad}</span></p>
             <p className="lp-price-note">Sin tarjeta. Pruébalo con clientes reales.</p>
             <ul className="lp-check">
               <li><Check size={15} /> Tu asistente completo</li>
@@ -193,7 +204,7 @@ export default function Landing() {
             <span className="lp-price-tag"><Sparkles size={14} /> El más elegido</span>
             <h3 className="display">Base</h3>
             <p className="lp-price-amount display">{basePrice}<span>/mes</span></p>
-            <p className="lp-price-note">{baseIncluded} conversaciones incluidas al mes.</p>
+            <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} incluidos al mes{esCreditos ? " · IVA incluido" : ""}.</p>
             <ul className="lp-check">
               <li><Check size={15} /> Todo lo de la prueba</li>
               <li><Check size={15} /> Multicanal (WhatsApp, IG, Messenger)</li>
@@ -206,7 +217,7 @@ export default function Landing() {
           <div className="lp-price card">
             <span className="lp-price-tag"><Zap size={14} /> Cuando creces</span>
             <h3 className="display">Packs</h3>
-            <p className="lp-price-amount display">+ conversaciones</p>
+            <p className="lp-price-amount display">+ {unidad}</p>
             <p className="lp-price-note">Suma cuando lo necesites. No vencen pronto.</p>
             <ul className="lp-check">
               {(packs.length ? packs : [
@@ -214,7 +225,7 @@ export default function Landing() {
                 { code: "b", name: "Pack 400", credits: 400, priceClp: 84900 },
                 { code: "c", name: "Pack 1.000", credits: 1000, priceClp: 199900 },
               ]).map((p) => (
-                <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} conversaciones · {clp(p.priceClp)}</li>
+                <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad} · {clp(p.priceClp)}</li>
               ))}
             </ul>
             <a href="/crear" className="lp-ghost lp-ghost-lg lp-full">Empezar gratis</a>
@@ -242,7 +253,7 @@ export default function Landing() {
       <section className="lp-cta">
         <div className="lp-cta-inner">
           <h2 className="display">Tu próximo cliente ya está escribiendo. <span className="display-italic">Que no espere.</span></h2>
-          <p>Crea tu asistente en minutos y atiende por WhatsApp hoy mismo. 30 conversaciones gratis.</p>
+          <p>Crea tu asistente en minutos y atiende por WhatsApp hoy mismo. {pruebaGratis} {unidad} gratis.</p>
           <a href="/crear" className="lp-btn lp-btn-lg lp-btn-invert">Crear mi asistente gratis <ArrowRight size={18} /></a>
         </div>
       </section>

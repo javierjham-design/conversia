@@ -7,7 +7,8 @@ cerrar cada etapa.
 |---|---|---|
 | 1 — Motor de Créditos IA | ✅ construida (apagada) | #557 |
 | 1 — Selector de modelo + aceptación del cliente | ✅ construida | #557 |
-| 2 — Catálogo, migración y cobro | pendiente | |
+| 2 — Catálogo y migración de saldos | ✅ construida (inactiva) | #558 |
+| 2b — Recarga automática con tarjeta | pendiente | |
 | 3 — Transparencia y avisos | pendiente | |
 | 4 — Margen y calibración | pendiente | |
 
@@ -168,6 +169,91 @@ ORDER BY o.brand, o.name, a.name;
 
 Con Créditos IA, un agente en gpt-4o consume **12 créditos por respuesta** en vez de 1.
 Decide tú si queda así (porque lo vale) o vuelve al estándar; no cambié ninguno.
+
+## Etapa 2 — Catálogo y migración de saldos (PR #558)
+
+### El catálogo, con tus precios
+
+Sembrado **INACTIVO**. Los precios viven en
+`packages/database/seeds/creditos-catalogo.json` —no en el código— y son los que aprobaste
+el 27-oct (§5 opción B, IVA incluido):
+
+| Producto | Créditos | Precio | Ganancia sobre costo | ≈ conversaciones |
+|---|---|---|---|---|
+| Prueba gratis | 200 | $0 | — | ~48 |
+| **Plan Base** mensual | 100 | **$18.990/mes** | 260% ⚠ excepción | ~24 |
+| **Recarga básica** | 1.000 | **$18.990** | 465% | ~240 |
+| Pack | 3.000 | $49.990 | 412% | ~710 |
+| Pack | 6.000 | $89.990 | 372% | ~1.430 |
+| Pack | 8.500 | $109.990 | 319% | ~2.020 |
+| Pack | 16.000 | $199.990 | 308% | ~3.810 |
+
+Gracia: 100 créditos. Los packs de 1.150 / 2.500 / 5.000 / 11.000 / 20.000 **no** se
+siembran (no cumplían la regla).
+
+**Hay un test que encierra tu regla**: calcula la ganancia de cada pack con las tres partes
+del costo (créditos, comisión de Flow y, en el plan, el costo fijo por cliente) y falla si
+alguno baja del 300%. Si mañana se edita un precio, o si el dólar sube y hay que
+recalibrar, te enteras ahí y no en el reporte de margen tres meses después.
+
+Ese mismo test encontró un detalle del documento: el **260%** del plan Base es el redondeo
+de **259,94%** (sale de sus propios números: $4.434 de costo contra $15.958 netos). No
+cambia ninguna decisión, pero el test compara redondeado para no perseguir centésimas.
+
+### Migrar los saldos (×10)
+
+`node packages/database/scripts/creditos-migrar-saldos.mjs` — **dry-run por defecto**: sin
+`--aplicar` no escribe nada, solo imprime el antes y el después por organización.
+
+- Cada conversación que le quede al cliente pasa a **10 créditos**, con su vencimiento
+  original. Como una conversación consume ~4,2 créditos, todos ganan saldo.
+- La **gracia usada también se multiplica**: si alguien debía 4 conversaciones, debe 40
+  créditos. Si no, le perdonaríamos deuda en una unidad y se la cobraríamos en la otra.
+- **Idempotente por organización**: al convertirla queda un sello y la corrida siguiente se
+  la salta. El sello es por organización y no por lote a propósito: si fuera por lote, un
+  pack que el cliente comprara *después* de migrar se vería como "sin convertir" y se le
+  multiplicaría otra vez.
+- El libro queda **cuadrado asiento por asiento** (saldo real después de cada movimiento),
+  no con un total al final: así se puede auditar de dónde salió cada crédito.
+- Los lotes vencidos no se tocan. TuBot no se toca.
+
+### Encender el modelo nuevo
+
+`node packages/database/scripts/creditos-golive.mjs` (y `OFF=1 …` para volver atrás).
+Activa los planes y packs de créditos, y **deja de vender** los de conversación sin
+borrarlos: quien ya los tiene sigue operando igual. Antes de encender **avisa si queda
+saldo sin convertir**, porque ese cliente gastaría su saldo diez veces más rápido de lo que
+le corresponde.
+
+El plan de prueba de las cuentas nuevas se elige por **el plan que está activo**, así que
+encender el catálogo y que los registros nuevos entren al modelo nuevo son la misma acción:
+no hay un segundo interruptor que pueda quedar desfasado.
+
+### Probado contra una base de datos real
+
+No solo typecheck: levanté un Postgres, apliqué las migraciones y corrí los scripts. Quedó
+verificado que la siembra deja todo inactivo, que correrla dos veces no cambia nada, que el
+dry-run no escribe, que la migración convierte bien (y la segunda corrida se salta), y que
+el go-live y su rollback dejan el catálogo como estaba.
+
+### Tres cosas que estaban mal y se arreglaron
+
+1. **Volver a correr el seeder del catálogo apagaba el plan que está vivo en producción** y
+   lo sacaba de los precios públicos — los registros nuevos se quedaban sin nada que
+   contratar. Ahora un plan ya activo no se apaga desde una siembra: eso lo decide el
+   go-live.
+2. **Un pack de créditos habría acreditado la bolsa de plantillas** en vez de los lotes: el
+   cliente pagaba y recibía saldo que su bot no puede gastar.
+3. **Al activar los créditos, el cliente perdía el medidor de su Inicio** (la pantalla
+   miraba solo la unidad vieja).
+
+### Lo que falta de esta etapa
+
+La **recarga automática con tarjeta** (§6): umbral de 50 créditos, cobro de la recarga
+básica a la tarjeta guardada con Flow, consentimiento explícito al registrarla, tope
+mensual obligatorio y aviso por cada cobro. Va en un PR aparte porque mueve plata de
+verdad. Importante: hoy la auto-recarga **tiene pantalla de configuración pero nada la
+dispara** — está a medio construir desde V2-2, y el PR que viene la completa.
 
 ### Nada que aplicar en producción
 

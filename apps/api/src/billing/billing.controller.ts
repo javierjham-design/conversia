@@ -10,6 +10,7 @@ import { getTemplateUsage } from "../common/plan-limits";
 import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStripeSignature } from "./payment-provider";
 import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus } from "./flow-subscriptions";
 import { PaymentSettingsService } from "./payment-settings.service";
+import { isLotPack, packUnitForOrg } from "./pack-unit";
 
 /**
  * Facturación del TENANT (su propia suscripción). Vista del plan actual, uso
@@ -163,7 +164,14 @@ export class BillingController {
   }
 
   /** V2-1 — medidor de la bolsa de CONVERSACIONES (solo lectura; la lógica vive en el worker). */
-  private async conversationWalletSummary(organizationId: string, included: number) {
+  /**
+   * CRE 2 — medidor de la bolsa de LOTES, que sirve a las dos unidades (conversaciones y
+   * Créditos IA): el saldo, el rollover y la gracia funcionan igual; lo único que cambia es
+   * cómo se llama la unidad y cuánta gracia hay. `unit` y `graceLimit` entran por parámetro
+   * para que el panel muestre la palabra correcta en vez de decirle "conversaciones" a quien
+   * compró créditos.
+   */
+  private async conversationWalletSummary(organizationId: string, included: number, opts: { unit?: "conversation" | "credit"; graceLimit?: number } = {}) {
     const admin = this.prisma.admin;
     const now = new Date();
     const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
@@ -195,13 +203,13 @@ export class BillingController {
     const projected = Math.round(debits + (debits / Math.max(1, dayOfMonth)) * Math.max(0, daysInMonth - dayOfMonth));
     const pctUsed = included > 0 ? Math.round((consumed / included) * 100) : 0;
     return {
-      unit: "conversation" as const,
+      unit: opts.unit ?? ("conversation" as const),
       balance: lots - grace,
       included,
       consumed,
       remaining: lots - grace,
       graceUsed: grace,
-      graceLimit: 20,
+      graceLimit: opts.graceLimit ?? 20,
       expiringThisMonth: expAgg._sum.remaining ?? 0,
       byCategory: {},
       projected,
@@ -216,6 +224,10 @@ export class BillingController {
     const admin = this.prisma.admin;
     // V2-1: planes por conversación (conversationDebitsWallet) → medidor de conversaciones.
     const feats = await this.activePlanFeatures(ctx.organizationId);
+    // CRE 2 — Créditos IA: mismo medidor, otra unidad y otra gracia (100, §6).
+    if (feats.aiCreditsWallet === true) {
+      return this.conversationWalletSummary(ctx.organizationId, Number(feats.aiCreditsIncluded) || 0, { unit: "credit", graceLimit: 100 });
+    }
     if (feats.conversationDebitsWallet === true) {
       return this.conversationWalletSummary(ctx.organizationId, Number(feats.conversationsIncluded) || 0);
     }
@@ -850,7 +862,10 @@ export class BillingController {
     }
     // V2-2 — packs de CONVERSACIONES (type "conversation") acreditan la bolsa V2 (lotes), no
     // la de plantillas. Idempotente por providerRef (dedup del webhook / commerceOrder).
-    if (pkg.type === "conversation") return this.creditConversationPackage(organizationId, pkg, provider, providerRef);
+    // CRE 2: los packs de CRÉDITOS IA acreditan la misma bolsa de lotes (un crédito es un
+    // crédito). Sin esto, un pack de créditos caería al camino de abajo —la bolsa de
+    // PLANTILLAS— y el cliente pagaría por un saldo que su bot no puede usar.
+    if (isLotPack(pkg.type)) return this.creditConversationPackage(organizationId, pkg, provider, providerRef);
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
@@ -888,7 +903,12 @@ export class BillingController {
    * paga primero la gracia pendiente, y emite factura. Idempotente por providerRef (el dedup
    * del webhook ya evita reprocesar; aquí reforzamos con un chequeo del ledger por refId).
    */
-  private async creditConversationPackage(organizationId: string, pkg: { code: string; name: string; credits: number; priceClp: number; priceUsd: unknown }, provider: string, providerRef?: string) {
+  private async creditConversationPackage(organizationId: string, pkg: { code: string; name: string; credits: number; priceClp: number; priceUsd: unknown; type?: string }, provider: string, providerRef?: string) {
+    // CRE 2 — la boleta nombra la unidad REAL del pack. Un pack de créditos facturado como
+    // "3.000 conversaciones" es un documento equivocado en manos del cliente. Y los precios
+    // de créditos son con IVA incluido (§5, opción B), así que la boleta lo dice.
+    const esCredito = pkg.type === "credit";
+    const unidad = esCredito ? "créditos de IA" : "conversaciones";
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { currency: true } });
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
@@ -924,7 +944,7 @@ export class BillingController {
           status: "PAID",
           currency,
           amountDue: amount,
-          lines: [{ concept: `Pack ${pkg.name} (${pkg.credits.toLocaleString("es-CL")} conversaciones)`, amount }],
+          lines: [{ concept: `Pack ${pkg.name} (${pkg.credits.toLocaleString("es-CL")} ${unidad})${esCredito ? " · IVA incluido" : ""}`, amount }],
           paidAt: new Date(),
           provider,
           providerRef: providerRef ?? null,
@@ -941,8 +961,11 @@ export class BillingController {
     const ctx = requireContext();
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const ar = (((org?.settings as Record<string, any> | null)?.autoRecharge ?? {}) as Record<string, any>);
-    const packs = await this.prisma.admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: "conversation" }, orderBy: { order: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } });
+    // CRE 2 — los packs que se ofrecen son los de la unidad que cobra SU plan.
+    const unit = await packUnitForOrg(ctx.organizationId);
+    const packs = await this.prisma.admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: unit }, orderBy: { order: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } });
     return {
+      unit,
       enabled: ar.enabled === true,
       thresholdRemaining: Number.isFinite(ar.thresholdRemaining) ? ar.thresholdRemaining : 20,
       packCode: typeof ar.packCode === "string" ? ar.packCode : (packs[0]?.code ?? null),
@@ -970,7 +993,9 @@ export class BillingController {
     }
     if (d.enabled && d.packCode) {
       const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: d.packCode } });
-      if (!pkg || !pkg.active || pkg.type !== "conversation") throw new BadRequestException("El pack de auto-recarga debe ser un pack de conversaciones válido");
+      // CRE 2: vale cualquier pack que acredite la bolsa de lotes (conversaciones o
+      // créditos). Lo que NO vale es un pack de plantillas: ese saldo no mantiene vivo al bot.
+      if (!pkg || !pkg.active || !isLotPack(pkg.type)) throw new BadRequestException("El pack de auto-recarga debe ser un pack de conversaciones o de Créditos IA válido");
     }
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const prev = (org?.settings as Record<string, unknown> | null) ?? {};
@@ -1015,16 +1040,22 @@ export class BillingController {
     const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true, settings: true, currency: true } });
     const brand = brandOf(org).key;
     const feats = await this.activePlanFeatures(ctx.organizationId);
-    const isV2 = feats.conversationDebitsWallet === true;
+    // CRE 2 — las dos unidades (conversación y Créditos IA) comparten esta pantalla: el
+    // saldo vive en los mismos lotes y el cliente ve el mismo medidor. Si `isV2` siguiera
+    // mirando solo `conversationDebitsWallet`, el día que se activen los créditos el
+    // cliente abriría su Inicio y no vería saldo por ninguna parte.
+    const unit = await packUnitForOrg(ctx.organizationId);
+    const isV2 = feats.conversationDebitsWallet === true || feats.aiCreditsWallet === true;
+    const included = unit === "credit" ? Number(feats.aiCreditsIncluded) || 0 : Number(feats.conversationsIncluded) || 0;
     const lifecycle = ((org?.settings as any)?.conversia?.lifecycle as string | undefined) ?? null;
-    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
-    const packs = await admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: "conversation" }, orderBy: { order: "asc" } });
+    const base = await admin.plan.findUnique({ where: { code: unit === "credit" ? "conversia_creditos_base" : "conversia_v2_base" } });
+    const packs = await admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: unit }, orderBy: { order: "asc" } });
     const activation = base
       ? {
           basePlanCode: base.code,
           basePriceClp: Number(base.priceClp),
           basePriceUsd: Number(base.priceUsd),
-          baseIncluded: Number((base.features as any)?.conversationsIncluded) || 100,
+          baseIncluded: Number((base.features as any)?.aiCreditsIncluded ?? (base.features as any)?.conversationsIncluded) || 100,
           packs: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: Number(p.priceUsd) })),
         }
       : null;
@@ -1033,12 +1064,19 @@ export class BillingController {
     let trial: { active: boolean; freeRemaining: number; freeTotal: number } | null = null;
     let wallet: { remaining: number; graceUsed: number } | null = null;
     if (isV2) {
-      const sum = await this.conversationWalletSummary(ctx.organizationId, Number(feats.conversationsIncluded) || 0);
+      const sum = await this.conversationWalletSummary(ctx.organizationId, included, unit === "credit" ? { unit: "credit", graceLimit: 100 } : {});
       wallet = { remaining: sum.remaining, graceUsed: sum.graceUsed };
-      const inTrial = lifecycle === "v2_trial" || (Number(feats.conversationsIncluded) || 0) === 0;
+      const inTrial = lifecycle === "v2_trial" || included === 0;
       if (inTrial) {
-        // En prueba el único saldo es el lote regalo (30). "Restantes" = saldo (acotado a 30).
-        trial = { active: true, freeRemaining: Math.max(0, Math.min(30, sum.remaining)), freeTotal: 30 };
+        // En prueba el único saldo es el lote de bienvenida. Cuánto fue sale del PLAN de
+        // prueba (30 por conversación · 200 en créditos), no de un número escrito acá:
+        // si no, al activar créditos la barra diría "200 de 30".
+        const trialPlan = await admin.plan.findUnique({
+          where: { code: unit === "credit" ? "conversia_creditos_trial" : "conversia_v2_trial" },
+          select: { features: true },
+        });
+        const regalo = Number((trialPlan?.features as any)?.signupGiftCredits) || 30;
+        trial = { active: true, freeRemaining: Math.max(0, Math.min(regalo, sum.remaining)), freeTotal: regalo };
       }
     }
 
@@ -1053,7 +1091,7 @@ export class BillingController {
       }
     }
 
-    return { isV2, lifecycle, trial, wallet, activation, grandfather };
+    return { isV2, unit, lifecycle, trial, wallet, activation, grandfather };
   }
 
   /**
@@ -1116,9 +1154,17 @@ export class BillingController {
     const org = await admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true, settings: true } });
     if (brandOf(org).key !== "conversia") throw new BadRequestException("La migración V2 es solo para cuentas Conversia.");
     const feats = await this.activePlanFeatures(ctx.organizationId);
-    if (feats.conversationDebitsWallet === true) return { ok: true, already: true };
-    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
-    if (!base || !base.active) throw new BadRequestException("El modelo por conversación aún no está disponible.");
+    if (feats.conversationDebitsWallet === true || feats.aiCreditsWallet === true) return { ok: true, already: true };
+    // CRE 2 — migra al plan de prepago que esté ACTIVO: Créditos IA si el dueño ya encendió
+    // ese catálogo, y si no el de conversaciones. Sin esto, el día del cambio esta ruta
+    // dejaría al cliente en un plan desactivado (sin saldo que acreditar y sin poder pagar).
+    const creditos = await admin.plan.findUnique({ where: { code: "conversia_creditos_base" } });
+    const base = creditos?.active === true ? creditos : await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
+    if (!base || !base.active) throw new BadRequestException("El modelo de prepago aún no está disponible.");
+    // Cortesía del primer mes, del catálogo: 100 conversaciones o su equivalente en
+    // créditos (×10, §8.4). Escrita en el plan para que el día del cambio no quede un "100"
+    // en el código regalando diez veces menos de lo que corresponde.
+    const cortesia = Number((base.features as any)?.migrationCourtesyCredits) || 100;
 
     const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" } });
     // Cambia el plan de la suscripción vigente a V2 (precio sellado V2). Mantiene periodEnd
@@ -1138,8 +1184,8 @@ export class BillingController {
       if (dup) return;
       const expiresAt = new Date(Date.now() + 35 * 86_400_000);
       await tx.conversationWallet.upsert({ where: { organizationId: ctx.organizationId }, create: { organizationId: ctx.organizationId, periodStart: new Date(0) }, update: {} });
-      await tx.conversationCreditLot.create({ data: { organizationId: ctx.organizationId, source: "bonus", amount: 100, remaining: 100, expiresAt, refType: "migration_courtesy", refId } });
-      await tx.conversationCreditLedger.create({ data: { organizationId: ctx.organizationId, delta: 100, reason: "admin_adjust", balanceAfter: 100, refType: "migration_courtesy", refId } });
+      await tx.conversationCreditLot.create({ data: { organizationId: ctx.organizationId, source: "bonus", amount: cortesia, remaining: cortesia, expiresAt, refType: "migration_courtesy", refId } });
+      await tx.conversationCreditLedger.create({ data: { organizationId: ctx.organizationId, delta: cortesia, reason: "admin_adjust", balanceAfter: cortesia, refType: "migration_courtesy", refId } });
     });
 
     const prev = (org?.settings as Record<string, unknown> | null) ?? {};

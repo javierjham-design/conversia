@@ -65,7 +65,7 @@ const PLANS = [
     isPublic: false,
     active: false,
     limits: { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 },
-    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 100, conversationsPerPeriod: -1, conversationHardCap: false },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 100, conversationsPerPeriod: -1, conversationHardCap: false, migrationCourtesyCredits: 100 },
   },
   // V2-9 — plan de PRUEBA del modelo por conversación (30 gratis, sin tarjeta). Debita
   // de la bolsa (conversationDebitsWallet:true) para que las 30 cuenten de verdad, pero
@@ -83,9 +83,54 @@ const PLANS = [
     isPublic: false,
     active: true,
     limits: { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 },
-    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 0, conversationsPerPeriod: -1, conversationHardCap: false, trial: true },
+    features: { v2SelfServe: true, conversationDebitsWallet: true, serviceDebitsWallet: false, aiPlus: false, whatsappTemplates: true, api: true, managed: false, conversationsIncluded: 0, conversationsPerPeriod: -1, conversationHardCap: false, trial: true, signupGiftCredits: 30 },
   },
 ];
+
+// CRE 2 — catálogo de CRÉDITOS IA. Los precios aprobados por el dueño (§5 opción B, §8.2)
+// viven en `seeds/creditos-catalogo.json`, NO acá: así hay una sola fuente de verdad que el
+// test `apps/api/test/creditos-catalogo.spec.ts` puede verificar contra la regla de ganancia
+// mínima de 300%. Si alguien edita un precio y deja de cumplirla, ese test se cae.
+//
+// Meta la paga el cliente con SU tarjeta → serviceDebitsWallet:false. La unidad es el crédito
+// de IA, así que conversationDebitsWallet:false (nunca las dos: sería cobrar dos veces el
+// mismo trabajo, y el worker lo bloquea aparte).
+//
+// TODO NACE INACTIVO: se activa con scripts/creditos-golive.mjs, con el OK del dueño.
+const CRED = JSON.parse(readFileSync(join(here, "..", "seeds", "creditos-catalogo.json"), "utf-8"));
+
+const CREDIT_LIMITS = { users: 3, clinics: 1, channels: 1, agents: 3, workflows: 10, aiTokensDaily: 3000000 };
+const CREDIT_PLANS = CRED.planes.map((p) => ({
+  code: p.code,
+  name: p.name,
+  brand: "conversia",
+  priceClp: p.priceClp,
+  priceUsd: p.priceUsd,
+  order: p.order,
+  isPublic: false,
+  active: false,
+  limits: CREDIT_LIMITS,
+  features: {
+    v2SelfServe: true,
+    aiCreditsWallet: true,
+    aiCreditsIncluded: p.creditos,
+    conversationDebitsWallet: false,
+    serviceDebitsWallet: false,
+    aiPlus: false,
+    whatsappTemplates: true,
+    api: true,
+    managed: false,
+    conversationsPerPeriod: -1,
+    conversationHardCap: false,
+    ...(p.trial ? { trial: true } : {}),
+    ...(p.regaloBienvenida ? { signupGiftCredits: p.regaloBienvenida } : {}),
+    // Cortesía del primer mes al migrar desde un plan V1: 100 conversaciones × 10 (§8.4).
+    ...(p.esPlanBase ? { migrationCourtesyCredits: 1000 } : {}),
+  },
+}));
+PLANS.push(...CREDIT_PLANS);
+
+const CREDIT_PACKS = CRED.packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order }));
 
 // V2-0 — packs de CONVERSACIONES (type "conversation"), por marca conversia. Precios
 // corregidos por el cálculo a máximo uso (CONVERSIA_V2.md §2.1): ≥ ~$200/conv para no
@@ -99,13 +144,24 @@ const CONV_PACKS = [
 async function main() {
   for (const p of PLANS) {
     const active = p.active ?? true; // V2-0: el plan base V2 nace inactivo
+    // Un plan que YA está activo en producción no se apaga desde un seed. Antes, volver a
+    // correr este script dejaba `conversia_v2_base` en active:false —el valor del repo— y
+    // con eso los registros nuevos se quedaban sin plan que contratar. Apagar un plan es
+    // una decisión comercial: la toma el dueño con el script de go-live, no una siembra.
+    const existente = await prisma.plan.findUnique({ where: { code: p.code }, select: { active: true, isPublic: true } }).catch(() => null);
+    const vivo = existente?.active === true;
+    // Si el plan ya está VIVO, no se toca ni su `active` ni su `isPublic`: apagarlo o
+    // sacarlo de los precios públicos es una decisión comercial del dueño (la toma el
+    // script de go-live), no un efecto de volver a sembrar el catálogo.
+    const activeFinal = vivo ? true : active;
+    const isPublicFinal = vivo ? existente.isPublic : p.isPublic;
     await prisma.plan.upsert({
       where: { code: p.code },
-      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: p.isPublic, brand: p.brand, active },
+      update: { name: p.name, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, limits: p.limits, features: p.features, isPublic: isPublicFinal, brand: p.brand, active: activeFinal },
       create: { ...p, active },
     });
   }
-  console.log(`✔ ${PLANS.length} planes conversia_* (conversia_v2_base INACTIVO)`);
+  console.log(`✔ ${PLANS.length} planes conversia_* (los nuevos INACTIVOS; los ya activos no se apagan)`);
 
   await prisma.messagePackage.upsert({
     where: { code: "conversia-sobre-500" },
@@ -116,13 +172,28 @@ async function main() {
 
   // V2-0 — packs de conversaciones (type "conversation"), INACTIVOS hasta el go-live V2-9.
   for (const p of CONV_PACKS) {
+    // Mismo cuidado que los planes: un pack ya activo en producción no se apaga desde acá
+    // (el go-live V2 los encendió; volver a sembrar dejaba al cliente sin nada que comprar).
+    const existente = await prisma.messagePackage.findUnique({ where: { code: p.code }, select: { active: true } }).catch(() => null);
     await prisma.messagePackage.upsert({
       where: { code: p.code },
-      update: { name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: false, brand: "conversia", type: "conversation" },
+      update: { name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: existente?.active === true, brand: "conversia", type: "conversation" },
       create: { code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: false, brand: "conversia", type: "conversation" },
     });
   }
   console.log(`✔ ${CONV_PACKS.length} packs de conversaciones V2 (INACTIVOS)`);
+
+  // CRE 2 — packs de Créditos IA. Un pack ya activo no se apaga desde la siembra (misma
+  // razón que los planes); activarlos o desactivarlos es decisión del dueño.
+  for (const p of CREDIT_PACKS) {
+    const existente = await prisma.messagePackage.findUnique({ where: { code: p.code }, select: { active: true } }).catch(() => null);
+    await prisma.messagePackage.upsert({
+      where: { code: p.code },
+      update: { name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: existente?.active === true, brand: "conversia", type: "credit" },
+      create: { code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: p.priceUsd, order: p.order, active: false, brand: "conversia", type: "credit" },
+    });
+  }
+  console.log(`✔ ${CREDIT_PACKS.length} packs de Créditos IA (INACTIVOS — opción B del §5, IVA incluido)`);
 
   await prisma.platformSetting.upsert({
     where: { key: "walletWeights:conversia" },
