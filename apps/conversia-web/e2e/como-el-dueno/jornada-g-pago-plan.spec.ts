@@ -67,24 +67,27 @@ test.describe("Jornada G — pago mi plan", () => {
     await expect(tarjetaPlan.getByText("Actual")).toBeVisible({ timeout: 20_000 });
   });
 
-  // BUG CONOCIDO, no resuelto. Este caso encontró un defecto REAL y está deshabilitado a
-  // propósito (no borrado) para que quede a la vista hasta arreglarlo.
+  // ARREGLADO (28-oct). Este caso encontró un defecto real: al volver de la pasarela a
+  // `/cobros?pago=ok` la región de estado quedaba VACÍA y el cliente que acababa de pagar
+  // no veía ninguna confirmación.
   //
-  // Qué pasa: al volver de la pasarela a `/cobros?pago=ok`, la región de estado queda
-  // VACÍA (20 s, 23 sondeos). El cliente que acaba de pagar no ve ninguna confirmación.
+  // La causa NO estaba en esta pantalla: `PwaManager` recargaba la página entera en cada
+  // `controllerchange` del service worker. En la PRIMERA visita de cada cliente el service
+  // worker se activa y llama a `clients.claim()`, así que toma el control de una pestaña
+  // que no tenía ninguno → `controllerchange` → `location.reload()`. La pantalla alcanzaba
+  // a mostrar "Pago recibido" y a limpiar la query; medio segundo después la recarga traía
+  // `/cobros` ya sin query y el aviso desaparecía para siempre.
   //
-  // Qué se descartó ya:
-  //  - `leerRetorno` es correcto y está cubierto por tests unitarios (incluye `?pago=ok`).
-  //  - No hay middleware ni redirects en conversia-web que limpien la query.
-  //  - La hidratación funciona: los otros dos casos de esta misma jornada pasan, y uno de
-  //    ellos depende de hacer clic en un botón de esta misma pantalla.
-  //  - Nada vuelve a poner el aviso en null al montar.
-  //  - Capturar el retorno al cargar el módulo (en vez de dentro del efecto) NO lo arregló.
+  // Por eso se veía como una carrera —el proyecto `iphone` pasaba y `desktop` fallaba con
+  // el mismo código— y por eso costó: el síntoma estaba acá y el defecto, en el PWA.
   //
-  // Cómo seguir: hay que reproducirlo con el stack de simulación levantado
-  // (`RUN_DUENO=1` + Docker) y mirar en el navegador si el efecto llega a correr y con qué
-  // valor de `window.location.search`.
-  test.fixme("los retornos de la pasarela aterrizan en /cobros con un mensaje claro", async ({ page, request }, testInfo) => {
+  // El arreglo (una línea): solo se recarga si ANTES había un service worker controlando
+  // la pestaña, que es el único caso en que el código servido realmente cambió.
+  //
+  // Verificado en un navegador real sobre la app construida, en los dos viewports y
+  // contando las cargas: con el guard, 1 carga y el aviso visible; sin él, 2 cargas y el
+  // aviso perdido en los 8 casos.
+  test("los retornos de la pasarela aterrizan en /cobros con un mensaje claro", async ({ page, request }, testInfo) => {
     test.skip(!["desktop", "iphone"].includes(testInfo.project.name), "Retornos en desktop + iphone.");
     const cuenta = await registerAccount(request, { brand: "conversia" });
     await useSession(page, cuenta.token);
