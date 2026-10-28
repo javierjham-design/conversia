@@ -70,7 +70,7 @@ async function seedTenant(fileName: string, adminEmail: string) {
   });
 
   // Usuario administrador del tenant
-  const password = process.env.SEED_ADMIN_PASSWORD ?? "conversia-dev";
+  const password = seedPassword("SEED_ADMIN_PASSWORD", "conversia-dev");
   const user = await prisma.user.upsert({
     // Identidad por marca (D8): el seed base crea tenants de la marca tubot.
     where: { email_brand: { email: adminEmail, brand: "tubot" } },
@@ -227,7 +227,50 @@ const V2_CONVERSATION_PACKS = [
   { code: "conv-pack-1000", name: "Pack 1.000 conversaciones", credits: 1000, priceClp: 199_900, priceUsd: 209, order: 22 },
 ];
 
+/**
+ * §1.3 — El seed NO corre en producción salvo que alguien lo pida a propósito.
+ *
+ * Este archivo crea un tenant de demostración, un usuario admin y un super admin de
+ * plataforma, y hace `upsert` del catálogo de planes. Contra la base de producción eso
+ * significa, en el mejor caso, pisar precios y planes reales; en el peor, dejar cuentas
+ * con contraseña conocida. Un `pnpm db:seed` con el `DATABASE_URL` de producción en la
+ * terminal equivocada alcanzaba para hacerlo, sin preguntar nada.
+ *
+ * Ahora aborta, y además exige contraseñas EXPLÍCITAS: sin `SEED_ADMIN_PASSWORD` /
+ * `PLATFORM_ADMIN_PASSWORD` no hay default que adivinar.
+ *
+ * Para sembrar datos acotados en producción están los scripts dedicados (ver
+ * `docs/RUNBOOK_GOLIVE_V2.md`), no este seed completo.
+ */
+function assertSeedPermitido(): void {
+  const env = process.env.NODE_ENV ?? "development";
+  if (env !== "production") return;
+  if (process.env.ALLOW_PROD_SEED === "true") {
+    console.warn("⚠ Sembrando con NODE_ENV=production porque ALLOW_PROD_SEED=true. Esto hace upsert del catálogo de planes y crea cuentas.");
+    return;
+  }
+  console.error(
+    "✖ `db:seed` ABORTADO: NODE_ENV=production.\n" +
+      "  Este seed crea un tenant de demo + un super admin y pisa el catálogo de planes.\n" +
+      "  Para producción usa los scripts acotados (docs/RUNBOOK_GOLIVE_V2.md).\n" +
+      "  Si de verdad es lo que quieres: ALLOW_PROD_SEED=true (y define SEED_ADMIN_PASSWORD y PLATFORM_ADMIN_PASSWORD).",
+  );
+  process.exit(1);
+}
+
+/** Contraseña del seed: sin default en producción (nada de claves conocidas). */
+function seedPassword(nombreVariable: string, defaultDev: string): string {
+  const v = process.env[nombreVariable];
+  if (v) return v;
+  if ((process.env.NODE_ENV ?? "development") === "production") {
+    console.error(`✖ Falta ${nombreVariable}. En producción el seed NO usa contraseñas por defecto.`);
+    process.exit(1);
+  }
+  return defaultDev;
+}
+
 async function main() {
+  assertSeedPermitido();
   // Catálogo de planes de la plataforma
   for (const p of PLANS) {
     await prisma.plan.upsert({
@@ -281,7 +324,7 @@ async function main() {
   console.log(`✔ ${verticals.length} paquetes verticales del catálogo.`);
 
   // Administrador de PLATAFORMA (super-admin). Identidad separada de los tenants.
-  const platformPassword = process.env.PLATFORM_ADMIN_PASSWORD ?? "conversia-platform-dev";
+  const platformPassword = seedPassword("PLATFORM_ADMIN_PASSWORD", "conversia-platform-dev");
   const platformEmail = process.env.PLATFORM_ADMIN_EMAIL ?? "superadmin@conversia.local";
   await prisma.platformAdmin.upsert({
     // Super admin por marca (D8): el seed base crea el super admin de tubot.

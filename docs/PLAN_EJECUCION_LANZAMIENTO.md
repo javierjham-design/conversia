@@ -105,5 +105,5 @@ pueden ir en un PR cada una o en dos, a tu criterio, siempre sin mezclar con otr
 | 10 | COP 1 — Copiloto que actúa | pendiente | | | |
 | 11 | COP 2 — Personaje y experiencia | pendiente | | | |
 | 12 | CRE 3 + COP 3 — Transparencia, avisos y pago | pendiente | | | |
-| 13 | AUD 8 — IA, frontends y cierre | pendiente | | | |
+| 13 | AUD 8 — IA, frontends y cierre | 🟡 PARCIAL en PR #554 | #554 | 2026-10-27 | Hecha la mitad de ENDURECIMIENTO (puntos 2, 3, 5, 6, 9): SSRF de `leerWeb` cerrado de verdad (se resuelve el dominio y se validan las redirecciones salto a salto — antes bastaba un dominio público que resolviera a la IP de metadatos de la nube); `confirmAppointment` ya no confirma la cita de otro paciente; los CSV ya no ejecutan fórmulas al abrirse en Excel; un modelo sin precio ya no reporta costo 0; y `db:seed` ya no puede arrasar producción. 25 tests. PENDIENTE (puntos 1, 4, 7, 8, 10): memoria de contacto, MCP, frontends de Conversia + **tus textos legales**, y recuperación de contraseña (función nueva). Separados a propósito para que el PR sea revisable. |
 | 14 | CRE 4 + COP 4 — Medición y calibración | pendiente | | | |

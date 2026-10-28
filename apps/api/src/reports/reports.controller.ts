@@ -2,6 +2,7 @@ import { Controller, Get, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
+import { csvCell } from "@conversia/types";
 
 function sinceDays(days: number): Date {
   return new Date(Date.now() - days * 24 * 3600 * 1000);
@@ -17,10 +18,10 @@ function parseRange(from?: string, to?: string): { gte: Date; lte: Date } {
   return { gte, lte };
 }
 
-function csvEscape(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v);
-  return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+// §10.5 — el escape compartido (@conversia/types) además NEUTRALIZA FÓRMULAS: estos CSV
+// llevan nombres y mensajes escritos por contactos, y Excel ejecuta una celda que empieza
+// con `=`, `+`, `-`, `@` o un tabulador al abrir el archivo.
+const csvEscape = csvCell;
 
 @Controller("reports")
 export class ReportsController {

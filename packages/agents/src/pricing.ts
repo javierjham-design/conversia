@@ -20,9 +20,41 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-4o": { inputPerMTok: 2.5, outputPerMTok: 10 },
 };
 
+/**
+ * §7.3 — Precio de un modelo que NO está en la tabla.
+ *
+ * Antes se devolvía costo **0**. Eso no es "no sé": es afirmar que el tenant no gasta
+ * nada. Un modelo nuevo, o una errata en el modelo que el super admin fija por tenant,
+ * dejaba el costo en cero y con él se calculan los márgenes, el modelo de costos y el
+ * precio de los Créditos IA — se vendía por debajo del costo sin que nada chillara.
+ *
+ * Ahora: aviso (una vez por modelo, para no inundar los logs) y el precio del modelo MÁS
+ * CARO que conocemos. Equivocarse SOBREestimando se nota y se corrige; subestimar a cero
+ * es invisible.
+ */
+const yaAvisados = new Set<string>();
+
+function precioConservador(model: string): ModelPricing {
+  if (!yaAvisados.has(model)) {
+    yaAvisados.add(model);
+    console.warn(
+      `⚠ Modelo sin precio en MODEL_PRICING: "${model}". Se cobra con el precio del modelo más caro conocido (estimación ALTA). Agrégalo a packages/agents/src/pricing.ts.`,
+    );
+  }
+  let peor: ModelPricing = { inputPerMTok: 0, outputPerMTok: 0 };
+  for (const p of Object.values(MODEL_PRICING)) {
+    if (p.inputPerMTok + p.outputPerMTok > peor.inputPerMTok + peor.outputPerMTok) peor = p;
+  }
+  return peor;
+}
+
+/** Precio del modelo, o una estimación conservadora si no está en la tabla. */
+export function pricingFor(model: string): ModelPricing {
+  return MODEL_PRICING[model] ?? precioConservador(model);
+}
+
 export function computeCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const p = MODEL_PRICING[model];
-  if (!p) return 0;
+  const p = pricingFor(model);
   return (inputTokens * p.inputPerMTok + outputTokens * p.outputPerMTok) / 1_000_000;
 }
 
@@ -36,8 +68,7 @@ export function computeCostUsdCached(
   model: string,
   t: { inputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; outputTokens: number },
 ): number {
-  const p = MODEL_PRICING[model];
-  if (!p) return 0;
+  const p = pricingFor(model); // §7.3 — nunca 0 por modelo desconocido (ver pricingFor)
   const read = t.cacheReadTokens ?? 0;
   const write = t.cacheCreationTokens ?? 0;
   return (

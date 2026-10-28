@@ -5,6 +5,7 @@ import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { requirePermission } from "../tenancy/permissions";
+import { csvCell } from "@conversia/types";
 
 const listQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -196,10 +197,9 @@ async function resolveWhere(tx: any, q: Record<string, any>): Promise<{ where: a
   return { where: buildWhere(filters, restrictIds), emptyTag: false };
 }
 
-const csvEscape = (v: unknown): string => {
-  const s = v == null ? "" : String(v);
-  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+// §10.5 — escape compartido con neutralización de fórmulas (ver @conversia/types).
+// Un contacto llamado `=HYPERLINK(...)` se ejecutaba al abrir el export en Excel.
+const csvEscape = csvCell;
 
 /**
  * B5 — asigna la etapa inicial "Nuevo" a un contacto recién creado que aún no tiene lead.

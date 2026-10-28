@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PrismaService } from "../prisma.service";
 import { requirePermission } from "../tenancy/permissions";
+import { csvCell } from "@conversia/types";
 
 /**
  * F9 — RECAUDACIÓN Y CAJA. Libro APPEND-ONLY e inmutable (UPDATE/DELETE revocados a nivel
@@ -163,7 +164,10 @@ export class CashController {
     const r = range === "week" || range === "month" ? range : "day";
     const { from, to } = rangeFor(r, date);
     const rows = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.cashLedger.findMany({ where: { organizationId: ctx.organizationId, createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "asc" } }));
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // §10.5 — escape compartido con neutralización de fórmulas (ver @conversia/types):
+    // el `concepto` de un asiento lo escribe una persona y terminaba en una celda que
+    // Excel evalúa.
+    const esc = csvCell;
     const header = ["fecha", "tipo", "metodo", "monto", "moneda", "estado", "concepto", "refType", "refId", "origen"].join(",");
     const lines = (rows as Entry[]).map((e) => [e.createdAt.toISOString(), e.type, e.method, e.amount, e.currency, e.status, e.concept ?? "", e.refType ?? "", e.refId ?? "", e.origin].map(esc).join(","));
     res.setHeader("content-type", "text/csv; charset=utf-8");
