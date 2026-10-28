@@ -89,6 +89,39 @@ describe("§6 — la decisión: ¿se cobra o no?", () => {
   });
 });
 
+/**
+ * El tick corre cada 15 minutos y un intento FALLIDO no queda "en vuelo" ni cuenta contra
+ * el tope (que mide cobros exitosos y pendientes), así que el saldo seguía bajo el umbral
+ * y la decisión volvía a ser "cobrar": la misma tarjeta rechazada, 96 veces al día, con un
+ * aviso cada vez. Estos son los dos frenos.
+ */
+describe("§6 — una tarjeta rechazada no se reintenta en ráfaga", () => {
+  const base = { cfg: CFG_OK, saldo: 10, precioClp: 18_990, gastadoEsteMesClp: 0, tieneTarjeta: true, enVuelo: false };
+  const now = new Date("2026-10-28T12:00:00.000Z");
+  const haceHoras = (h: number) => new Date(now.getTime() - h * 3_600_000);
+
+  it("recién rechazada: espera, no vuelve a cobrar", () => {
+    expect(decidirRecarga({ ...base, now, fallos: { seguidos: 1, ultimoAt: haceHoras(0.25) } })).toBe("espera_tras_fallo");
+  });
+
+  it("a las 23 h sigue esperando; a las 24 h vuelve a intentar", () => {
+    expect(decidirRecarga({ ...base, now, fallos: { seguidos: 1, ultimoAt: haceHoras(23) } })).toBe("espera_tras_fallo");
+    expect(decidirRecarga({ ...base, now, fallos: { seguidos: 2, ultimoAt: haceHoras(24) } })).toBe("cobrar");
+  });
+
+  it("tras 3 rechazos seguidos se deja de intentar (hace falta otra tarjeta)", () => {
+    expect(decidirRecarga({ ...base, now, fallos: { seguidos: 3, ultimoAt: haceHoras(48) } })).toBe("tarjeta_agotada");
+  });
+
+  it("si el cliente recargó a mano y tiene saldo, un rechazo viejo no lo reporta bloqueado", () => {
+    expect(decidirRecarga({ ...base, saldo: 900, now, fallos: { seguidos: 5, ultimoAt: haceHoras(1) } })).toBe("saldo_suficiente");
+  });
+
+  it("sin fallos se comporta igual que siempre", () => {
+    expect(decidirRecarga({ ...base, now, fallos: { seguidos: 0, ultimoAt: null } })).toBe("cobrar");
+  });
+});
+
 describe("§6 — config leída de los ajustes de la organización", () => {
   const def = { threshold: 50, monthlyCapClp: 56_970 };
 
@@ -123,6 +156,7 @@ describe("§6 — los cobros de recarga no se confunden con los de suscripción"
 function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: number; enVuelo?: boolean } = {}) {
   const attempts: Array<{ commerceOrder: string; amount: number; status: string; reason: string | null }> = [];
   const avisos: Array<{ kind: string; data: Record<string, unknown> }> = [];
+  const excepciones: Array<{ type: string; title: string; detail: string; dedupeKey: string; severity: string }> = [];
   const candidato: RechargeCandidate = {
     organizationId: "org1",
     cfg: CFG_OK,
@@ -137,6 +171,7 @@ function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: 
     packOf: async (code) => (code === "conversia-cred-1000" ? { code, credits: 1000, priceClp: 18_990 } : null),
     spentThisMonth: async () => over.gastado ?? 0,
     hasPendingRecharge: async () => over.enVuelo ?? false,
+    failedRecharges: async () => ({ seguidos: 0, ultimoAt: null }),
     createAttempt: async (i) => void attempts.push({ commerceOrder: i.commerceOrder, amount: i.amount, status: "pending", reason: null }),
     markAttempt: async (co, status, _ref, reason) => {
       const a = attempts.find((x) => x.commerceOrder === co);
@@ -147,9 +182,10 @@ function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: 
     },
     notify: async (_org, kind, data) => void avisos.push({ kind, data }),
     firstTimeThisMonth: async () => true,
+    raiseOps: async (_org, input) => void excepciones.push(input),
     ...over,
   };
-  return { port, attempts, avisos, candidato };
+  return { port, attempts, avisos, excepciones, candidato };
 }
 
 const URLS = { confirmation: "https://api/billing/webhooks/flow", ret: "https://app/cobros" };
@@ -250,6 +286,61 @@ describe("§6 — pasada completa", () => {
     expect(r.cobradas).toBe(0);
     expect(attempts).toEqual([]);
     expect(r.motivos.sin_pack).toBe(1);
+  });
+
+  it("con la tarjeta rechazada hace un rato NO vuelve a cobrar ni avisa de nuevo", async () => {
+    const { port, attempts, avisos } = makePort({
+      failedRecharges: async () => ({ seguidos: 1, ultimoAt: new Date(Date.now() - 20 * 60_000) }),
+    });
+    const r = await runAutoRecharge(port, async () => provider, new Date(), URLS);
+
+    expect(r.cobradas).toBe(0);
+    expect(r.motivos.espera_tras_fallo).toBe(1);
+    expect(attempts).toHaveLength(0); // ni un intento más a la pasarela
+    expect(avisos).toEqual([]); // ni un aviso repetido al cliente
+  });
+
+  it("tras 3 rechazos avisa UNA vez y lo deja en la cola de operación", async () => {
+    const { port, attempts, avisos, excepciones } = makePort({
+      failedRecharges: async () => ({ seguidos: 3, ultimoAt: new Date(Date.now() - 2 * 86_400_000) }),
+    });
+    const r = await runAutoRecharge(port, async () => provider, new Date(), URLS);
+
+    expect(r.motivos.tarjeta_agotada).toBe(1);
+    expect(attempts).toHaveLength(0);
+    expect(avisos.map((a) => a.kind)).toEqual(["recharge_failed"]);
+    expect(excepciones).toHaveLength(1);
+    expect(excepciones[0]).toMatchObject({ type: "recarga_fallida", severity: "critical" });
+  });
+
+  it("el primer rechazo ya aparece en la consola, con su propia clave (no tapa al grave)", async () => {
+    const { port, excepciones } = makePort();
+    provider.scheduleCharge(false, "tarjeta rechazada");
+    await runAutoRecharge(port, async () => provider, new Date(), URLS);
+
+    expect(excepciones).toHaveLength(1);
+    expect(excepciones[0]).toMatchObject({ type: "recarga_fallida", severity: "warning" });
+    // La clave del aviso leve y la del grave son distintas a propósito: con la misma, la
+    // deduplicación de `raiseException` taparía el grave con el leve que llegó primero.
+    expect(excepciones[0].dedupeKey).toMatch(/^fallo:/);
+  });
+
+  it("ese aviso no se repite en cada pasada", async () => {
+    const { port, avisos, excepciones } = makePort({
+      failedRecharges: async () => ({ seguidos: 4, ultimoAt: new Date(Date.now() - 2 * 86_400_000) }),
+      firstTimeThisMonth: async () => false,
+    });
+    await runAutoRecharge(port, async () => provider, new Date(), URLS);
+    expect(avisos).toEqual([]);
+    expect(excepciones).toEqual([]);
+  });
+
+  it("sin `raiseOps` en el puerto el cobro sigue funcionando (la consola es un extra)", async () => {
+    const { port } = makePort({
+      failedRecharges: async () => ({ seguidos: 3, ultimoAt: new Date() }),
+      raiseOps: undefined,
+    });
+    await expect(runAutoRecharge(port, async () => provider, new Date(), URLS)).resolves.toMatchObject({ cobradas: 0 });
   });
 
   it("con un cobro en vuelo no se dispara otro", async () => {

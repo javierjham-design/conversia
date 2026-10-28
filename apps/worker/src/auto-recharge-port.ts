@@ -1,6 +1,6 @@
 import IORedis from "ioredis";
 import { getEnv, brandOf } from "@conversia/config";
-import { getAdminPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, raiseException, withTenant } from "@conversia/database";
 import { enqueueNotification } from "./notifications/queue";
 import {
   parseAutoRechargeConfig,
@@ -110,6 +110,28 @@ export function createDbAutoRechargePort(): AutoRechargePort {
       return Boolean(row);
     },
 
+    async failedRecharges(organizationId) {
+      // Se cuentan los fallos CONSECUTIVOS mirando desde el intento más nuevo hacia atrás y
+      // parando en el primero que no falló: un rechazo de hace tres meses, con cobros buenos
+      // en medio, no tiene que bloquear nada hoy.
+      const rows = await admin.paymentAttempt
+        .findMany({
+          where: { organizationId, commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } },
+          orderBy: { createdAt: "desc" },
+          select: { status: true, createdAt: true },
+          take: 20,
+        })
+        .catch(() => []);
+      let seguidos = 0;
+      let ultimoAt: Date | null = null;
+      for (const r of rows) {
+        if (r.status !== "failed") break;
+        seguidos++;
+        if (!ultimoAt) ultimoAt = r.createdAt;
+      }
+      return { seguidos, ultimoAt };
+    },
+
     async createAttempt(input) {
       await admin.paymentAttempt.create({
         data: {
@@ -145,6 +167,10 @@ export function createDbAutoRechargePort(): AutoRechargePort {
             ? "credits.auto_recharge_failed"
             : "credits.auto_recharge_cap";
       await enqueueNotification({ eventKey, organizationId, data });
+    },
+
+    async raiseOps(organizationId, input) {
+      await raiseException(admin, { organizationId, ...input });
     },
 
     async firstTimeThisMonth(key) {
