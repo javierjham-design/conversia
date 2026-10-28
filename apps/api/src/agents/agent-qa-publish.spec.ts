@@ -25,8 +25,19 @@ function makePrisma() {
     agent: { update: async ({ where, data }: any) => { agentUpdates.push({ where, data }); return {}; } },
     auditLog: { create: async ({ data }: any) => { audit.push(data); return data; } },
   };
-  const prisma: any = { withTenant: (_org: string, fn: any) => fn(tx), admin: {} };
-  return { prisma, updates, agentUpdates, audit };
+  // V2-8: la cola de excepciones de la consola (raiseException escribe acá).
+  const excepciones: any[] = [];
+  const admin = {
+    platformException: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => {
+        excepciones.push(data);
+        return data;
+      },
+    },
+  };
+  const prisma: any = { withTenant: (_org: string, fn: any) => fn(tx), admin };
+  return { prisma, updates, agentUpdates, audit, excepciones };
 }
 
 const GOOD_REPLY =
@@ -53,14 +64,27 @@ describe("runQaBattery con autoPublish — publica solo con la batería verde", 
     expect(fallos).toContain("no inventa precios (regla 3)");
   });
 
+  it("batería ROJA → además queda en la CONSOLA (el cliente se queda sin bot y hay que verlo)", async () => {
+    testMock.mockResolvedValue({ ok: true, reply: "Son $45.000 exactos, nada más.", humanHandoff: false, toolEvents: [] });
+    const { prisma, excepciones } = makePrisma();
+
+    await runQaBattery(prisma, "org1", "ag1", { autoPublish: true });
+
+    expect(excepciones).toHaveLength(1);
+    expect(excepciones[0]).toMatchObject({ organizationId: "org1", type: "qa_failed", dedupeKey: "ag1" });
+    // El detalle tiene que decir QUÉ falló: una excepción sin eso obliga a reproducirlo a mano.
+    expect(excepciones[0].detail).toContain("ofrece agendar");
+  });
+
   it("batería VERDE → publica el borrador, lo deja como versión vigente y lo AUDITA", async () => {
     testMock.mockResolvedValue({ ok: true, reply: GOOD_REPLY, humanHandoff: true, toolEvents: [] });
-    const { prisma, updates, agentUpdates, audit } = makePrisma();
+    const { prisma, updates, agentUpdates, audit, excepciones } = makePrisma();
 
     const r = await runQaBattery(prisma, "org1", "ag1", { autoPublish: true });
 
     expect(r.passed).toBe(true);
     expect(r.published).toBe(true);
+    expect(excepciones).toEqual([]); // en verde no se molesta a nadie
     expect(updates[0].data).toMatchObject({ status: "PUBLISHED" });
     expect(updates[0].data.publishedAt).toBeInstanceOf(Date);
     expect(agentUpdates[0].where).toEqual({ id: "ag1" });

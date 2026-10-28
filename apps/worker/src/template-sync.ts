@@ -1,5 +1,5 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
-import { getAdminPrisma, withTenant } from "@conversia/database";
+import { getAdminPrisma, raiseException, withTenant } from "@conversia/database";
 import { ClarivaSchedulingProvider } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 
@@ -12,6 +12,27 @@ import { decryptCredential } from "./credentials";
 
 const SYNC_EVERY_MS = 6 * 60 * 60 * 1000; // 6 h
 const BOOT_DELAY_MS = 60 * 1000;
+
+/**
+ * V2-8 — plantillas RECHAZADAS por Meta en la respuesta de Graph.
+ *
+ * Importa porque una plantilla rechazada es un recordatorio o una difusión que NO va a
+ * salir y el cliente no se entera: el flujo busca una plantilla APROBADA, no la encuentra
+ * y omite el envío en silencio. Pura para poder probar los bordes del payload de Meta
+ * (sin motivo, sin idioma, estados que NO son un rechazo) sin levantar nada.
+ */
+export function plantillasRechazadas(templates: unknown[]): { name: string; language: string; reason: string }[] {
+  const out: { name: string; language: string; reason: string }[] = [];
+  for (const raw of templates ?? []) {
+    const t = (raw ?? {}) as Record<string, unknown>;
+    if (String(t.status ?? "") !== "REJECTED") continue;
+    const name = String(t.name ?? "").trim();
+    if (!name) continue; // sin nombre no hay nada que ir a mirar
+    const reason = String(t.rejected_reason ?? "").trim();
+    out.push({ name, language: String(t.language ?? "es"), reason: reason || "sin motivo informado" });
+  }
+  return out;
+}
 
 export async function syncOrgTemplates(organizationId: string): Promise<number> {
   const env = getEnv();
@@ -99,6 +120,10 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
 
     const templates = (json?.data as any[]) ?? [];
     const seen = new Set<string>();
+    // V2-8 — las que Meta RECHAZÓ. Se calculan ANTES y se levantan DESPUÉS de la
+    // transacción: `withTenant` es una transacción, y meterle trabajo accesorio adentro
+    // significa que un fallo del accesorio aborta la proyección entera.
+    const rechazadas = plantillasRechazadas(templates);
     await withTenant(organizationId, async (tx) => {
       for (const t of templates) {
         const language = String(t.language ?? "es");
@@ -144,6 +169,20 @@ export async function syncOrgTemplates(organizationId: string): Promise<number> 
       const stale = existing.filter((e) => !seen.has(`${e.name}::${e.language}`));
       if (stale.length) await tx.whatsappTemplate.deleteMany({ where: { organizationId, id: { in: stale.map((s) => s.id) } } });
     });
+
+    // Una plantilla rechazada es un recordatorio o una difusión que NO va a salir, y el
+    // cliente no se entera: el flujo la busca APROBADA, no la encuentra y omite el envío.
+    // Una por plantilla (dedupe por nombre+idioma) hasta que se resuelva en la consola.
+    for (const r of rechazadas) {
+      await raiseException(getAdminPrisma(), {
+        organizationId,
+        type: "hsm_rechazada",
+        severity: "warning",
+        title: `Meta rechazó la plantilla "${r.name}"`,
+        detail: `Motivo de Meta: ${r.reason}. Mientras esté rechazada, los envíos que la usan (recordatorios, difusiones) se omiten en silencio.`,
+        dedupeKey: `${r.name}::${r.language}`,
+      }).catch(() => undefined);
+    }
   }
   // Tras proyectar las APROBADAS, empújalas a Cláriva para su Gestor de IA (best-effort).
   await pushApprovedTemplatesToClariva(organizationId).catch((err) =>

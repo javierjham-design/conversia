@@ -1,3 +1,4 @@
+import { raiseException } from "@conversia/database";
 import type { PrismaService } from "../prisma.service";
 import { runAgentTest } from "./agent-test";
 
@@ -73,6 +74,29 @@ function loadScenarios(defn: unknown): QaScenario[] {
 }
 
 export async function runQaBattery(prisma: PrismaService, orgId: string, agentId: string, opts?: { autoPublish?: boolean }): Promise<QaResult> {
+  const r = await correrBateria(prisma, orgId, agentId, opts);
+  /**
+   * V2-8 — un bot que no pasa la batería NO se publica, y el cliente se queda esperando un
+   * asistente que nunca contesta. El copiloto se lo dice en el momento, pero nadie del lado
+   * de la plataforma tenía la lista de clientes atascados así. Va FUERA de la transacción:
+   * `withTenant` es una transacción y un fallo del accesorio abortaría la batería entera.
+   * Una por agente (dedupe) hasta que se resuelva en la consola.
+   */
+  if (r.ok && !r.passed) {
+    const fallan = r.results.filter((x) => !x.pass);
+    await raiseException(prisma.admin, {
+      organizationId: orgId,
+      type: "qa_failed",
+      severity: "warning",
+      title: "El asistente no pasó la batería de calidad y quedó SIN publicar",
+      detail: `Falló: ${fallan.map((f) => `${f.name}${f.reason ? ` (${f.reason})` : ""}`).join(" · ")}. El cliente no tiene bot atendiendo hasta que esto se corrija.`,
+      dedupeKey: agentId,
+    }).catch(() => undefined);
+  }
+  return r;
+}
+
+async function correrBateria(prisma: PrismaService, orgId: string, agentId: string, opts?: { autoPublish?: boolean }): Promise<QaResult> {
   return prisma.withTenant(orgId, async (tx) => {
     const draft = await tx.agentVersion.findFirst({ where: { agentId, status: "DRAFT" }, orderBy: { version: "desc" } });
     const version = draft ?? (await tx.agentVersion.findFirst({ where: { agentId, status: "PUBLISHED" }, orderBy: { version: "desc" } }));
