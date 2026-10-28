@@ -16,6 +16,59 @@ const bcrypt = (bcryptMod as any).default ?? bcryptMod;
 /** Costo bcrypt (ASVS 2.4): 12 es el mínimo recomendado actual. */
 export const BCRYPT_COST = 12;
 
+/** Días de prueba de TuBot y días hasta la purga (7 + 7). No se tocan. */
+export const TRIAL_DAYS = 7;
+export const TRIAL_PURGE_DAYS = 14;
+
+export interface TrialWindow {
+  startedAt: string;
+  endsAt: string;
+  purgeAt: string;
+  state: "active";
+  warnedDays: number[];
+}
+
+/**
+ * §6.10 — Ventana de prueba de una cuenta nueva, SEGÚN SU MARCA.
+ *
+ * TuBot: 7 días de prueba y purga a los 14 (el "7+7" de siempre). Conversia NO usa el
+ * trial de autoservicio: la cuenta nace "pendiente de implementación", sin countdown ni
+ * purga, y el ciclo de cobro arranca al ENTREGAR (B6/F5).
+ *
+ * Está extraída de `register` para poder fijarla con un test sin levantar la base: es una
+ * de las cosas que la etapa 6 promete no haberle cambiado a TuBot.
+ */
+export function trialWindowFor(brand: string | null | undefined, now: Date): TrialWindow | null {
+  if ((brand ?? "tubot") === "conversia") return null;
+  return {
+    startedAt: now.toISOString(),
+    endsAt: new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString(),
+    purgeAt: new Date(now.getTime() + TRIAL_PURGE_DAYS * 86_400_000).toISOString(),
+    state: "active",
+    warnedDays: [],
+  };
+}
+
+/** De dónde sale la sesión: la marca de la cuenta y el modo que pidió el cliente. */
+export interface SessionHint {
+  brand?: string | null;
+  /** Cabecera `x-session-mode` del request (`sliding` = quiero sesión deslizante). */
+  sessionMode?: string | null;
+}
+
+/**
+ * §10.2 — ¿esta sesión lleva refresh token?
+ *
+ * Solo quien usa la sesión deslizante lo recibe: el panel de Conversia (que en un 401
+ * refresca y reintenta) y cualquier cliente que lo pida explícitamente con la cabecera
+ * `x-session-mode: sliding`. El panel de TuBot no lo lee, así que emitirle uno solo creaba
+ * credenciales de 30 días que nadie revoca ni usa.
+ */
+export function wantsSlidingSession(hint?: SessionHint): boolean {
+  if ((hint?.sessionMode ?? "").trim().toLowerCase() === "sliding") return true;
+  return (hint?.brand ?? "").trim().toLowerCase() === "conversia";
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -55,7 +108,7 @@ export class AuthService {
    * estados de lead por defecto. Corre con la conexión admin (crear una
    * organización es una operación de plataforma, fuera del RLS del tenant).
    */
-  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string; draftToken?: string }) {
+  async register(input: { email: string; password: string; name: string; organizationName: string; brand?: string; country?: string; vertical?: string; draftToken?: string; sessionMode?: string }) {
     const db = this.prisma.admin;
     const brand = input.brand ?? "tubot";
     // V2-3 — si viene draftToken, cargamos el draft del generador /crear para materializarlo
@@ -83,16 +136,8 @@ export class AuthService {
     // implementación" (sin countdown ni purga) y el ciclo de cobro arranca al ENTREGAR.
     const isConversia = brand === "conversia";
     const now = new Date();
-    const endsAt = new Date(now.getTime() + 7 * 86_400_000).toISOString();
-    const trial = isConversia
-      ? null
-      : {
-          startedAt: now.toISOString(),
-          endsAt,
-          purgeAt: new Date(now.getTime() + 14 * 86_400_000).toISOString(),
-          state: "active",
-          warnedDays: [],
-        };
+    const trial = trialWindowFor(brand, now);
+    const endsAt = trial?.endsAt ?? new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
 
     // La cuenta nace ASIGNADA al plan Free (no "sin plan / todo en 0"): se crea una
     // suscripción TRIALING al plan gratuito para que la plataforma quede OPERATIVA
@@ -287,7 +332,7 @@ export class AuthService {
       await this.sendVerificationEmail(result.user.id, input.email, result.org).catch(() => {});
     }
 
-    return this.issueTokens(result.user.id, result.org.id, result.role.code, ["*"]);
+    return this.issueTokens(result.user.id, result.org.id, result.role.code, ["*"], { brand, sessionMode: input.sessionMode });
   }
 
   /** Envía (o reenvía) el correo de verificación con un link de 2 días. Best-effort. */
@@ -488,7 +533,7 @@ export class AuthService {
     return { userId: user.id, email };
   }
 
-  async login(input: { email: string; password: string; brand?: string }) {
+  async login(input: { email: string; password: string; brand?: string; sessionMode?: string }) {
     // Cuentas POR MARCA (D8): el correo se resuelve dentro de su marca (la del dominio
     // de origen). El mismo email en TuBot y Conversia son cuentas distintas.
     const brand = input.brand ?? "tubot";
@@ -502,6 +547,15 @@ export class AuthService {
     const membership = user.memberships[0];
     if (!membership) throw new UnauthorizedException("El usuario no pertenece a ninguna organización");
 
+    // §3.9 — la organización puede haber sido dada de baja DESPUÉS del último login. Se
+    // revisa antes de cualquier cosa (incluso antes del desafío MFA): no tiene sentido pedir
+    // el 2.º factor para entrar a una cuenta que ya no existe.
+    const org = await this.prisma.admin.organization.findUnique({
+      where: { id: membership.organizationId },
+      select: { settings: true, deletedAt: true },
+    });
+    if (!org || org.deletedAt) throw new UnauthorizedException("Esta cuenta ya no está disponible");
+
     // 2.º factor activo → desafío (no se emite sesión hasta verificar el código).
     if (user.mfaEnabled) {
       return { mfaRequired: true as const, mfaToken: signMfaToken(user.id, "verify") };
@@ -509,50 +563,75 @@ export class AuthService {
     // La organización exige MFA a owner/admin y este no está enrolado → forzar enrolamiento.
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const roleCode = role?.code ?? "viewer";
-    const org = await this.prisma.admin.organization.findUnique({ where: { id: membership.organizationId }, select: { settings: true } });
-    if ((org?.settings as any)?.security?.requireMfaForAdmins === true && (roleCode === "owner" || roleCode === "admin")) {
+    if ((org.settings as any)?.security?.requireMfaForAdmins === true && (roleCode === "owner" || roleCode === "admin")) {
       return { mfaSetupRequired: true as const, mfaToken: signMfaToken(user.id, "setup") };
     }
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     await this.touchLastLogin(user.id);
-    return this.issueTokens(user.id, membership.organizationId, roleCode, perms);
+    return this.issueTokens(user.id, membership.organizationId, roleCode, perms, { brand, sessionMode: input.sessionMode });
   }
 
   /** Emite la sesión completa de un usuario ya validado (2.º factor o Google). */
-  private async issueForUser(userId: string) {
+  private async issueForUser(userId: string, sessionMode?: string | null) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, include: { memberships: { where: { active: true } } } });
     const membership = user?.memberships[0];
     if (!user || !membership) throw new UnauthorizedException("Sesión inválida");
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     await this.touchLastLogin(user.id);
-    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
+    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms, { brand: user.brand, sessionMode });
   }
 
   /** Verifica el 2.º factor (TOTP o código de recuperación) y emite la sesión. */
-  async verifyMfaLogin(userId: string, code: string) {
+  async verifyMfaLogin(userId: string, code: string, sessionMode?: string | null) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
     if (!user?.mfaEnabled || !user.mfaSecret) throw new UnauthorizedException("MFA no está activo");
-    if (verifyTotp(decryptSecret(user.mfaSecret), code)) return this.issueForUser(userId);
+    if (verifyTotp(decryptSecret(user.mfaSecret), code)) return this.issueForUser(userId, sessionMode);
     const remaining = consumeRecoveryCode(code, Array.isArray(user.mfaRecoveryCodes) ? (user.mfaRecoveryCodes as string[]) : []);
     if (remaining) {
       await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaRecoveryCodes: remaining } });
-      return this.issueForUser(userId);
+      return this.issueForUser(userId, sessionMode);
     }
     throw new UnauthorizedException("Código de verificación inválido");
   }
 
-  /** Genera un secreto TOTP (aún NO activo) y devuelve el URI para el QR. */
-  async beginMfaSetup(userId: string) {
+  /**
+   * Genera un secreto TOTP (aún NO activo) y devuelve el URI para el QR.
+   *
+   * §3.3 — Si el usuario YA tiene MFA activo, esto es un RE-enrolamiento: cambiar de
+   * teléfono. Antes bastaba una sesión robada para pedir un QR nuevo y, con
+   * `mfa/enable`, dejar el 2.º factor en manos del atacante sin saber nunca el código
+   * actual ni la contraseña. Ahora el re-enrolamiento exige las dos cosas: la
+   * contraseña (algo que sabe) y el 2.º factor vigente —TOTP o código de
+   * recuperación— (algo que tiene). El primer enrolamiento no pide nada extra: no hay
+   * nada que proteger todavía.
+   */
+  async beginMfaSetup(userId: string, confirm?: { password?: string; code?: string }) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException("Usuario inválido");
+    if (user.mfaEnabled) {
+      const password = (confirm?.password ?? "").trim();
+      const code = (confirm?.code ?? "").trim();
+      if (!password || !code) {
+        throw new BadRequestException(
+          "Para cambiar tu autenticación en dos pasos necesitamos tu contraseña y un código vigente (del teléfono actual o uno de recuperación).",
+        );
+      }
+      if (!bcrypt.compareSync(password, user.passwordHash)) throw new UnauthorizedException("La contraseña no es correcta.");
+      const totpOk = user.mfaSecret ? verifyTotp(decryptSecret(user.mfaSecret), code) : false;
+      // Un código de recuperación se CONSUME aunque el resultado sea solo "autorizado":
+      // es de un solo uso, igual que al iniciar sesión.
+      const remaining = totpOk ? null : consumeRecoveryCode(code, Array.isArray(user.mfaRecoveryCodes) ? (user.mfaRecoveryCodes as string[]) : []);
+      if (!totpOk && !remaining) throw new UnauthorizedException("El código no es correcto.");
+      if (remaining) await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaRecoveryCodes: remaining } });
+    }
     const secret = generateTotpSecret();
     await this.prisma.admin.user.update({ where: { id: userId }, data: { mfaSecret: encryptSecret(secret) } });
     return { secret, otpauthUri: otpauthUri(secret, user.email) };
   }
 
   /** Confirma el código y ACTIVA MFA; devuelve los códigos de recuperación (una vez) + sesión. */
-  async enableMfa(userId: string, code: string) {
+  async enableMfa(userId: string, code: string, sessionMode?: string | null) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });
     if (!user?.mfaSecret) throw new BadRequestException("Primero genera el código QR de configuración.");
     if (!verifyTotp(decryptSecret(user.mfaSecret), code)) throw new BadRequestException("El código no es correcto. Revisa la hora de tu teléfono e inténtalo de nuevo.");
@@ -561,7 +640,7 @@ export class AuthService {
       where: { id: userId },
       data: { mfaEnabled: true, mfaEnrolledAt: new Date(), mfaRecoveryCodes: recoveryCodes.map(hashRecoveryCode) },
     });
-    const session = await this.issueForUser(userId);
+    const session = await this.issueForUser(userId, sessionMode);
     return { recoveryCodes, ...session };
   }
 
@@ -581,7 +660,7 @@ export class AuthService {
    * en el controlador). Solo permitimos cuentas que YA existen como miembros —
    * no es auto-registro. Mensaje genérico para no filtrar qué correos existen.
    */
-  async loginWithGoogle(email: string, brand = "tubot") {
+  async loginWithGoogle(email: string, brand = "tubot", sessionMode?: string | null) {
     const user = await this.prisma.admin.user.findUnique({
       where: { email_brand: { email, brand } },
       include: { memberships: { where: { active: true } } },
@@ -590,10 +669,27 @@ export class AuthService {
     if (!user || !membership) {
       throw new UnauthorizedException("Tu cuenta de Google no está autorizada en la plataforma");
     }
+
+    // §3.4 — el 2.º factor vale para TODA puerta de entrada. Google prueba el correo, no
+    // el segundo factor: sin esto, quien tuviera la cuenta de Google del dueño entraba sin
+    // TOTP y el MFA del panel era decorativo. Mismas dos bifurcaciones que `login()`.
+    const org = await this.prisma.admin.organization.findUnique({
+      where: { id: membership.organizationId },
+      select: { settings: true, deletedAt: true },
+    });
+    if (!org || org.deletedAt) throw new UnauthorizedException("Esta cuenta ya no está disponible");
+
+    if (user.mfaEnabled) {
+      return { mfaRequired: true as const, mfaToken: signMfaToken(user.id, "verify") };
+    }
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
+    const roleCode = role?.code ?? "viewer";
+    if ((org.settings as any)?.security?.requireMfaForAdmins === true && (roleCode === "owner" || roleCode === "admin")) {
+      return { mfaSetupRequired: true as const, mfaToken: signMfaToken(user.id, "setup") };
+    }
     const perms = Array.isArray(role?.permissions) ? (role!.permissions as string[]) : [];
     await this.touchLastLogin(user.id);
-    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms);
+    return this.issueTokens(user.id, membership.organizationId, roleCode, perms, { brand, sessionMode });
   }
 
   /** Organizaciones a las que pertenece el usuario (para el selector de tenant). */
@@ -616,7 +712,7 @@ export class AuthService {
   }
 
   /** Cambia la organización activa: valida la membresía y emite un token nuevo. */
-  async switchOrg(userId: string, organizationId: string) {
+  async switchOrg(userId: string, organizationId: string, sessionMode?: string | null) {
     const membership = await this.prisma.admin.organizationUser.findUnique({
       where: { organizationId_userId: { organizationId, userId } },
     });
@@ -625,7 +721,9 @@ export class AuthService {
     if (!org || org.deletedAt) throw new UnauthorizedException("Organización no disponible");
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
-    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms);
+    // La marca sale de la CUENTA (no del org destino): define si la sesión es deslizante (§10.2).
+    const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, select: { brand: true } });
+    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms, { brand: user?.brand, sessionMode });
   }
 
   /** Marca la última conexión — best-effort, jamás bloquea el login. */
@@ -637,10 +735,12 @@ export class AuthService {
     }
   }
 
-  private async issueTokens(userId: string, orgId: string, roleCode: string, perms: string[]) {
+  private async issueTokens(userId: string, orgId: string, roleCode: string, perms: string[], session?: SessionHint) {
     const token = signAppToken({ sub: userId, orgId, role: roleCode, perms });
-    // Sesión deslizante (Bloque 3): junto al access token corto emitimos un refresh token opaco de
-    // larga vida. Aditivo — quien no lo use (p. ej. el panel de TuBot) simplemente lo ignora.
+    // §10.2 — el refresh token solo se EMITE a quien lo usa. Antes se creaba una sesión
+    // deslizante de 30 días en Redis en cada login de cualquier marca: el panel de TuBot
+    // nunca la lee, así que eran credenciales de larga vida acumulándose sin dueño.
+    if (!wantsSlidingSession(session)) return { token, organizationId: orgId, role: roleCode };
     const refreshToken = await this.refreshSessions.create(userId, orgId);
     return { token, refreshToken, organizationId: orgId, role: roleCode };
   }

@@ -1,6 +1,7 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import { publishRealtime } from "./realtime.js";
 import { purgeExpiredExports } from "./exports.js";
+import { resumeCoexistencePauses } from "./coexistence-pause.js";
 
 /**
  * Reglas de la bandeja (/settings/conversations), aplicadas por un tick cada
@@ -21,6 +22,11 @@ export function startInboxRules(): () => void {
         const botResumeMinutes = Number(inbox.botResumeMinutes ?? 0);
         if (autoCloseDays > 0) await autoClose(org.id, autoCloseDays, String(inbox.autoCloseNote ?? "")).catch(() => undefined);
         if (botResumeMinutes > 0) await botResume(org.id, botResumeMinutes).catch(() => undefined);
+        // §5 — devolver el control al bot cuando vence la pausa por coexistencia. NO
+        // depende de `settings.inbox` (es una pausa que puso el sistema, no una regla que
+        // el dueño configuró) y es inerte para quien no tiene canales en coexistencia:
+        // solo mira conversaciones con el plazo guardado en su `meta`.
+        await resumeCoexistencePauses(org.id).catch(() => undefined);
       }
     } catch (err) {
       console.error("✖ inbox-rules tick:", (err as Error).message);

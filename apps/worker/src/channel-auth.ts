@@ -55,6 +55,82 @@ export class ChannelConfigError extends Error {
   }
 }
 
+/**
+ * §4.5 — El mensaje NO se puede entregar A ESTE DESTINATARIO, y reintentar no lo arregla.
+ *
+ * Es distinto de `ChannelConfigError`: ahí el problema es del CANAL (falta el nombre para
+ * mostrar, el número no está registrado…) y corresponde marcarlo en error. Acá el canal
+ * está perfecto; lo que no se puede es este mensaje a este número. Marcar el canal por
+ * esto dejaría al cliente viendo "revisa tu WhatsApp" porque UN contacto cerró su ventana
+ * de 24 h o tiene el número dado de baja.
+ */
+export class MessageUndeliverableError extends Error {
+  readonly kind = "message_undeliverable";
+  constructor(
+    message: string,
+    readonly userMessage: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * §4.5 — Meta nos está limitando (130429 throughput de la cuenta, 131056 el par
+ * número→destinatario). Reintentar enseguida empeora el problema: hay que esperar.
+ */
+export class MetaRateLimitError extends Error {
+  readonly kind = "meta_rate_limit";
+  constructor(
+    message: string,
+    /** Cuánto esperar antes de volver a intentar. */
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * §4.5 — Clasifica un error de ENVÍO de Meta en lo que hay que hacer con él.
+ *
+ * Antes, todo lo que no fuera 190 (token) ni un 400 de configuración entraba al reintento
+ * genérico de BullMQ. Eso significa dos cosas malas: una ventana de 24 h cerrada (131047)
+ * o un número que no recibe (131026) se reintentaban varias veces para terminar igual, con
+ * el error CRUDO de Meta guardado en el mensaje; y un rate limit (130429/131056) se
+ * reintentaba rápido, que es exactamente lo que no hay que hacer cuando te están limitando.
+ */
+export function classifyMetaSendError(
+  status: number,
+  body: unknown,
+  rawText: string,
+): MessageUndeliverableError | MetaRateLimitError | null {
+  const err = (body as { error?: { code?: number; message?: string } } | null)?.error;
+  const code = err?.code ?? (/"code":(\d+)/.exec(rawText)?.[1] ? Number(/"code":(\d+)/.exec(rawText)![1]) : undefined);
+  const detalle = (err?.message ?? rawText).slice(0, 200);
+
+  // TERMINALES para este mensaje (el canal está bien).
+  if (code === 131047) {
+    return new MessageUndeliverableError(
+      `Meta 131047 (ventana de 24 h cerrada): ${detalle}`,
+      "Pasaron más de 24 h desde el último mensaje de este contacto, así que WhatsApp no permite escribirle texto libre. Usa una plantilla aprobada para reabrir la conversación.",
+    );
+  }
+  if (code === 131026) {
+    return new MessageUndeliverableError(
+      `Meta 131026 (mensaje no entregable): ${detalle}`,
+      "WhatsApp no puede entregar a este número: puede no tener WhatsApp, estar dado de baja o no aceptar mensajes de empresas. Confirma el número con el contacto.",
+    );
+  }
+
+  // LIMITACIÓN: esperar, no insistir.
+  if (code === 130429 || code === 131056 || status === 429) {
+    // 131056 es por PAR (nuestro número → ese destinatario) y se suelta rápido; 130429 es
+    // de toda la cuenta y necesita más aire.
+    const retryAfterMs = code === 131056 ? 60_000 : 15 * 60_000;
+    return new MetaRateLimitError(`Meta ${code ?? status} (rate limit): ${detalle}`, retryAfterMs);
+  }
+  return null;
+}
+
 /** Traduce un error 400 de Meta a un aviso claro para el tenant (o null si no aplica). */
 export function channelConfigNotice(text: string): string | null {
   if (text.includes('"code":131037') || text.toLowerCase().includes("display name"))
@@ -168,6 +244,50 @@ export async function resolveChannelAuth(
       tokenSource,
     };
   });
+}
+
+/**
+ * §4.2 — ¿Se permite ENVIAR con el token GLOBAL de la plataforma en vez del del canal?
+ *
+ * Enviar con el token global significa responderle al cliente de alguien con credenciales
+ * que no son suyas: o Meta lo rechaza (#133010) o sale por un número que el cliente no
+ * conectó. La auditoría pide cerrarlo salvo para Conversia (que ofrece número llave en
+ * mano de la plataforma) o cuentas marcadas como de plataforma.
+ *
+ * Se cierra EN DOS PASOS a propósito. Desde el worker no hay forma de saber si alguna
+ * cuenta de TuBot depende hoy del token global, y cortarle los envíos a ciegas a un bot que
+ * atiende 24/7 sería justo el incidente que esta etapa quiere evitar. Así que:
+ *  1. Siempre deja rastro VISIBLE (una excepción de plataforma por canal y día) → el dueño
+ *     ve en la consola si alguien está usando el global, y quién.
+ *  2. Bloquea solo con `WA_GLOBAL_TOKEN_FALLBACK=block`, cuando él lo decida.
+ *
+ * Conversia nunca se bloquea: ahí el token de plataforma es parte del producto.
+ */
+export async function decidirFallbackGlobal(
+  organizationId: string,
+  auth: Pick<ChannelAuth, "tokenSource" | "phoneNumberId" | "channelConnectionId">,
+): Promise<"ok" | "block"> {
+  // Token propio del canal (el caso normal) o canal mock: nada que decidir.
+  if (!auth.tokenSource || auth.tokenSource === "channel" || auth.tokenSource === "none") return "ok";
+  try {
+    const admin = getAdminPrisma();
+    const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
+    const brand = (org?.brand ?? "tubot").toLowerCase();
+    // Visibilidad SIEMPRE, con dedupe por canal y día: una fila, no una por mensaje.
+    const dia = new Date().toISOString().slice(0, 10);
+    await raiseException(admin, {
+      organizationId,
+      type: "token_global_en_uso",
+      title: `Envío con el token GLOBAL de la plataforma (${auth.tokenSource})`,
+      severity: "warning",
+      detail: `El canal ${auth.channelConnectionId ?? "?"} (número ${auth.phoneNumberId}) está enviando con el token de la plataforma, no con el suyo. Motivo: ${auth.tokenSource}. Reautoriza WhatsApp en ese canal.`,
+      dedupeKey: `token-global:${auth.channelConnectionId ?? auth.phoneNumberId}:${dia}`,
+    }).catch(() => undefined);
+    if (brand === "conversia") return "ok"; // número de plataforma: es parte del producto
+    return getEnv().WA_GLOBAL_TOKEN_FALLBACK === "block" ? "block" : "ok";
+  } catch {
+    return "ok"; // no poder decidir no puede dejar al bot mudo
+  }
 }
 
 /**

@@ -189,13 +189,16 @@ export default function LoginPage() {
             <span className="h-px flex-1 bg-line" />o<span className="h-px flex-1 bg-line" />
           </div>
         )}
+        {/* §10.6 — `autoComplete` explícito: sin él los gestores de contraseñas no
+            rellenan de forma fiable, lo que empuja a la gente a usar claves memorizables
+            (o a escribirlas en otra parte). Es una medida de seguridad, no de comodidad. */}
         <label className="block text-sm">
           Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={input} required />
+          <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={input} required />
         </label>
         <label className="block text-sm">
           Contraseña
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={input} required />
+          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={input} required />
         </label>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button type="submit" disabled={loading} className={btn}>{loading ? "Entrando…" : "Entrar"}</button>

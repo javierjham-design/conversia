@@ -1510,9 +1510,15 @@ export class PlatformController {
 
   /** Marca un ticket como resuelto (o lo reabre). */
   @Patch("support/:id")
-  async updateSupport(@Param("id") id: string, @Body() body: unknown) {
+  async updateSupport(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
     const parsed = z.object({ status: z.enum(["open", "resolved"]) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Estado inválido");
+    // §6.5 — el listado, el detalle y la respuesta ya validaban marca; cerrar o reabrir
+    // iba por id a secas, así que el admin de una marca podía cerrarle un ticket abierto
+    // a un cliente de la otra (y el cliente lo ve en su widget).
+    const ticket = await this.prisma.admin.supportTicket.findUnique({ where: { id }, select: { organizationId: true } });
+    if (!ticket) throw new NotFoundException("Ticket no encontrado");
+    await this.assertOrgBrand(req, ticket.organizationId);
     const t = await this.prisma.admin.supportTicket.update({
       where: { id },
       data: { status: parsed.data.status, resolvedAt: parsed.data.status === "resolved" ? new Date() : null },
@@ -1594,14 +1600,35 @@ export class PlatformController {
       })
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    await this.assertDemoLeadBrand(req, id); // §6.5
     const lead = await this.prisma.admin.demoLead.update({ where: { id }, data: parsed.data });
     await this.audit(req, "platform.demo.update", "demo_lead", id, parsed.data);
     return lead;
   }
 
+  /**
+   * §6.5 — ¿este prospecto es alcanzable por la marca del admin?
+   *
+   * `DemoLead` no tiene columna `brand` y su `organizationId` es opcional (entran desde
+   * la landing antes de existir como cliente). Se aplica la MISMA regla que ya usa el
+   * listado (D8): el CRM público es de TuBot y ve todo, incluidos los prospectos sin org;
+   * otra marca solo alcanza los que ya están vinculados a una org suya. Sin esto, editar
+   * o provisionar iba por id suelto y cruzaba marcas.
+   */
+  private async assertDemoLeadBrand(req: PlatformRequest, id: string): Promise<void> {
+    if (this.reqBrand(req) === "tubot") return;
+    const lead = await this.prisma.admin.demoLead.findUnique({ where: { id }, select: { organizationId: true } });
+    if (!lead?.organizationId) throw new NotFoundException("Prospecto no encontrado");
+    await this.assertOrgBrand(req, lead.organizationId);
+  }
+
   /** Provisiona el demo: crea org + usuario owner con IA PAUSADA (no gasta tokens). */
   @Post("demo-leads/:id/provision")
   async provisionDemoLead(@Param("id") id: string, @Req() req: PlatformRequest) {
+    // §6.5 — explícito aunque hoy sea redundante: provisionar exige un prospecto SIN org,
+    // y la regla D8 solo le da esos a TuBot. Si mañana se le dan prospectos propios a otra
+    // marca, el guard ya está puesto y no hay que acordarse de agregarlo.
+    await this.assertDemoLeadBrand(req, id);
     const lead = await this.prisma.admin.demoLead.findUnique({ where: { id } });
     if (!lead) throw new NotFoundException("Prospecto no encontrado");
     if (lead.organizationId) throw new BadRequestException("Este prospecto ya tiene un demo provisionado");
@@ -1614,6 +1641,12 @@ export class PlatformController {
   /** Crea un prospecto manualmente (para demos agendados fuera de la web). */
   @Post("demo-leads")
   async createDemoLead(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.5 — `DemoLead` no tiene columna `brand`, y el prospecto nace SIN organización.
+    // Con la regla de lectura de D8 (los prospectos sin org son de TuBot), un prospecto
+    // creado por el admin de Conversia quedaba invisible para él y visible en el CRM de
+    // TuBot. Hasta que exista la columna `brand` (docs/MIGRACIONES_DIFERIDAS.md), el CRM
+    // de prospectos lo opera TuBot: así escribir y leer siguen la MISMA regla.
+    assertTubotBrand(req);
     const parsed = z
       .object({
         name: z.string().min(2).max(80),
@@ -1631,9 +1664,16 @@ export class PlatformController {
 
   // ------------------------------- Planes -------------------------------
 
+  /**
+   * §6.3 — Catálogo de planes DE SU MARCA.
+   *
+   * Sin el filtro, el super admin de Conversia veía (y podía asignarle a un cliente) los
+   * planes de TuBot y al revés: precios, features y cupos de otra marca, con el riesgo de
+   * dejar a un cliente en un plan que su marca no vende.
+   */
   @Get("plans")
-  plans() {
-    return this.prisma.admin.plan.findMany({ orderBy: { order: "asc" } });
+  plans(@Req() req: PlatformRequest) {
+    return this.prisma.admin.plan.findMany({ where: { brand: this.reqBrand(req) }, orderBy: { order: "asc" } });
   }
 
   /** Vista global del cobro recurrente: MRR, fallos, suspendidas, canceladas y próximos cobros. */
@@ -1720,6 +1760,9 @@ export class PlatformController {
 
   @Patch("templates-pricing")
   async setTemplatesPricing(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.5 — ajuste GLOBAL (una sola fila para las dos marcas): el admin de Conversia
+    // pisaba el precio que ve TuBot. Hasta que exista por marca, lo administra TuBot.
+    assertTubotBrand(req);
     const parsed = z
       .object({ priceClp: z.number().int().min(0).nullable().optional(), priceUsd: z.number().min(0).nullable().optional() })
       .safeParse(body);
@@ -1748,6 +1791,9 @@ export class PlatformController {
   /** Guarda tarifas de Meta por país y/o el tipo de cambio (editable desde el panel). */
   @Patch("cost-settings")
   async updateCostSettings(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.5 — tarifas de Meta y tipo de cambio son GLOBALES: los usan las dos marcas para
+    // calcular costos y márgenes. Solo TuBot los administra.
+    assertTubotBrand(req);
     const parsed = z
       .object({
         usdToClp: z.number().positive().max(100_000).optional(),
@@ -1791,6 +1837,10 @@ export class PlatformController {
   /** Ajusta el tope global y/o el default por tenant (auditado). */
   @Patch("messaging-limits")
   async setMessagingLimits(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.5 — estas son las claves SIN marca (`messagingCapGlobalDay`), que tras §6.1
+    // quedaron siendo el techo de TuBot. Que las toque otra marca le cambiaría el fusible
+    // a TuBot. El techo por marca se guarda en `messagingCapGlobalDay:<marca>`.
+    assertTubotBrand(req);
     const parsed = z
       .object({ global: z.number().int().min(1).max(10_000_000).optional(), perTenantDefault: z.number().int().min(1).max(10_000_000).optional() })
       .safeParse(body);
@@ -2073,6 +2123,10 @@ export class PlatformController {
   @Patch("packages/:id")
   async updatePackage(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
     const d = this.parsePackage(body, true);
+    // §6.5 — el listado y la creación ya respetaban la marca (A4), pero editar y borrar
+    // iban por id a secas: el admin de una marca podía cambiarle el PRECIO o borrarle un
+    // pack a la otra. 404 para no confirmar que el pack existe.
+    await this.assertPackageBrand(req, id);
     const pkg = await this.prisma.admin.messagePackage.update({ where: { id }, data: d });
     await this.audit(req, "platform.package_update", "package", id, d);
     return pkg;
@@ -2080,9 +2134,19 @@ export class PlatformController {
 
   @Delete("packages/:id")
   async deletePackage(@Param("id") id: string, @Req() req: PlatformRequest) {
+    await this.assertPackageBrand(req, id); // §6.5 — ver nota en updatePackage.
     await this.prisma.admin.messagePackage.delete({ where: { id } });
     await this.audit(req, "platform.package_delete", "package", id);
     return { ok: true };
+  }
+
+  /** §6.5 — el pack existe Y es de la marca del admin; si no, 404. */
+  private async assertPackageBrand(req: PlatformRequest, id: string): Promise<void> {
+    const pkg = await this.prisma.admin.messagePackage.findFirst({
+      where: { id, brand: this.reqBrand(req) },
+      select: { id: true },
+    });
+    if (!pkg) throw new NotFoundException("Paquete no encontrado");
   }
 
   private parsePackage(body: unknown, partial = false) {
@@ -2151,7 +2215,10 @@ export class PlatformController {
   /** Prueba rápida de IA: manda un prompt al modelo y devuelve la respuesta + uso.
    *  Verifica que la llave (OpenAI/Anthropic) funciona sin depender de WhatsApp. */
   @Post("test-ai")
-  async testAi(@Body() body: unknown) {
+  async testAi(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.5 — prueba las llaves de IA GLOBALES de la plataforma (y gasta tokens con
+    // ellas). Solo TuBot, igual que las credenciales de pago.
+    assertTubotBrand(req);
     const parsed = z
       .object({
         model: z.string().default("gpt-4o-mini"),
@@ -2177,7 +2244,9 @@ export class PlatformController {
   @Post("plans")
   async createPlan(@Body() body: unknown, @Req() req: PlatformRequest) {
     const input = planSchema.parse2(body);
-    const plan = await this.prisma.admin.plan.create({ data: input });
+    // §6.3 — la marca la fija el SERVIDOR con la del admin, no el cuerpo (`planFields` no
+    // la incluye, así que tampoco se puede colar): un plan nace siempre en su marca.
+    const plan = await this.prisma.admin.plan.create({ data: { ...input, brand: this.reqBrand(req) } });
     await this.audit(req, "platform.plan.create", "plan", plan.id, { code: plan.code });
     return plan;
   }
@@ -2185,12 +2254,25 @@ export class PlatformController {
   @Patch("plans/:id")
   async updatePlan(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
     const input = planSchema.partial2(body);
+    // §6.3 — el id de un plan es adivinable/compartible: sin esto, el admin de una marca
+    // podía editarle el PRECIO a un plan de la otra. 404 (no 403) para no confirmar que
+    // ese plan existe.
+    const existente = await this.prisma.admin.plan.findFirst({ where: { id, brand: this.reqBrand(req) }, select: { id: true } });
+    if (!existente) throw new NotFoundException("Plan no encontrado");
     const plan = await this.prisma.admin.plan.update({ where: { id }, data: input });
     await this.audit(req, "platform.plan.update", "plan", id);
     return plan;
   }
 
   // ------------------------------- Cupones -------------------------------
+  //
+  // §6.5 — `Coupon` NO tiene columna `brand`: los cupones son una tabla GLOBAL, y el
+  // código es único en toda la plataforma. Mientras siga así no hay forma de validar a
+  // qué marca pertenece uno, así que los administra TuBot: de lo contrario el admin de
+  // una marca puede desactivar, editar o borrar el cupón de una campaña de la otra. Darle
+  // cupones propios a Conversia exige la columna `brand` (está en
+  // docs/MIGRACIONES_DIFERIDAS.md, pendiente del OK del dueño). La LECTURA se deja
+  // abierta a propósito: un cupón se canjea por código y el equipo necesita poder mirarlo.
 
   @Get("coupons")
   coupons() {
@@ -2199,6 +2281,7 @@ export class PlatformController {
 
   @Post("coupons")
   async createCoupon(@Body() body: unknown, @Req() req: PlatformRequest) {
+    assertTubotBrand(req); // §6.5 — tabla global sin marca (ver nota arriba).
     const parsed = z
       .object({
         code: z.string().min(3).max(40),
@@ -2235,6 +2318,7 @@ export class PlatformController {
 
   @Patch("coupons/:id")
   async updateCoupon(@Param("id") id: string, @Body() body: unknown, @Req() req: PlatformRequest) {
+    assertTubotBrand(req); // §6.5 — tabla global sin marca: no se puede validar por cupón.
     const parsed = z.object({ active: z.boolean().optional() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("Datos inválidos");
     const coupon = await this.prisma.admin.coupon.update({ where: { id }, data: parsed.data });
@@ -2244,6 +2328,7 @@ export class PlatformController {
 
   @Delete("coupons/:id")
   async deleteCoupon(@Param("id") id: string, @Req() req: PlatformRequest) {
+    assertTubotBrand(req); // §6.5 — tabla global sin marca: borrar el cupón de la otra marca.
     await this.prisma.admin.coupon.delete({ where: { id } });
     await this.audit(req, "platform.coupon.delete", "coupon", id);
     return { ok: true };
@@ -2530,6 +2615,13 @@ export class PlatformController {
 
   @Post("invoices/:id/mark-paid")
   async markPaid(@Param("id") id: string, @Req() req: PlatformRequest) {
+    // §6.5 — dar por pagada una factura es un movimiento de DINERO sobre la cuenta de un
+    // cliente. El listado ya se acotaba a la marca, pero esta acción iba por id suelto:
+    // el admin de una marca podía marcar como pagada una factura impaga de la otra y
+    // dejarle de cobrar a ese cliente sin rastro de por qué.
+    const existente = await this.prisma.admin.invoice.findUnique({ where: { id }, select: { organizationId: true } });
+    if (!existente) throw new NotFoundException("Factura no encontrada");
+    await this.assertOrgBrand(req, existente.organizationId);
     const invoice = await this.prisma.admin.invoice.update({ where: { id }, data: { status: "PAID", paidAt: new Date() } });
     await this.audit(req, "platform.invoice.mark_paid", "invoice", id);
     return { ok: true, status: invoice.status };

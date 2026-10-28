@@ -579,9 +579,23 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         if (!contact.phone) return { error: "No tengo el teléfono del paciente, no puedo ubicar su cita." };
         const now = Date.now();
         let targetId = input.appointmentId;
-        if (!targetId) {
+        // §7.3 — las citas del paciente se leen SIEMPRE, también cuando el id viene dado:
+        // ese id lo propone el modelo y la conversación puede influirlo ("confirma la cita
+        // 12345"). Sin comprobarlo, se confirmaba en la agenda de la clínica una cita que
+        // podía ser de OTRO paciente.
+        const appts = await s
+          .listContactAppointments()
+          .catch(() => [] as Awaited<ReturnType<ToolServices["listContactAppointments"]>>);
+        if (targetId) {
+          const propia = appts.find((a) => String(a.id) === String(targetId));
+          if (!propia) {
+            return { error: "Esa cita no está a nombre de este paciente. Usa getPatientAppointments para ver sus citas y confirma la que corresponda (o llama a confirmAppointment sin id para su próxima cita)." };
+          }
+          if (String(propia.status).toLowerCase() === "confirmed") {
+            return { ok: true, alreadyConfirmed: true, cuando: slotWhen.format(new Date(propia.start)), message: `Su cita del ${slotWhen.format(new Date(propia.start))} ya estaba confirmada. Agradécele y cierra con calidez.` };
+          }
+        } else {
           // Sin id: la próxima cita ACTIVA desde la PROYECCIÓN LOCAL (incluye rescheduled).
-          const appts = await s.listContactAppointments().catch(() => [] as Awaited<ReturnType<ToolServices["listContactAppointments"]>>);
           const upcoming = appts
             .filter((a) => ["pending", "confirmed", "rescheduled"].includes(String(a.status).toLowerCase()) && new Date(a.start).getTime() >= now)
             .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());

@@ -1,6 +1,6 @@
 import { withTenant } from "@conversia/database";
 import type { OutboundJob } from "@conversia/types";
-import { ChannelAuthError, ChannelConfigError, markChannelAuthError, markChannelConfigError, resolveChannelAuth, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, MessageUndeliverableError, MetaRateLimitError, decidirFallbackGlobal, markChannelAuthError, markChannelConfigError, resolveChannelAuth, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
 import { getChannelProvider } from "./channel-providers";
 import { claimSend, markSent, releaseSend } from "./send-claim";
 import { renderTemplateBody, resolveTemplateParams } from "./template-params";
@@ -178,6 +178,30 @@ export async function processOutbound(
     }
   }
 
+  // §4.2 — ¿este envío iría con el token GLOBAL de la plataforma en vez del del canal?
+  // Eso significa enviar la respuesta de un cliente con credenciales que no son suyas: o
+  // Meta lo rechaza (#133010) o sale por un número que no es el que el cliente conectó.
+  // Se hace VISIBLE siempre (una excepción por canal y día en la consola del super admin)
+  // y se BLOQUEA cuando el dueño lo decida con `WA_GLOBAL_TOKEN_FALLBACK=block`.
+  // El default es `allow` a propósito: no hay forma de saber desde acá si alguna cuenta de
+  // TuBot depende hoy del token global, y cortarle los envíos a ciegas a un bot 24/7 sería
+  // el incidente que esta etapa quiere evitar. Primero se mira, después se cierra.
+  const fallbackDecision = await decidirFallbackGlobal(organizationId, auth);
+  if (fallbackDecision === "block") {
+    await withTenant(organizationId, (tx) =>
+      tx.message.update({
+        where: { id: data.message.id },
+        data: {
+          status: "FAILED",
+          error:
+            "Este canal no tiene su propio token de WhatsApp: la plataforma ya no envía con el suyo. Reautoriza WhatsApp en Canales.",
+        },
+      }),
+    ).catch(() => undefined);
+    await refundForMessage(organizationId, data.message.id).catch(() => undefined);
+    return;
+  }
+
   // §4.5/§8.4 — DOBLE ENVÍO al reintentar: si el envío a Meta salió bien pero falló el update
   // del estado, el mensaje quedaba PENDING, BullMQ reintentaba y el cliente lo recibía DOS
   // veces. Claim atómico antes de despachar (ver send-claim.ts; va en Redis porque `SENDING`
@@ -237,11 +261,19 @@ export async function processOutbound(
     await releaseSend(data.message.id);
     // ¿Es un fallo terminal o habrá reintento de BullMQ? Auth/Config NO se reintentan
     // (no se arreglan solos). Los demás se reintentan hasta agotar maxAttempts.
+    // §4.5 — Un rate limit de Meta SIEMPRE se relanza, incluso en el último intento: el
+    // mensaje no falló, solo hay que esperar. Quien lo recibe arriba (main.ts) frena la
+    // cola y no gasta el intento.
+    if (err instanceof MetaRateLimitError) throw err;
+
+    // §4.5 — Terminal para ESTE mensaje: ventana de 24 h cerrada o número que no recibe.
+    // No se reintenta (no se arregla solo) y NO se marca el canal: el canal está sano.
+    const isUndeliverable = err instanceof MessageUndeliverableError;
     const isConfigErr = err instanceof ChannelAuthError || err instanceof ChannelConfigError;
     const attemptsMade = retry?.attemptsMade ?? 0;
     const maxAttempts = retry?.maxAttempts ?? 1;
     const isLastAttempt = attemptsMade + 1 >= maxAttempts;
-    const willRetry = !isConfigErr && !isLastAttempt;
+    const willRetry = !isConfigErr && !isUndeliverable && !isLastAttempt;
 
     if (willRetry) {
       // Deja el mensaje en PENDING (processOutbound es re-entrante: el check de status
@@ -252,7 +284,10 @@ export async function processOutbound(
 
     // Fallo terminal (config que no se arregla sola, o se agotaron los reintentos).
     // En errores de config del canal, guarda el mensaje CLARO (no el 400 crudo).
-    const failText = err instanceof ChannelConfigError || err instanceof ChannelAuthError ? err.userMessage : (err as Error).message.slice(0, 500);
+    const failText =
+      err instanceof ChannelConfigError || err instanceof ChannelAuthError || err instanceof MessageUndeliverableError
+        ? err.userMessage
+        : (err as Error).message.slice(0, 500);
     await withTenant(organizationId, (tx) =>
       tx.message.update({ where: { id: data.message.id }, data: { status: "FAILED", error: failText } }),
     );
@@ -294,6 +329,10 @@ export async function processOutbound(
       await markChannelConfigError(organizationId, auth.channelConnectionId, err.userMessage);
       return;
     }
+    // §4.5 — No entregable a ESTE destinatario: el mensaje ya quedó FAILED con el motivo
+    // en claro. Se sale sin relanzar (como auth/config) para que BullMQ no lo reintente,
+    // y SIN marcar el canal: el canal está sano, el problema es el contacto.
+    if (err instanceof MessageUndeliverableError) return;
     throw err; // último intento agotado: rethrow para que BullMQ lo marque failed
   }
 }

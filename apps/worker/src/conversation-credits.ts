@@ -1,4 +1,5 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
+import { brandOf } from "@conversia/config";
 import { resolvePeriodStart } from "./conversation-quota";
 
 /**
@@ -35,7 +36,32 @@ async function planFeatures(organizationId: string): Promise<Record<string, unkn
 
 /** ¿El plan vigente de la org debita la CONVERSACIÓN de la bolsa (modelo V2)? */
 export async function planDebitsConversation(organizationId: string): Promise<boolean> {
+  // §6.6 — DOBLE GUARDA: marca conversia Y feature del plan. El cobro por conversación es
+  // el modelo V2 de Conversia; en TuBot no existe. Con la feature sola, un plan de TuBot
+  // mal marcado (a mano, por un seed, o por un loop que recorra todos los planes — el
+  // incidente de V2-7) les empezaría a debitar créditos a los clientes de TuBot. La marca
+  // de la org no se toca desde la pantalla de planes, así que cierra ese camino.
+  if (!(await isConversiaOrg(organizationId))) return false;
   return (await planFeatures(organizationId)).conversationDebitsWallet === true;
+}
+
+/**
+ * §6.6 — ¿La organización es de marca Conversia? Ante cualquier duda, NO (no se cobra).
+ *
+ * Exportada para que la use TAMBIÉN `planDebitsService` en messaging-guard: las dos
+ * guardas hacen la misma pregunta, y si cada una la respondiera por su cuenta podrían
+ * divergir. Una sola implementación, un solo test.
+ */
+export async function isConversiaOrg(organizationId: string): Promise<boolean> {
+  try {
+    const org = await getAdminPrisma().organization.findUnique({
+      where: { id: organizationId },
+      select: { brand: true },
+    });
+    return brandOf(org).key === "conversia";
+  } catch {
+    return false;
+  }
 }
 
 /** Multiplicador de crédito por conversación: Asistente Plus (modelo premium) = x2. */

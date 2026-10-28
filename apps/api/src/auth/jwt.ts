@@ -14,6 +14,14 @@ export interface AppTokenClaims {
   orgId: string;
   role: string;
   perms: string[];
+  /**
+   * §3.2 — id del super admin que está IMPERSONANDO a este usuario. Presente solo en
+   * los tokens que emite `POST /platform/organizations/:id/impersonate`. Viaja hasta el
+   * contexto del request para que las acciones de cuenta (cambiar contraseña, MFA,
+   * cambiar de organización, editar el perfil) se puedan negar: el super admin entra a
+   * VER y operar la ficha, no a apropiarse de la cuenta del cliente.
+   */
+  imp?: string;
 }
 
 const ALGO: jwt.Algorithm = "HS256";
@@ -169,5 +177,7 @@ export function verifyAppToken(token: string): AppTokenClaims {
     orgId: String(decoded.orgId),
     role: String(decoded.role),
     perms: Array.isArray(decoded.perms) ? (decoded.perms as string[]) : [],
+    // §3.2: el claim `imp` se propaga tal cual; sin él, sesión normal del cliente.
+    ...(decoded.imp ? { imp: String(decoded.imp) } : {}),
   };
 }

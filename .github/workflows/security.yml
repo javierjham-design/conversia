@@ -126,6 +126,17 @@ jobs:
       - run: pnpm --filter @conversia/database db:setup
       - name: Cobertura de RLS (falla si una tabla de tenant no tiene política)
         run: pnpm --filter @conversia/database verify:rls
+      # §1.3 — El seed ABORTA contra producción. Se comprueba ANTES de sembrar de verdad:
+      # el guard corta en la primera línea, sin tocar la base. Un `pnpm db:seed` con el
+      # DATABASE_URL de producción en la terminal equivocada creaba un tenant de demo y un
+      # super admin, y pisaba el catálogo de planes.
+      - name: db:seed se niega a correr con NODE_ENV=production (§1.3)
+        run: |
+          if NODE_ENV=production pnpm --filter @conversia/database run db:seed; then
+            echo "✖ el seed NO abortó con NODE_ENV=production"
+            exit 1
+          fi
+          echo "✓ abortó como debía"
       - run: pnpm --filter @conversia/database db:seed
       - name: Verificar aislamiento (rol conversia_app, sin BYPASSRLS)
         run: pnpm --filter @conversia/database verify:isolation

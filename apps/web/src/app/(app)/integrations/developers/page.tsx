@@ -121,7 +121,7 @@ export default function DevelopersPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Desarrolladores</h1>
-          <p className="text-sm text-ink-muted">Webhooks entrantes y API de Conversia — conecta tus sistemas externos.</p>
+          <p className="text-sm text-ink-muted">Webhooks entrantes y API de TuBot — conecta tus sistemas externos.</p>
         </div>
         <a href="/integrations" className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-ink-muted hover:bg-app">← Integraciones</a>
       </div>
