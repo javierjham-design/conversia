@@ -90,6 +90,9 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
       currency: input.currency,
       urlConfirmation: input.urlConfirmation,
       urlReturn: input.urlReturn,
+      // Flow devuelve `optional` tal cual en payment/getStatus, y el webhook lo usa para
+      // saber qué acreditar. Solo se manda si el cobro lo necesita (la recarga automática).
+      ...(input.metadata ? { optional: JSON.stringify(input.metadata) } : {}),
     });
     // customer/collect devuelve un token de pago; el resultado DEFINITIVO llega por el
     // webhook (urlConfirmation) que reconsultamos con payment/getStatus. Por eso queda

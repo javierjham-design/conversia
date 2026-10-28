@@ -9,6 +9,7 @@ import { alertOwner, sendBillingEmail } from "./billing-emails";
 import { getEnv } from "@conversia/config";
 import type { BillingPort, EngineSub } from "./engine";
 import type { SubState } from "./state-machine";
+import { RECHARGE_ORDER_PREFIX } from "../auto-recharge";
 
 const HALTED = "SUSPENDED";
 
@@ -69,7 +70,10 @@ export function createDbBillingPort(): BillingPort {
       // Intentos que llevan pendientes ≥ 2 min (dar tiempo al webhook antes de reconsultar).
       const cutoff = new Date(now.getTime() - 2 * 60 * 1000);
       const rows = await admin.paymentAttempt.findMany({
-        where: { status: "pending", createdAt: { lte: cutoff } },
+        // CRE 2 — los cobros de RECARGA de créditos (prefijo "rec-") se excluyen: no son
+        // cobros de suscripción. Si entraran, al confirmarse una recarga la reconciliación
+        // llamaría a applyOutcome y le RENOVARÍA EL PERÍODO GRATIS a ese cliente.
+        where: { status: "pending", createdAt: { lte: cutoff }, NOT: { commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } } },
         select: { commerceOrder: true, providerRef: true, subscriptionId: true },
         take: 200,
       });
@@ -79,7 +83,9 @@ export function createDbBillingPort(): BillingPort {
     async pendingSubscriptionIds() {
       // TODOS los intentos pendientes (sin importar la antigüedad): mientras uno esté en vuelo,
       // no se re-cobra esa suscripción. La reconciliación (cada tick) los resuelve.
-      const rows = await admin.paymentAttempt.findMany({ where: { status: "pending" }, select: { subscriptionId: true }, distinct: ["subscriptionId"], take: 1000 });
+      // CRE 2 — una RECARGA de créditos en vuelo no debe frenar la mensualidad: son cobros
+      // distintos a la misma tarjeta. Se excluyen por prefijo.
+      const rows = await admin.paymentAttempt.findMany({ where: { status: "pending", NOT: { commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } } }, select: { subscriptionId: true }, distinct: ["subscriptionId"], take: 1000 });
       return new Set(rows.map((r) => r.subscriptionId));
     },
 

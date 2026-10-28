@@ -33,6 +33,13 @@ export interface ChargeInput {
   /** URL donde el proveedor confirma el resultado (webhook). */
   urlConfirmation: string;
   urlReturn: string;
+  /**
+   * CRE 2 — datos que el proveedor devuelve en el webhook para que sepamos QUÉ se pagó.
+   * En Flow viaja como `optional`; en Stripe serían los `metadata` del PaymentIntent.
+   * Los cobros de suscripción no lo necesitan (se reconcilian por `commerceOrder`), pero la
+   * recarga automática sí: el webhook tiene que saber a qué pack acreditar.
+   */
+  metadata?: Record<string, string>;
 }
 export interface ChargeResult {
   ok: boolean;

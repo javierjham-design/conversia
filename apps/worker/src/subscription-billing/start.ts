@@ -7,6 +7,8 @@ import { getEnv } from "@conversia/config";
 import { reconcilePending, runBillingCycle } from "./engine";
 import { createDbBillingPort } from "./db-port";
 import { resolveSubscriptionProvider } from "./resolve-provider";
+import { runAutoRecharge } from "../auto-recharge";
+import { createDbAutoRechargePort } from "../auto-recharge-port";
 
 const TICK_MS = 15 * 60 * 1000; // cada 15 min: cobros/reintentos por hora + reconciliación ágil
 
@@ -24,6 +26,11 @@ export function startSubscriptionBilling(): () => void {
       const r = await runBillingCycle(port, resolveSubscriptionProvider, now, urls);
       const rec = await reconcilePending(port, resolveSubscriptionProvider, now);
       if (r.charged || r.suspended || rec.reconciled) console.log(`• Cobro recurrente: ${r.charged} cobros, ${r.suspended} suspensiones, ${rec.reconciled} reconciliados.`);
+      // CRE 2 — recarga automática de Créditos IA, en el mismo tick: usa la misma tarjeta
+      // guardada y la misma pasarela, y conviene que no corran en paralelo sobre la misma
+      // org. Sus cobros llevan prefijo "rec-" y el motor de arriba los ignora.
+      const ar = await runAutoRecharge(createDbAutoRechargePort(), resolveSubscriptionProvider, now, urls);
+      if (ar.cobradas) console.log(`• Recarga automática: ${ar.cobradas} cobros (${JSON.stringify(ar.motivos)}).`);
     } catch (err) {
       console.error("✖ subscription-billing tick:", (err as Error).message);
     }
