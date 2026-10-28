@@ -33,7 +33,8 @@ export class OrganizationsController {
 
   @Post("me/clinics")
   createClinic(@Body() body: unknown) {
-    const ctx = requireContext();
+    // §3.5 — crear una sucursal es configuración del negocio: `settings:write`.
+    const ctx = requirePermission("settings:write");
     const parsed = createClinicSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => i.message).join("; "));
     return this.prisma.withTenant(ctx.organizationId, (tx) =>
@@ -76,7 +77,8 @@ export class OrganizationsController {
   /** Define qué agente atiende por defecto las conversaciones nuevas del canal. */
   @Put("me/channels/:id/default-agent")
   async setChannelDefaultAgent(@Param("id") id: string, @Body() body: unknown) {
-    const ctx = requireContext();
+    // §3.5 — decide qué bot contesta TODAS las conversaciones nuevas del canal: `agents:write`.
+    const ctx = requirePermission("agents:write");
     const parsed = z.object({ agentId: z.string().nullable() }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("agentId requerido (o null)");
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {

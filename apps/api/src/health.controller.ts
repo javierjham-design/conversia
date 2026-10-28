@@ -1,5 +1,5 @@
 import { Controller, Get, Header, Headers, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { getEnv } from "@conversia/config";
+import { getEnv, BRANDS, messagingFuseKeys } from "@conversia/config";
 import { getDbRoleStatus } from "@conversia/database";
 import { QueueService } from "./queues";
 import { PrismaService } from "./prisma.service";
@@ -29,23 +29,49 @@ export class HealthController {
   @Header("cache-control", "no-store")
   async fuse() {
     const date = new Date().toISOString().slice(0, 10);
-    let tmpl = false;
-    let svc = false;
+    // §6.1 — el fusible es POR MARCA, así que se reportan TODAS: si solo se mirara la de
+    // TuBot, un corte de Conversia dejaría al monitor diciendo "todo bien" mientras sus
+    // clientes no pueden enviar. Las claves las arma `messagingFuseKeys` (en
+    // @conversia/config), la MISMA función que usa el worker para escribirlas.
+    const marcas = Object.keys(BRANDS);
+    const porMarca: Record<string, { templates: boolean; service: boolean }> = {};
+    for (const m of marcas) porMarca[m] = { templates: false, service: false };
     try {
-      // M4 — exponer AMBOS fusibles: el de plantillas (msgcap:fuse) y el de SERVICIO
-      // (msgcap:svc-fuse). Antes solo se veía el de plantillas → el monitor externo no
-      // alertaba si se cortaba el de servicio (gasto de mensajes de servicio sobre el techo).
-      const [t, s] = await this.queues.connection.mget(`msgcap:fuse:${date}`, `msgcap:svc-fuse:${date}`);
-      tmpl = t === "1";
-      svc = s === "1";
+      // M4 — se exponen AMBOS fusibles: plantillas y SERVICIO (ventana de 24 h). Antes
+      // solo se veía el de plantillas → el monitor no alertaba si cortaba el de servicio.
+      const claves = marcas.flatMap((m) => {
+        const k = messagingFuseKeys(m, date);
+        return [k.templateFuse, k.serviceFuse];
+      });
+      const valores = await this.queues.connection.mget(...claves);
+      marcas.forEach((m, i) => {
+        porMarca[m] = { templates: valores[i * 2] === "1", service: valores[i * 2 + 1] === "1" };
+      });
     } catch {
       /* redis caído → no afirmamos que el fusible cortó */
     }
-    if (tmpl || svc) {
-      const which = [tmpl ? "plantillas" : null, svc ? "servicio" : null].filter(Boolean).join(" + ");
-      throw new ServiceUnavailableException({ ok: false, fuse: "tripped", tripped: { templates: tmpl, service: svc }, message: `Fusible de mensajería cortado (${which}): envíos en pausa.` });
+    const cortadas = marcas.filter((m) => porMarca[m].templates || porMarca[m].service);
+    if (cortadas.length) {
+      const detalle = cortadas
+        .map((m) => {
+          const q = [porMarca[m].templates ? "plantillas" : null, porMarca[m].service ? "servicio" : null].filter(Boolean).join(" + ");
+          return `${m}: ${q}`;
+        })
+        .join("; ");
+      throw new ServiceUnavailableException({
+        ok: false,
+        fuse: "tripped",
+        brands: porMarca,
+        // `tripped` se mantiene para no romper lo que ya lo lee (smoke-prod, monitores):
+        // es el agregado de todas las marcas.
+        tripped: {
+          templates: cortadas.some((m) => porMarca[m].templates),
+          service: cortadas.some((m) => porMarca[m].service),
+        },
+        message: `Fusible de mensajería cortado (${detalle}): envíos en pausa.`,
+      });
     }
-    return { ok: true, fuse: "ok" };
+    return { ok: true, fuse: "ok", brands: porMarca };
   }
 
   /**
