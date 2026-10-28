@@ -1587,7 +1587,7 @@ export function GoogleDrawer({
       ) : (
         <>
           <p className="mb-3 text-xs text-ink-muted">
-            Una sola conexión habilita <b>Google Calendar</b> (espejo de tus citas de Conversia) y{" "}
+            Una sola conexión habilita <b>Google Calendar</b> (espejo de tus citas de TuBot) y{" "}
             <b>Google Sheets</b> (paso «Añadir fila a Google Sheets» en los flujos). Los tokens quedan cifrados por
             organización.
           </p>
@@ -1974,7 +1974,7 @@ export function HubspotDrawer({
       ) : (
         <>
           <p className="mb-3 text-xs text-ink-muted">
-            Sincronización <b>unidireccional</b> Conversia → HubSpot: cada contacto nuevo o editado se refleja en tu
+            Sincronización <b>unidireccional</b> TuBot → HubSpot: cada contacto nuevo o editado se refleja en tu
             CRM. Antes de crear se busca por teléfono/email — <b>sin duplicados</b>. Los tokens quedan cifrados.
           </p>
 
@@ -2006,7 +2006,7 @@ export function HubspotDrawer({
               </label>
 
               <div className="rounded-xl border border-line p-3">
-                <p className="text-sm font-medium">Mapeo de campos (HubSpot ← Conversia)</p>
+                <p className="text-sm font-medium">Mapeo de campos (HubSpot ← TuBot)</p>
                 <div className="mt-2 space-y-1.5">
                   {Object.entries(mapping).map(([prop, field]) => (
                     <div key={prop} className="flex items-center gap-2 text-xs">
