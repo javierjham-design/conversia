@@ -22,6 +22,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @conversia/database db:generate
       - run: pnpm build
+      # Que el api ARRANQUE, no solo que compile: un error de inyección de Nest mata el
+      # proceso al arrancar y ni `tsc` ni vitest lo ven (vitest transpila con esbuild,
+      # que no emite `design:paramtypes`). Antes de esto, el síntoma era el contenedor
+      # del api sin responder en el job `dueno`, 4 minutos después y sin logs.
+      - name: El grafo de dependencias de Nest se resuelve
+        run: node tools/ops/check-di.cjs
       - run: pnpm typecheck
       - run: pnpm test
 

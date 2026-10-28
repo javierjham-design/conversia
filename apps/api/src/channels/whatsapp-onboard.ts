@@ -1,5 +1,6 @@
 import { getEnv, withAppSecretProof } from "@conversia/config";
 
+
 export interface OnboardStep {
   step: "subscribe" | "register" | "credit_share";
   ok: boolean;
@@ -29,6 +30,69 @@ export interface OnboardResult {
  *
  * `fetchImpl` se inyecta en tests; en producción usa el `fetch` global.
  */
+/** §4.3 — Resultado de verificar que un número PERTENECE a la WABA declarada. */
+export type OwnershipResult =
+  | { estado: "verificado"; displayPhone: string | null; verifiedName: string | null }
+  /** Meta contestó y el número NO está en esa WABA: se está declarando un número ajeno. */
+  | { estado: "ajeno"; detalle: string }
+  /** No se pudo comprobar (red, permisos, Graph caído). Se RECHAZA igual, pero se distingue. */
+  | { estado: "sin_verificar"; detalle: string };
+
+/**
+ * §4.3 — ¿El `phoneNumberId` pertenece de verdad a la `wabaId` declarada, según el token
+ * DEL TENANT?
+ *
+ * Sin esta comprobación, el id del número y el de la WABA son datos que entran por el
+ * formulario (o por el evento de Meta) y se guardan tal cual: una organización podía
+ * declarar el número de otra y quedar recibiendo y enviando como ella. Esto es lo único
+ * que ata "lo que dice el cliente" con "lo que Meta dice que es suyo", y usa el token del
+ * propio cliente a propósito: la pregunta es si ÉL tiene acceso a ese número.
+ *
+ * Falla CERRADO: si no se puede comprobar, no se da por bueno. Pero `estado` distingue
+ * "es ajeno" de "no pude comprobar", porque el mensaje que ve el dueño es muy distinto.
+ */
+export async function verifyPhoneNumberOwnership(
+  wabaId: string,
+  phoneNumberId: string,
+  accessToken: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<OwnershipResult> {
+  const v = getEnv().META_GRAPH_VERSION;
+  let res: Response;
+  let json: { data?: Array<Record<string, unknown>>; error?: { message?: string; code?: number } };
+  try {
+    res = await fetchImpl(
+      withAppSecretProof(
+        `https://graph.facebook.com/${v}/${encodeURIComponent(wabaId)}/phone_numbers?fields=id,display_phone_number,verified_name`,
+        accessToken,
+      ),
+      { headers: { authorization: `Bearer ${accessToken}` } },
+    );
+    json = (await res.json().catch(() => ({}))) as typeof json;
+  } catch (e) {
+    return { estado: "sin_verificar", detalle: `no se pudo consultar Meta: ${(e as Error).message}` };
+  }
+  if (!res.ok || !Array.isArray(json?.data)) {
+    const motivo = json?.error?.message ?? `Meta respondió ${res.status}`;
+    return { estado: "sin_verificar", detalle: motivo };
+  }
+  const encontrado = json.data.find((n) => String(n.id) === phoneNumberId);
+  if (!encontrado) {
+    const ids = json.data.map((n) => String(n.id));
+    return {
+      estado: "ajeno",
+      detalle: ids.length
+        ? `la WABA ${wabaId} no incluye el número ${phoneNumberId} (tiene ${ids.length} número(s) distinto(s))`
+        : `la WABA ${wabaId} no tiene números visibles con este token`,
+    };
+  }
+  return {
+    estado: "verificado",
+    displayPhone: (encontrado.display_phone_number as string) ?? null,
+    verifiedName: (encontrado.verified_name as string) ?? null,
+  };
+}
+
 /**
  * Lista los números de una WABA (GET /{waba_id}/phone_numbers). Lo usa COEXISTENCIA con
  * "Phone Number First" (Meta, sep-2026): el evento final trae solo `waba_id`, así que el número

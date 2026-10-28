@@ -102,6 +102,21 @@ const envSchema = z.object({
   OPS_ALERT_WEBHOOK_URL: z.string().optional().default(""),
   // Topes puente de mensajería de PLANTILLA (defaults; ajustables en platform_settings).
   MSG_CAP_PER_TENANT_DAY: z.coerce.number().default(500),
+  /**
+   * §4.5 — Tope de RITMO de la cola de envío (mensajes por segundo, toda la cola).
+   * El default está por encima del techo real medido del worker (~50 msg/s), así que no
+   * cambia el comportamiento actual: existe para no provocar el 130429 de Meta, que
+   * además castiga la calidad de la cuenta.
+   */
+  WA_SEND_MAX_PER_SECOND: z.coerce.number().int().min(1).max(1000).default(60),
+  /**
+   * §4.2 — ¿se permite ENVIAR con el token GLOBAL de la plataforma cuando el canal no
+   * tiene el suyo? `allow` (default) solo deja rastro visible; `block` lo corta. El
+   * default NO es `block` porque no se puede saber desde el código si alguna cuenta de
+   * TuBot depende hoy del global, y cortarlo a ciegas dejaría su bot sin responder.
+   * Conversia nunca se bloquea (su número llave en mano es de la plataforma).
+   */
+  WA_GLOBAL_TOKEN_FALLBACK: z.enum(["allow", "block"]).default("allow"),
   MSG_CAP_GLOBAL_DAY: z.coerce.number().default(1500),
   // Topes de mensajería de SERVICIO (E3). SEPARADOS de los de plantilla: el volumen
   // de servicio es 10-100x y compartir el contador dispararía el fusible de plantillas.

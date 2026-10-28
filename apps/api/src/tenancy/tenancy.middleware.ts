@@ -3,8 +3,15 @@ import type { NextFunction, Request, Response } from "express";
 import { verifyAppToken, type AppTokenClaims } from "../auth/jwt";
 import { runWithContext, type RequestContext } from "./context";
 
-/** Rutas sin JWT: auth, webhooks (firma propia), API pública (API key) y health. */
-const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
+/**
+ * Rutas sin JWT: auth, webhooks (firma propia), API pública (API key) y health.
+ *
+ * §3.10 — `/auth/invite` y `/auth/accept-invite` van acá porque el frontend las llama SIN
+ * Bearer (`AUTH_API_PATHS` en apps/web/src/lib/api.ts): el invitado todavía no tiene sesión.
+ * Sin esto el middleware cortaba con "Falta token Bearer" y el link de invitación no servía.
+ * Se autentican por el token del propio link (`verifyInviteToken`, audiencia `:invite`).
+ */
+const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/auth/invite", "/auth/accept-invite", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
 
 /** @deprecated usar AppTokenClaims de auth/jwt */
 export type JwtPayload = AppTokenClaims;
@@ -33,6 +40,8 @@ export class TenancyMiddleware implements NestMiddleware {
       organizationId: payload.orgId,
       roleCode: payload.role,
       permissions: payload.perms ?? [],
+      // §3.2 — sesión de impersonación: el contexto recuerda QUIÉN la pidió.
+      ...(payload.imp ? { impersonatedBy: payload.imp } : {}),
     };
     // El contexto envuelve TODO el manejo del request (controllers incluidos)
     runWithContext(ctx, () => next());

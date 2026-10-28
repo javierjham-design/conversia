@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { csvCell } from "@conversia/types";
+import { requirePermission } from "../tenancy/permissions";
 
 function sinceDays(days: number): Date {
   return new Date(Date.now() - days * 24 * 3600 * 1000);
@@ -149,7 +150,9 @@ export class ReportsController {
 
   @Get("export/conversations")
   async exportConversations(@Res() res: Response, @Query("days") daysParam?: string) {
-    const ctx = requireContext();
+    // §3.5 — una exportación saca datos de clientes del sistema: exige `reports:read`,
+    // igual que el resto de los informes. Antes bastaba estar autenticado.
+    const ctx = requirePermission("reports:read");
     const days = Math.min(Math.max(Number(daysParam ?? 30) || 30, 1), 365);
     const rows = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.conversation.findMany({
@@ -180,7 +183,7 @@ export class ReportsController {
 
   @Get("export/leads")
   async exportLeads(@Res() res: Response) {
-    const ctx = requireContext();
+    const ctx = requirePermission("reports:read");
     const rows = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.lead.findMany({
         include: { contact: true, status: true },

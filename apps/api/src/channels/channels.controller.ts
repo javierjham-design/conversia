@@ -19,7 +19,35 @@ import { enforcePlanLimit, getTemplatesEntitlement } from "../common/plan-limits
 import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
 import { assignPublishedAgentToChannelsSafe } from "../agents/assign-agent-to-channels";
-import { listWabaPhoneNumbers, subscribeAndRegisterWhatsapp } from "./whatsapp-onboard";
+import { listWabaPhoneNumbers, subscribeAndRegisterWhatsapp, verifyPhoneNumberOwnership } from "./whatsapp-onboard";
+
+/**
+ * §4.2 — Mensaje único cuando el canal del tenant no tiene token propio.
+ *
+ * Antes, estos endpoints caían al token GLOBAL de la plataforma
+ * (`META_ACCESS_TOKEN`). Eso significa operar la WABA del cliente con credenciales de
+ * la plataforma: la acción sale a Meta de todas formas, pero no es del cliente, no queda
+ * limitada a lo suyo y además TAPA que su token esté muerto (el panel se ve "sano"
+ * hasta que fallan los envíos de verdad). Ahora falla acá, con qué hacer.
+ */
+const SIN_TOKEN_PROPIO =
+  "Este canal no tiene su propio token de WhatsApp cargado. Reautoriza WhatsApp en Canales (o pega el access token en Editar): la plataforma ya no opera tu WABA con sus credenciales.";
+
+/**
+ * §4.3 — Un id de Meta (WABA, número, negocio) es SIEMPRE numérico. Validarlo antes de
+ * interpolarlo en una URL de Graph evita que un valor cualquiera —una ruta, un query
+ * string, un id de otra cuenta— llegue a construir la llamada. Va junto con
+ * `encodeURIComponent` en el punto de uso: cinturón y tirantes.
+ */
+export const META_ID_RE = /^\d{5,20}$/;
+
+export function assertMetaId(valor: string | null | undefined, nombre: string): string {
+  const v = (valor ?? "").trim();
+  if (!META_ID_RE.test(v)) {
+    throw new BadRequestException(`${nombre} inválido: Meta usa identificadores numéricos de 5 a 20 dígitos.`);
+  }
+  return v;
+}
 
 const createChannelSchema = z.object({
   type: z.enum(["WHATSAPP_CLOUD", "MOCK"]),
@@ -189,6 +217,14 @@ export class ChannelsController {
       if (!input.phoneNumberId || !input.wabaId || !input.accessToken) {
         throw new BadRequestException("WhatsApp Cloud requiere phoneNumberId, wabaId y accessToken");
       }
+      // §4.3/§4.4 — comprobar la propiedad ANTES de suscribir la app y registrar el
+      // número: esas dos llamadas ya son cambios en la cuenta de Meta.
+      await this.assertChannelOwnership({
+        organizationId: ctx.organizationId,
+        wabaId: input.wabaId,
+        phoneNumberId: input.phoneNumberId,
+        accessToken: input.accessToken,
+      });
       warnings = (await subscribeAndRegisterWhatsapp(input.wabaId, input.phoneNumberId, input.accessToken)).warnings;
     }
 
@@ -415,16 +451,18 @@ export class ChannelsController {
     // 2.1 — cómo se conectó (FINISH estándar vs coexistencia) para guardarlo en el canal.
     const connectEvent = input.event ?? null;
 
-    // Guard de colisión GLOBAL: phone_number_id es único en toda la BD. Bajo RLS solo vemos los
-    // números de ESTA org, así que un número ya conectado en OTRA cuenta no aparece y el create
-    // reventaría con un 500 feo. Lo detectamos con el cliente admin (sin RLS) y damos un mensaje claro.
-    const anywhere = await this.prisma.admin.whatsappPhoneNumber.findUnique({
-      where: { phoneNumberId: input.phoneNumberId },
-      select: { organizationId: true },
+    // §4.3/§4.4 — misma puerta que el alta manual: ids numéricos, ni la WABA ni el número
+    // tomados por otra organización (con el cliente admin: bajo RLS la fila del otro
+    // tenant no se ve y el choque salía como un 500 feo), y Meta confirmando que el
+    // número está en esa WABA. Antes solo se comprobaba la colisión del número; la WABA
+    // —que únicamente es única POR organización— no se miraba, así que dos cuentas podían
+    // reclamar la misma.
+    await this.assertChannelOwnership({
+      organizationId: ctx.organizationId,
+      wabaId: input.wabaId,
+      phoneNumberId: input.phoneNumberId,
+      accessToken,
     });
-    if (anywhere && anywhere.organizationId !== ctx.organizationId) {
-      throw new BadRequestException("Ese número de WhatsApp ya está conectado en otra cuenta. Si es tuyo, desconéctalo allí primero o escríbenos para moverlo.");
-    }
 
     // 5. Persistir el canal con el token por-WABA cifrado
     const saved = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
@@ -568,6 +606,18 @@ export class ChannelsController {
       if (!tokenRes.ok || !accessToken) {
         throw new BadRequestException(`No se pudo obtener el token de Meta: ${tokenJson?.error?.message ?? tokenRes.status}`);
       }
+
+      // §4.3/§4.4 — ANTES de suscribir (suscribir ya es un cambio en la cuenta de Meta):
+      // ids numéricos, WABA no tomada por otra organización y, SI el cuerpo trajo un
+      // número, que Meta confirme que está en esa WABA. Ese era el agujero: el número del
+      // cuerpo se guardaba sin comprobar. Cuando el número NO viene, se resuelve más abajo
+      // DESDE la propia WABA, que es verificación por construcción.
+      await this.assertChannelOwnership({
+        organizationId: ctx.organizationId,
+        wabaId: input.wabaId,
+        phoneNumberId: input.phoneNumberId ?? null,
+        accessToken,
+      });
 
       // 2. Suscribir la app al WABA (webhooks entrantes + ecos). SIN registrar el número
       //    (coexistencia: el número ya está activo en la app del cliente) — la suscripción solo
@@ -777,6 +827,22 @@ export class ChannelsController {
       const effWaba = input.wabaId ?? current.wabaId;
       const effPhone = input.phoneNumberId ?? current.phoneNumberId;
       const changedWhatsapp = !!(input.accessToken || input.wabaId || input.phoneNumberId);
+      // §4.3/§4.4 — si el PATCH cambia la WABA o el número, hay que volver a comprobar la
+      // propiedad: era la puerta más fácil de todas (crear un canal legítimo y después
+      // apuntarlo por PATCH al número de otro cliente). Solo cuando cambian de verdad: un
+      // PATCH que únicamente repega el token no necesita ir a Meta a preguntar.
+      const cambiaDestino = !!(
+        (input.wabaId && input.wabaId !== current.wabaId) ||
+        (input.phoneNumberId && input.phoneNumberId !== current.phoneNumberId)
+      );
+      if (cambiaDestino && effToken && effWaba) {
+        await this.assertChannelOwnership({
+          organizationId: ctx.organizationId,
+          wabaId: effWaba,
+          phoneNumberId: effPhone ?? null,
+          accessToken: effToken,
+        });
+      }
       if (changedWhatsapp && effToken && effWaba && effPhone) {
         warnings = (await subscribeAndRegisterWhatsapp(effWaba, effPhone, effToken)).warnings;
       }
@@ -880,10 +946,11 @@ export class ChannelsController {
       return {
         wabaId: account.wabaId,
         phoneNumberId: number.phoneNumberId,
-        token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN,
+        // §4.2 — SIN fallback al token global (ver nota en SIN_TOKEN_PROPIO).
+        token: credential ? decryptSecret(credential.ciphertext) : null,
       };
     });
-    if (!data.token) throw new BadRequestException("Sin token: carga el access token del canal (Editar)");
+    if (!data.token) throw new BadRequestException(SIN_TOKEN_PROPIO);
     const result = await subscribeAndRegisterWhatsapp(data.wabaId, data.phoneNumberId, data.token);
     const ok = result.steps.every((s) => s.ok);
     // Si quedó todo OK y el canal estaba en error, lo reactivamos.
@@ -914,7 +981,8 @@ export class ChannelsController {
       return {
         mock: false as const,
         phoneNumberId: number.phoneNumberId,
-        token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN,
+        // §4.2 — SIN fallback al token global (ver nota en SIN_TOKEN_PROPIO).
+        token: credential ? decryptSecret(credential.ciphertext) : null,
       };
     });
 
@@ -965,24 +1033,21 @@ export class ChannelsController {
     if (!data.token) return { ok: false, detail: "Sin token: carga el access token del canal" };
 
     try {
-      // graphFetch reintenta con el token global si el del canal está vencido.
-      const { res, json, usedFallback } = await this.graphFetch(
-        `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${data.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`,
+      // §4.2 — la prueba usa SOLO el token del canal. Antes reintentaba con el token
+      // global y devolvía "ok ⚠ token vencido", lo que además dejaba la prueba en verde
+      // con un token muerto. Ahora un token vencido es un FALLO con el motivo.
+      const { res, json, tokenVencido } = await this.graphFetch(
+        `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(data.phoneNumberId)}?fields=display_phone_number,verified_name,quality_rating`,
         data.token,
       );
       if (!res.ok) {
-        if (json?.error?.code === 190 || res.status === 401) {
-          await this.setChannelHealth(ctx.organizationId, id, "error", `Prueba de conexión: ${json?.error?.message ?? res.status}`);
+        if (tokenVencido) {
+          await this.setChannelHealth(ctx.organizationId, id, "error", "El token del canal está vencido o fue revocado. Reautoriza WhatsApp en Canales.");
+          return { ok: false, detail: "El token del canal está vencido o fue revocado — reautoriza WhatsApp en Canales." };
         }
         return { ok: false, detail: json?.error?.message ?? `Meta respondió ${res.status}` };
       }
       const detail = `Número verificado: ${json.display_phone_number ?? "?"} (${json.verified_name ?? "sin nombre"}) · calidad: ${json.quality_rating ?? "?"}`;
-      if (usedFallback) {
-        // El token PROPIO del canal está vencido (funcionó solo el global):
-        // marcar para que el equipo reautorice antes de que fallen los envíos.
-        await this.setChannelHealth(ctx.organizationId, id, "error", "El token del canal está vencido (la prueba funcionó con el token global). Reautoriza WhatsApp.");
-        return { ok: true, detail: `${detail} · ⚠ token del canal vencido — reautoriza WhatsApp` };
-      }
       await this.setChannelHealth(ctx.organizationId, id, "active");
       return { ok: true, detail };
     } catch (err) {
@@ -1028,11 +1093,12 @@ export class ChannelsController {
       return {
         wabaId: account.wabaId,
         accountId: account.id,
-        token: credential ? decryptSecret(credential.ciphertext) : env.META_ACCESS_TOKEN,
+        // §4.2 — SIN fallback al token global (ver nota en SIN_TOKEN_PROPIO).
+        token: credential ? decryptSecret(credential.ciphertext) : null,
         mappings: (((channel.config as any)?.templateMappings ?? {}) as Record<string, { fields?: string[] }>),
       };
     });
-    if (!data.token) throw new BadRequestException("Sin token de acceso: carga el access token del canal");
+    if (!data.token) throw new BadRequestException(SIN_TOKEN_PROPIO);
     return { wabaId: data.wabaId, token: data.token, accountId: data.accountId, mappings: data.mappings };
   }
 
@@ -1085,24 +1151,80 @@ export class ChannelsController {
    * plataforma. Cubre canales creados con tokens temporales que expiraron
    * (el permanente vive en el env y es el que usa el worker para enviar).
    */
-  private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any; usedFallback: boolean }> {
-    const doFetch = async (tk: string) => {
-      // appsecret_proof va firmado con el token efectivo de cada intento.
-      const res = await fetch(withAppSecretProof(url, tk), {
-        ...init,
-        headers: { ...((init?.headers as Record<string, string>) ?? {}), authorization: `Bearer ${tk}` },
-      });
-      const json: any = await res.json().catch(() => ({}));
-      return { res, json };
-    };
-    let out = await doFetch(token);
-    let usedFallback = false;
-    const globalToken = getEnv().META_ACCESS_TOKEN;
-    if (!out.res.ok && out.json?.error?.code === 190 && globalToken && globalToken !== token) {
-      out = await doFetch(globalToken);
-      usedFallback = true;
+  /**
+   * §4.3 + §4.4 — PUERTA ÚNICA para declarar un par (WABA, número) en una organización.
+   *
+   * La usan los cuatro caminos por los que entra un número: alta manual, Embedded
+   * Signup, coexistencia y el PATCH que cambia la WABA o el número. Antes cada uno
+   * guardaba lo que venía en el cuerpo (o en el evento de Meta) sin comprobar nada, así
+   * que una organización podía declarar el número de otra y quedar recibiendo y enviando
+   * como ella. Hace tres cosas, en este orden:
+   *
+   *  1. Los ids son numéricos (así no se cuela una ruta ni un query string en una URL de Graph).
+   *  2. Ni la WABA ni el número están tomados por OTRA organización. Esta consulta va con
+   *     el cliente ADMIN a propósito: bajo RLS no se ve la fila del otro tenant, y entonces
+   *     el choque aparecía como un error crudo de base (o, con `wabaId` —que solo es único
+   *     POR organización—, no aparecía en absoluto).
+   *  3. Meta confirma que el número está en esa WABA, preguntando con el token DEL CLIENTE:
+   *     la pregunta es si ÉL tiene acceso. Falla CERRADO.
+   */
+  private async assertChannelOwnership(opts: {
+    organizationId: string;
+    wabaId: string;
+    phoneNumberId: string | null;
+    accessToken: string;
+  }): Promise<void> {
+    const wabaId = assertMetaId(opts.wabaId, "El id de la WABA");
+    const phoneNumberId = opts.phoneNumberId ? assertMetaId(opts.phoneNumberId, "El id del número") : null;
+
+    const admin = this.prisma.admin;
+    const wabaAjena = await admin.whatsappAccount.findFirst({
+      where: { wabaId, organizationId: { not: opts.organizationId } },
+      select: { id: true },
+    });
+    if (wabaAjena) {
+      throw new BadRequestException(
+        "Esa cuenta de WhatsApp (WABA) ya está conectada en otra cuenta de la plataforma. Si es tuya, escríbenos por Soporte para moverla.",
+      );
     }
-    return { ...out, usedFallback };
+    if (phoneNumberId) {
+      const numeroAjeno = await admin.whatsappPhoneNumber.findFirst({
+        where: { phoneNumberId, organizationId: { not: opts.organizationId } },
+        select: { id: true },
+      });
+      if (numeroAjeno) {
+        throw new BadRequestException(
+          "Ese número de WhatsApp ya está conectado en otra cuenta de la plataforma. Si es tuyo, escríbenos por Soporte para moverlo.",
+        );
+      }
+      const r = await verifyPhoneNumberOwnership(wabaId, phoneNumberId, opts.accessToken);
+      if (r.estado === "ajeno") {
+        throw new BadRequestException(
+          `Meta dice que ese número no pertenece a la cuenta de WhatsApp indicada (${r.detalle}). Revisa el número y la WABA en tu Administrador de Business de Meta.`,
+        );
+      }
+      if (r.estado === "sin_verificar") {
+        throw new BadRequestException(
+          `No pudimos confirmar con Meta que el número sea tuyo (${r.detalle}). No conectamos un número sin comprobarlo: revisa el token y vuelve a intentar.`,
+        );
+      }
+    }
+  }
+
+  private async graphFetch(url: string, token: string, init?: RequestInit): Promise<{ res: Response; json: any; tokenVencido: boolean }> {
+    // appsecret_proof va firmado con el token efectivo.
+    const res = await fetch(withAppSecretProof(url, token), {
+      ...init,
+      headers: { ...((init?.headers as Record<string, string>) ?? {}), authorization: `Bearer ${token}` },
+    });
+    const json: any = await res.json().catch(() => ({}));
+    // §4.2 — antes, si el token del canal devolvía 190, se REINTENTABA la MISMA operación
+    // con el token global de la plataforma. Eso hacía la llamada a Graph sobre la WABA del
+    // cliente con credenciales de la plataforma: una operación cross-tenant disfrazada de
+    // "reintento". El diagnóstico que daba (saber que el token del canal está muerto) se
+    // conserva sin hacer la llamada: el 190 YA lo dice.
+    const tokenVencido = !res.ok && (json?.error?.code === 190 || res.status === 401);
+    return { res, json, tokenVencido };
   }
 
   /** Actualiza el estado del canal + registra el evento en la actividad (best-effort). */
