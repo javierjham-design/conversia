@@ -1,10 +1,11 @@
 import IORedis from "ioredis";
-import { getEnv } from "@conversia/config";
+import { brandOf, getEnv } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
 import {
   applyQuietHours,
   getEvent,
   isCritical,
+  linkParaMarca,
   render,
   resolveEnabledChannels,
   type NotifChannel,
@@ -62,8 +63,13 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
 
   const org = await prisma.organization.findUnique({
     where: { id: job.organizationId },
-    select: { timezone: true, settings: true },
+    select: { timezone: true, settings: true, brand: true },
   });
+  // CRE 3 — la MARCA del destinatario decide a qué pantalla lo manda el aviso y con qué
+  // nombre/dominio le llega el correo. El catálogo está escrito en rutas de TuBot y varias
+  // de ellas no existen en conversia-web (`/inbox`, `/billing`, `/facturacion`…), así que
+  // sin esto un cliente de Conversia tocaba su aviso y caía en un 404.
+  const brand = brandOf(org);
   const tz = org?.timezone ?? "America/Santiago";
   const allPrefs = (((org?.settings ?? {}) as Record<string, any>).notifPrefs ?? {}) as Record<string, UserNotifPrefs>;
 
@@ -105,7 +111,7 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
     const renderData = { ...job.data, conversationId: job.conversationId };
     const title = render(event.title, renderData);
     const body = render(event.body, renderData);
-    let link = event.link ? render(event.link, renderData) : undefined;
+    let link = linkParaMarca(event.link ? render(event.link, renderData) : undefined, brand.key === "conversia" ? "conversia" : "tubot");
     // Deep link MULTI-TENANT: adjuntamos la org del evento (?org=). Un mismo usuario puede
     // manejar varias cuentas; sin esto, al tocar una notificación de otra cuenta la app
     // abría la conversación en la cuenta activa equivocada y quedaba cargando. Con el org,
@@ -129,6 +135,7 @@ export async function processNotificationJob(job: NotifJob): Promise<void> {
           title,
           body,
           link,
+          brand: { key: brand.key, name: brand.name, webUrl: brand.webUrl },
           data: { ...job.data, conversationId: job.conversationId, userEmail: user.email, userName: user.name },
         });
         await recordDelivery(prisma, { ...base, status: result.status, error: result.error });

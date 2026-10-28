@@ -92,9 +92,22 @@ describe("saldo en el contexto del copiloto", () => {
   it("plan por CRÉDITOS IA: ya NO queda en blanco (regresión de CRE 2)", async () => {
     const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }));
     const c = await svc.buildContext("org-1");
-    expect(c.saldo).toBe("450 créditos disponibles");
+    expect(c.saldo).toContain("450 créditos");
     expect(c.saldoRestante).toBe(450);
     expect(c.saldoUnidad).toBe("credit");
+  });
+
+  it("CRE 3 — el saldo en créditos SIEMPRE viene traducido a conversaciones", async () => {
+    // "te quedan 450 créditos" no le dice nada a nadie; el copiloto habla de créditos pero
+    // tiene que poder decir a cuántas conversaciones equivalen, con el MISMO estimador que
+    // el medidor del panel y los avisos del worker.
+    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }));
+    expect((await svc.buildContext("org-1")).saldo).toMatch(/≈ \d+ conversaciones/);
+  });
+
+  it("en conversaciones NO se traduce nada (una conversación ya se cuenta de a una)", async () => {
+    const svc = new AssistantService(prismaCon({ features: { conversationDebitsWallet: true }, lotes: 120 }));
+    expect((await svc.buildContext("org-1")).saldo).toBe("120 conversaciones disponibles");
   });
 
   it("la gracia ya usada se descuenta del saldo que se le muestra", async () => {

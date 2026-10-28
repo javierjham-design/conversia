@@ -19,7 +19,7 @@ import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { chargeServiceSend, outOfConversationCreditsPhrase } from "./messaging-guard";
 import { planDebitsConversation } from "./conversation-credits";
-import { aiCreditsGate, debitAiCreditsForTurn } from "./ai-credits";
+import { aiCreditsGate, aiCreditsNotifyDecision, debitAiCreditsForTurn, getAiCreditsMeter } from "./ai-credits";
 import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrail";
 import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
@@ -860,6 +860,28 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
       console.error(`✖ Débito de Créditos IA (${conversationId}):`, (err as Error).message);
       return undefined;
     });
+
+    // CRE 3 — AVISOS de saldo (75%, 90% y gracia), una vez por umbral y período.
+    //
+    // Antes de esto un cliente de Créditos IA no recibía NINGÚN aviso: los avisos vivían
+    // solo en el camino del cobro por conversación, y CRE 1 desactivó ese camino para los
+    // planes de créditos (correcto, para no cobrar dos veces). Resultado: el bot se le
+    // paraba sin una sola advertencia previa. El aviso lleva el ESTIMADO —"te quedan ≈ N
+    // conversaciones"— porque "te queda el 10% de tus créditos" no le dice nada a nadie.
+    const aviso = await aiCreditsNotifyDecision(organizationId).catch(() => null);
+    if (aviso?.fire) {
+      const medidor = await getAiCreditsMeter(organizationId).catch(() => null);
+      const pct = aviso.included > 0 ? Math.round((aviso.used / aviso.included) * 100) : 0;
+      const { enqueueNotification } = await import("./notifications/queue.js");
+      await enqueueNotification({
+        eventKey: aviso.fire === "grace" ? "credits.grace" : "credits.low",
+        organizationId,
+        data:
+          aviso.fire === "grace"
+            ? { grace: aviso.graceUsed, restantes: aviso.remaining, estimado: medidor?.frase ?? "" }
+            : { pct, used: aviso.used, included: aviso.included, restantes: aviso.remaining, estimado: medidor?.frase ?? "" },
+      }).catch(() => undefined);
+    }
   }
 
   // Cinturón E4: si alguna vez se creara más de un message de texto del agente en el

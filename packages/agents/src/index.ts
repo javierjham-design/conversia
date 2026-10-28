@@ -1,5 +1,6 @@
 export * from "./pricing.js";
 export * from "./credit-formula.js";
+export * from "./credit-estimate.js";
 export * from "./providers.js";
 export * from "./resilient.js";
 export * from "./transcription.js";

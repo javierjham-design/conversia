@@ -1,5 +1,15 @@
-import { getAdminPrisma, raiseException, withTenant } from "@conversia/database";
-import { CREDIT_POLICY_SEED, creditsForTurn, parseCreditPolicy, type CreditPolicy, type TurnCredits } from "@conversia/agents";
+import { getAdminPrisma, leerMuestraConsumoCreditos, leerPromedioDelRubro, raiseException, withTenant } from "@conversia/database";
+import {
+  CREDIT_POLICY_SEED,
+  creditsForTurn,
+  estimarAlcance,
+  explicarBase,
+  frasePorSaldo,
+  parseCreditPolicy,
+  type CreditPolicy,
+  type Estimacion,
+  type TurnCredits,
+} from "@conversia/agents";
 import {
   balanceInTx,
   consumeCreditsInTx,
@@ -251,4 +261,73 @@ export async function getAiCreditsSummary(organizationId: string): Promise<{
       graceLimit: policy.graceCredits,
     };
   });
+}
+
+/**
+ * CRE 3 — AVISOS POR UMBRAL para la unidad de Créditos IA (75%, 90% y gracia).
+ *
+ * AGUJERO QUE CIERRA: los avisos de saldo vivían SOLO en el camino del cobro por
+ * conversación (`creditsNotifyDecision`, que dispara dentro de
+ * `planDebitsConversation`). CRE 1 hizo que `planDebitsConversation` devuelva false cuando
+ * el plan cobra Créditos IA —correcto, para no cobrar dos veces—, y con eso un cliente de
+ * créditos dejó de recibir CUALQUIER aviso: el bot se le paraba sin una sola advertencia
+ * previa. Es el peor momento posible para enterarse.
+ *
+ * Reutiliza `conversation_wallets.lastNotifiedPct` (mismo campo, mismo monedero, se
+ * reinicia al acreditar el período nuevo), así que no hay estado nuevo ni migración. La
+ * decisión es idéntica a la de conversaciones: una vez por umbral y por período.
+ */
+export async function aiCreditsNotifyDecision(
+  organizationId: string,
+): Promise<{ fire: "low75" | "low90" | "grace" | null; used: number; included: number; remaining: number; graceUsed: number }> {
+  const s = await getAiCreditsSummary(organizationId);
+  const pct = s.included > 0 ? Math.round((s.used / s.included) * 100) : 0;
+  return withTenant(organizationId, async (tx) => {
+    const w = await tx.conversationWallet.findUnique({ where: { organizationId }, select: { lastNotifiedPct: true } });
+    const last = w?.lastNotifiedPct ?? 0;
+    let fire: "low75" | "low90" | "grace" | null = null;
+    let mark = last;
+    if (s.graceUsed > 0 && last < 100) {
+      fire = "grace";
+      mark = 100;
+    } else if (pct >= 90 && last < 90) {
+      fire = "low90";
+      mark = 90;
+    } else if (pct >= 75 && last < 75) {
+      fire = "low75";
+      mark = 75;
+    }
+    if (fire) await tx.conversationWallet.update({ where: { organizationId }, data: { lastNotifiedPct: mark } }).catch(() => undefined);
+    return { fire, used: s.used, included: s.included, remaining: s.remaining, graceUsed: s.graceUsed };
+  });
+}
+
+/**
+ * CRE 3 — EL MEDIDOR: saldo + la traducción a conversaciones y días.
+ *
+ * Es la MISMA función que alimenta el panel (vía el endpoint del API), el copiloto y los
+ * avisos: un solo cálculo para que las tres superficies no digan números distintos del
+ * mismo saldo. La aritmética es pura (`estimarAlcance`, en `@conversia/agents`) y acá va
+ * solo la lectura de datos.
+ */
+export async function getAiCreditsMeter(organizationId: string): Promise<{
+  summary: Awaited<ReturnType<typeof getAiCreditsSummary>>;
+  estimate: Estimacion;
+  frase: string;
+  explicacion: string;
+}> {
+  const summary = await getAiCreditsSummary(organizationId);
+  const admin = getAdminPrisma();
+  const org = await admin.organization
+    .findUnique({ where: { id: organizationId }, select: { settings: true } })
+    .catch(() => null);
+  const rubro = String((((org?.settings ?? {}) as Record<string, any>).general ?? {}).industry ?? "");
+  // Cada lectura accesoria degrada a su valor neutro: una muestra que no se pudo leer da
+  // una estimación con el promedio del rubro o el general, nunca un error en pantalla.
+  const propio = await withTenant(organizationId, (tx) => leerMuestraConsumoCreditos(tx, organizationId)).catch(
+    () => ({ conversaciones: 0, creditos: 0, dias: 0 }),
+  );
+  const promedioDelRubro = await leerPromedioDelRubro(admin, rubro).catch(() => null);
+  const estimate = estimarAlcance({ restantes: summary.remaining, propio, promedioDelRubro });
+  return { summary, estimate, frase: frasePorSaldo(estimate), explicacion: explicarBase(estimate) };
 }

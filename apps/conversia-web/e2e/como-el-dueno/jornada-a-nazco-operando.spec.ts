@@ -133,7 +133,10 @@ test.describe("Jornada A — quedo operando (viaje completo)", () => {
     // 8) El contador de créditos bajó (una conversación consumida): 30 → 29.
     await expect.poll(async () => walletBalance(request, token), { timeout: 30_000, message: "el crédito debía bajar a 29" }).toBe(29);
     await page.goto("/cobros", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Créditos disponibles")).toBeVisible({ timeout: 15_000 });
+    // CRE 3 — el título del saldo sigue a la UNIDAD del plan: a quien cobra por conversación
+    // se le dice "Conversaciones disponibles". Decirle "Créditos" es la misma mezcla de
+    // unidades que CRE 2 salió a corregir (1 conversación ≈ 4 créditos, no son lo mismo).
+    await expect(page.getByText("Conversaciones disponibles")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/^29$/)).toBeVisible({ timeout: 10_000 });
 
     // Consola limpia (cuenta conversia sana): sin errores inesperados.

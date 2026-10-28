@@ -197,6 +197,10 @@ export * from "./vertical-loaders.js";
 // (activar/registrar pago/asignar suscripción) y el worker (cobro recurrente).
 export * from "./wallet-refill.js";
 
+// CRE 3 — muestra de consumo de créditos (estimador). Una sola consulta para el panel y
+// el worker: dos cálculos distintos del mismo saldo harían que el dueño no le crea a ninguno.
+export * from "./credit-usage.js";
+
 /**
  * V2-8 — levanta una excepción en la cola de operación (idempotente por dedupeKey abierto).
  * La usan los módulos V2-1…V2-7 (API y worker). `admin` = cliente sin RLS (getAdminPrisma()).

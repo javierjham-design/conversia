@@ -37,7 +37,9 @@ const SUB_ESTADO: Record<string, string> = {
 };
 const subEstado = (s: string) => SUB_ESTADO[s.toLowerCase()] ?? s;
 
-type Summary = { balance: number; included: number; consumed: number; byCategory: Record<string, number>; projected: number; pctUsed: number; over80: boolean };
+type MetaCostos = { mensajes: number; usd: number; clpAprox: number; clpPorUsd: number; porCategoria: Record<string, { mensajes: number; usd: number }>; desde: string };
+type Medidor = { conversaciones: number; dias: number | null; creditosPorConversacion: number; base: "org" | "rubro" | "defecto"; frase: string; explicacion: string };
+type Summary = { unit?: string; balance: number; included: number; consumed: number; byCategory: Record<string, number>; projected: number; pctUsed: number; over80: boolean; medidor?: Medidor };
 type Me = {
   organization: { currency: string };
   plan: { code: string; name: string; interval: string } | null;
@@ -307,8 +309,22 @@ export default function Cobros() {
         {/* Créditos */}
         {s ? (
           <div className="card" style={{ padding: 22, marginBottom: 16 }}>
-            <p className="text-dim" style={{ margin: 0, fontSize: 13 }}>Créditos disponibles</p>
-            <p className="display" style={{ margin: "4px 0 14px", fontSize: 40 }}>{s.balance.toLocaleString("es-CL")}</p>
+            <p className="text-dim" style={{ margin: 0, fontSize: 13 }}>{s.unit === "conversation" ? "Conversaciones disponibles" : "Créditos disponibles"}</p>
+            <p className="display" style={{ margin: "4px 0 6px", fontSize: 40 }}>{s.balance.toLocaleString("es-CL")}</p>
+            {/* CRE 3 — EL MEDIDOR, la misma traducción que se ve en Inicio y que usa el
+                copiloto: un saldo en créditos no significa nada hasta decirle a cuántas
+                conversaciones y cuántos días equivale a SU ritmo. La explicación de dónde
+                sale el número va visible, no escondida en un tooltip: una estimación que no
+                se puede auditar es una cifra que el dueño no va a creer. */}
+            {s.medidor ? (
+              <div style={{ margin: "0 0 14px" }}>
+                <p style={{ margin: 0, fontSize: 14.5 }}>
+                  ≈ <b style={{ fontVariantNumeric: "tabular-nums" }}>{s.medidor.conversaciones.toLocaleString("es-CL")}</b> conversaciones
+                  {s.medidor.dias != null && s.medidor.dias > 0 ? <> · ≈ <b style={{ fontVariantNumeric: "tabular-nums" }}>{s.medidor.dias.toLocaleString("es-CL")}</b> días a tu ritmo</> : null}
+                </p>
+                <p className="text-dim" style={{ margin: "3px 0 0", fontSize: 12 }}>{s.medidor.explicacion}</p>
+              </div>
+            ) : null}
             {s.included > 0 ? (
               <>
                 <div style={{ height: 10, borderRadius: 999, background: "var(--acc-dim)", overflow: "hidden" }}>
@@ -402,6 +418,9 @@ export default function Cobros() {
         {/* CRE 2 (§6) — recarga automática: solo con Flow (tarjeta guardada) */}
         {conFlow ? <RecargaAutomatica tieneTarjeta={Boolean(me?.paymentMethod)} /> : null}
 
+        {/* CRE 3 — lo que cobra Meta, informativo (Conversia no lo cobra). */}
+        <CostosDeMeta />
+
         {/* Método de pago (cobro automático con tarjeta en Flow) */}
         {conFlow ? (
           <div className="card" data-copilot="cobros-metodo-pago" style={{ padding: 22, marginTop: 24 }}>
@@ -476,6 +495,52 @@ type AutoRecargaCfg = {
 
 /** La recarga automática es solo con Flow, o sea CLP: formateador local y explícito. */
 const clpRec = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
+
+/**
+ * CRE 3 — LO QUE COBRA META, informativo.
+ *
+ * Decisión del dueño (27-oct): cada cliente paga a Meta con SU tarjeta. Al cliente le
+ * llegan dos cobros y hasta ahora el panel solo le mostraba uno: veía su plan de Conversia
+ * y no tenía dónde enterarse de cuánto le está cobrando Meta por los mensajes. Un cargo que
+ * aparece en la tarjeta sin explicación en ninguna parte termina en un reclamo.
+ *
+ * Si no hay mensajes cobrados en el mes la tarjeta NO aparece: mostrar "$0" invita a
+ * preguntarse por un cobro que no existe.
+ */
+function CostosDeMeta() {
+  const [c, setC] = useState<MetaCostos | null>(null);
+  useEffect(() => {
+    api<MetaCostos>("/billing/meta-costs").then(setC).catch(() => setC(null));
+  }, []);
+  if (!c || c.mensajes === 0) return null;
+  const cats = Object.entries(c.porCategoria).sort((a, b) => b[1].usd - a[1].usd);
+  return (
+    <div className="card" data-copilot="costos-meta" style={{ padding: 22, marginTop: 24 }}>
+      <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Lo que te cobra Meta este mes</h2>
+      <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px", lineHeight: 1.5 }}>
+        Son dos cobros distintos: <b>Conversia te cobra el plan</b> y <b>Meta te cobra aparte</b> ciertos mensajes
+        de WhatsApp, directo a la tarjeta que tengas cargada en tu cuenta de Meta. Esto es solo informativo —
+        nosotros no cobramos este monto.
+      </p>
+      <p className="display" style={{ margin: 0, fontSize: 30 }}>
+        US${c.usd.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+      </p>
+      <p className="text-dim" style={{ fontSize: 12.5, margin: "2px 0 0" }}>
+        ≈ ${c.clpAprox.toLocaleString("es-CL")} aproximados ({c.mensajes.toLocaleString("es-CL")} mensajes cobrados).
+        Meta factura en dólares, así que el monto en pesos depende del cambio del día.
+      </p>
+      {cats.length ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+          {cats.map(([cat, v]) => (
+            <span key={cat} className="text-dim" style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)" }}>
+              {CAT_LABEL[cat] ?? cat}: US${v.usd.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {v.mensajes.toLocaleString("es-CL")}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
   const [cfg, setCfg] = useState<AutoRecargaCfg | null>(null);

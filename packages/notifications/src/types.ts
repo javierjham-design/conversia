@@ -72,6 +72,13 @@ export interface NotificationChannel {
     title: string;
     body: string;
     link?: string;
+    /**
+     * CRE 3 — marca del destinatario. El correo y el enlace tienen que salir con SU dominio
+     * y SU nombre: antes el canal de correo armaba la URL con `WEB_URL` (la de TuBot) y
+     * firmaba "Abrir en TuBot", así que a un cliente de Conversia le llegaba un aviso de su
+     * propio saldo que lo mandaba a la aplicación de otra marca.
+     */
+    brand?: { key: string; name: string; webUrl: string };
     data: Record<string, unknown>;
   }): Promise<ChannelResult>;
 }

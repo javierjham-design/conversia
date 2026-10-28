@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec, AssistantAction } from "@conversia/types";
 import { getEnv } from "@conversia/config";
-import { computeCostUsd, createAIProvider } from "@conversia/agents";
+import { computeCostUsd, createAIProvider, estimarAlcance, frasePorSaldo } from "@conversia/agents";
+import { leerMuestraConsumoCreditos, leerPromedioDelRubro } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
 import { getSetupChecklist } from "../onboarding/setup-checklist";
@@ -97,6 +98,18 @@ export class AssistantService {
         saldoRestante = Math.max(0, (lots._sum.remaining ?? 0) - (w?.graceUsed ?? 0));
         saldoUnidad = porCreditos ? "credit" : "conversation";
         saldo = `${saldoRestante} ${porCreditos ? "créditos" : "conversaciones"} disponibles`;
+        // CRE 3 / COP 3 — con Créditos IA el copiloto habla de créditos pero SIEMPRE traduce
+        // a conversaciones: "te quedan 1.240 créditos" no le dice nada a nadie. Usa el mismo
+        // estimador que el medidor del panel y los avisos del worker, así que las tres
+        // superficies dicen exactamente el mismo número del mismo saldo.
+        if (porCreditos) {
+          const propio = await this.prisma
+            .withTenant(organizationId, (tx) => leerMuestraConsumoCreditos(tx, organizationId))
+            .catch(() => ({ conversaciones: 0, creditos: 0, dias: 0 }));
+          const rubro = String((((org?.settings ?? {}) as Record<string, any>).general ?? {}).industry ?? "");
+          const promedioDelRubro = await leerPromedioDelRubro(admin, rubro).catch(() => null);
+          saldo = frasePorSaldo(estimarAlcance({ restantes: saldoRestante, propio, promedioDelRubro }));
+        }
       }
     } catch { /* noop */ }
 
@@ -282,6 +295,14 @@ REGLAS:
     const modeBlock = ctx.mode === "implementacion"
       ? `\n\nMODO IMPLEMENTACIÓN (avance < 100%): LIDERA. Saluda proponiendo el siguiente paso pendiente ("${ctx.nextStep?.label ?? ""}") y ofrécete a hacerlo juntos.`
       : `\n\nMODO ASISTENCIA (todo listo): resuelve dudas; si no puedes, escala a un humano.`;
+    // COP 3 — MOMENTOS DE PAGO. Nunca agresivos, pero siempre presentes y SIEMPRE con el
+    // precio y el saldo leídos del catálogo (ofrecerRecarga/verEstado), nunca inventados.
+    const pagoBlock = `\n\nCUÁNDO HABLAR DE PAGAR (una vez cada uno, sin insistir; si dice que no, lo dejas y sigues ayudando):
+- Al quedar el bot atendiendo: felicítalo y cuéntale que tiene saldo de prueba y que activando el plan no se corta. Precio y saldo con ofrecerRecarga.
+- Cuando el saldo de prueba vaya quedando corto, o al agotarse: avísale con el estimado (cuántas conversaciones le quedan) y ofrécele el botón.
+- Cuando vea valor —una cita agendada o una conversación que el bot atendió solo— nómbralo concreto ("tu asistente ya atendió N conversaciones") y recién ahí ofrece activar.
+- Si pregunta por el costo de los MENSAJES de WhatsApp, usa explicarPagoEnMeta: son dos cobros distintos y conviene que lo entienda antes de que le llegue el de Meta.
+Con Créditos IA habla de créditos pero SIEMPRE traduce a conversaciones: el saldo del contexto ya viene traducido, úsalo tal cual y no inventes equivalencias.`;
     const ownerBlock = owner
       ? `\n\nPuedes MONTAR el negocio conversando, no solo explicar cómo: datos del negocio y rubro (completarDatosNegocio), horario de atención (configurarHorarioAtencion), servicios con precio (crearServicio, configurarPrecioServicio), quién atiende y su horario (crearProfesional), cómo se ofrecen las horas (configurarAgenda), y el asistente completo: armarlo desde una plantilla del rubro (listarPlantillasAsistente, crearAsistente), ajustarle tono/reglas/preguntas frecuentes (ajustarAsistente), PROBARLO con un mensaje de cliente (probarAsistente) y publicarlo (publicarAsistente). También la página del negocio (activarMiniSitio).
 
@@ -293,7 +314,7 @@ AUTONOMÍA:
 - NUNCA cambias el modelo de IA del asistente: eso lo fija Conversia.
 - Después de crear el asistente, pruébalo con un mensaje realista de su rubro ANTES de ofrecer publicarlo: que el dueño vea cómo atiende.`
       : `\n\nEste usuario NO es dueño ni administrador: NO configures nada. Solo informa y, si hace falta, escala a un humano.`;
-    return base + modeBlock + ownerBlock;
+    return base + modeBlock + pagoBlock + ownerBlock;
   }
 
   /**

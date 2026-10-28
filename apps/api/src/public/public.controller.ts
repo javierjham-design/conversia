@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
 import { getEnv, brandFromOrigin } from "@conversia/config";
-import { createAIRouter, fetchWebPageText } from "@conversia/agents";
+import { CREDITOS_POR_CONVERSACION_POR_DEFECTO, createAIRouter, fetchWebPageText } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { INDUSTRIES } from "../common/industries";
@@ -58,7 +58,21 @@ export class PublicController {
       where: { active: true, brand: b, type: unit },
       orderBy: { order: "asc" },
     });
-    return packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: Number(p.priceClp), priceUsd: Number(p.priceUsd), order: p.order, unit }));
+    // CRE 3 — `creditosPorConversacion` viaja con los packs para que la página de precios
+    // pueda mostrar la equivalencia ("1.000 créditos ≈ 111 conversaciones") SIN hardcodear
+    // el promedio en el navegador. El número lo manda el servidor, que es el mismo que usa
+    // el estimador del panel: así la promesa de la landing y lo que el cliente ve adentro no
+    // se contradicen. (Y evita arrastrar `@conversia/agents` al bundle del cliente.)
+    return packs.map((p) => ({
+      code: p.code,
+      name: p.name,
+      credits: p.credits,
+      priceClp: Number(p.priceClp),
+      priceUsd: Number(p.priceUsd),
+      order: p.order,
+      unit,
+      creditosPorConversacion: CREDITOS_POR_CONVERSACION_POR_DEFECTO,
+    }));
   }
 
   /**

@@ -16,7 +16,7 @@ import { api, getToken, getRefreshToken, sessionActive, clearToken } from "@/lib
 const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
 
 type Plan = { code: string; name: string; priceClp: number; features: Record<string, unknown> };
-type Pack = { code: string; name: string; credits: number; priceClp: number };
+type Pack = { code: string; name: string; credits: number; priceClp: number; creditosPorConversacion?: number };
 
 export default function Landing() {
   const router = useRouter();
@@ -48,13 +48,22 @@ export default function Landing() {
   // los Créditos IA, el plan que llega es el de créditos y la unidad cambia de nombre: decir
   // "100 conversaciones incluidas" cuando lo que trae son 100 CRÉDITOS (≈24 conversaciones)
   // sería una promesa falsa en la página de precios.
-  // El copy completo de la landing con la equivalencia en conversaciones es del paso 12
-  // (CRE 3); acá solo se evita que quede un número o una unidad que no corresponde.
   const esCreditos = base?.code === "conversia_creditos_base";
   const unidad = esCreditos ? "créditos" : "conversaciones";
   const basePrice = base ? clp(base.priceClp) : "$18.990";
   const baseIncluded = base ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || 100 : 100;
   const pruebaGratis = esCreditos ? 200 : 30;
+  // CRE 3 — EQUIVALENCIA EN CONVERSACIONES. "100 créditos" no le dice nada a alguien que
+  // está decidiendo si contratar: en la página de precios el número tiene que poder
+  // compararse con algo que entienda. Es una APROXIMACIÓN y se dice así ("≈", "según cuánto
+  // conversen tus clientes"), porque el consumo real depende del largo de cada conversación.
+  // El promedio de referencia es el MISMO del estimador del panel, para no prometer acá una
+  // cifra distinta de la que verá adentro.
+  // El promedio lo manda el servidor con los packs (`creditosPorConversacion`), para no
+  // hardcodear acá un número que después se desincronice del estimador del panel.
+  const porConversacion = packs.find((p) => p.creditosPorConversacion)?.creditosPorConversacion ?? 9;
+  const conv = (creditos: number) => Math.floor(creditos / porConversacion);
+  const aprox = (creditos: number) => (esCreditos ? ` (≈ ${conv(creditos).toLocaleString("es-CL")} conversaciones)` : "");
 
   return (
     <div className="lp">
@@ -191,6 +200,7 @@ export default function Landing() {
             <span className="lp-price-tag lp-price-tag-free"><Gift size={14} /> Para empezar</span>
             <h3 className="display">Gratis</h3>
             <p className="lp-price-amount display">{pruebaGratis} <span>{unidad}</span></p>
+            {esCreditos ? <p className="lp-price-note">≈ {conv(pruebaGratis).toLocaleString("es-CL")} conversaciones, según cuánto conversen tus clientes.</p> : null}
             <p className="lp-price-note">Sin tarjeta. Pruébalo con clientes reales.</p>
             <ul className="lp-check">
               <li><Check size={15} /> Tu asistente completo</li>
@@ -204,7 +214,7 @@ export default function Landing() {
             <span className="lp-price-tag"><Sparkles size={14} /> El más elegido</span>
             <h3 className="display">Base</h3>
             <p className="lp-price-amount display">{basePrice}<span>/mes</span></p>
-            <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} incluidos al mes{esCreditos ? " · IVA incluido" : ""}.</p>
+            <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} incluidos al mes{aprox(baseIncluded)}{esCreditos ? " · IVA incluido" : ""}.</p>
             <ul className="lp-check">
               <li><Check size={15} /> Todo lo de la prueba</li>
               <li><Check size={15} /> Multicanal (WhatsApp, IG, Messenger)</li>
@@ -225,7 +235,7 @@ export default function Landing() {
                 { code: "b", name: "Pack 400", credits: 400, priceClp: 84900 },
                 { code: "c", name: "Pack 1.000", credits: 1000, priceClp: 199900 },
               ]).map((p) => (
-                <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad} · {clp(p.priceClp)}</li>
+                <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad}{aprox(p.credits)} · {clp(p.priceClp)}</li>
               ))}
             </ul>
             <a href="/crear" className="lp-ghost lp-ghost-lg lp-full">Empezar gratis</a>

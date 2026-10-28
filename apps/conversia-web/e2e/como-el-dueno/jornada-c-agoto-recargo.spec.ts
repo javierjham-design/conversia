@@ -24,11 +24,18 @@ import {
  */
 test.skip(!process.env.RUN_DUENO, "Suite 'como el dueño': requiere el stack Docker (RUN_DUENO=1).");
 
-/** Lee el número grande "Créditos disponibles" que ve el dueño en /cobros. */
+/**
+ * Lee el número grande del saldo que ve el dueño en /cobros. El TÍTULO depende de la unidad
+ * del plan (CRE 3): "Conversaciones disponibles" cuando cobra por conversación, "Créditos
+ * disponibles" con Créditos IA. La expresión acepta las dos para que esta jornada siga
+ * valiendo cuando el dueño encienda el catálogo de créditos.
+ */
+const TITULO_SALDO = /(Conversaciones|Créditos) disponibles/;
+
 async function saldoEnPantalla(page: import("@playwright/test").Page): Promise<number> {
-  const card = page.locator("div.card").filter({ hasText: "Créditos disponibles" }).first();
+  const card = page.locator("div.card").filter({ hasText: TITULO_SALDO }).first();
   const txt = await card.innerText();
-  const m = txt.replace(/\./g, "").match(/Créditos disponibles\s+(\d+)/i);
+  const m = txt.replace(/\./g, "").match(/(?:Conversaciones|Créditos) disponibles\s+(\d+)/i);
   return m ? Number(m[1]) : NaN;
 }
 
@@ -44,7 +51,7 @@ test.describe("Jornada C — agoto y recargo", () => {
     // Nazco con 30.
     expect(await walletBalance(request, cuenta.token)).toBe(30);
     await page.goto("/cobros", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Créditos disponibles")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(TITULO_SALDO)).toBeVisible({ timeout: 15_000 });
     expect(await saldoEnPantalla(page)).toBe(30);
 
     // 3 clientes distintos escriben → el bot atiende → 3 conversaciones consumidas (30 → 27).

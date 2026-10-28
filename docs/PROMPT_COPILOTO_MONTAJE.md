@@ -156,7 +156,7 @@ sin salida no sirve.
 - Accesible: navegable con teclado, `aria-live` para los mensajes, respeta
   `prefers-reduced-motion` en las animaciones del avatar.
 
-## ETAPA 3 — Inducir al pago y explicar los detalles de Meta
+## ETAPA 3 — Inducir al pago y explicar los detalles de Meta — ✅ #563
 
 - **Momentos de pago** dentro del guion, nunca agresivos pero siempre presentes:
   - Al terminar el montaje: "Tu bot ya está atendiendo. Tienes tus créditos de prueba;
