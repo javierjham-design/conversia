@@ -6,9 +6,15 @@ name: deploy-conversia-web
 # Este workflow publica la web en cada push a main que toque su código o los paquetes compartidos.
 #
 # Requisito de UNA sola vez del dueño: crear el secret RAILWAY_TOKEN del repo (token de PROYECTO de
-# Railway del proyecto conversia). Sin él, el job NO falla: se salta el deploy con un aviso. Nunca
-# se escribe el token en el código. Alternativa equivalente: conectar el servicio a GitHub en el
-# dashboard de Railway (como api/worker) y desactivar este workflow.
+# Railway del proyecto conversia). Nunca se escribe el token en el código. Alternativa equivalente:
+# conectar el servicio a GitHub en el dashboard de Railway (como api/worker) y borrar este workflow.
+#
+# SIN EL TOKEN, ESTE JOB FALLA A PROPÓSITO (28-oct-2026). Antes se saltaba el deploy con un aviso y
+# terminaba en verde: un workflow llamado "deploy" que informa éxito sin desplegar nada. El 28-oct
+# producción servía un commit de la mañana con TRECE commits ya en main —entre ellos arreglos de
+# cobro— y no había una sola señal roja en ninguna parte. Un rojo por merge es molesto; creer que
+# algo se desplegó cuando no, cuesta mucho más. No bloquea nada: corre DESPUÉS del merge y no es
+# un check requerido.
 
 on:
   push:
@@ -41,8 +47,17 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           if [ -z "$RAILWAY_TOKEN" ]; then
-            echo "::warning::RAILWAY_TOKEN no está configurado → se omite el deploy. Cárgalo en Settings → Secrets and variables → Actions (token de proyecto de Railway)."
-            exit 0
+            echo "::error title=conversia-web NO se desplegó::Falta el secret RAILWAY_TOKEN, así que este commit NO está en producción."
+            echo ""
+            echo "Dos formas de arreglarlo, cualquiera sirve:"
+            echo "  1) Settings → Secrets and variables → Actions → nuevo secret RAILWAY_TOKEN"
+            echo "     (token de PROYECTO de Railway del proyecto conversia)."
+            echo "  2) Conectar el servicio conversia-web a GitHub en el dashboard de Railway"
+            echo "     (como api y worker) y BORRAR este workflow."
+            echo ""
+            echo "Mientras tanto hay que desplegar a mano:"
+            echo "  railway up --service conversia-web --ci"
+            exit 1
           fi
           npm i -g @railway/cli
           railway up --service conversia-web --ci
