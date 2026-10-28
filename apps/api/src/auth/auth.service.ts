@@ -6,7 +6,7 @@ import { brandOf, accentForCountry } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { VerticalService } from "../organizations/vertical.service";
 import { applyDraftToOrganization, type ApplyDraftTx } from "./apply-draft";
-import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken } from "./jwt";
+import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken, signPasswordResetToken, verifyPasswordResetToken, passwordFingerprint } from "./jwt";
 import { RefreshSessionService } from "./refresh-session.service";
 import { sendEmail } from "../common/email";
 import { encryptSecret, decryptSecret } from "../common/crypto";
@@ -303,6 +303,85 @@ export class AuthService {
 <p style="color:#64748b;font-size:13px">El enlace vence en 2 días. Si no creaste esta cuenta, ignora este mensaje.</p>
 </div>`;
     return sendEmail({ to: email, subject: `Confirma tu correo · ${brand.name}`, html, from: brand.mailFrom, replyTo: brand.replyTo ?? undefined, apiKey: brand.resendApiKey });
+  }
+
+  /**
+   * §10.5 — Pide un enlace de recuperación. Respuesta UNIFORME siempre.
+   *
+   * Devuelve lo mismo exista o no la cuenta, y sin tardar distinto: si contestara
+   * "ese correo no existe", cualquiera podría usar este endpoint público para averiguar
+   * quién es cliente de la plataforma (enumeración de cuentas). El correo se manda
+   * best-effort y en segundo plano por el mismo motivo.
+   */
+  async requestPasswordReset(email: string, brand: string): Promise<{ ok: true }> {
+    const normalizado = (email ?? "").trim().toLowerCase();
+    try {
+      const user = await this.prisma.admin.user.findUnique({
+        where: { email_brand: { email: normalizado, brand } },
+        select: { id: true, email: true, passwordHash: true, memberships: { where: { active: true }, select: { organizationId: true } } },
+      });
+      // Sin cuenta, o sin contraseña (invitado que nunca la fijó): no se manda nada, pero
+      // la respuesta es idéntica.
+      if (user?.passwordHash && user.memberships.length) {
+        const org = await this.prisma.admin.organization.findUnique({
+          where: { id: user.memberships[0].organizationId },
+          select: { brand: true },
+        });
+        const token = signPasswordResetToken(user.id, passwordFingerprint(user.passwordHash));
+        await this.sendPasswordResetEmail(user.email, org, token).catch(() => undefined);
+      }
+    } catch {
+      /* ni un fallo de BD cambia la respuesta: sería otra forma de filtrar */
+    }
+    return { ok: true as const };
+  }
+
+  private async sendPasswordResetEmail(email: string, org: { brand?: string | null } | null, token: string): Promise<boolean> {
+    const brand = brandOf(org);
+    const link = `${brand.webUrl}/recuperar?token=${encodeURIComponent(token)}`;
+    const html = `<div style="font-family:Inter,system-ui,sans-serif;max-width:520px">
+<h2 style="margin:0 0 12px">Recupera tu acceso</h2>
+<p>Pediste cambiar la contraseña de tu cuenta de ${brand.name}. El enlace sirve <b>una sola vez</b> y vence en 1 hora.</p>
+<p style="margin:22px 0"><a href="${link}" style="background:#0f9e8e;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">Crear una contraseña nueva</a></p>
+<p style="color:#64748b;font-size:13px">O copia este enlace: <br/>${link}</p>
+<p style="color:#64748b;font-size:13px"><b>Si no fuiste tú</b>, puedes ignorar este mensaje: tu contraseña no cambia hasta que uses el enlace, y nadie más recibió este correo.</p>
+</div>`;
+    return sendEmail({
+      to: email,
+      subject: `Recupera tu acceso · ${brand.name}`,
+      html,
+      from: brand.mailFrom,
+      replyTo: brand.replyTo ?? undefined,
+      apiKey: brand.resendApiKey,
+    });
+  }
+
+  /**
+   * §10.5 — Fija la contraseña nueva con el token del enlace.
+   *
+   * El token es de UN SOLO USO porque lleva la huella de la contraseña vigente: al
+   * cambiarla, el enlace usado y cualquier otro pedido antes dejan de valer. Y se revocan
+   * TODAS las sesiones deslizantes: quien haya entrado con la contraseña vieja (el motivo
+   * más probable de estar recuperando el acceso) queda fuera.
+   */
+  async resetPassword(token: string, newPassword: string): Promise<{ ok: true }> {
+    let claims: { sub: string; pwd: string };
+    try {
+      claims = verifyPasswordResetToken(token);
+    } catch {
+      throw new BadRequestException("El enlace no es válido o venció. Pide uno nuevo.");
+    }
+    const user = await this.prisma.admin.user.findUnique({ where: { id: claims.sub }, select: { id: true, passwordHash: true } });
+    if (!user?.passwordHash || passwordFingerprint(user.passwordHash) !== claims.pwd) {
+      // La huella no calza: el enlace ya se usó, o la contraseña cambió por otra vía.
+      throw new BadRequestException("Este enlace ya se usó o la contraseña cambió. Pide uno nuevo.");
+    }
+    await this.prisma.admin.user.update({
+      where: { id: user.id },
+      data: { passwordHash: bcrypt.hashSync(newPassword, BCRYPT_COST) },
+    });
+    await this.revokeAllSessions(user.id).catch(() => undefined);
+    return { ok: true as const };
   }
 
   /** Marca el correo del usuario como verificado a partir del token del link. */

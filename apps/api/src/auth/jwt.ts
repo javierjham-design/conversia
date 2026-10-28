@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as jwt from "jsonwebtoken";
 import { getEnv } from "@conversia/config";
 
@@ -111,6 +111,45 @@ export function verifyEmailVerifyToken(token: string): { sub: string } {
   }) as jwt.JwtPayload;
   if (!decoded.sub || decoded.purpose !== "email_verify") throw new Error("Token de verificación inválido");
   return { sub: String(decoded.sub) };
+}
+
+/**
+ * §10.5 — Token de RECUPERACIÓN DE CONTRASEÑA. Audiencia propia (`${AUD}:reset`) → no
+ * sirve para entrar a la app, solo para fijar una contraseña nueva. Vive 1 hora.
+ *
+ * `pwd` es una huella de la contraseña ACTUAL. Es lo que hace el token de UN SOLO USO sin
+ * guardar nada en base ni en Redis: al cambiar la contraseña la huella deja de coincidir,
+ * así que el enlace usado —y cualquier otro que se haya pedido antes— queda inservible al
+ * instante. Sin esto, un enlace filtrado (del correo, de un reenvío) seguiría abriendo la
+ * cuenta durante toda la hora, incluso después de haberlo usado.
+ */
+export function signPasswordResetToken(userId: string, pwdFingerprint: string): string {
+  const env = getEnv();
+  return jwt.sign({ sub: userId, pwd: pwdFingerprint, purpose: "password_reset", jti: randomUUID() }, env.JWT_SECRET, {
+    algorithm: ALGO,
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:reset`,
+    expiresIn: "1h",
+  } as jwt.SignOptions);
+}
+
+export function verifyPasswordResetToken(token: string): { sub: string; pwd: string } {
+  const env = getEnv();
+  const decoded = jwt.verify(token, env.JWT_SECRET, {
+    algorithms: [ALGO],
+    issuer: env.JWT_ISSUER,
+    audience: `${env.JWT_AUDIENCE}:reset`,
+    clockTolerance: 5,
+  }) as jwt.JwtPayload;
+  if (!decoded.sub || decoded.purpose !== "password_reset" || typeof decoded.pwd !== "string") {
+    throw new Error("Token de recuperación inválido");
+  }
+  return { sub: String(decoded.sub), pwd: decoded.pwd };
+}
+
+/** Huella corta de la contraseña actual, para atar el token a ella (ver arriba). */
+export function passwordFingerprint(passwordHash: string): string {
+  return createHash("sha256").update(passwordHash).digest("hex").slice(0, 32);
 }
 
 export function verifyAppToken(token: string): AppTokenClaims {

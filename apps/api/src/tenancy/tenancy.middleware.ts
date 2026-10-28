@@ -4,7 +4,9 @@ import { verifyAppToken, type AppTokenClaims } from "../auth/jwt";
 import { runWithContext, type RequestContext } from "./context";
 
 /** Rutas sin JWT: auth, webhooks (firma propia), API pública (API key) y health. */
-const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
+// §10.5 — `/auth/forgot` y `/auth/reset` son públicas por definición: quien las usa es
+// justamente alguien que NO puede iniciar sesión. Se autentican por el token del enlace.
+const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/auth/forgot", "/auth/reset", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
 
 /** @deprecated usar AppTokenClaims de auth/jwt */
 export type JwtPayload = AppTokenClaims;

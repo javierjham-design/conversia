@@ -142,7 +142,12 @@ export default function Login() {
         <button className="btn-accent" type="submit" disabled={loading} style={{ width: "100%", marginTop: 20, opacity: loading ? 0.6 : 1 }}>
           {loading ? "Entrando…" : "Entrar"}
         </button>
-        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 16 }}>
+        {/* §10.5 — la salida cuando se olvidó la contraseña. Sin esto el único camino era
+            escribir a Soporte para que un admin la restableciera a mano. */}
+        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 14 }}>
+          <a href="/recuperar" className="text-dim" style={{ textDecoration: "none" }}>¿Olvidaste tu contraseña?</a>
+        </p>
+        <p className="text-dim" style={{ fontSize: 13, textAlign: "center", marginTop: 8 }}>
           ¿No tienes cuenta? <a href="/registro" className="text-accent" style={{ textDecoration: "none" }}>Crear cuenta</a>
         </p>
       </form>
