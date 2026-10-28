@@ -1,14 +1,30 @@
-import { Body, Controller, HttpCode, Param, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, HttpCode, HttpException, HttpStatus, Param, Post, Req, UnauthorizedException } from "@nestjs/common";
+import type { Request } from "express";
 import { getEnv } from "@conversia/config";
+import { RateLimitService } from "../common/rate-limit";
 
 /**
  * MCP REMOTO (HTTP) de TuBot — para conectar desde Claude por URL (conectores/Claude web),
  * a diferencia del MCP stdio (apps/mcp-tubot, para Claude Desktop). Mismas herramientas de
- * gestión de agentes. El token va en la URL: POST /mcp/:token (Streamable HTTP, JSON-RPC).
+ * gestión de agentes. JSON-RPC sobre Streamable HTTP.
+ *
+ * El token se acepta por `Authorization: Bearer` (recomendado) o en la ruta
+ * `POST /mcp/:token` (compatibilidad con los conectores ya configurados). §7.3: la ruta se
+ * mantiene porque hay conectores vivos usándola, pero la cabecera es la buena — una URL
+ * con el token se escribe en logs de acceso, proxys e historial, y éste es un JWT de 365
+ * días con los permisos del tenant.
  *
  * Ruta PÚBLICA (excluida del middleware de tenant): se autentica reenviando el token a los
  * endpoints internos /agents/*, que sí validan el JWT y resuelven el tenant.
  */
+
+/** Token del conector desde `Authorization: Bearer <token>`, o null si no vino. */
+function tokenDeCabecera(req: Request): string | null {
+  const h = req.headers?.authorization;
+  if (typeof h !== "string" || !h.startsWith("Bearer ")) return null;
+  const t = h.slice(7).trim();
+  return t || null;
+}
 
 const SERVER = { name: "tubot-agents", version: "1.0.0" };
 
@@ -135,12 +151,51 @@ function makeCaller(token: string): Caller {
   };
 }
 
+/**
+ * §7.3 — Tope de operaciones por lote.
+ *
+ * El cuerpo JSON-RPC puede ser un ARRAY, y se abría con `Promise.all` sin límite: un solo
+ * POST con 10.000 entradas se convertía en 10.000 llamadas a la API interna, todas en
+ * paralelo. Es amplificación: una petición barata para el atacante, carísima para nosotros.
+ */
+const MAX_LOTE = 10;
+
+/** §7.3 — Intentos por token y minuto. El MCP proxea la API interna: no puede ser infinito. */
+const MCP_MAX_POR_MINUTO = 120;
+
 @Controller("mcp")
 export class McpController {
+  constructor(private rateLimit: RateLimitService) {}
+
+  /**
+   * §7.3 — El token también se acepta por `Authorization: Bearer`.
+   *
+   * Hasta ahora SOLO viajaba en la ruta (`POST /mcp/<token>`), y las URLs se escriben en
+   * todos los registros del camino: logs de acceso, proxys, historial del cliente. Este
+   * token es un JWT de 365 días con los permisos del tenant, así que dejarlo en un log es
+   * dejarlo disponible. La cabecera no se registra.
+   */
+  @Post()
+  @HttpCode(200)
+  async rpcHeader(@Req() req: Request, @Body() body: unknown): Promise<unknown> {
+    return this.rpc(tokenDeCabecera(req) ?? "", body, req);
+  }
+
   @Post(":token")
   @HttpCode(200)
-  async rpc(@Param("token") token: string, @Body() body: unknown): Promise<unknown> {
-    const call = makeCaller(token);
+  async rpc(@Param("token") token: string, @Body() body: unknown, @Req() req?: Request): Promise<unknown> {
+    // La cabecera manda sobre la ruta: si el cliente ya la usa, el token de la URL sobra.
+    const efectivo = (req ? tokenDeCabecera(req) : null) ?? token;
+    if (!efectivo) throw new UnauthorizedException("Falta el token del conector (cabecera Authorization: Bearer o /mcp/<token>)");
+
+    // §7.3 — límite por TOKEN (no por IP: el cliente MCP sale por la IP de su proveedor).
+    // La llave usa un prefijo del token, no el token entero, para no escribirlo en Redis.
+    const rl = await this.rateLimit.custom(`rl:mcp:${efectivo.slice(0, 24)}`, MCP_MAX_POR_MINUTO, 60);
+    if (!rl.allowed) {
+      throw new HttpException("Demasiadas llamadas al conector. Espera un momento.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const call = makeCaller(efectivo);
     const handleOne = async (msg: { id?: unknown; method?: string; params?: any }) => {
       const { id, method, params } = msg;
       if (method === "initialize") {
@@ -166,6 +221,11 @@ export class McpController {
     };
 
     if (Array.isArray(body)) {
+      // §7.3 — tope de lote (ver MAX_LOTE): sin esto un POST con miles de entradas se
+      // abría en miles de llamadas internas simultáneas.
+      if (body.length > MAX_LOTE) {
+        throw new BadRequestException(`Demasiadas operaciones en un lote (${body.length}); el máximo es ${MAX_LOTE}.`);
+      }
       const out = (await Promise.all(body.map(handleOne))).filter((x) => x !== null);
       return out;
     }
