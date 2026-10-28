@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { Fraunces, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import { PROD_API_FALLBACK } from "@/lib/api-base";
 
 // M3 — origen de la API (cross-origin) para preconectar y acelerar el primer fetch.
@@ -13,13 +13,42 @@ const API_ORIGIN = (() => {
   }
 })();
 
-// A10 — tipografía del design system "Nocturna" realmente cargada. next/font auto-hospeda
-// las fuentes en build (se sirven desde el propio dominio → compatible con la CSP font-src 'self').
-// M3 — display:"optional" en la tipografía de titulares (Fraunces, que es el elemento LCP):
-// con el fallback metric-matched de next/font el titular pinta YA, sin el swap tardío que
-// disparaba el LCP a ~3,4 s bajo 4G. Inter (cuerpo) queda en "swap".
-const fraunces = Fraunces({ subsets: ["latin"], weight: ["400", "600"], style: ["normal", "italic"], variable: "--font-fraunces", display: "optional" });
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+/*
+ * A10 — tipografía del design system "Nocturna", servida desde el propio dominio (la CSP
+ * del panel solo admite `font-src 'self'`).
+ *
+ * Los archivos viven en el repo (`./fonts`) en vez de pedírselos a Google en cada build:
+ * `next/font/google` descarga y parsea el CSS de Google DURANTE el build, y cuando esa
+ * respuesta no viene como el loader espera revienta con un `TypeError: Cannot read
+ * properties of null (reading '1')` que no tiene nada que ver con el código. Era el flake
+ * que obligaba a re-lanzar el job `build` cada varios PRs —incluido el de este cambio— y
+ * convierte un verde en una moneda al aire. Ahora el build no sale a internet.
+ *
+ * Son las MISMAS fuentes: los woff2 variables del subconjunto latino que servía Google
+ * (Inter v20, Fraunces v38). Para reemplazarlas: pedir el CSS de Google con un
+ * `User-Agent` de Chrome, tomar la URL del bloque cuyo `unicode-range` incluye
+ * U+0000-00FF y guardarla acá.
+ *
+ * M3 — display:"optional" en los titulares (Fraunces es el elemento LCP): con el fallback
+ * ajustado por métricas el titular pinta YA, sin el swap tardío que disparaba el LCP a
+ * ~3,4 s bajo 4G. Inter (cuerpo) queda en "swap". `adjustFontFallback` va explícito porque
+ * con fuentes locales no se puede deducir de la familia: Fraunces es serif, Inter no.
+ */
+const fraunces = localFont({
+  src: [
+    { path: "./fonts/fraunces-latin-variable.woff2", weight: "100 900", style: "normal" },
+    { path: "./fonts/fraunces-latin-variable-italic.woff2", weight: "100 900", style: "italic" },
+  ],
+  variable: "--font-fraunces",
+  display: "optional",
+  adjustFontFallback: "Times New Roman",
+});
+const inter = localFont({
+  src: [{ path: "./fonts/inter-latin-variable.woff2", weight: "100 900", style: "normal" }],
+  variable: "--font-inter",
+  display: "swap",
+  adjustFontFallback: "Arial",
+});
 
 export const metadata: Metadata = {
   title: "Conversia",
