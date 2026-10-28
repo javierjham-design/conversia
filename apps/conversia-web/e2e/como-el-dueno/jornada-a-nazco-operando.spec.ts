@@ -57,19 +57,27 @@ test.describe("Jornada A — quedo operando (viaje completo)", () => {
     await expect(page.getByText(/Te quedan\s+30\s+de\s+30\s+conversaciones gratis/i)).toBeVisible({ timeout: 15_000 });
     const token = await tokenFromBrowser(page);
 
-    // 2) El asistente me saluda y me dice qué falta (contexto REAL del backend, no IA).
-    //    Disparo el onClick del botón flotante (openWidget, que siembra el saludo) con
-    //    dispatchEvent: en móvil el botón fijo queda tapado por una tarjeta del contenido y el
-    //    hit-test de Playwright no lo alcanza, pero un tap real sí; esto ejecuta el mismo handler.
-    const burbuja = page.getByRole("button", { name: "Asistente" });
-    await expect(burbuja).toBeVisible({ timeout: 15_000 });
-    await burbuja.dispatchEvent("click");
-    await expect(page.getByText("Asistente Conversia")).toBeVisible();
-    await expect(page.getByText(/soy tu asistente de Conversia/i)).toBeVisible();
+    // 2) COP 2 — Convi se presenta SOLO en la primera entrada y me dice qué falta (contexto
+    //    REAL del backend, no IA). En escritorio aparece el panel acoplado completo; en móvil
+    //    aparece COMPACTO —saludo + progreso— para no taparme el panel que vengo a ver, y se
+    //    expande al tocar. Las dos formas llevan el nombre del negocio y el paso que sigue.
+    const esMovil = testInfo.project.name !== "desktop";
+    if (esMovil) {
+      await expect(page.getByText(/Convi te acompaña/i)).toBeVisible({ timeout: 15_000 });
+      // El progreso del montaje se ve sin abrir nada.
+      await expect(page.getByText(/Paso \d+ de \d+/)).toBeVisible();
+      await page.getByRole("button", { name: /Empecemos|Abrir/i }).dispatchEvent("click");
+    }
+    await expect(page.getByRole("dialog", { name: /Convi/i })).toBeVisible({ timeout: 15_000 });
+    // Saluda por el nombre del negocio y propone el paso pendiente (no un texto genérico).
+    await expect(page.getByText(/Soy Convi/i)).toBeVisible();
+    await expect(page.getByText(/Gimnasio QA/i).first()).toBeVisible();
+    // Barra de progreso del montaje, siempre visible mientras falte algo.
+    await expect(page.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
     await expect(page.getByText(/not found/i)).toHaveCount(0);
-    // Cierro la burbuja (es fija; en móvil taparía el compositor de la Bandeja más adelante).
-    await page.locator("div.card").filter({ hasText: "Asistente Conversia" }).getByRole("button", { name: "Cerrar" }).dispatchEvent("click");
-    await expect(page.getByText("Asistente Conversia")).toHaveCount(0);
+    // Lo cierro (en móvil taparía el compositor de la Bandeja más adelante).
+    await page.getByRole("dialog", { name: /Convi/i }).getByRole("button", { name: "Cerrar" }).dispatchEvent("click");
+    await expect(page.getByRole("dialog", { name: /Convi/i })).toHaveCount(0);
 
     // 3) Cargo 2 servicios con su precio (por el formulario; la vía por chat exige IA real).
     await page.goto("/agenda/configurar", { waitUntil: "domcontentloaded" });

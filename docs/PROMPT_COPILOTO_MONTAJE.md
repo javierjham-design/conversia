@@ -133,7 +133,7 @@ sin salida no sirve.
   cae.
 - El markdown simple (negritas, listas, enlaces internos) se renderiza en vez de aplanarse.
 
-## ETAPA 2 — Experiencia: un copiloto protagonista, no una burbuja olvidada
+## ETAPA 2 — Experiencia: un copiloto protagonista, no una burbuja olvidada — ✅ #562
 
 - **Personaje**: un avatar ilustrado propio en SVG inline (sin assets externos, por la CSP),
   con estados: saludando, pensando, hablando, celebrando, preocupado (cuando hay un error).
