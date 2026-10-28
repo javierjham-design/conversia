@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -57,10 +57,19 @@ export function BusinessSettings() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * ¿El dueño ya empezó a editar? Las dos cargas son asíncronas y el horario tarda más (es
+   * otra clave de configuración). Sin este candado, alguien con conexión lenta que empieza a
+   * marcar días PIERDE lo marcado cuando llega la respuesta, porque `setHours` la pisa.
+   * Lo cazó la jornada H en CI, donde el tecleo es inmediato y la respuesta no.
+   */
+  const tocado = useRef(false);
+
   useEffect(() => {
     api<Negocio>("/settings/business")
       .then((n) => {
         setNegocio(n);
+        if (tocado.current) return;
         setNombre(n.nombre);
         setRubro(n.rubro);
         setDireccion(n.direccion);
@@ -68,14 +77,19 @@ export function BusinessSettings() {
       })
       .catch((e) => setError((e as Error).message));
     api<{ hours: Hours }>("/settings/hours")
-      .then((h) => setHours(h.hours ?? {}))
+      .then((h) => {
+        if (tocado.current) return;
+        setHours(h.hours ?? {});
+      })
       .catch(() => undefined);
   }, []);
 
   function abrir(dia: string) {
+    tocado.current = true;
     setHours((h) => ({ ...h, [dia]: [{ from: "09:00", to: "18:00" }] }));
   }
   function cerrar(dia: string) {
+    tocado.current = true;
     setHours((h) => {
       const next = { ...h };
       delete next[dia];
@@ -83,9 +97,11 @@ export function BusinessSettings() {
     });
   }
   function agregarTramo(dia: string) {
+    tocado.current = true;
     setHours((h) => ({ ...h, [dia]: [...(h[dia] ?? []), { from: "09:00", to: "13:00" }].slice(0, 4) }));
   }
   function quitarTramo(dia: string, i: number) {
+    tocado.current = true;
     setHours((h) => {
       const lista = (h[dia] ?? []).filter((_, j) => j !== i);
       const next = { ...h };
@@ -95,10 +111,12 @@ export function BusinessSettings() {
     });
   }
   function cambiarTramo(dia: string, i: number, campo: "from" | "to", valor: string) {
+    tocado.current = true;
     setHours((h) => ({ ...h, [dia]: (h[dia] ?? []).map((t, j) => (j === i ? { ...t, [campo]: valor } : t)) }));
   }
   /** Copia el horario del lunes al resto de los días laborales (el caso más común). */
   function aplicarALaborales() {
+    tocado.current = true;
     const base = hours.mon;
     if (!base?.length) return;
     setHours((h) => {
@@ -160,12 +178,12 @@ export function BusinessSettings() {
 
       <label style={labelStyle}>
         Nombre del negocio
-        <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Barbería Central" style={inputStyle} />
+        <input value={nombre} onChange={(e) => { tocado.current = true; setNombre(e.target.value); }} placeholder="Barbería Central" style={inputStyle} />
       </label>
 
       <label style={{ ...labelStyle, marginTop: 12 }}>
         Rubro
-        <select value={rubro} onChange={(e) => setRubro(e.target.value)} style={inputStyle}>
+        <select value={rubro} onChange={(e) => { tocado.current = true; setRubro(e.target.value); }} style={inputStyle}>
           <option value="">Elige tu rubro…</option>
           {(negocio?.rubros ?? []).map((r) => (
             <option key={r.code} value={r.code}>{r.label}</option>
@@ -175,12 +193,12 @@ export function BusinessSettings() {
 
       <label style={{ ...labelStyle, marginTop: 12 }}>
         Dirección
-        <input value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Av. Siempre Viva 742, Providencia" style={inputStyle} />
+        <input value={direccion} onChange={(e) => { tocado.current = true; setDireccion(e.target.value); }} placeholder="Av. Siempre Viva 742, Providencia" style={inputStyle} />
       </label>
 
       <label style={{ ...labelStyle, marginTop: 12 }}>
         ¿Qué hace tu negocio? (opcional)
-        <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} rows={2} placeholder="Cortes de pelo y barba, atención sin reserva previa." style={{ ...inputStyle, resize: "vertical" }} />
+        <textarea value={descripcion} onChange={(e) => { tocado.current = true; setDescripcion(e.target.value); }} rows={2} placeholder="Cortes de pelo y barba, atención sin reserva previa." style={{ ...inputStyle, resize: "vertical" }} />
       </label>
 
       <div style={{ marginTop: 20 }} data-copilot="negocio-horario">

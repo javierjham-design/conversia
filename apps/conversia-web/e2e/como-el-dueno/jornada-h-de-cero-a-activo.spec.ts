@@ -73,7 +73,10 @@ test.describe("Jornada H — de cero a bot activo (medida)", () => {
     await tarjeta.getByLabel("Dirección").fill("Av. Siempre Viva 742, Providencia");
     // El rubro ya viene del registro; el nombre también. Falta el horario, que es el dato
     // que hacía imposible cerrar el paso 1 antes de arreglar el endpoint.
-    await tarjeta.getByRole("checkbox", { name: /Lunes: abre/i }).check();
+    // `setChecked` en vez de `check`: el input vive DENTRO de su `<label>`, y un clic en el
+    // centro puede resolverse contra el texto de la etiqueta (que reenvía el clic al control)
+    // → Playwright ve "el clic no cambió el estado". Con setChecked se afirma el estado final.
+    await tarjeta.getByRole("checkbox", { name: /Lunes: abre/i }).setChecked(true);
     await tarjeta.getByRole("button", { name: /Aplicar el lunes a toda la semana laboral/i }).click();
     await tarjeta.getByRole("button", { name: /Guardar datos del negocio/i }).click();
     await expect(tarjeta.getByText(/tu asistente ya responde con estos datos/i)).toBeVisible({ timeout: 15_000 });
@@ -98,7 +101,8 @@ test.describe("Jornada H — de cero a bot activo (medida)", () => {
     await expect(page.getByRole("heading", { name: "Nuevo recurso" })).toBeVisible();
     await page.getByLabel("Nombre").fill("Ana");
     await page.getByRole("button", { name: /^Guardar$/i }).click();
-    await expect(page.getByText("Ana", { exact: true })).toBeVisible({ timeout: 15_000 });
+    // La fila muestra "Ana · persona" en un solo nodo, así que `exact` no aplica.
+    await expect(page.getByText(/Ana\s*·/).first()).toBeVisible({ timeout: 15_000 });
     marcar("profesional");
 
     // ── 6) Asistente publicado + canal con asistente asignado ─────────────────
