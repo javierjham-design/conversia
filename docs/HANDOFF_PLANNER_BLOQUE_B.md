@@ -18,9 +18,18 @@
 
 **Org:** "Barbería Demo Sandbox" (id `cmus94hyy0000l601w4xhl49b`, rubro barbería, brand conversia). Poblada: plan activo, 1.500 créditos, 4 contactos, 3 asientos de caja, 1 profesional "Barbero demo", 3 citas de hoy.
 
-**TENANT (panel del cliente):** https://app.conversia.cl/login · `sandbox.user@conversia.cl` / `SandboxUser-2026` · sin MFA.
+**TENANT (panel del cliente):** https://app.conversia.cl/login · `sandbox.user@conversia.cl` · sin MFA.
 
-**SUPER ADMIN (consola):** https://app.conversia.cl/admin/login · `sandbox.admin@conversia.cl` / `SandboxAdmin-2026` · MFA secreto `DXIKWAV25YVRUR2WCJPAFCCVMAOOROBU` (base32; agrégalo a una app TOTP o genera el código con la lib). ⚠️ Cuenta sandbox temporal (se eliminará al terminar las pruebas).
+**SUPER ADMIN (consola):** https://app.conversia.cl/admin/login · `sandbox.admin@conversia.cl` · con MFA.
+
+> ⚠️ **Las contraseñas y el secreto TOTP estaban escritos acá y se quitaron el 28-oct-2026.**
+> Eran credenciales de un super admin con rol OWNER en la producción COMPARTIDA (TuBot +
+> clientes reales): cualquiera con lectura del repo tenía la consola completa, segundo
+> factor incluido. Quitarlas del archivo no las recupera —siguen en el historial de git—,
+> así que **esa cuenta hay que borrarla o rotarla**; mientras exista, el secreto publicado
+> sigue sirviendo: `node packages/database/scripts/sandbox-cerrar.mjs`.
+> Para rearmar un sandbox: `seed-sandbox.mjs`, que ahora exige `SANDBOX_ADMIN_PASSWORD` y
+> `ALLOW_SANDBOX_BACKDOOR=true`, y nunca imprime la contraseña.
 
 **API:** `https://api-production-cf8e.up.railway.app` (sin prefijo; 401 = ruta viva).
 

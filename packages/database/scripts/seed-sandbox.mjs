@@ -6,9 +6,23 @@
  * - Enriquece el tenant sandbox (ya registrado por API): plan conversia + suscripción activa +
  *   vigencia extendida + bolsa con créditos + contactos demo + caja demo (best-effort por sección).
  *
- * Uso (prod):
+ * ⚠️ ESTO CREA UNA PUERTA TRASERA, y la base de Conversia es COMPARTIDA con TuBot y con
+ * clientes reales: un super admin con rol OWNER y un segundo factor cuyo secreto queda
+ * impreso en una terminal. La primera versión traía la contraseña fija en el código y el
+ * `railway run` contra producción en este mismo encabezado, así que la puerta se reabría
+ * con un comando — y las credenciales acabaron escritas en un documento del repo
+ * (`docs/HANDOFF_PLANNER_BLOQUE_B.md`, limpiado el 28-oct-2026).
+ *
+ * Por eso ahora exige las dos cosas EXPLÍCITAS, sin valores por defecto:
+ *   SANDBOX_ADMIN_PASSWORD=<la que elijas, ≥12>  (nunca se imprime)
+ *   ALLOW_SANDBOX_BACKDOOR=true                  (confirmación de que la querés abrir)
+ *
+ * Uso:
  *   railway run -s Postgres -- bash -c 'cd packages/database && DATABASE_URL="$DATABASE_PUBLIC_URL" \
- *     TENANT_ORG_ID="cmus94hyy0000l601w4xhl49b" node scripts/seed-sandbox.mjs'
+ *     ALLOW_SANDBOX_BACKDOOR=true SANDBOX_ADMIN_PASSWORD="…" \
+ *     TENANT_ORG_ID="…" node scripts/seed-sandbox.mjs'
+ *
+ * Al terminar las pruebas, CERRARLA (imprime el comando al final).
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -17,8 +31,28 @@ import { randomBytes, createHmac } from "node:crypto";
 const prisma = new PrismaClient();
 const BRAND = "conversia";
 const ADMIN_EMAIL = "sandbox.admin@conversia.cl";
-const ADMIN_PASSWORD = "SandboxAdmin-2026";
+const ADMIN_PASSWORD = process.env.SANDBOX_ADMIN_PASSWORD || "";
 const ORG_ID = process.env.TENANT_ORG_ID || "";
+
+/**
+ * Las dos confirmaciones se exigen SOLO para el super admin (lo que abre la puerta), no
+ * para repoblar los datos de demo del tenant: pedirle una contraseña a quien solo quiere
+ * recargar contactos de prueba es la clase de fricción que termina en un `|| "clave fija"`.
+ */
+function exigirConfirmacionExplicita() {
+  if (process.env.ALLOW_SANDBOX_BACKDOOR !== "true") {
+    console.error(
+      "✖ Esto crea un SUPER ADMIN con MFA de secreto conocido en la base a la que apuntes,\n" +
+        "  que en Conversia es la MISMA de TuBot y de los clientes reales.\n" +
+        "  Si de verdad es lo que querés: ALLOW_SANDBOX_BACKDOOR=true (y SANDBOX_ADMIN_PASSWORD).",
+    );
+    process.exit(2);
+  }
+  if (ADMIN_PASSWORD.length < 12) {
+    console.error("✖ Falta SANDBOX_ADMIN_PASSWORD (12 caracteres o más). No hay contraseña por defecto a propósito.");
+    process.exit(2);
+  }
+}
 
 // ---- base32 + TOTP (misma lógica que apps/api/src/platform/totp.ts) ----
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -43,6 +77,7 @@ function totp(secretB32, forTime = Date.now()) {
 }
 
 async function seedSuperAdmin(role) {
+  exigirConfirmacionExplicita();
   const secret = base32Encode(randomBytes(20));
   const existing = await prisma.platformAdmin.findUnique({ where: { email_brand: { email: ADMIN_EMAIL, brand: BRAND } } });
   const data = { passwordHash: bcrypt.hashSync(ADMIN_PASSWORD, 12), mfaSecret: secret, mfaEnabledAt: new Date(), role };
@@ -53,10 +88,16 @@ async function seedSuperAdmin(role) {
   console.log("\n===== SUPER ADMIN SANDBOX =====");
   console.log("  URL:        https://app.conversia.cl/admin/login");
   console.log("  Email:     ", ADMIN_EMAIL);
-  console.log("  Password:  ", ADMIN_PASSWORD);
+  console.log("  Password:   (la de SANDBOX_ADMIN_PASSWORD — no se imprime)");
   console.log("  MFA secret:", secret, "(base32 — agrégalo a Google Authenticator/Authy, o úsalo en una lib TOTP)");
   console.log("  otpauth:   ", otpauth);
   console.log("  Código MFA ahora:", totp(secret), "(expira en ≤30s; genera uno nuevo con el secreto)");
+  console.log(
+    "\n  ⚠️ ESTO QUEDÓ ABIERTO: super admin OWNER con segundo factor de secreto conocido.\n" +
+      "     Nada de esto va a un documento, un chat ni un commit: solo a un gestor de contraseñas.\n" +
+      "     Para CERRARLO al terminar las pruebas:\n" +
+      "       node scripts/sandbox-cerrar.mjs",
+  );
 }
 
 async function enrichTenant() {

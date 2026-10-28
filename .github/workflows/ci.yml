@@ -28,6 +28,11 @@ jobs:
       # del api sin responder en el job `dueno`, 4 minutos después y sin logs.
       - name: El grafo de dependencias de Nest se resuelve
         run: node tools/ops/check-di.cjs
+      # 28-oct-2026: la contraseña y el secreto TOTP del super admin OWNER de la producción
+      # compartida estaban escritos en un documento del repo. Gitleaks no los vio (una
+      # contraseña en prosa no calza con ningún patrón de proveedor), así que esto los busca.
+      - name: Sin credenciales en claro en el repo
+        run: node tools/ops/check-plaintext-credentials.cjs
       - run: pnpm typecheck
       - run: pnpm test
 
