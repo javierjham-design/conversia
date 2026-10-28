@@ -302,3 +302,73 @@ Nada de esta etapa. Queda la Etapa 3 (medidor, estimador y avisos al 75/90/0%) y
 - **Sin variables de entorno nuevas.**
 - Lo único opcional: correr el script de siembra de la política. Si no lo corres, el
   código usa los mismos valores calibrados por defecto, así que tampoco es urgente.
+
+## Etapa 3 — Transparencia y avisos (#563)
+
+### El estimador y el medidor
+
+Un saldo en créditos no significa nada para el dueño. Ahora en Inicio, en Cobros y en el
+copiloto se ve **"1.240 créditos ≈ 140 conversaciones ≈ 18 días a tu ritmo"**, y cada
+estimación dice de dónde salió el número.
+
+Cómo se calcula, y por qué así:
+
+- **Promedio de SUS últimas conversaciones** (30 días), con un **mínimo de 20**. Por debajo
+  de eso el promedio propio es ruido: tres conversaciones, una larga con un modelo caro, y
+  el dueño vería "te quedan 5 conversaciones" cuando le quedan cien. Con muestra chica se
+  usa el promedio del rubro; si el rubro tampoco tiene datos suficientes (al menos 3
+  negocios y 30 conversaciones), uno general.
+- **Redondea siempre hacia abajo.** Que el saldo dure más de lo prometido es una buena
+  sorpresa; lo contrario es un bot que se corta sin aviso.
+- **Los días salen del ritmo propio**, aunque el promedio por conversación venga del rubro:
+  el rubro dice cuánto cuesta una conversación, no cuántas tiene este negocio por día. Sin
+  consumo propio no se muestran días en vez de inventar una cifra.
+- **Un solo cálculo para las cuatro superficies** (panel, Cobros, copiloto y avisos): la
+  aritmética en `@conversia/agents` y la muestra en una sola consulta de
+  `@conversia/database`. Si cada una lo hiciera a su manera, el dueño vería "≈ 18 días" en
+  pantalla y "≈ 6 días" en el aviso del mismo momento, y dejaría de creerle a las dos.
+
+### Dos bugs que encontré y arreglé
+
+**1. Un cliente de Créditos IA no recibía NINGÚN aviso de saldo.** Los avisos de 75%, 90% y
+gracia vivían solo dentro del camino del cobro por conversación. La Etapa 1 desactivó ese
+camino para los planes de créditos —correcto, para no cobrar dos veces— y con eso el aviso
+desapareció: el bot se le paraba sin una sola advertencia previa, que es el peor momento
+posible para enterarse. Ahora el débito por turno dispara el aviso, con el estimado dentro
+("te quedan ≈ N conversaciones"), reutilizando `lastNotifiedPct` del mismo monedero: una vez
+por umbral y período, sin estado nuevo ni migración.
+
+**2. Nueve tipos de aviso dejaban al cliente de Conversia en un 404.** El catálogo de
+notificaciones nació con TuBot y sus rutas quedaron escritas tal cual: `/inbox?c=…` (el
+enlace más usado, el que abre la conversación que espera respuesta), `/billing`,
+`/facturacion`, `/settings/plan`, `/contacts`. En conversia-web esas pantallas no existen.
+Es el mismo hallazgo que ya se había corregido en el checklist de montaje, vivo todavía en
+el camino de los avisos —y peor, porque el del checklist lo ve quien está montando y este lo
+ve quien ya está pagando y acaba de recibir un aviso de que su bot se corta. De paso, el
+correo armaba el enlace con el dominio de TuBot y firmaba "Abrir en TuBot", así que a un
+cliente de Conversia le llegaba un aviso de su propio saldo que lo mandaba a otra marca.
+
+Ahora el enlace y el correo se resuelven por marca, conservando la query que abre la
+conversación correcta, y un guardián recorre el catálogo completo: si alguien agrega un aviso
+con una ruta que en Conversia no lleva a ninguna parte, falla en CI.
+
+### Costos de Meta
+
+Decisión del dueño (27-oct): **cada cliente paga a Meta con su propia tarjeta**. Eso
+significa que le llegan dos cobros y el panel solo le mostraba uno. Ahora en Cobros hay una
+tarjeta informativa con lo que Meta cobró en el mes, por categoría, sacada de `usage_events`
+y descontando lo que Meta no factura. Dice explícitamente que son dos cobros distintos y que
+ese no lo cobra Conversia. Si no hay mensajes cobrados, la tarjeta no aparece: mostrar "$0"
+invita a preguntarse por un cobro que no existe.
+
+**La rama activa en producción es "sin línea de crédito"** (cada cliente con su tarjeta en
+Meta). La otra —línea de crédito compartida de un Solution Partner, `META_EXTENDED_CREDIT_ID`—
+sigue en el código pero inactiva. Si algún día se activa, el texto de `explicarPagoEnMeta` es
+lo primero que hay que cambiar: decirle a un cliente que cargue una tarjeta en Meta cuando ya
+no hace falta es mandarlo a un trámite inútil.
+
+### Verificación
+
+api 603/603, worker 467/467, agents 106/106, notifications 25/25, conversia-web 62/62, builds
+completos. Los cuatro guardianes nuevos se rompieron a propósito para verlos fallar. **Sin
+migraciones.**

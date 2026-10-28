@@ -379,7 +379,7 @@ detrás de un feature del plan (p. ej. `features.aiCreditsWallet`).
 - Herramientas del asistente/copiloto (`ofrecerRecarga`, `verEstado`) y textos del panel
   hablan de Créditos IA, siempre leyendo precios del catálogo.
 
-### Etapa 3 — Transparencia y avisos
+### Etapa 3 — Transparencia y avisos — ✅ #563
 - **Estimador:** promedio de créditos por conversación de la org en los últimos 30 días
   (mínimo 20 conversaciones; si no, promedio del rubro). Endpoint que devuelve créditos
   restantes, conversaciones estimadas y días estimados a su ritmo.

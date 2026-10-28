@@ -79,6 +79,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
+        name: "explicarPagoEnMeta",
+        description:
+          "Explica, sin jerga, que hay DOS cobros distintos (Conversia cobra el plan; Meta cobra aparte ciertos mensajes de WhatsApp a la tarjeta del propio cliente) y entrega el botón que abre la página de Meta para cargar la tarjeta. Úsalo cuando pregunten por el costo de los mensajes, cuando Meta rechace un envío por falta de método de pago, o justo después de conectar WhatsApp.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
         name: "acompañarPaso",
         description:
           "Lleva al cliente a la pantalla del paso que están haciendo y le resalta qué tocar. Úsalo cuando le propongas un paso del montaje o cuando pregunte dónde está algo. Claves: negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio.",
@@ -358,6 +364,34 @@ export async function runSetupTool(
           estado: a.versions.some((v) => v.status === "PUBLISHED") ? "publicado (atiende)" : "borrador (NO atiende a nadie)",
         })),
       }),
+    };
+  }
+
+  if (name === "explicarPagoEnMeta") {
+    // COP 3 — DECISIÓN DEL DUEÑO (27-oct): cada cliente paga a Meta con SU tarjeta (rama
+    // "sin línea de crédito"). La otra rama —línea de crédito compartida de un Solution
+    // Partner— existe en el código pero está inactiva (`META_EXTENDED_CREDIT_ID`), así que
+    // acá se explica la que de verdad le toca al cliente. Si alguna vez se activa la línea
+    // compartida, este texto es lo primero que hay que cambiar: decirle que cargue una
+    // tarjeta en Meta cuando no hace falta es mandarlo a un trámite inútil.
+    return {
+      content: JSON.stringify({
+        dosCobros: {
+          conversia: "El plan y las recargas de créditos los cobra Conversia a la tarjeta que dejaste en el panel.",
+          meta: "Los mensajes de WhatsApp los cobra Meta aparte, directo a la tarjeta que cargues en tu cuenta de Meta. Son montos chicos por mensaje y varían según el tipo.",
+        },
+        comoCargarla: [
+          "Abre la página de pagos de Meta con el botón.",
+          "Entra a Facturación y pagos y elige tu cuenta de WhatsApp Business.",
+          "Agrega una tarjeta como método de pago de esa cuenta.",
+        ],
+        siNoLaCarga: "Sin método de pago en Meta, Meta deja de entregar los mensajes que cobra. El asistente sigue recibiendo, pero no puede responder por WhatsApp.",
+        dondeVerElGasto: "En Cobros aparece lo que Meta te cobró este mes, informativo (Conversia no cobra eso).",
+      }),
+      actions: [
+        { type: "button", label: "Abrir pagos de Meta", kind: "externo", payload: "https://business.facebook.com/billing_hub/payment_settings" },
+        { type: "button", label: "Ver mis cobros", kind: "interno", payload: "/cobros" },
+      ],
     };
   }
 

@@ -49,7 +49,8 @@ function ago(iso: string | null): string {
 
 /* ---------- Tipos de las respuestas ---------- */
 type Me = { user?: { name?: string }; organization?: { timezone?: string; name?: string } };
-type Wallet = { unit?: string; balance: number; included: number; consumed: number; pctUsed: number; projected: number; over80: boolean };
+type Medidor = { conversaciones: number; dias: number | null; creditosPorConversacion: number; base: "org" | "rubro" | "defecto"; frase: string; explicacion: string };
+type Wallet = { unit?: string; balance: number; included: number; consumed: number; pctUsed: number; projected: number; over80: boolean; medidor?: Medidor };
 type Appt = { id: string; status: string; startsAt: string; endsAt: string; professionalName: string | null; serviceName: string | null; contact: { name: string } };
 type ApptResp = { appointments: Appt[] };
 type CashDay = { summary: { net: number } };
@@ -292,10 +293,26 @@ export default function Home() {
                         <p style={{ margin: 0, fontSize: 14 }}><b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.consumed.toLocaleString("es-CL")}</b> de {wallet.included.toLocaleString("es-CL")} usadas este mes</p>
                         <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5 }}>Proyección fin de mes: {wallet.projected.toLocaleString("es-CL")}{wallet.projected > wallet.included ? " ⚠" : ""}</p>
                         <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Saldo total: {wallet.balance.toLocaleString("es-CL")}</p>
+                        {/* CRE 3 — EL MEDIDOR. Un saldo en créditos no le dice nada a nadie:
+                            lo que el dueño quiere saber es cuántas conversaciones más le
+                            alcanzan y cuántos días a su ritmo. El título explica de dónde
+                            sale el número, para que la estimación no parezca magia. */}
+                        {wallet.medidor ? (
+                          <p title={wallet.medidor.explicacion} style={{ margin: "0 0 10px", fontSize: 13 }}>
+                            ≈ <b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.medidor.conversaciones.toLocaleString("es-CL")}</b> conversaciones más
+                            {wallet.medidor.dias != null && wallet.medidor.dias > 0 ? ` · ~${wallet.medidor.dias.toLocaleString("es-CL")} días a tu ritmo` : ""}
+                          </p>
+                        ) : null}
                       </>
                     ) : (
                       <>
                         <p style={{ margin: 0, fontSize: 14 }}>Te quedan <b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.balance.toLocaleString("es-CL")}</b> {wallet.unit === "conversation" ? "conversaciones" : "créditos"} de prueba</p>
+                        {wallet.medidor && wallet.medidor.conversaciones > 0 ? (
+                          <p title={wallet.medidor.explicacion} style={{ margin: "2px 0 0", fontSize: 13 }}>
+                            Te alcanzan para ≈ <b style={{ fontVariantNumeric: "tabular-nums" }}>{wallet.medidor.conversaciones.toLocaleString("es-CL")}</b> conversaciones
+                            {wallet.medidor.dias != null && wallet.medidor.dias > 0 ? ` · ~${wallet.medidor.dias.toLocaleString("es-CL")} días` : ""}
+                          </p>
+                        ) : null}
                         <p className="text-dim" style={{ margin: "2px 0 10px", fontSize: 12.5 }}>Al activar tu plan tendrás saldo todos los meses, y recargas cuando quieras.</p>
                       </>
                     )}

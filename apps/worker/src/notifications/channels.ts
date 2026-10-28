@@ -57,9 +57,15 @@ export const emailChannel: NotificationChannel = {
   async send(input): Promise<ChannelResult> {
     const to = input.data.userEmail as string | undefined;
     if (!to) return { status: "skipped", error: "usuario sin correo" };
-    const link = input.link ? `${process.env.WEB_URL ?? ""}${input.link}` : (process.env.WEB_URL ?? "");
+    // CRE 3 — el correo va con la MARCA del destinatario: su dominio y su nombre. Antes el
+    // enlace se armaba siempre con `WEB_URL` (el de TuBot) y el botón decía "Abrir en
+    // TuBot", así que a un cliente de Conversia le llegaba un aviso de SU saldo que lo
+    // mandaba a la aplicación de otra marca.
+    const base = input.brand?.webUrl ?? process.env.WEB_URL ?? "";
+    const marca = input.brand?.name ?? "TuBot";
+    const link = input.link ? `${base}${input.link}` : base;
     const html = `<p><b>${escapeHtml(input.title)}</b></p><p>${escapeHtml(input.body)}</p>${
-      input.link ? `<p><a href="${escapeHtml(link)}">Abrir en TuBot</a></p>` : ""
+      input.link ? `<p><a href="${escapeHtml(link)}">Abrir en ${escapeHtml(marca)}</a></p>` : ""
     }`;
     const res = await sendTenantEmail(input.organizationId, { to: [to], subject: input.title, html });
     return res.ok ? { status: "sent" } : { status: "failed", error: res.detail };

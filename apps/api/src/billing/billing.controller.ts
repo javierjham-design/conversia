@@ -2,7 +2,8 @@ import { BadRequestException, Body, Controller, Get, Post, Put, Req, Unauthorize
 import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
-import { messageWalletQuota, refillMessageWallet } from "@conversia/database";
+import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, refillMessageWallet } from "@conversia/database";
+import { CLP_PER_USD_REF, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
@@ -216,6 +217,97 @@ export class BillingController {
       projected,
       pctUsed,
       over80: included > 0 && pctUsed >= 80,
+      // CRE 3 — EL MEDIDOR: la traducción de créditos a algo que el dueño entienda.
+      // "Te quedan 1.240 créditos" no le dice nada; "≈ 140 conversaciones ≈ 18 días" sí.
+      // Solo aplica a la unidad de créditos (una conversación ya se cuenta de a una).
+      ...(opts.unit === "credit" ? { medidor: await this.creditMeter(organizationId, lots - grace) } : {}),
+    };
+  }
+
+  /**
+   * CRE 3 — estimación de alcance del saldo de créditos.
+   *
+   * La aritmética es `estimarAlcance` de `@conversia/agents` y la muestra la lee
+   * `leerMuestraConsumoCreditos` de `@conversia/database`: las MISMAS dos piezas que usa el
+   * worker para los avisos (`getAiCreditsMeter`). Acá solo cambia el cliente de base de
+   * datos, no el cálculo — si no fuera así, el panel diría "≈ 18 días" y el aviso del mismo
+   * momento "≈ 6 días", y el dueño dejaría de creerle a los dos.
+   */
+  private async creditMeter(organizationId: string, restantes: number) {
+    const admin = this.prisma.admin;
+    const org = await admin.organization
+      .findUnique({ where: { id: organizationId }, select: { settings: true } })
+      .catch(() => null);
+    const rubro = String((((org?.settings ?? {}) as Record<string, any>).general ?? {}).industry ?? "");
+    // Cada lectura accesoria degrada a su valor neutro: una muestra que no se pudo leer da
+    // una estimación con el promedio del rubro o el general, nunca un error en pantalla.
+    const propio = await this.prisma
+      .withTenant(organizationId, (tx) => leerMuestraConsumoCreditos(tx, organizationId))
+      .catch(() => ({ conversaciones: 0, creditos: 0, dias: 0 }));
+    const promedioDelRubro = await leerPromedioDelRubro(admin, rubro).catch(() => null);
+    const e = estimarAlcance({ restantes, propio, promedioDelRubro });
+    return {
+      conversaciones: e.conversaciones,
+      dias: e.dias,
+      creditosPorConversacion: e.creditosPorConversacion,
+      base: e.base,
+      muestra: e.muestra,
+      frase: frasePorSaldo(e),
+      explicacion: explicarBase(e),
+    };
+  }
+
+  /**
+   * CRE 3 — LO QUE COBRA META, informativo.
+   *
+   * Decisión del dueño (27-oct): **cada cliente paga a Meta con su propia tarjeta**. Eso
+   * significa que al cliente le llegan DOS cobros y hasta ahora el panel solo le mostraba
+   * uno: veía su plan de Conversia y no tenía dónde enterarse de cuánto le está cobrando
+   * Meta por los mensajes. Un cargo que aparece en la tarjeta sin explicación en ninguna
+   * parte es la receta de un reclamo.
+   *
+   * Sale de `usage_events` de tipo `whatsapp_message`, que es donde el worker anota el costo
+   * que informa Meta en cada estado de entrega. Conversia NO cobra esto: solo lo muestra.
+   * El monto en pesos es APROXIMADO (Meta factura en dólares) y así se dice en pantalla.
+   */
+  @Get("meta-costs")
+  async metaCosts() {
+    const ctx = requireContext();
+    const now = new Date();
+    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const rows = await this.prisma.admin.usageEvent
+      .findMany({
+        where: { organizationId: ctx.organizationId, type: "whatsapp_message", occurredAt: { gte: since } },
+        select: { costUsd: true, meta: true },
+        take: 20_000,
+      })
+      .catch(() => []);
+    const porCategoria: Record<string, { mensajes: number; usd: number }> = {};
+    let usd = 0;
+    let mensajes = 0;
+    for (const r of rows) {
+      const m = (r.meta ?? {}) as Record<string, unknown>;
+      // `billable: false` son mensajes que Meta NO cobra (ventana de servicio gratuita):
+      // contarlos infla el total y asusta al cliente por nada.
+      if (m.billable === false) continue;
+      const c = r.costUsd != null ? Number(r.costUsd) : 0;
+      const cat = String(m.category ?? "otro");
+      (porCategoria[cat] ??= { mensajes: 0, usd: 0 });
+      porCategoria[cat].mensajes += 1;
+      porCategoria[cat].usd += c;
+      usd += c;
+      mensajes += 1;
+    }
+    const redondear = (n: number) => Math.round(n * 100) / 100;
+    return {
+      mensajes,
+      usd: redondear(usd),
+      // Referencia de conversión (`CLP_PER_USD_REF`): aproximada a propósito, porque Meta
+      // factura en dólares y el tipo de cambio del día no lo decide Conversia.
+      clpAprox: Math.round(usd * CLP_PER_USD_REF),
+      clpPorUsd: CLP_PER_USD_REF,
+      porCategoria: Object.fromEntries(Object.entries(porCategoria).map(([k, v]) => [k, { mensajes: v.mensajes, usd: redondear(v.usd) }])),
+      desde: since.toISOString(),
     };
   }
 
