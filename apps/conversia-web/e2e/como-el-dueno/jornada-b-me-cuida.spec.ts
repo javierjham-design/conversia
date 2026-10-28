@@ -78,4 +78,79 @@ test.describe("Jornada B — me equivoco y el sistema me cuida", () => {
     await expect(page.getByText(/No pudimos cargar tu saldo/i)).toHaveCount(0, { timeout: 15_000 });
     await expect(page.getByText(/Te quedan\s+30\s+conversaciones de prueba/i)).toBeVisible({ timeout: 15_000 });
   });
+
+  /**
+   * CRE 3 — EL MEDIDOR DE CRÉDITOS, EN PANTALLA.
+   *
+   * Un saldo en créditos no le dice nada al dueño: lo que necesita saber es cuántas
+   * conversaciones más le alcanzan. Ese bloque solo aparece cuando el plan cobra Créditos
+   * IA, que es un catálogo que todavía está apagado — así que hasta acá NADIE lo había
+   * renderizado en un navegador. El día del go-live se estrenaría en la pantalla del primer
+   * cliente que pague.
+   *
+   * La respuesta del saldo se sirve con la forma EXACTA que arma la API (y que el test
+   * `apps/api/test/creditos-medidor.spec.ts` encierra campo por campo): el saldo en
+   * créditos, el medidor con su estimación y la explicación de dónde sale el número.
+   */
+  test("con Créditos IA el medidor dice cuántas conversaciones alcanzan, en Inicio y en Cobros", async ({ page, request }) => {
+    const errores = collectConsoleErrors(page);
+    const cuenta = await registerAccount(request, { brand: "conversia", vertical: "barberia" });
+    await useSession(page, cuenta.token);
+
+    // 1.240 créditos, 9 por conversación (promedio de SUS últimas 40) → 137 conversaciones;
+    // 18 créditos al día → 68 días. Los dos textos los arma `frasePorSaldo`/`explicarBase`.
+    const saldoEnCreditos = {
+      unit: "credit",
+      balance: 1240,
+      included: 100,
+      consumed: 0,
+      remaining: 1240,
+      graceUsed: 0,
+      graceLimit: 100,
+      expiringThisMonth: 0,
+      byCategory: {},
+      projected: 12,
+      pctUsed: 0,
+      over80: false,
+      medidor: {
+        conversaciones: 137,
+        dias: 68,
+        creditosPorConversacion: 9,
+        base: "org",
+        muestra: 40,
+        frase: "1.240 créditos · ≈ 137 conversaciones · ≈ 68 días a tu ritmo",
+        explicacion: "Calculado con tus últimas 40 conversaciones: 9 créditos cada una en promedio.",
+      },
+    };
+    await page.route("**/billing/wallet/summary", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(saldoEnCreditos) }),
+    );
+
+    // --- Inicio: el medidor, con la explicación a mano (title) y el CTA de SU unidad.
+    await page.goto("/inicio", { waitUntil: "domcontentloaded" });
+    const medidorInicio = page.getByText(/137\s*conversaciones más/i);
+    await expect(medidorInicio).toBeVisible({ timeout: 15_000 });
+    await expect(medidorInicio).toContainText(/68\s*días a tu ritmo/i);
+    await expect(medidorInicio).toHaveAttribute("title", /Calculado con tus últimas 40 conversaciones/i);
+    await expect(page.getByRole("link", { name: /Recargar créditos/i })).toBeVisible();
+
+    // --- Cobros: la unidad correcta, el saldo, el medidor y de dónde sale el número.
+    await page.goto("/cobros", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("Créditos disponibles")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("1.240", { exact: true })).toBeVisible();
+    await expect(page.getByText(/≈\s*137\s*conversaciones/i)).toBeVisible();
+    await expect(page.getByText(/≈\s*68\s*días a tu ritmo/i)).toBeVisible();
+    // La explicación va VISIBLE en Cobros (no en un tooltip): una estimación que no se puede
+    // auditar es una cifra que el dueño no va a creer.
+    await expect(page.getByText(/Calculado con tus últimas 40 conversaciones/i)).toBeVisible();
+    // Y jamás "Conversaciones disponibles" sobre un saldo que está en créditos.
+    await expect(page.getByText("Conversaciones disponibles")).toHaveCount(0);
+
+    // Ningún número a medio formatear en ninguna de las dos pantallas.
+    for (const basura of [/NaN/, /undefined/, /\[object/, /Infinity/]) {
+      await expect(page.getByText(basura)).toHaveCount(0);
+    }
+    const inesperados = errores.filter((e) => !/connect\.facebook\.net|content security policy|failed to load resource/i.test(e));
+    expect(inesperados, `Errores de consola inesperados: ${inesperados.join(" | ")}`).toEqual([]);
+  });
 });
