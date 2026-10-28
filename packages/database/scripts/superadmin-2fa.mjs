@@ -15,13 +15,16 @@
  * SIN BANDERAS NO TOCA NADA: lista los super admins de la marca y qué los protege. No imprime
  * hashes ni secretos, solo si existen.
  *
+ * Correr los dos DESDE LA RAÍZ del repo: `railway` resuelve el proyecto por el directorio
+ * donde se lo invoca, y desde `packages/database` pierde el enlace.
+ *
  *   # 1) Ver (solo lectura)
- *   railway run -s Postgres -- node -e "process.env.DATABASE_URL=process.env.DATABASE_PUBLIC_URL;import('./scripts/superadmin-2fa.mjs')"
+ *   railway run -s Postgres -- node -e "process.env.DATABASE_URL=process.env.DATABASE_PUBLIC_URL;import('./packages/database/scripts/superadmin-2fa.mjs')"
  *
  *   # 2) Reiniciar el 2FA de UNA cuenta para poder re-enrolarlo
- *   railway run -s Postgres -- node -e "process.env.SUPERADMIN_EMAIL='tu@correo';process.env.DATABASE_URL=process.env.DATABASE_PUBLIC_URL;process.argv.push('--reiniciar-2fa');import('./scripts/superadmin-2fa.mjs')"
+ *   railway run -s Postgres -- node -e "process.env.REINICIAR_2FA='1';process.env.SUPERADMIN_EMAIL='tu@correo';process.env.DATABASE_URL=process.env.DATABASE_PUBLIC_URL;import('./packages/database/scripts/superadmin-2fa.mjs')"
  *
- * Correrlo desde `packages/database`. Variables: SUPERADMIN_EMAIL, BRAND (default conversia).
+ * Variables: SUPERADMIN_EMAIL, REINICIAR_2FA=1, BRAND (default conversia).
  *
  * OJO: reiniciar el 2FA BAJA la protección de esa cuenta hasta que la vuelvas a enrolar. Con
  * `SUPER_ADMIN_REQUIRE_MFA=true` (el default) la consola te manda derecho a /admin/security y
@@ -33,7 +36,9 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 const BRAND = (process.env.BRAND ?? "conversia").trim().toLowerCase();
 const EMAIL = (process.env.SUPERADMIN_EMAIL ?? "").trim().toLowerCase();
-const REINICIAR = process.argv.includes("--reiniciar-2fa");
+// La bandera o la variable: con `node -e` meter argumentos es incómodo y se presta a errores,
+// y esto se corre justo cuando alguien está afuera de su propia consola y con prisa.
+const REINICIAR = process.argv.includes("--reiniciar-2fa") || process.env.REINICIAR_2FA === "1";
 
 function describe(a) {
   const rec = Array.isArray(a.mfaRecoveryCodes) ? a.mfaRecoveryCodes.length : 0;
@@ -63,12 +68,12 @@ async function main() {
 
   if (!REINICIAR) {
     console.log("\nNo toqué nada (modo lectura).");
-    console.log("Para reiniciar el 2FA de una cuenta: SUPERADMIN_EMAIL=... y la bandera --reiniciar-2fa");
+    console.log("Para reiniciar el 2FA de una cuenta: SUPERADMIN_EMAIL=<correo> y REINICIAR_2FA=1");
     return;
   }
 
   if (!EMAIL) {
-    console.error("\n✖ --reiniciar-2fa necesita SUPERADMIN_EMAIL (a cuál de las de arriba).");
+    console.error("\n✖ Falta SUPERADMIN_EMAIL: a cuál de las de arriba. No adivino.");
     process.exitCode = 1;
     return;
   }
