@@ -24,6 +24,7 @@ import { enforcePlanLimit } from "../common/plan-limits";
 // R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
 import { runQaBattery } from "../agents/agent-qa";
+import { defaultAgentModel } from "../agents/model-policy";
 import { raiseException, messageWalletQuota, refillMessageWallet } from "@conversia/database"; // V2-8 cola de excepciones · §9.3 recarga compartida
 import { AuthService } from "../auth/auth.service";
 import { VerticalService } from "../organizations/vertical.service";
@@ -898,7 +899,8 @@ export class PlatformController {
       let slug = agentSlugify(input.name) || "agente";
       if (await tx.agent.findUnique({ where: { organizationId_slug: { organizationId: id, slug } } })) slug = `${slug}-${Math.random().toString(36).slice(2, 5)}`;
       const a = await tx.agent.create({ data: { organizationId: id, slug, name: input.name, kind: input.kind, description: input.description, active: true } });
-      await tx.agentVersion.create({ data: { organizationId: id, agentId: a.id, version: 1, status: "DRAFT", systemPrompt: DEFAULT_PROMPT, config: { model: "gpt-4o-mini", maxTokens: 400, maxToolRounds: 5, language: "es" }, tools: ["getServices", "getServicePrice", "searchKnowledgeBase", "transferToHuman"], changelog: "Borrador inicial" } });
+      // CRE 1 — el modelo estándar sale de configuración (platform_settings.aiCredits).
+      await tx.agentVersion.create({ data: { organizationId: id, agentId: a.id, version: 1, status: "DRAFT", systemPrompt: DEFAULT_PROMPT, config: { model: await defaultAgentModel(), maxTokens: 400, maxToolRounds: 5, language: "es" }, tools: ["getServices", "getServicePrice", "searchKnowledgeBase", "transferToHuman"], changelog: "Borrador inicial" } });
       return a;
     });
     await this.audit(req, "platform.agent.create", "agent", agent.id, { organizationId: id, name: input.name });

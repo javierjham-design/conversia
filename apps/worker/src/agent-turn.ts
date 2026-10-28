@@ -9,7 +9,7 @@ import {
   type OrchestrateResult,
 } from "@conversia/agents";
 import { getEnv, brandOf } from "@conversia/config";
-import { getPrisma, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
+import { getAdminPrisma, getPrisma, raiseException, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import { acquireConversationLock, newLockToken, releaseConversationLock } from "./conversation-lock";
 import { requeueAgentTurn } from "./agent-turn-queue";
 import { pauseAiWithFallback } from "./ai-paused-fallback";
@@ -17,8 +17,9 @@ import type { AIChatMessage, ToolContext } from "@conversia/types";
 import { ChannelAuthError, markChannelAuthError, resolveChannelAuth } from "./channel-auth";
 import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
-import { chargeServiceSend } from "./messaging-guard";
+import { chargeServiceSend, outOfConversationCreditsPhrase } from "./messaging-guard";
 import { planDebitsConversation } from "./conversation-credits";
+import { aiCreditsGate, debitAiCreditsForTurn } from "./ai-credits";
 import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrail";
 import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
@@ -398,6 +399,41 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     }
   }
 
+  // CRE 1 — CRÉDITOS IA: ¿puede pagar una respuesta más? Se mira ANTES de llamar al
+  // modelo para no gastar tokens que no vamos a poder cobrar. El débito real va al final
+  // del turno, con los tokens que realmente usó. Si se agotaron saldo Y gracia, el bot NO
+  // queda mudo: manda la frase de respaldo del tenant y la conversación pasa a una persona.
+  // La marca ya viene cargada con la organización: se usa para NO hacerle ni una consulta
+  // extra al turno de TuBot, que atiende clientes reales 24/7.
+  const esConversia = brandOf(org).key === "conversia";
+  const creditGate = esConversia
+    ? await aiCreditsGate(organizationId).catch(() => ({ charges: false }) as const)
+    : ({ charges: false } as const);
+  if (creditGate.charges && creditGate.blocked) {
+    const frase = await outOfConversationCreditsPhrase(organizationId);
+    await withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: {
+          organizationId,
+          provider: "ai",
+          type: "ai.no_credits",
+          status: "warning",
+          message: `Créditos IA agotados (gracia incluida): saldo ${creditGate.remaining}`,
+        },
+      }),
+    ).catch(() => undefined);
+    await raiseException(getAdminPrisma(), {
+      organizationId,
+      type: "saldo_gracia_sin_recarga",
+      severity: "critical",
+      title: "Créditos IA en 0 y gracia agotada",
+      detail: "El cliente consumió sus Créditos IA y la gracia sin recargar; el bot está derivando a humano.",
+      dedupeKey: new Date().toISOString().slice(0, 7),
+    }).catch(() => undefined);
+    await pauseAiWithFallback(organizationId, conversationId, "Créditos IA agotados (recarga para reanudar la IA)", { text: frase });
+    return;
+  }
+
   // 2. Historial ventaneado (el primer mensaje debe ser del usuario)
   // Ventana ADAPTATIVA: normalmente 20 mensajes; pero si un HUMANO del equipo intervino
   // (tomó el control y conversó con el cliente), la ampliamos hasta 50. Así, al devolver
@@ -744,6 +780,9 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
   // contador es el cinturón que delata cualquier 2.º message del agente en el futuro.
   const maxAgentMessagesPerTurn = await readMaxAgentMessagesPerTurn();
   let agentTextCreated = 0;
+  // CRE 1 — sella el débito de Créditos IA: es el id del ai_requests de ESTE turno, así
+  // un reintento del job no vuelve a cobrar la misma respuesta.
+  let turnId: string | null = null;
   const persisted = await withTenant(organizationId, async (tx) => {
     const aiRequest = await tx.aiRequest.create({
       data: {
@@ -770,6 +809,7 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
         meta: { conversationId, agentSlug: agent.slug, toolCalls: result.toolEvents.map((e) => e.name) },
       },
     });
+    turnId = aiRequest.id;
 
     if (!result.reply) return null;
     // ÚNICO punto de creación del message de texto del agente (una respuesta por
@@ -801,6 +841,26 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     });
     return message;
   });
+
+  // CRE 1 — DÉBITO REAL de Créditos IA, con los tokens que de verdad usó el turno (todas
+  // las llamadas: respuesta, rondas de herramientas y clasificación) y el modelo que
+  // efectivamente respondió. Va después de persistir porque necesita el id del turno para
+  // ser idempotente, y nunca frena la respuesta: si el cobro falla, el cliente igual
+  // recibe su mensaje y el próximo turno vuelve a intentar el gate.
+  if (creditGate.charges && turnId) {
+    await debitAiCreditsForTurn(organizationId, {
+      conversationId,
+      turnId,
+      model: runtime.model,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      costUsd: result.usage.costUsd,
+      agentId: agent.id,
+    }).catch((err) => {
+      console.error(`✖ Débito de Créditos IA (${conversationId}):`, (err as Error).message);
+      return undefined;
+    });
+  }
 
   // Cinturón E4: si alguna vez se creara más de un message de texto del agente en el
   // turno (hoy imposible: punto único), delátalo en vez de gastar envíos en silencio.

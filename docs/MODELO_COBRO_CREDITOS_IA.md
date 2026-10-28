@@ -1,7 +1,13 @@
 # Modelo de cobro de Conversia: de "conversaciones" a "Créditos IA"
 
-**Fecha:** 27-oct-2026 · **Estado:** propuesta para decisión del dueño, con prompt de
-desarrollo al final (Parte B).
+**Fecha:** 27-oct-2026 · **Estado:** precios y unidad DECIDIDOS por el dueño (§8).
+**Etapa 1 (motor de créditos) construida** — PR #557, 28-oct-2026; resultados en
+`docs/CREDITOS_IA_RESULTADOS.md`. Pendientes las Etapas 2 (catálogo y migración),
+3 (transparencia y avisos) y 4 (margen), en el orden de `PLAN_EJECUCION_LANZAMIENTO.md`.
+
+> El motor está APAGADO para todos: cobra solo si el plan tiene
+> `features.aiCreditsWallet`, y ningún plan del catálogo lo trae todavía. Se enciende con
+> la Etapa 2, cuando el dueño apruebe activar el catálogo nuevo.
 
 ## Decisión que origina este documento
 

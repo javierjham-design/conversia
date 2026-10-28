@@ -39,11 +39,17 @@ function getOutboundQueue(): Queue<OutboundJob> {
 /**
  * Manda la frase de respaldo, apaga la IA de la conversación y alerta al equipo.
  * `reason` es el texto que verá el equipo en la alerta (incluye el tope efectivo).
+ *
+ * `opts.text` reemplaza la frase que recibe el CLIENTE. Lo usa el corte por Créditos IA
+ * agotados (CRE 1), que ya tiene una frase configurable por tenant
+ * (`settings.messaging.outOfCreditsMessage`): el cliente final no tiene por qué leer dos
+ * textos distintos según qué nos hizo parar.
  */
 export async function pauseAiWithFallback(
   organizationId: string,
   conversationId: string,
   reason: string,
+  opts: { text?: string } = {},
 ): Promise<void> {
   try {
     const messageId = await withTenant(organizationId, async (tx) => {
@@ -53,7 +59,7 @@ export async function pauseAiWithFallback(
           conversationId,
           direction: "OUTBOUND",
           type: "TEXT",
-          body: FALLBACK_TEXT,
+          body: opts.text?.trim() || FALLBACK_TEXT,
           status: "PENDING",
           authorType: "AGENT",
           visibility: "PUBLIC",

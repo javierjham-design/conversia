@@ -23,7 +23,7 @@ function addMonths(d: Date, n: number): Date {
 }
 
 /** Features del plan vigente (suscripción ACTIVE/TRIALING más reciente; free si no hay). */
-async function planFeatures(organizationId: string): Promise<Record<string, unknown>> {
+export async function planFeatures(organizationId: string): Promise<Record<string, unknown>> {
   const prisma = getAdminPrisma();
   const sub = await prisma.subscription
     .findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } })
@@ -42,7 +42,13 @@ export async function planDebitsConversation(organizationId: string): Promise<bo
   // incidente de V2-7) les empezaría a debitar créditos a los clientes de TuBot. La marca
   // de la org no se toca desde la pantalla de planes, así que cierra ese camino.
   if (!(await isConversiaOrg(organizationId))) return false;
-  return (await planFeatures(organizationId)).conversationDebitsWallet === true;
+  const feats = await planFeatures(organizationId);
+  // CRE 1 — UNA SOLA UNIDAD POR PLAN. Si el plan cobra Créditos IA (por respuesta), no
+  // puede cobrar además por conversación: serían dos cargos por el mismo trabajo. El
+  // catálogo nuevo no trae las dos features juntas, pero un plan editado a mano en el
+  // super admin sí podría, y el cliente no tiene cómo darse cuenta. Gana la unidad nueva.
+  if (feats.aiCreditsWallet === true) return false;
+  return feats.conversationDebitsWallet === true;
 }
 
 /**
@@ -69,10 +75,10 @@ export async function conversationCreditMultiplier(organizationId: string): Prom
   return (await planFeatures(organizationId)).aiPlus === true ? 2 : 1;
 }
 
-type Tx = Parameters<Parameters<typeof withTenant>[1]>[0];
+export type Tx = Parameters<Parameters<typeof withTenant>[1]>[0];
 
 /** Saldo = suma de remaining de lotes VIGENTES (no expirados) menos la gracia usada. */
-async function balanceInTx(tx: Tx, organizationId: string, now: Date): Promise<{ lots: number; grace: number; net: number }> {
+export async function balanceInTx(tx: Tx, organizationId: string, now: Date): Promise<{ lots: number; grace: number; net: number }> {
   const rows = await tx.conversationCreditLot.aggregate({
     _sum: { remaining: true },
     where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
@@ -83,7 +89,7 @@ async function balanceInTx(tx: Tx, organizationId: string, now: Date): Promise<{
   return { lots, grace, net: lots - grace };
 }
 
-async function ensureWallet(tx: Tx, organizationId: string, _now: Date) {
+export async function ensureWallet(tx: Tx, organizationId: string, _now: Date) {
   // periodStart guarda el último período ACREDITADO. Una wallet recién creada debe
   // nacer como "nunca acreditada" (época 0): si naciera con `now`, ensurePeriodAccrued
   // vería walletPeriod >= periodStart de la suscripción y el PRIMER período jamás
@@ -101,8 +107,19 @@ async function ensureWallet(tx: Tx, organizationId: string, _now: Date) {
  * la bolsa quedó atrás respecto del período de facturación, crea un lote con los créditos
  * incluidos del plan (expira a 2 meses), paga primero la gracia y resetea los avisos.
  * Idempotente por período (no re-acredita el mismo período).
+ *
+ * CRE 1 — `includedKey` es lo ÚNICO que cambia entre unidades: el plan de conversaciones
+ * incluye `conversationsIncluded` y el de Créditos IA `aiCreditsIncluded`. Los lotes, el
+ * rollover, la gracia y el libro son los mismos (un crédito es un crédito); por eso esta
+ * función se generaliza en vez de copiarse.
  */
-async function ensurePeriodAccrued(tx: Tx, organizationId: string, now: Date): Promise<void> {
+export async function ensurePeriodAccrued(
+  tx: Tx,
+  organizationId: string,
+  now: Date,
+  opts: { includedKey?: "conversationsIncluded" | "aiCreditsIncluded" } = {},
+): Promise<void> {
+  const includedKey = opts.includedKey ?? "conversationsIncluded";
   const prisma = getAdminPrisma();
   const sub = await prisma.subscription
     .findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { periodStart: true, planId: true } })
@@ -112,14 +129,19 @@ async function ensurePeriodAccrued(tx: Tx, organizationId: string, now: Date): P
   const walletPeriod = resolvePeriodStart(wallet.periodStart, now);
 
   const feats = await planFeatures(organizationId);
-  const included = Number(feats.conversationsIncluded) || 0;
+  const included = Number(feats[includedKey]) || 0;
   // Idempotencia por (PLAN, período) vía ledger, NO solo por fecha de la wallet: un
   // upgrade dentro del mismo período (trial→base el mismo día, el funnel normal) debe
   // acreditar el plan nuevo aunque la wallet ya haya "visto" el período con el plan
   // anterior (hallazgo sim 200 del 2026-10-17: el cliente pagaba y recibía 0 créditos
   // hasta el mes siguiente). El refId sella plan+período; reintentos no re-acreditan.
   if (included > 0 && sub?.planId) {
-    const refId = `${sub.planId}:${periodStart.toISOString().slice(0, 10)}`;
+    // El sello de la unidad nueva lleva prefijo: si una org cambiara de unidad dentro del
+    // mismo período, el lote de Créditos IA no debe darse por acreditado porque ya existía
+    // el de conversaciones (mismo plan, misma fecha). El formato de conversaciones NO se
+    // toca: cambiarlo re-acreditaría el período a TODOS los clientes V2 vigentes.
+    const sello = `${sub.planId}:${periodStart.toISOString().slice(0, 10)}`;
+    const refId = includedKey === "aiCreditsIncluded" ? `ai:${sello}` : sello;
     const done = await tx.conversationCreditLedger.findFirst({
       where: { organizationId, reason: "plan_renewal", refId },
       select: { id: true },
@@ -135,7 +157,7 @@ async function ensurePeriodAccrued(tx: Tx, organizationId: string, now: Date): P
 }
 
 /** Crea un lote de crédito; primero PAGA la gracia pendiente (los créditos nuevos cubren el negativo). */
-async function creditLotInTx(
+export async function creditLotInTx(
   tx: Tx,
   organizationId: string,
   input: { source: string; amount: number; expiresAt: Date | null; refType?: string; refId?: string; now: Date },
@@ -189,6 +211,56 @@ export type ConversationDebit =
   | { ok: false; blocked: true; graceUsed: number }; // gracia agotada → fallback + derivación (bot NO mudo)
 
 /**
+ * CRE 1 — NÚCLEO del consumo, compartido por las dos unidades (conversación y Créditos
+ * IA): consume `amount` de los lotes vigentes FIFO por expiración y, si no alcanzan, usa
+ * gracia hasta `graceLimit`. Superado el límite NO consume nada y devuelve `ok: false`
+ * para que el caller responda con la frase de respaldo y derive (el bot no queda mudo).
+ *
+ * Lo que NO hace, a propósito: tomar el cerrojo, acreditar el período y escribir el
+ * asiento. Eso lo hace cada caller, porque el motivo y el detalle del asiento son
+ * distintos en cada unidad; el cálculo del saldo, en cambio, tiene que ser idéntico.
+ */
+export async function consumeCreditsInTx(
+  tx: Tx,
+  organizationId: string,
+  opts: { amount: number; graceLimit: number; now: Date },
+): Promise<{ ok: true; graceUsed: number } | { ok: false; graceUsed: number }> {
+  let need = Math.max(0, Math.round(opts.amount));
+
+  // DECIDIR ANTES DE CONSUMIR. El camino viejo consumía los lotes y recién después
+  // miraba la gracia: si el límite quedaba corto devolvía "bloqueado" con los lotes YA
+  // vaciados y sin asiento, así que esos créditos desaparecían del libro. No se podía
+  // llegar ahí con el flujo normal (toda recarga paga la gracia primero, así que no
+  // conviven saldo y gracia), pero un ajuste manual del super admin sí lo permitía, y
+  // con los Créditos IA el débito ya no es de 1 en 1: un turno caro pide 8 o 20 de una
+  // vez, que es exactamente cuando el pedido supera lo disponible.
+  const disponible = await balanceInTx(tx, organizationId, opts.now);
+  const faltante = Math.max(0, need - disponible.lots);
+  if (faltante > 0 && disponible.grace + faltante > opts.graceLimit) {
+    return { ok: false as const, graceUsed: disponible.grace };
+  }
+
+  const lots = await tx.conversationCreditLot.findMany({
+    where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: opts.now } }] },
+    orderBy: [{ expiresAt: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
+  });
+  for (const lot of lots) {
+    if (need <= 0) break;
+    const take = Math.min(lot.remaining, need);
+    await tx.conversationCreditLot.update({ where: { id: lot.id }, data: { remaining: lot.remaining - take } });
+    need -= take;
+  }
+
+  const wallet = await ensureWallet(tx, organizationId, opts.now);
+  let graceUsed = wallet.graceUsed;
+  if (need > 0) {
+    graceUsed += need;
+    await tx.conversationWallet.update({ where: { organizationId }, data: { graceUsed } });
+  }
+  return { ok: true as const, graceUsed };
+}
+
+/**
  * Debita `multiplier` créditos por UNA conversación. Consume lotes FIFO por expiración;
  * si no alcanzan, usa GRACIA hasta GRACE_LIMIT; superada la gracia, devuelve blocked
  * (el caller responde con la frase de respaldo + deriva, nunca se calla). Serializa por
@@ -206,30 +278,11 @@ export async function debitConversation(
     await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
     await ensurePeriodAccrued(tx, organizationId, now);
 
-    let need = m;
-    // Consume de lotes vigentes, FIFO por expiración (los que vencen antes primero).
-    const lots = await tx.conversationCreditLot.findMany({
-      where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-      orderBy: [{ expiresAt: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }],
-    });
-    for (const lot of lots) {
-      if (need <= 0) break;
-      const take = Math.min(lot.remaining, need);
-      await tx.conversationCreditLot.update({ where: { id: lot.id }, data: { remaining: lot.remaining - take } });
-      need -= take;
-    }
-
-    const wallet = await ensureWallet(tx, organizationId, now);
-    let graceUsed = wallet.graceUsed;
-    if (need > 0) {
-      // Lotes agotados → gracia. Si supera el límite, NO debita: fallback + derivación.
-      if (graceUsed + need > GRACE_LIMIT) {
-        return { ok: false as const, blocked: true as const, graceUsed };
-      }
-      graceUsed += need;
-      await tx.conversationWallet.update({ where: { organizationId }, data: { graceUsed } });
-      need = 0;
-    }
+    // Lotes FIFO + gracia: mismo núcleo que los Créditos IA (una sola forma de calcular
+    // el saldo). Gracia agotada → blocked: el caller manda la frase de respaldo y deriva.
+    const consumo = await consumeCreditsInTx(tx, organizationId, { amount: m, graceLimit: GRACE_LIMIT, now });
+    if (!consumo.ok) return { ok: false as const, blocked: true as const, graceUsed: consumo.graceUsed };
+    const graceUsed = consumo.graceUsed;
 
     const after = await balanceInTx(tx, organizationId, now);
     await tx.conversationCreditLedger.create({
