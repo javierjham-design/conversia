@@ -1,6 +1,6 @@
 import { fetchGraphWithProof, getEnv, withAppSecretProof } from "@conversia/config";
 import type { ChannelProvider, ChannelSendOptions, ChannelSendResult, OutboundMessage, VerifyTokenResult } from "@conversia/types";
-import { ChannelAuthError, ChannelConfigError, channelConfigNotice, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
+import { ChannelAuthError, ChannelConfigError, channelConfigNotice, classifyMetaSendError, TOKEN_INVALID_FAIL_TEXT } from "./channel-auth";
 import { simWaTokenInvalid } from "./sim-token.js";
 
 /** ¿El error de Meta es de token inválido/revocado (190 / OAuthException / 401)? */
@@ -90,6 +90,11 @@ export class MetaChannelProvider implements ChannelProvider {
       if (authErr.auth) {
         throw new ChannelAuthError(`Meta send ${res.status} (code ${authErr.code ?? "?"}${authErr.subcode ? `/${authErr.subcode}` : ""}): ${text.slice(0, 300)}`);
       }
+      // §4.5 — antes de caer al reintento genérico: ventana de 24 h cerrada y número que no
+      // recibe son TERMINALES para este mensaje (el canal está bien, no hay que marcarlo),
+      // y un rate limit necesita esperar, no insistir.
+      const verdict = classifyMetaSendError(res.status, parsed, text);
+      if (verdict) throw verdict;
       // Errores de configuración del canal en Meta (nombre para mostrar, registro, pago…):
       // reintentar no ayuda; se marca el canal con un aviso claro.
       const notice = channelConfigNotice(text);

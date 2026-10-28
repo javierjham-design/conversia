@@ -6,5 +6,6 @@ export * from "./actions.js";
 export * from "./core-guardrails.js";
 export * from "./tools.js";
 export * from "./web-fetch.js";
+export * from "./ssrf-guard.js";
 export * from "./sanitize.js";
 export * from "./orchestrator.js";

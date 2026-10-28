@@ -46,7 +46,17 @@ Pasos (dashboard o CLI; el dueño los ejecuta):
 6. CLI equivalente: `railway up --service conversia-web --ci` desde la raíz.
 
 Primer release recomendado DESPUÉS de aplicar las migraciones E3/F1/F2/F5 + `db:setup` +
-`db:seed` (planes/paquetes/pesos conversia), para que el frontend tenga datos reales.
+el seed ACOTADO del catálogo (planes/paquetes/pesos conversia), para que el frontend tenga
+datos reales:
+
+```bash
+railway run --service Postgres -- bash -c 'cd packages/database && \
+  DATABASE_URL="$DATABASE_PUBLIC_URL" node scripts/seed-conversia-catalog.mjs'
+```
+
+> §1.3 — **no** `db:seed` contra producción: el seed completo crea un tenant de demo y un
+> super admin, y pisa el catálogo entero. Desde la etapa 8 aborta solo con
+> `NODE_ENV=production`. Ver `docs/RUNBOOK_GOLIVE_V2.md` §3.
 
 ### Publicar conversia-web (cómo se publica REALMENTE) + sello de versión
 

@@ -23,9 +23,9 @@ export function isFullPlatformAdmin(role: string | undefined | null): boolean {
 
 /**
  * Prefijos de rutas GLOBALES/destructivas reservadas al super admin — el operador NO
- * puede tocarlas. Nota: las acciones de billing POR-ORG viven bajo /platform/organizations
- * (billing-action, payment-link, subscription, invoices, wallet-adjust) y SÍ las puede el
- * operador; lo que se bloquea aquí es el billing/config GLOBAL de la plataforma.
+ * puede tocarlas: planes/precios, fusibles, pasarelas, infra y otros administradores.
+ * Las acciones POR-ORG (/platform/organizations/:id/...) se filtran aparte, con
+ * OPERATOR_DENY_ORG_ACTIONS.
  */
 export const OPERATOR_DENY_PREFIXES = [
   "/platform/metrics", // dashboard con MRR/ingresos/costos de la marca (dato financiero global)
@@ -48,12 +48,53 @@ export const OPERATOR_DENY_PREFIXES = [
 ];
 
 /**
+ * §3.6 — Acciones POR-ORG reservadas al super admin, bajo `/platform/organizations/:id/`.
+ *
+ * Son las que, en la ficha de UN cliente, equivalen a tomar posesión de la cuenta o a
+ * mover dinero: entrar como el cliente, cambiarle el correo de acceso o la contraseña
+ * (ambas = apropiarse de la cuenta), regalar saldo, cambiarle el plan, generar cobros,
+ * emitir facturas, suspender/reactivar la cuenta y subirle el tope de mensajería.
+ *
+ * OJO — ESTO CAMBIA EL ALCANCE DEL ROL OPERADOR respecto de cómo se diseñó F10, que las
+ * daba por permitidas ("opera la ficha del cliente, incluido impersonar CON auditoría").
+ * La auditoría las considera privilegio de super admin. Queda en una lista aparte, a
+ * propósito: devolver alguna al operador es borrar su línea de acá, sin tocar nada más.
+ * `impersonate` es la más discutible —es la herramienta diaria del equipo de
+ * implementación—; está en el PR para que el dueño decida.
+ */
+export const OPERATOR_DENY_ORG_ACTIONS = [
+  "impersonate", // entrar como el cliente
+  "admin/email", // cambiar el correo de acceso = apropiarse de la cuenta
+  "admin/reset-password", // idem
+  "wallet-adjust", // regalar/quitar saldo
+  "subscription", // cambiar el plan contratado
+  "billing-action", // cobrar / reintentar / cancelar
+  "payment-link", // generar un link de pago
+  "invoices", // emitir o pagar facturas de ese cliente
+  "status", // suspender o reactivar la cuenta
+  "messaging-cap", // subir el tope de mensajería
+];
+
+/** `/platform/organizations/<id>/<resto>` → devuelve `<resto>`; null si no calza. */
+function orgActionOf(path: string): string | null {
+  const m = /^\/platform\/organizations\/[^/]+\/(.+)$/.exec(path);
+  return m ? m[1] : null;
+}
+
+/**
  * ¿Puede un OPERADOR acceder a esta ruta? true = permitido. Auth (login/MFA) siempre.
  * Coincidencia exacta o por segmento ("/platform/billing/..."), nunca por substring suelto,
  * para no bloquear rutas per-org que comparten raíz con una global.
+ *
+ * §3.6 — la comparación va en MINÚSCULAS porque Express rutea sin distinguir mayúsculas:
+ * `/platform/Billing` llegaba al mismo handler y no calzaba con la denylist, así que el
+ * operador entraba a la configuración global cambiando una letra.
  */
 export function operatorMayAccess(rawPath: string): boolean {
-  const p = (rawPath || "").split("?")[0].replace(/\/+$/, "") || "/";
+  const p = ((rawPath || "").split("?")[0].replace(/\/+$/, "") || "/").toLowerCase();
   if (p.startsWith("/platform/auth/")) return true; // iniciar sesión + enrolar/verificar MFA
-  return !OPERATOR_DENY_PREFIXES.some((pre) => p === pre || p.startsWith(pre + "/"));
+  if (OPERATOR_DENY_PREFIXES.some((pre) => p === pre || p.startsWith(pre + "/"))) return false;
+  const action = orgActionOf(p);
+  if (action && OPERATOR_DENY_ORG_ACTIONS.some((a) => action === a || action.startsWith(a + "/"))) return false;
+  return true;
 }

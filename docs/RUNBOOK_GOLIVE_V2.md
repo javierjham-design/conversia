@@ -56,8 +56,19 @@ railway run --service Postgres -- bash -lc 'DATABASE_URL="$DATABASE_PUBLIC_URL" 
 
 ## 3. Seed del catálogo (14 rubros + planes V2 inactivos + packs; todo idempotente)
 
+> **§1.3 — NO uses `db:seed` acá.** El seed completo crea un tenant de demostración, un
+> usuario admin y un super admin de plataforma, y hace `upsert` del catálogo entero: contra
+> producción eso pisa planes y precios reales y deja cuentas con contraseña del seed.
+> Desde la etapa 8 **aborta solo** si `NODE_ENV=production` (hace falta
+> `ALLOW_PROD_SEED=true` para forzarlo, y ya no hay contraseñas por defecto).
+>
+> El script de abajo es el ACOTADO: solo hace upsert de catálogo GLOBAL (planes
+> `conversia_*`, sobre de créditos, pesos de bolsa por marca y las plantillas de los 14
+> rubros) y **no toca ningún tenant**.
+
 ```bash
-railway run --service Postgres -- bash -lc 'DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_DATABASE_URL="$DATABASE_PUBLIC_URL" pnpm --filter @conversia/database run db:seed'
+railway run --service Postgres -- bash -c 'cd packages/database && \
+  DATABASE_URL="$DATABASE_PUBLIC_URL" node scripts/seed-conversia-catalog.mjs'
 ```
 
 ## 4. Encender V2 (selfServe + plan base + packs de conversación)

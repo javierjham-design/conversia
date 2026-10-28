@@ -26,16 +26,28 @@ export function assertTubotBrand(req: PlatformRequest): void {
   }
 }
 
-function clientIp(req: Request): string {
-  return (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+/**
+ * §3.7 — IP real del cliente, vía `req.ip` (Express la deriva con `trust proxy`, ver
+ * main.ts). Antes se leía el PRIMER valor de `X-Forwarded-For` a mano: ese valor lo
+ * escribe quien hace la petición, así que la allowlist de IP del super admin se saltaba
+ * mandando `X-Forwarded-For: <una de la lista>`. Era la 2ª capa de defensa del panel
+ * más sensible del sistema.
+ */
+export function clientIp(req: Request): string {
+  return req.ip || req.socket?.remoteAddress || "";
 }
 
 /**
  * Rutas alcanzables SIN MFA activo: autenticarse, ver el propio estado y enrolar
  * el segundo factor. Todo lo demás queda bloqueado hasta activar MFA.
+ *
+ * §3.10 — se evalúa sobre el PATH, sin query string, y exigiendo que empiece por el
+ * prefijo. Con `includes()` sobre la URL completa, cualquier ruta del panel se eximía
+ * del MFA colgándole `?x=/platform/auth/` al final.
  */
-function isMfaExempt(req: Request): boolean {
-  return (req.originalUrl || req.url || "").includes("/platform/auth/");
+export function isMfaExempt(req: Request): boolean {
+  const path = (req.originalUrl || req.url || "").split("?")[0];
+  return path.startsWith("/platform/auth/");
 }
 
 /** Protege las rutas /platform/* con el token de administrador de plataforma. */

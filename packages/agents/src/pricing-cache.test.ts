@@ -27,7 +27,25 @@ describe("computeCostUsdCached", () => {
     expect(conCache).toBeCloseTo(sinCache * 0.1, 9);
   });
 
-  it("modelo desconocido → 0 (no inventa costo)", () => {
-    expect(computeCostUsdCached("modelo-inexistente", { inputTokens: 1000, outputTokens: 1000 })).toBe(0);
+  /**
+   * §7.3 — CAMBIO DE CRITERIO respecto de la versión anterior de este test, que exigía 0
+   * "para no inventar costo". Devolver 0 no es abstenerse: es afirmar que el tenant no
+   * gastó nada. Y con ese número se calculan los márgenes, el modelo de costos y el precio
+   * de los Créditos IA — un modelo nuevo, o una errata en el modelo que el super admin
+   * fija por tenant, hacía vender por debajo del costo sin que nada chillara.
+   *
+   * Ahora se estima ALTO (el modelo más caro conocido) y se avisa por log: equivocarse
+   * sobreestimando se nota y se corrige; subestimar a cero es invisible.
+   */
+  it("modelo desconocido → estimación CONSERVADORA, nunca 0", () => {
+    const costo = computeCostUsdCached("modelo-inexistente", { inputTokens: 1000, outputTokens: 1000 });
+    expect(costo).toBeGreaterThan(0);
+    // No es menor que el más caro que conocemos (fable 5: 10 in / 50 out por MTok).
+    const masCaro = computeCostUsdCached("claude-fable-5", { inputTokens: 1000, outputTokens: 1000 });
+    expect(costo).toBeGreaterThanOrEqual(masCaro);
+  });
+
+  it("un modelo conocido NO se ve afectado por el fallback", () => {
+    expect(computeCostUsdCached("claude-haiku-4-5", { inputTokens: 1_000_000, outputTokens: 0 })).toBeCloseTo(1, 9);
   });
 });

@@ -10,6 +10,7 @@ import { transcribeWhatsappAudio } from "./audio";
 import { downloadWhatsappMedia } from "./media";
 import { extractDocumentText } from "./document-text";
 import { resolveChannelAuth } from "./channel-auth";
+import { estadoDesdeMeta, estadosQuePermiten } from "./message-status-order";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";
 import { processMetaHealth } from "./meta-health";
 import { emitPlatformEvent } from "./platform-events";
@@ -200,17 +201,25 @@ export async function processInbound(job: InboundJob): Promise<void> {
     const tenant = await resolveTenant(status.phoneNumberId);
     if (!tenant) continue;
     const failed = status.status === "failed";
-    await withTenant(tenant.organizationId, (tx) =>
-      tx.message.updateMany({
-        where: { organizationId: tenant.organizationId, externalId: status.externalId },
-        data: {
-          status: status.status === "read" ? "READ" : status.status === "delivered" ? "DELIVERED" : failed ? "FAILED" : "SENT",
-          // Guardamos el MOTIVO que manda Meta para que se vea en la Bandeja
-          // (antes se marcaba FAILED sin razón). Solo en fallo y si vino detalle.
-          ...(failed && status.error ? { error: status.error } : {}),
-        },
-      }),
-    );
+    // §4.6 — transición MONÓTONA: Meta no garantiza el orden de los status, así que el
+    // filtro por estado actual evita que un `sent`/`delivered` rezagado baje un mensaje ya
+    // leído o borre un FAILED (que es el que lleva el motivo del rebote). Lo decide la
+    // base en el propio UPDATE: sin leer-y-escribir, sin carrera.
+    const destino = estadoDesdeMeta(status.status);
+    const desde = estadosQuePermiten(destino);
+    if (desde.length) {
+      await withTenant(tenant.organizationId, (tx) =>
+        tx.message.updateMany({
+          where: { organizationId: tenant.organizationId, externalId: status.externalId, status: { in: desde } },
+          data: {
+            status: destino,
+            // Guardamos el MOTIVO que manda Meta para que se vea en la Bandeja
+            // (antes se marcaba FAILED sin razón). Solo en fallo y si vino detalle.
+            ...(failed && status.error ? { error: status.error } : {}),
+          },
+        }),
+      );
+    }
     // Traza en el panel de Salud/Alertas del Super Admin: por qué rebotó el envío.
     if (failed && status.error) {
       await withTenant(tenant.organizationId, (tx) =>
@@ -813,6 +822,16 @@ export async function processInbound(job: InboundJob): Promise<void> {
       return { conversationId: conversation.id };
     });
     if (!result) continue; // duplicado
+    // §5 — El dueño contestó a mano: el bot se CALLA en este chat (y vuelve solo pasado el
+    // plazo del canal, 2 h por defecto). Antes el eco solo se pintaba, así que el bot
+    // seguía respondiendo en paralelo y el cliente recibía dos respuestas a lo mismo.
+    // Aislado: un fallo acá no puede hacer reintentar el job ni perder el eco.
+    try {
+      const { pauseAiForOwnerEcho } = await import("./coexistence-pause.js");
+      await pauseAiForOwnerEcho(organizationId, result.conversationId, tenant.channelConnectionId);
+    } catch (err) {
+      console.error(`✖ Error al pausar la IA por eco del dueño (${result.conversationId}):`, (err as Error).message);
+    }
     // §8.3 — los ECOS de coexistencia NO disparan al agente (son mensajes que el DUEÑO ya
     // respondió a mano desde su app): acá NO se reencola ningún turno, o el bot le
     // contestaría al propio dueño. Solo se refresca la Bandeja, aislado para que un fallo
