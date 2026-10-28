@@ -41,7 +41,7 @@ function makeAuth(opts: { user?: { id: string; email: string; passwordHash: stri
     create: async () => "r",
     revokeAllForUser: async (uid: string) => void revocados.push(uid),
   };
-  const service = new AuthService(prisma, {} as any, refreshSessions);
+  const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);
   // El envío se intercepta: lo que importa acá es SI se manda, no el contenido del correo.
   (service as any).sendPasswordResetEmail = async (to: string) => {
     correos.push({ to });

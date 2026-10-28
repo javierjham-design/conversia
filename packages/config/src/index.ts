@@ -75,6 +75,14 @@ const envSchema = z.object({
   // proveedor (ver `resolveAssistantModel`). Su costo lo paga Conversia, no el cliente:
   // NUNCA se debita de los Créditos IA del tenant.
   ASSISTANT_MODEL: z.string().default(""),
+  // COP 4 — señales del EMBUDO hacia Meta Ads (cuenta creada, bot activo, plan activado).
+  // NACE APAGADO a propósito: mandarle eventos a Meta es irreversible (entrenan el modelo
+  // del conjunto de anuncios) y hacerlo con datos de prueba o duplicados ensucia la cuenta
+  // publicitaria de forma que no se limpia. El dueño lo enciende cuando la campaña esté lista.
+  FUNNEL_CAPI_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true"),
   // Org de TuBot (el proveedor del "montaje asistido"): el cliente autoriza a ESTE
   // org a escribir su configuración durante la implementación. Default = tenant de TuBot.
   ASSISTED_SETUP_PROVIDER_ORG_ID: z.string().default("cms5zmgtz0001od01t30lw4t6"),

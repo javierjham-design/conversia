@@ -20,6 +20,7 @@ import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { chargeServiceSend, outOfConversationCreditsPhrase } from "./messaging-guard";
 import { planDebitsConversation } from "./conversation-credits";
 import { aiCreditsGate, aiCreditsNotifyDecision, debitAiCreditsForTurn, getAiCreditsMeter } from "./ai-credits";
+import { informarHitoCapi } from "./funnel-capi";
 import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrail";
 import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
@@ -882,6 +883,15 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
             : { pct, used: aviso.used, included: aviso.included, restantes: aviso.remaining, estimado: medidor?.frase ?? "" },
       }).catch(() => undefined);
     }
+  }
+
+  // COP 4 — SEÑAL "BOT ACTIVO" hacia Meta Ads. Se dispara cuando el bot respondió de
+  // verdad, que es el momento en que el producto sirve (no cuando se creó la cuenta ni
+  // cuando se conectó el número). Idempotente por organización y APAGADA por bandera:
+  // `FUNNEL_CAPI_ENABLED` nace en false porque mandarle eventos a Meta es irreversible.
+  // Nunca lanza: una señal de marketing no puede tumbar la respuesta de un cliente.
+  if (agentTextCreated > 0) {
+    await informarHitoCapi(organizationId, "bot_activo", { contactId: conversation?.contactId ?? null }).catch(() => undefined);
   }
 
   // Cinturón E4: si alguna vez se creara más de un message de texto del agente en el

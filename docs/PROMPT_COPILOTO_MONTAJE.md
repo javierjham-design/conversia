@@ -187,7 +187,7 @@ sin salida no sirve.
       plan; Meta cobra aparte ciertos mensajes.
     Deja en `docs/AJUSTES_RESULTADOS.md` cuál rama queda activa hoy en producción.
 
-## ETAPA 4 — Medición y pruebas
+## ETAPA 4 — Medición y pruebas — ✅ #564
 
 - **Eventos del embudo de montaje** por organización (tabla propia o `IntegrationEvent`):
   cuenta creada, cada paso completado, bot publicado, canal conectado, primer mensaje

@@ -28,6 +28,8 @@ type Funnel = {
   stages: { key: string; label: string; count: number; convFromPrev?: number }[];
   trial: { exhausted: number; paused: number };
   draftsMaterialized: number;
+  /** COP 4 — cuanto tarda un cliente nuevo en tener el bot respondiendo de verdad. */
+  tiempoHastaBotActivo?: { medianaMin: number | null; cuentas: number; nacidasEnLaVentana: number };
 };
 
 const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
@@ -147,6 +149,15 @@ export default function AdminDashboard() {
                   ));
                 })()}
                 <p className="text-dim" style={{ margin: "12px 0 0", fontSize: 12 }}>Prueba agotada: {f.trial.exhausted} · en pausa: {f.trial.paused} · borradores materializados: {f.draftsMaterialized}</p>
+                {/* COP 4 — MEDIANA, no promedio: una cuenta que tardó tres semanas movería
+                    el promedio a algo que no describe a nadie. */}
+                {f.tiempoHastaBotActivo ? (
+                  <p className="text-dim" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                    {f.tiempoHastaBotActivo.medianaMin == null
+                      ? `Tiempo hasta "bot activo": sin datos todavía (${f.tiempoHastaBotActivo.nacidasEnLaVentana} cuentas nuevas, ninguna con respuesta del bot).`
+                      : `Tiempo hasta "bot activo": mediana ${f.tiempoHastaBotActivo.medianaMin} min (${f.tiempoHastaBotActivo.cuentas} de ${f.tiempoHastaBotActivo.nacidasEnLaVentana} cuentas nuevas llegaron).`}
+                  </p>
+                ) : null}
               </div>
             </>
           ) : null}

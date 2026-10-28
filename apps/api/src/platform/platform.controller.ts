@@ -15,7 +15,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
-import { MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, buildCoreTools } from "@conversia/agents";
+import { CLP_PER_USD_REF, CREDIT_POLICY_SEED, MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, buildCoreTools } from "@conversia/agents";
+import { MARGEN_MINIMO_PCT, calcularMargen, mesRango, recomendarCalibracion } from "./margen";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -331,17 +332,58 @@ export class PlatformController {
     const brand = this.reqBrand(req);
     const orgIds = await this.brandOrgIds(req);
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    const base = await db.plan.findUnique({ where: { code: "conversia_v2_base" }, select: { id: true } });
-    const [draftsCreated, draftsMaterialized, registered, channels, firstConv, activatedSubs, exhausted, paused] = await Promise.all([
+    // CRE 2 dejó esto ciego a MEDIAS: la etapa "activaron" solo miraba el plan por
+    // conversación, así que al encender el catálogo de Créditos IA los clientes que pagan
+    // el plan de créditos dejaban de contar como activados y el embudo mostraría una caída
+    // de conversión que no ocurrió. Se cuentan los DOS planes base.
+    const bases = await db.plan.findMany({
+      where: { code: { in: ["conversia_v2_base", "conversia_creditos_base"] } },
+      select: { id: true },
+    });
+    const baseIds = bases.map((b) => b.id);
+    const [draftsCreated, draftsMaterialized, registered, channels, firstConv, activatedSubs, exhausted, paused, publicados, activos] = await Promise.all([
       db.draftSession.count({ where: { createdAt: { gte: since } } }),
       db.draftSession.count({ where: { status: "materialized", createdAt: { gte: since } } }),
       db.organization.count({ where: { brand, deletedAt: null } }),
       db.channelConnection.findMany({ where: { organizationId: { in: orgIds }, status: "active" }, select: { organizationId: true }, distinct: ["organizationId"] }),
       db.conversationCreditLedger.findMany({ where: { organizationId: { in: orgIds }, reason: "conversation_debit" }, select: { organizationId: true }, distinct: ["organizationId"] }),
-      base ? db.subscription.findMany({ where: { organizationId: { in: orgIds }, status: "ACTIVE", planId: base.id }, select: { organizationId: true }, distinct: ["organizationId"] }) : Promise.resolve([] as { organizationId: string }[]),
+      baseIds.length ? db.subscription.findMany({ where: { organizationId: { in: orgIds }, status: "ACTIVE", planId: { in: baseIds } }, select: { organizationId: true }, distinct: ["organizationId"] }) : Promise.resolve([] as { organizationId: string }[]),
       db.integrationEvent.findMany({ where: { organizationId: { in: orgIds }, provider: "funnel", type: "trial_exhausted" }, select: { organizationId: true }, distinct: ["organizationId"] }),
       db.integrationEvent.findMany({ where: { organizationId: { in: orgIds }, provider: "funnel", type: "trial_paused" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+      // COP 4 — ETAPA QUE FALTABA: "publicaron su asistente". Es justo el paso donde el
+      // cliente se quedaba atascado antes de COP 0 (el bot existía pero seguía en borrador,
+      // sin atender a nadie), así que sin esta fila el embudo no muestra el cuello real:
+      // entre registrarse y conectar WhatsApp hay un paso invisible.
+      db.agentVersion.findMany({ where: { organizationId: { in: orgIds }, status: "PUBLISHED" }, select: { organizationId: true }, distinct: ["organizationId"] }),
+      // Para el TIEMPO MEDIO hasta "bot activo": cuándo nació la cuenta y cuándo respondió
+      // su bot por primera vez. Se mide del estado real (el primer mensaje del AGENTE), no
+      // de un evento que alguien pudo no escribir.
+      db.organization.findMany({
+        where: { brand, deletedAt: null, createdAt: { gte: since } },
+        select: { id: true, createdAt: true },
+      }),
     ]);
+    // Primera respuesta del bot por cuenta (de las nacidas en la ventana).
+    const nacidas = new Map(activos.map((o) => [o.id, o.createdAt]));
+    const primeras = nacidas.size
+      ? await db.message.groupBy({
+          by: ["organizationId"],
+          where: { organizationId: { in: [...nacidas.keys()] }, direction: "OUTBOUND", authorType: "AGENT" },
+          _min: { createdAt: true },
+        })
+      : [];
+    const minutos = primeras
+      .map((p) => {
+        const nac = nacidas.get(p.organizationId);
+        const first = p._min.createdAt;
+        if (!nac || !first) return null;
+        return Math.max(0, Math.round((first.getTime() - nac.getTime()) / 60_000));
+      })
+      .filter((n): n is number => n != null)
+      .sort((a, b) => a - b);
+    // MEDIANA, no promedio: una sola cuenta que tardó 3 semanas movería el promedio a algo
+    // que no describe a nadie. La mediana dice cuánto tarda un cliente típico.
+    const medianaMin = minutos.length ? minutos[Math.floor(minutos.length / 2)] : null;
     const channelConnected = channels.length;
     const firstConversation = firstConv.length;
     const activated = activatedSubs.length;
@@ -351,13 +393,77 @@ export class PlatformController {
       stages: [
         { key: "draft", label: "Crearon un borrador (/crear)", count: draftsCreated },
         { key: "registered", label: "Se registraron", count: registered, convFromPrev: pct(draftsMaterialized, draftsCreated) },
-        { key: "channel", label: "Conectaron su WhatsApp", count: channelConnected, convFromPrev: pct(channelConnected, registered) },
+        { key: "published", label: "Publicaron su asistente", count: publicados.length, convFromPrev: pct(publicados.length, registered) },
+        { key: "channel", label: "Conectaron su WhatsApp", count: channelConnected, convFromPrev: pct(channelConnected, publicados.length) },
         { key: "first_conversation", label: "Atendieron su 1.ª conversación", count: firstConversation, convFromPrev: pct(firstConversation, channelConnected) },
         { key: "activated", label: "Activaron (pagaron la Base)", count: activated, convFromPrev: pct(activated, firstConversation) },
       ],
       trial: { exhausted: exhausted.length, paused: paused.length },
       draftsMaterialized,
+      // COP 4 — cuánto tarda un cliente nuevo en tener el bot respondiendo de verdad.
+      tiempoHastaBotActivo: {
+        medianaMin,
+        cuentas: minutos.length,
+        nacidasEnLaVentana: nacidas.size,
+      },
     };
+  }
+
+  /**
+   * CRE 4 — RECOMENDACIÓN DE CALIBRACIÓN del mes: créditos por conversación, tokens por
+   * respuesta y si conviene mover el bloque de tokens o los pesos. No recomienda nada sin
+   * muestra suficiente: una recomendación hecha con 30 respuestas invita a mover un precio
+   * por ruido.
+   */
+  @Get("calibration")
+  async calibration(@Req() req: PlatformRequest, @Query("month") month?: string) {
+    const db = this.prisma.admin;
+    const orgIds = await this.brandOrgIds(req);
+    const { desde, hasta, mes } = mesRango(month);
+    if (!orgIds.length) return { mes, sinDatos: true };
+
+    const [creditos, turnos, pack] = await Promise.all([
+      db.usageEvent.aggregate({
+        _sum: { quantity: true },
+        where: { organizationId: { in: orgIds }, type: "ai_credits", occurredAt: { gte: desde, lt: hasta } },
+      }).catch(() => ({ _sum: { quantity: null } })),
+      db.aiRequest.aggregate({
+        _count: { _all: true },
+        _sum: { inputTokens: true, outputTokens: true, costUsd: true },
+        where: { organizationId: { in: orgIds }, createdAt: { gte: desde, lt: hasta } },
+      }).catch(() => ({ _count: { _all: 0 }, _sum: { inputTokens: null, outputTokens: null, costUsd: null } })),
+      db.messagePackage.findFirst({
+        where: { active: true, brand: "conversia", type: "credit" },
+        orderBy: { order: "asc" },
+        select: { credits: true, priceClp: true },
+      }).catch(() => null),
+    ]);
+    // Conversaciones DISTINTAS que generaron esos créditos (una conversación son varios turnos).
+    const convRows = await db.$queryRaw<{ n: bigint }[]>`
+      SELECT COUNT(DISTINCT meta->>'conversationId') AS n
+      FROM usage_events
+      WHERE organization_id = ANY(${orgIds})
+        AND type = 'ai_credits'
+        AND occurred_at >= ${desde} AND occurred_at < ${hasta}
+    `.catch(() => [{ n: BigInt(0) }]);
+
+    // Bloque de tokens VIGENTE (`platform_settings.aiCredits.tokensPerCredit`), que es lo
+    // que la recomendación compara con los tokens reales por respuesta. Si la fila no está,
+    // se usa la semilla del motor: es el valor con el que el sistema está cobrando.
+    const row = await db.platformSetting.findUnique({ where: { key: "aiCredits" }, select: { value: true } }).catch(() => null);
+    const policy = Number((((row?.value ?? {}) as Record<string, unknown>).tokensPerCredit ?? 0)) || CREDIT_POLICY_SEED.tokensPerCredit;
+    const precioCreditoClp = pack && pack.credits > 0 ? Number(pack.priceClp) / pack.credits : 0;
+    const r = recomendarCalibracion({
+      creditos: Number(creditos._sum.quantity ?? 0),
+      conversaciones: Number(convRows[0]?.n ?? 0),
+      turnos: turnos._count._all ?? 0,
+      tokens: Number(turnos._sum.inputTokens ?? 0) + Number(turnos._sum.outputTokens ?? 0),
+      tokensPorCredito: policy,
+      costoIaUsd: Number(turnos._sum.costUsd ?? 0),
+      clpPorUsd: CLP_PER_USD_REF,
+      precioCreditoClp: Math.round(precioCreditoClp * 100) / 100,
+    });
+    return { mes, tokensPorCreditoVigente: policy, precioCreditoClp: Math.round(precioCreditoClp * 100) / 100, ...r };
   }
 
   // ---------------------------- Organizaciones ----------------------------
@@ -2171,45 +2277,85 @@ export class PlatformController {
 
   // ---------------------- Margen por cliente + catálogo de paquetes ----------------------
 
-  /** Margen real por tenant del mes: ingreso cobrado − costo Meta − costo IA (en CLP). */
+  /**
+   * CRE 4 — MARGEN REAL por tenant y mes: ingreso cobrado contra el costo que de verdad
+   * paga Conversia, con alerta bajo el 40%.
+   *
+   * DOS DEFECTOS CORREGIDOS, que empujaban el número en direcciones opuestas (así que lo
+   * que mostraba antes estaba mal sin saber hacia dónde):
+   *
+   *  1. **Restaba el costo de Meta.** Decisión del dueño (27-oct): los mensajes los paga el
+   *     CLIENTE a Meta con su propia tarjeta. Imputárselo a Conversia subestimaba el margen
+   *     de toda cuenta que manda plantillas. Ahora se informa aparte, no se resta.
+   *  2. **Leía el costo de IA de la tabla equivocada.** Tomaba `usage_events` de tipo
+   *     `ai_tokens`, que SOLO escriben el probador de agentes y el copiloto de montaje. El
+   *     costo de las respuestas reales del bot —el costo principal del negocio— vive en
+   *     `ai_requests.costUsd` y no entraba, así que el margen salía inflado justo en las
+   *     cuentas que más consumen.
+   *
+   * Agrega la infraestructura estimada por cuenta y la alerta del §"Etapa 4". El cálculo es
+   * `calcularMargen` (puro, en `margen.ts`) para poder probarlo sin base de datos.
+   */
   @Get("margins")
-  async margins(@Req() req: PlatformRequest) {
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
+  async margins(@Req() req: PlatformRequest, @Query("month") month?: string) {
+    const db = this.prisma.admin;
     const { usdToClp } = await this.readCostSettings();
-    const [orgs, invoices, usage] = await Promise.all([
-      this.prisma.admin.organization.findMany({ where: { brand: this.reqBrand(req), deletedAt: null }, select: { id: true, name: true, currency: true } }),
-      this.prisma.admin.invoice.groupBy({ by: ["organizationId"], where: { status: "PAID", paidAt: { gte: monthStart } }, _sum: { amountDue: true } }),
-      this.prisma.admin.usageEvent.groupBy({ by: ["organizationId", "type"], where: { occurredAt: { gte: monthStart } }, _sum: { costUsd: true } }),
-    ]);
-    const revById = new Map(invoices.map((i) => [i.organizationId, Number(i._sum.amountDue ?? 0)]));
-    const metaById = new Map<string, number>();
-    const aiById = new Map<string, number>();
-    for (const u of usage) {
-      const usd = Number(u._sum.costUsd ?? 0);
-      if (u.type === "whatsapp_message") metaById.set(u.organizationId, usd);
-      else if (u.type === "ai_tokens") aiById.set(u.organizationId, (aiById.get(u.organizationId) ?? 0) + usd);
-    }
-    const rows = orgs.map((o) => {
-      // Ingreso: la factura ya está en la moneda del tenant → normalizamos a CLP.
-      const revenueClp = o.currency === "CLP" ? (revById.get(o.id) ?? 0) : (revById.get(o.id) ?? 0) * usdToClp;
-      const metaCostClp = (metaById.get(o.id) ?? 0) * usdToClp;
-      const aiCostClp = (aiById.get(o.id) ?? 0) * usdToClp;
-      const marginClp = revenueClp - metaCostClp - aiCostClp;
-      return {
-        id: o.id,
-        name: o.name,
-        revenueClp: Math.round(revenueClp),
-        metaCostClp: Math.round(metaCostClp),
-        aiCostClp: Math.round(aiCostClp),
-        marginClp: Math.round(marginClp),
-        marginPct: revenueClp > 0 ? Math.round((marginClp / revenueClp) * 100) : null,
-      };
+    const { desde, hasta, mes } = mesRango(month);
+    const orgs = await db.organization.findMany({
+      where: { brand: this.reqBrand(req), deletedAt: null },
+      select: { id: true, name: true, currency: true },
     });
-    // Los que pierden plata primero (margen negativo arriba).
-    rows.sort((a, b) => a.marginClp - b.marginClp);
-    return { month: monthStart.toISOString().slice(0, 7), rows };
+    const orgIds = orgs.map((o) => o.id);
+    if (!orgIds.length) return { month: mes, umbralPct: MARGEN_MINIMO_PCT, usdToClp, rows: [], alertas: 0 };
+
+    const [invoices, aiReq, metaUsage, testUsage] = await Promise.all([
+      db.invoice.groupBy({ by: ["organizationId"], where: { organizationId: { in: orgIds }, status: "PAID", paidAt: { gte: desde, lt: hasta } }, _sum: { amountDue: true } }),
+      // EL COSTO QUE IMPORTA: las respuestas reales del bot.
+      db.aiRequest.groupBy({ by: ["organizationId"], where: { organizationId: { in: orgIds }, createdAt: { gte: desde, lt: hasta } }, _sum: { costUsd: true } }),
+      db.usageEvent.groupBy({ by: ["organizationId"], where: { organizationId: { in: orgIds }, type: "whatsapp_message", occurredAt: { gte: desde, lt: hasta } }, _sum: { costUsd: true } }),
+      // Probador + copiloto de montaje: costo de Conversia también, pero por separado para
+      // poder ver cuánto cuesta ATENDER y cuánto cuesta MONTAR a un cliente.
+      db.usageEvent.groupBy({ by: ["organizationId"], where: { organizationId: { in: orgIds }, type: "ai_tokens", occurredAt: { gte: desde, lt: hasta } }, _sum: { costUsd: true } }),
+    ]);
+    const num = (v: unknown) => (v == null ? 0 : Number(v));
+    const mapa = <T extends { organizationId: string }>(rows: T[]) => new Map(rows.map((r) => [r.organizationId, r]));
+    const rev = mapa(invoices);
+    const ia = mapa(aiReq);
+    const meta = mapa(metaUsage);
+    const test = mapa(testUsage);
+
+    const rows = orgs
+      .map((o) => {
+        // La factura ya está en la moneda del tenant → se normaliza a CLP.
+        const bruto = num(rev.get(o.id)?._sum.amountDue);
+        const revenueClp = o.currency === "CLP" ? bruto : bruto * usdToClp;
+        const m = calcularMargen({
+          organizationId: o.id,
+          nombre: o.name,
+          ingresosClp: revenueClp,
+          costoIaUsd: num(ia.get(o.id)?._sum.costUsd) + num(test.get(o.id)?._sum.costUsd),
+          // Meta lo paga el cliente: NO entra en el costo de Conversia (se informa aparte).
+          costoWhatsappUsd: 0,
+          clpPorUsd: usdToClp,
+        });
+        return {
+          id: o.id,
+          name: o.name,
+          revenueClp: m.ingresosClp,
+          aiCostClp: m.detalle.iaClp,
+          infraCostClp: m.detalle.infraClp,
+          marginClp: m.margenClp,
+          marginPct: m.margenPct,
+          alerta: m.alerta,
+          /** Informativo: lo que Meta le cobró AL CLIENTE (no afecta el margen). */
+          metaDelClienteClp: Math.round(num(meta.get(o.id)?._sum.costUsd) * usdToClp),
+          montajeClp: Math.round(num(test.get(o.id)?._sum.costUsd) * usdToClp),
+        };
+      })
+      // Las que pierden plata primero: es lo que el dueño necesita ver al abrir la pantalla.
+      .sort((a, b) => a.marginClp - b.marginClp);
+
+    return { month: mes, umbralPct: MARGEN_MINIMO_PCT, usdToClp, rows, alertas: rows.filter((r) => r.alerta).length };
   }
 
   /** Catálogo de paquetes de la MARCA del super admin (A4 — no mezcla marcas). */

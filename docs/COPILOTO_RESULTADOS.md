@@ -169,3 +169,60 @@ la regresión tumba 3 tests.
 **api 601/601** (12 nuevos), **conversia-web 62/62** (35 nuevos), build de conversia-web
 completo, jornadas A/B/D actualizadas y verdes en el job `dueno`. El guardián del saldo lo
 rompí a propósito para verlo fallar. **Sin migraciones.**
+
+## Etapa 4 — Medición y pruebas (#564)
+
+### El embudo tenía un paso invisible
+
+Al embudo del super admin le faltaba **"publicaron su asistente"**, que es justo el paso
+donde el cliente se atascaba antes de COP 0: el bot existía pero seguía en borrador, sin
+atender a nadie. Sin esa fila, entre "se registraron" y "conectaron su WhatsApp" había una
+caída sin explicación.
+
+Además había quedado **ciego al plan de Créditos IA**: la etapa "activaron" solo contaba el
+plan por conversación, así que el día que se encienda el catálogo nuevo el embudo habría
+mostrado una caída de conversión que no ocurrió.
+
+Y ahora mide el **tiempo hasta "bot activo"** por **mediana, no promedio**: una sola cuenta
+que tardó tres semanas movería el promedio a un número que no describe a nadie.
+
+### Señales a Meta Ads: preparadas y apagadas
+
+Cuenta creada (`CompleteRegistration`), bot atendiendo (evento propio) y plan activado
+(`Purchase`, con su valor en CLP, que es lo que le permite a Meta optimizar por ingreso y no
+por volumen).
+
+**Nacen apagadas** (`FUNNEL_CAPI_ENABLED=false`) y es una decisión, no una omisión: mandarle
+eventos a Meta es irreversible —entrenan el modelo del conjunto de anuncios— y hacerlo con
+datos de prueba o duplicados ensucia la cuenta publicitaria de una forma que no se limpia.
+La decisión de qué se manda y cuándo queda escrita, versionada y con tests; el dueño la
+enciende cuando la campaña esté lista.
+
+Son idempotentes por organización y hito, con el sello escrito **antes** de encolar: si el
+proceso muere entre medio preferimos perder una señal a mandar un `Purchase` dos veces,
+porque un valor contado doble le enseña a Meta que ese público paga el doble de lo que paga.
+Un `Purchase` sin valor no se manda: un evento de compra con valor 0 le enseñaría que ese
+público no vale nada, que es peor que no mandarlo.
+
+### Jornada H: el recorrido completo, medido
+
+`jornada-h-de-cero-a-activo.spec.ts` recorre en un navegador real, de punta a punta:
+registro → Convi se presenta solo → datos del negocio y horario por el formulario →
+servicios con precio → quien atiende con su horario → asistente publicado → canal con
+asistente asignado → un cliente escribe y el bot responde → el saldo baja → el panel lo
+refleja. En escritorio y en móvil, con el tiempo total y por hito adjunto al reporte.
+
+**Corre en cada PR**, no solo de noche: la promesa del producto es "tu asistente andando en
+minutos" y un recorrido que nadie mira se degrada sin que nadie se entere. El tiempo se
+**adjunta, no se afirma con un tope**: un umbral duro en CI convierte una máquina lenta en un
+build rojo y enseña a ignorar la suite.
+
+Lo que la jornada no hace, y por qué: la conexión con Meta y el cobro usan el canal MOCK y
+el proveedor de pago falso del sim. Levantar el popup real de Meta o cobrar de verdad en un
+test es imposible, y fingirlo con un mock que siempre dice sí no probaría nada que no
+prueben ya las jornadas B (popup bloqueado) y G (retornos de la pasarela).
+
+### Verificación
+
+api 636/636, worker 467/467, builds completos. Los dos guardianes nuevos se rompieron a
+propósito para verlos fallar. **Sin migraciones.**

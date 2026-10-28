@@ -166,7 +166,7 @@ function makeAuth(opts: {
       return "refresh-token";
     },
   };
-  const service = new AuthService(prisma, {} as any, refreshSessions);
+  const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);
   return { service, user, secret, updates, refrescos };
 }
 
