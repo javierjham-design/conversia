@@ -77,13 +77,17 @@ export function sessionActive(token: string | null, nowMs: number = Date.now()):
 }
 
 // Páginas públicas: un 401 estando en ellas NO debe redirigir (evita bucles).
-const PUBLIC_PAGES = ["/login", "/crear", "/registro", "/legal", "/n/"];
+// §10.5 — `/recuperar` es pública: quien la abre no tiene sesión (viene del enlace del
+// correo). Sin esto, el flujo de "sesión expirada" la sacaría al login a mitad de camino.
+const PUBLIC_PAGES = ["/login", "/crear", "/registro", "/legal", "/recuperar", "/n/"];
 function onPublicPage(pathname: string): boolean {
   return pathname === "/" || PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p));
 }
 
 /** Rutas de la API cuyo 401 NO dispara el flujo de sesión expirada (lo maneja quien llama). */
-const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"];
+// §10.5 — `forgot`/`reset` van acá: quien las usa no tiene sesión, así que un 401 (o el
+// 400 del enlace vencido) lo muestra la propia pantalla, no el flujo de "sesión expirada".
+const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/forgot", "/auth/reset"];
 function isAuthPath(path: string): boolean {
   return AUTH_PATHS.some((p) => path.startsWith(p));
 }

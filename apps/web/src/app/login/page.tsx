@@ -202,6 +202,11 @@ export default function LoginPage() {
         </label>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button type="submit" disabled={loading} className={btn}>{loading ? "Entrando…" : "Entrar"}</button>
+        {/* §10.5 — la salida cuando se olvidó la contraseña. Sin esto el único camino era
+            pedirle a alguien del equipo que la restableciera a mano. */}
+        <p className="text-center text-sm text-ink-muted">
+          <a href="/recuperar" className="hover:text-ink">¿Olvidaste tu contraseña?</a>
+        </p>
         <p className="text-center text-sm text-ink-muted">
           ¿No tienes cuenta?{" "}
           <a href="/registro" className="font-medium text-brand-600 hover:text-brand-700">Crear cuenta gratis</a>

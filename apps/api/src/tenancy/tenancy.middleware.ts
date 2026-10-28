@@ -6,12 +6,15 @@ import { runWithContext, type RequestContext } from "./context";
 /**
  * Rutas sin JWT: auth, webhooks (firma propia), API pública (API key) y health.
  *
+ * §10.5 — `/auth/forgot` y `/auth/reset` son públicas por definición: quien las usa es
+ * justamente alguien que NO puede iniciar sesión. Se autentican por el token del enlace.
+ *
  * §3.10 — `/auth/invite` y `/auth/accept-invite` van acá porque el frontend las llama SIN
  * Bearer (`AUTH_API_PATHS` en apps/web/src/lib/api.ts): el invitado todavía no tiene sesión.
  * Sin esto el middleware cortaba con "Falta token Bearer" y el link de invitación no servía.
  * Se autentican por el token del propio link (`verifyInviteToken`, audiencia `:invite`).
  */
-const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/auth/invite", "/auth/accept-invite", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
+const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/auth/forgot", "/auth/reset", "/auth/invite", "/auth/accept-invite", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
 
 /** @deprecated usar AppTokenClaims de auth/jwt */
 export type JwtPayload = AppTokenClaims;

@@ -159,6 +159,56 @@ export class AuthController {
     return this.auth.logout(input.refreshToken);
   }
 
+  // ------------------- Recuperación de contraseña (§10.5) -------------------
+
+  /**
+   * Pide el enlace de recuperación. PÚBLICO y de respuesta UNIFORME: contesta lo mismo
+   * exista o no la cuenta, porque contestar distinto convertiría este endpoint en una
+   * forma de averiguar quién es cliente de la plataforma.
+   *
+   * Doble límite: por CORREO (frena pedir mil enlaces para una cuenta, que además llena
+   * de correo a esa persona) y por IP (frena el barrido de miles de correos).
+   */
+  @Post("forgot")
+  async forgot(@Body() body: unknown, @Req() req: Request) {
+    const input = parse(z.object({ email: z.string().email().max(200) }), body);
+    const [porEmail, porIp] = await Promise.all([
+      this.rateLimit.login(`forgot:${input.email.trim().toLowerCase()}`),
+      this.rateLimit.register(`forgot-ip:${clientIp(req)}`),
+    ]);
+    if (!porEmail.allowed || !porIp.allowed) {
+      throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    return this.auth.requestPasswordReset(input.email, brand);
+  }
+
+  /**
+   * Fija la contraseña nueva con el token del enlace. PÚBLICO (quien lo usa justamente no
+   * puede iniciar sesión). El token vale 1 hora y UNA sola vez; al cambiarla se revocan
+   * todas las sesiones abiertas.
+   */
+  @Post("reset")
+  async reset(@Body() body: unknown, @Req() req: Request) {
+    const input = parse(
+      z.object({
+        token: z.string().min(10).max(2000),
+        // Misma política que el registro (ASVS 2.1): largo mínimo, sin tope agresivo.
+        password: z.string().min(10, "La contraseña debe tener al menos 10 caracteres").max(200),
+      }),
+      body,
+    );
+    // Límite por IP y por token: el token es secreto, así que la llave usa un prefijo.
+    const [porIp, porToken] = await Promise.all([
+      this.rateLimit.register(`reset-ip:${clientIp(req)}`),
+      this.rateLimit.login(`reset:${input.token.slice(0, 24)}`),
+    ]);
+    if (!porIp.allowed || !porToken.allowed) {
+      throw new HttpException("Demasiados intentos. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    return this.auth.resetPassword(input.token, input.password);
+  }
+
   // --------------------------- Invitaciones ---------------------------
 
   /** Datos del invitado a partir del token del link (público). */

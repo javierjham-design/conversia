@@ -2,9 +2,13 @@ import type { ReactNode } from "react";
 
 /**
  * DATOS LEGALES DE LA EMPRESA — EDITA SOLO ESTE BLOQUE.
- * ⚠️ Los que están entre [corchetes] DEBES completarlos antes de operar en serio
- * (razón social, RUT, domicilio y comuna de jurisdicción). El resto puede quedar igual.
- * Estos textos son un punto de partida profesional; conviene que un abogado los revise.
+ *
+ * Razón social, RUT, domicilio y comuna de jurisdicción están COMPLETOS (los cargó el
+ * dueño en el PR #547): ya no queda ningún campo entre [corchetes] por rellenar. Si
+ * cambia alguno, edítalo acá y sube `actualizado`.
+ *
+ * Los textos de Términos y Privacidad son un punto de partida profesional, no asesoría
+ * legal: conviene que un abogado los revise antes de la campaña pública (§10.4).
  */
 export const LEGAL = {
   marca: "Conversia",

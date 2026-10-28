@@ -20,7 +20,7 @@ export function clearToken() {
 // backend (antes recargaba y el cliente veía el formulario vacío, peor aún con MFA). En el resto
 // (sesión vencida navegando el panel) sí se limpia el token y se va al login: comportamiento
 // histórico de TuBot, intacto.
-const AUTH_API_PATHS = ["/auth/login", "/auth/register", "/auth/mfa/", "/auth/accept-invite", "/auth/invite"];
+const AUTH_API_PATHS = ["/auth/login", "/auth/register", "/auth/mfa/", "/auth/accept-invite", "/auth/invite", "/auth/forgot", "/auth/reset"];
 export function shouldRedirectOn401(path: string, pathname: string | null | undefined): boolean {
   if (AUTH_API_PATHS.some((p) => path.startsWith(p))) return false;
   if (pathname === "/login") return false;
