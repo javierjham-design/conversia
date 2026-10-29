@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post, Put, Req, Unauthorize
 import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
-import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, refillMessageWallet } from "@conversia/database";
+import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, raiseException, refillMessageWallet } from "@conversia/database";
 import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, PREFIJO_ORDEN_RECARGA, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
@@ -679,6 +679,30 @@ export class BillingController {
   }
 
   /**
+   * Sello de idempotencia que SE SUELTA si el trabajo falla.
+   *
+   * El sello se escribe en su propia transacción, antes de acreditar. Si la acreditación
+   * fallaba —una colisión del número de factura, un blip de la base, una tabla a medio
+   * migrar— el handler devolvía 500, la pasarela reintentaba y el reintento se deduplicaba
+   * contra el sello ya escrito: **pago cobrado, cero créditos, cero factura, cero rastro y
+   * sin alerta**. El cliente paga y no recibe nada, y nadie se entera.
+   *
+   * Borrando el sello antes de propagar el error, el reintento de la pasarela vuelve a
+   * intentarlo de verdad. No puede acreditar dos veces: la acreditación tiene su propia
+   * idempotencia por el `refId` del pago, dentro de la misma transacción que escribe el lote.
+   */
+  private async conSello(provider: string, eventId: string, type: string, trabajo: () => Promise<void>): Promise<boolean> {
+    if (await this.alreadyProcessed(provider, eventId, type)) return false;
+    try {
+      await trabajo();
+      return true;
+    } catch (e) {
+      await this.prisma.admin.webhookEvent.deleteMany({ where: { provider, eventId } }).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  /**
    * Confirmación mock del checkout: activa la suscripción y emite factura
    * pagada. En producción esto lo hace el webhook del proveedor (Stripe).
    */
@@ -783,29 +807,31 @@ export class BillingController {
         meta = {};
       }
       if (meta.organizationId && meta.planCode) {
-        // Dedup al confirmarse el pago (Flow reenvía callbacks del mismo token).
-        if (await this.alreadyProcessed("flow", token, "flow.payment")) {
-          return { received: true, deduped: true };
-        }
-        // S-4: lo pagado (getStatus firmado) debe calzar con el checkout emitido.
+        // S-4: lo pagado (getStatus firmado) debe calzar con el checkout emitido. Va ANTES
+        // del sello: un monto que no calza no es un pago procesado, es un pago rechazado.
         if (this.amountMismatch(meta.expectedAmount, status?.amount)) {
           await this.reportAmountMismatch(meta.organizationId, meta.planCode, "flow", meta.expectedAmount, status?.amount, token);
           return { received: true, rejected: "amount_mismatch" };
         }
-        await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token, meta.interval === "yearly" ? "yearly" : "monthly");
-        // CERRAR EL INTENTO DE RECARGA. Nada lo hacía: el motor de suscripciones excluye a
-        // propósito los cobros `rec-` (si los viera, al confirmarse una recarga le
-        // renovaría el mes gratis al cliente), y acá no se tocaba `payment_attempts`. El
-        // intento quedaba `pending` para siempre y "hay una recarga en vuelo" pasaba a ser
-        // verdad para siempre: la recarga automática cobraba UNA vez en la vida de cada
-        // cliente, sin un solo log. Solo se cierran los `rec-`: pisar un intento de
-        // suscripción le robaría al motor la renovación del período.
-        const orden = String(status?.commerceOrder ?? "");
-        if (orden.startsWith(PREFIJO_ORDEN_RECARGA)) {
-          await this.prisma.admin.paymentAttempt
-            .updateMany({ where: { commerceOrder: orden, status: "pending" }, data: { status: "succeeded", providerRef: token } })
-            .catch(() => undefined);
-        }
+        // Dedup al confirmarse el pago (Flow reenvía callbacks del mismo token), con el
+        // sello que se suelta si la acreditación falla.
+        const hecho = await this.conSello("flow", token, "flow.payment", async () => {
+          await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token, meta.interval === "yearly" ? "yearly" : "monthly");
+          // CERRAR EL INTENTO DE RECARGA. Nada lo hacía: el motor de suscripciones excluye
+          // a propósito los cobros `rec-` (si los viera, al confirmarse una recarga le
+          // renovaría el mes gratis al cliente), y acá no se tocaba `payment_attempts`. El
+          // intento quedaba `pending` para siempre y "hay una recarga en vuelo" pasaba a
+          // ser verdad para siempre: la recarga automática cobraba UNA vez en la vida de
+          // cada cliente, sin un solo log. Solo se cierran los `rec-`: pisar un intento de
+          // suscripción le robaría al motor la renovación del período.
+          const orden = String(status?.commerceOrder ?? "");
+          if (orden.startsWith(PREFIJO_ORDEN_RECARGA)) {
+            await this.prisma.admin.paymentAttempt
+              .updateMany({ where: { commerceOrder: orden, status: "pending" }, data: { status: "succeeded", providerRef: token } })
+              .catch(() => undefined);
+          }
+        });
+        if (!hecho) return { received: true, deduped: true };
       }
     }
     return { received: true };
@@ -978,7 +1004,34 @@ export class BillingController {
    */
   private async creditPackage(organizationId: string, code: string, provider: string, providerRef?: string) {
     const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code } });
-    if (!pkg || !pkg.active) return;
+    if (!pkg) {
+      // Pagó por un pack que ya no existe en el catálogo. No se puede acreditar nada, pero
+      // tampoco se puede quedar la plata sin que nadie lo sepa: alguien tiene que devolverla.
+      await raiseException(this.prisma.admin, {
+        organizationId,
+        type: "pago_de_pack_inexistente",
+        severity: "critical",
+        title: `Pago recibido de un pack que no existe: ${code}`,
+        detail: `Llegó la confirmación de un pago (${provider}, ref ${providerRef ?? "sin ref"}) del pack "${code}", que no está en el catálogo. No se acreditó nada: hay que revisar y devolver.`,
+        dedupeKey: `${provider}:${providerRef ?? code}`,
+      }).catch(() => undefined);
+      return;
+    }
+    // UN PACK DESACTIVADO SE ACREDITA IGUAL. Antes había un `return` mudo acá, y el pack se
+    // relee en el momento de la confirmación: si se desactivaba entre el checkout y el pago
+    // —por ejemplo durante el go-live, que apaga los packs de la unidad vieja— el cliente
+    // pagaba y no recibía nada, sin factura y sin rastro. El checkout lo emitimos nosotros y
+    // el monto ya se validó contra el emitido, así que se cumple y se avisa.
+    if (!pkg.active) {
+      await raiseException(this.prisma.admin, {
+        organizationId,
+        type: "pago_de_pack_inactivo",
+        severity: "warning",
+        title: `Pago de un pack ya desactivado: ${pkg.code}`,
+        detail: `El pack se desactivó entre el checkout y el pago. Se acreditó igual (el checkout era nuestro y el monto calza), pero revisá si se desactivó a propósito.`,
+        dedupeKey: `${provider}:${providerRef ?? pkg.code}`,
+      }).catch(() => undefined);
+    }
     // IDEMPOTENCIA POR PAGO (auditoría §9.5): confirmar DOS VECES el mismo pago no puede
     // acreditar dos veces el pack. Los packs de CONVERSACIONES ya lo chequeaban por refId;
     // los de MENSAJES (bolsa de plantillas) no tenían defensa propia. El marcador es

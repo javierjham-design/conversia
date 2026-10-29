@@ -37,6 +37,18 @@ describe("§6 — la decisión: ¿se cobra o no?", () => {
     expect(decidirRecarga(base)).toBe("cobrar");
   });
 
+  it("una org que NO cobra en CLP no se cobra automáticamente", () => {
+    // El cobro va con `priceClp` y la moneda de la org, y el cobro recurrente es por Flow,
+    // que es CLP. Una org en USD habría recibido un cargo de 24.990 DÓLARES (~23 millones
+    // de pesos). Mejor no cobrar que cobrar en la moneda equivocada: esa cuenta recarga a
+    // mano hasta que exista un cobro recurrente en USD.
+    expect(decidirRecarga({ ...base, moneda: "USD" })).toBe("moneda_no_soportada");
+    expect(decidirRecarga({ ...base, moneda: "CLP" })).toBe("cobrar");
+    // Sin dato de moneda se asume CLP, que es lo que hay hoy: no se frena a nadie por un
+    // campo vacío.
+    expect(decidirRecarga({ ...base, moneda: undefined })).toBe("cobrar");
+  });
+
   it("apagada → no se cobra", () => {
     expect(decidirRecarga({ ...base, cfg: { ...CFG_OK, enabled: false } })).toBe("apagada");
   });

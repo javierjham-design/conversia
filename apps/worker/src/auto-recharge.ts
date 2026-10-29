@@ -80,7 +80,9 @@ export type RechargeDecision =
   | "tope_mensual"
   | "en_vuelo"
   | "espera_tras_fallo"
-  | "tarjeta_agotada";
+  | "tarjeta_agotada"
+  /** La org no cobra en CLP y el cobro recurrente es en CLP: no se cobra automáticamente. */
+  | "moneda_no_soportada";
 
 /**
  * ¿Hay que cobrar? Pura. El orden de las guardas importa: primero las que son "no, y punto"
@@ -102,10 +104,17 @@ export function decidirRecarga(input: {
   fallos?: FallosDeRecarga;
   /** Momento de la pasada, para medir la espera tras un rechazo. */
   now?: Date;
+  /** Moneda de la organización. El precio del pack que se cobra está en CLP. */
+  moneda?: string;
 }): RechargeDecision {
   const { cfg } = input;
   if (!cfg.enabled) return "apagada";
   if (!cfg.consentAt) return "sin_consentimiento";
+  // El cobro va con `priceClp` y la moneda de la org, y la pasarela de cobro recurrente es
+  // Flow, que es CLP. Una org en USD habría recibido un cargo de 24.990 DÓLARES (~23
+  // millones de pesos). Mejor no cobrar automáticamente que cobrar en la moneda equivocada:
+  // esa cuenta recarga a mano hasta que haya un cobro recurrente en USD.
+  if ((input.moneda ?? "CLP") !== "CLP") return "moneda_no_soportada";
   if (!cfg.packCode || input.precioClp <= 0) return "sin_pack";
   if (!input.tieneTarjeta) return "sin_tarjeta";
   if (input.enVuelo) return "en_vuelo";
@@ -217,6 +226,7 @@ export async function runAutoRecharge(
       enVuelo: await port.hasPendingRecharge(c.organizationId),
       fallos: await port.failedRecharges(c.organizationId),
       now,
+      moneda: c.currency,
     });
     out.motivos[decision] = (out.motivos[decision] ?? 0) + 1;
 
