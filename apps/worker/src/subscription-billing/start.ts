@@ -30,7 +30,12 @@ export function startSubscriptionBilling(): () => void {
       // guardada y la misma pasarela, y conviene que no corran en paralelo sobre la misma
       // org. Sus cobros llevan prefijo "rec-" y el motor de arriba los ignora.
       const ar = await runAutoRecharge(createDbAutoRechargePort(), resolveSubscriptionProvider, now, urls);
-      if (ar.cobradas) console.log(`• Recarga automática: ${ar.cobradas} cobros (${JSON.stringify(ar.motivos)}).`);
+      // Se loguea SIEMPRE el detalle de motivos, no solo cuando hubo cobros: un tick en el
+      // que todas las cuentas salen por el mismo motivo raro (p. ej. "en_vuelo") no dejaba
+      // ni una línea, y así un cobro que dejó de dispararse es invisible.
+      if (ar.cobradas || Object.keys(ar.motivos ?? {}).length > 0) {
+        console.log(`• Recarga automática: ${ar.cobradas} cobros (${JSON.stringify(ar.motivos)}).`);
+      }
     } catch (err) {
       console.error("✖ subscription-billing tick:", (err as Error).message);
     }

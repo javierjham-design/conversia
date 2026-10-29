@@ -158,6 +158,48 @@ describe("cuando el dueño cambia un peso (la política no es eterna)", () => {
   });
 });
 
+describe("el cobro topeado por el colchón de gracia", () => {
+  // Cuando el turno pide más de lo que queda, se cobra todo lo cobrable y la gracia
+  // aterriza en el tope (si no, el gate dejaría pasar respuestas gratis para siempre). Ese
+  // turno cobró MENOS de lo que pedía la fórmula, a propósito y con constancia. La
+  // auditoría tiene que nombrarlo así y no como un cobro mal hecho: si cada cuenta que se
+  // queda sin saldo pusiera el informe en rojo, nadie mira más los rojos de verdad.
+  const topeado = { weight: 50, tokensPerCredit: 20_000, alTope: true, pedido: 50 };
+
+  it("se cobró 4 de los 50 que pedía: es tope de gracia, no un cobro de menos", () => {
+    const a = auditarTurno(turno(), { deltas: [-4], aplicado: topeado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("tope_gracia");
+    expect(a.esperado).toBe(50);
+    expect(a.cobrado).toBe(4);
+  });
+
+  it("y los créditos que no entraron se cuentan APARTE, sin poner el informe en rojo", () => {
+    const r = resumirAuditoria([auditarTurno(turno(), { deltas: [-4], aplicado: topeado }, CREDIT_POLICY_SEED)]);
+    expect(r.porTope).toBe(46);
+    expect(r.regalados).toBe(0); // no es un defecto
+    expect(r.cuadra).toBe(true);
+  });
+
+  it("pero sin NINGÚN cobro sigue siendo servicio regalado, tope o no tope", () => {
+    // El agujero original: respuesta enviada, cero asientos. Marcar esto como "tope" lo
+    // taparía justo en el caso que importa.
+    const a = auditarTurno(turno(), { deltas: [], aplicado: topeado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("sin_cobrar");
+    expect(resumirAuditoria([a]).cuadra).toBe(false);
+  });
+
+  it("y cobrar MÁS de lo que pedía no se excusa con el tope", () => {
+    const a = auditarTurno(turno(), { deltas: [-80], aplicado: topeado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("cobrado_de_mas");
+    expect(resumirAuditoria([a]).cuadra).toBe(false);
+  });
+
+  it("un doble cobro con tope sigue siendo doble cobro", () => {
+    const a = auditarTurno(turno(), { deltas: [-2, -2], aplicado: topeado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("doble_cobro");
+  });
+});
+
 describe("resumen de la auditoría", () => {
   const items = (vs: Array<[number, number]>): AuditoriaTurno[] =>
     vs.map(([esperado, cobrado], i) =>

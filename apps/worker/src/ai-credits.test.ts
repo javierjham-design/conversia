@@ -8,10 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * en dejarlo sin bot: idempotencia del turno, gracia, lotes vencidos, modelo desconocido,
  * y que TuBot no entre por ninguna puerta.
  *
- * La serialización real entre dos turnos simultáneos la da el `SELECT … FOR UPDATE` de
- * Postgres, que un store en memoria no puede reproducir. Acá se verifica que el cerrojo
- * se tome ANTES de mirar los lotes (que es lo que el código tiene que garantizar); que
- * funcione bajo carga de verdad lo prueba el stack de simulación.
+ * La serialización real entre dos turnos simultáneos la da el cerrojo de aviso de Postgres
+ * (`pg_advisory_xact_lock`), que un store en memoria no puede reproducir. Acá se verifica
+ * que el cerrojo se tome ANTES de mirar los lotes (que es lo que el código tiene que
+ * garantizar); que funcione bajo carga de verdad lo prueba el stack de simulación.
  */
 
 const store = {
@@ -218,10 +218,15 @@ describe("Etapa 1 — débito por respuesta del bot", () => {
     });
   });
 
-  it("toma el cerrojo de la org ANTES de mirar los lotes", async () => {
+  it("toma el cerrojo de la org ANTES de mirar los lotes, y uno que no dependa de que exista el monedero", async () => {
     lote(10);
     await turno("t1");
-    expect(store.rawCalls[0]).toContain("FOR UPDATE");
+    // Era un `SELECT … FROM conversation_wallets … FOR UPDATE`, y ahí estaba el agujero:
+    // si la fila del monedero no existe, ese FOR UPDATE no bloquea NADA y dos turnos
+    // simultáneos de una cuenta nueva (o creada por un seed, o migrada) pasaban los dos.
+    // El cerrojo de aviso se toma sobre el id de la organización y no necesita filas.
+    expect(store.rawCalls[0]).toContain("pg_advisory_xact_lock");
+    expect(store.rawCalls[0]).not.toContain("conversation_wallets");
   });
 });
 
@@ -269,17 +274,54 @@ describe("Etapa 1 — gracia: el bot nunca queda mudo de golpe", () => {
     expect(store.wallet.graceUsed).toBe(100); // no pasa del límite
   });
 
-  it("un turno CARO que no cabe en la gracia no consume nada (ni lotes ni gracia)", async () => {
-    // El caso que el cobro por conversación no veía: el turno pide 50 de una vez.
-    // Antes el núcleo vaciaba los lotes y recién después miraba la gracia, así que esos
-    // créditos desaparecían del libro sin asiento.
+  it("un turno CARO que no cabe en el colchón cobra TODO lo cobrable y deja la gracia en el tope", async () => {
+    // EL AGUJERO QUE ESTO CIERRA: respuestas gratis para siempre.
+    //
+    // El gate de antes de responder solo pregunta "¿queda un crédito o colchón?", porque
+    // todavía no sabe cuántos tokens va a gastar el turno. Con el consumo todo-o-nada, un
+    // turno caro que no cabía NO se cobraba —y la respuesta ya estaba enviada—, dejando el
+    // estado IDÉNTICO para el turno siguiente: gate pasa, consumo rechaza, otra respuesta
+    // gratis. Indefinidamente, con saldo a la vista y sin un asiento que lo delate. Un
+    // cliente con 3 créditos y un agente Sonnet tenía respuestas ilimitadas gratis.
+    //
+    // Ahora se cobra `min(pedido, lotes + colchón)`: la gracia aterriza EXACTAMENTE en el
+    // tope y por eso el gate del turno siguiente sí corta.
     lote(3);
     store.wallet = { graceUsed: 99, lastNotifiedPct: 0, periodStart: new Date(0) };
-    const r = await turno("caro", { model: "claude-opus-4-8" }); // 50 créditos
-    expect(r.charged).toBe(false);
-    expect(store.lots[0].remaining).toBe(3); // intacto
-    expect(store.wallet.graceUsed).toBe(99); // intacta
-    expect(store.ledger).toHaveLength(0);
+    const r = await turno("caro", { model: "claude-opus-4-8" }); // pide 50
+    expect(r.charged).toBe(true);
+    // 3 del lote + 1 de colchón (99 → 100) = 4 de los 50 que pedía.
+    if (r.charged) expect(r.credits).toBe(4);
+    expect(store.lots[0].remaining).toBe(0);
+    expect(store.wallet.graceUsed).toBe(100);
+    // Un solo asiento, por lo CONSUMIDO: cobrar 50 habría dicho que salió plata que no salió.
+    expect(store.ledger).toHaveLength(1);
+    expect(store.ledger[0].delta).toBe(-4);
+    // El consumo deja constancia de lo que pedía la fórmula y de que el colchón topeó, para
+    // que la auditoría no lo confunda con un cobro mal hecho.
+    expect(store.usage[0].meta.pedido).toBe(50);
+    expect(store.usage[0].meta.alTope).toBe(true);
+    expect(store.usage[0].quantity).toBe(4);
+    // Y el super admin se entera AHORA, no cuando el cliente llame.
+    expect(store.excepciones.some((e) => e.type === "saldo_gracia_sin_recarga")).toBe(true);
+  });
+
+  it("y con el colchón ya en el tope el gate corta: no hay turno siguiente gratis", async () => {
+    // La otra mitad del agujero: que después de topear, el gate de verdad bloquee.
+    store.wallet = { graceUsed: 100, lastNotifiedPct: 0, periodStart: new Date(0) };
+    const g = await aiCreditsGate("o");
+    expect(g.charges).toBe(true);
+    if (g.charges) expect(g.blocked).toBe(true);
+  });
+
+  it("el turno que entra justo en el colchón se cobra COMPLETO (no se topea de más)", async () => {
+    lote(0);
+    store.wallet = { graceUsed: 60, lastNotifiedPct: 0, periodStart: new Date(0) };
+    const r = await turno("justo", { model: "claude-haiku-4-5", inputTokens: 1_000, outputTokens: 0 }); // pide 4
+    expect(r.charged).toBe(true);
+    if (r.charged) expect(r.credits).toBe(4);
+    expect(store.wallet.graceUsed).toBe(64);
+    expect(store.usage[0].meta.alTope).toBe(false);
   });
 
   it("el saldo del lote se usa primero y solo el resto cae a gracia", async () => {

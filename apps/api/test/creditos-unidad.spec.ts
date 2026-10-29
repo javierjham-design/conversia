@@ -144,3 +144,56 @@ describe("CRE 2 — a qué modelo entra una cuenta nueva", () => {
     expect(TRIAL_PLAN_CODES).toEqual(["conversia_creditos_trial", "conversia_v2_trial"]);
   });
 });
+
+/**
+ * EL ARBITRAJE ENTRE LAS DOS UNIDADES.
+ *
+ * Los packs de conversación y los de Créditos IA acreditan el MISMO bucket de lotes
+ * (`isLotPack`), y sus precios por unidad no se parecen: la recarga de créditos da 420
+ * unidades por $24.990 ($59,5 cada una) y la de conversaciones 100 por $21.900 ($219 cada
+ * una). `buy-package` validaba existencia, `active` y marca — nunca el TIPO contra el plan
+ * del cliente. Un cliente que cobra por conversación comprando el pack de créditos se
+ * llevaba 420 conversaciones por $24.990 en vez de ~$92.000, y tras el go-live, con sus
+ * propios packs apagados, era el ÚNICO comprable por API. La pantalla ya filtraba por tipo,
+ * pero eso es la UI: el endpoint aceptaba el código igual.
+ *
+ * La regla que cierra eso es una sola: `pkg.type` tiene que coincidir con la unidad de la
+ * organización. Se prueba sobre `packUnitForOrg`, que es de donde sale esa unidad.
+ */
+describe("un pack de la unidad equivocada no se puede comprar", () => {
+  /** La comprobación que hace el endpoint, con el pack y la unidad resuelta. */
+  const permitido = (tipo: string | null, unidad: string) => !isLotPack(tipo) || tipo === unidad;
+
+  it("el cliente por CONVERSACIÓN no puede comprar la recarga de créditos", async () => {
+    state.planFeatures = { conversationDebitsWallet: true };
+    const unidad = await packUnitForOrg("o1");
+    expect(unidad).toBe("conversation");
+    expect(permitido("credit", unidad)).toBe(false);
+    expect(permitido("conversation", unidad)).toBe(true);
+  });
+
+  it("el cliente de CRÉDITOS no puede comprar packs de conversaciones", async () => {
+    state.planFeatures = { aiCreditsWallet: true };
+    const unidad = await packUnitForOrg("o1");
+    expect(unidad).toBe("credit");
+    expect(permitido("conversation", unidad)).toBe(false);
+    expect(permitido("credit", unidad)).toBe(true);
+  });
+
+  it("los packs de PLANTILLAS no entran en la regla (no acreditan lotes)", async () => {
+    // El sobre de 500 plantillas se sigue vendiendo a quien sea: va a otra bolsa.
+    state.planFeatures = { aiCreditsWallet: true };
+    const unidad = await packUnitForOrg("o1");
+    expect(permitido("message", unidad)).toBe(true);
+    expect(permitido(null, unidad)).toBe(true);
+  });
+
+  it("ante una base caída la unidad cae a 'conversation', así que el pack de créditos NO pasa", async () => {
+    // El default seguro es el conservador: lo que está vendido y cobrando hoy. Si ante un
+    // error cayera a "credit", un fallo de base abriría justo el arbitraje.
+    state.fallarBase = true;
+    const unidad = await packUnitForOrg("o1");
+    expect(unidad).toBe("conversation");
+    expect(permitido("credit", unidad)).toBe(false);
+  });
+});

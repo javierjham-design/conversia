@@ -1,3 +1,4 @@
+import { PREFIJO_ORDEN_RECARGA } from "@conversia/agents";
 import type { SubscriptionProvider } from "./subscription-billing/provider";
 
 /**
@@ -25,8 +26,12 @@ import type { SubscriptionProvider } from "./subscription-billing/provider";
  * pasarela ni base de datos.
  */
 
-/** Prefijo que distingue un cobro de RECARGA de uno de suscripción. */
-export const RECHARGE_ORDER_PREFIX = "rec-";
+/**
+ * Prefijo que distingue un cobro de RECARGA de uno de suscripción. El valor vive en
+ * `@conversia/agents` porque el api también lo necesita (para cerrar el intento cuando la
+ * pasarela confirma el pago); se re-exporta acá para no tocar a quien ya lo importa.
+ */
+export const RECHARGE_ORDER_PREFIX = PREFIJO_ORDEN_RECARGA;
 
 /**
  * Horas de espera tras un cobro RECHAZADO antes de volver a intentar.

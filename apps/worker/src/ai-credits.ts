@@ -15,6 +15,7 @@ import {
   consumeCreditsInTx,
   ensurePeriodAccrued,
   isConversiaOrg,
+  lockOrg,
   planFeatures,
 } from "./conversation-credits";
 
@@ -94,6 +95,14 @@ export async function aiCreditsGate(organizationId: string): Promise<AiCreditsGa
   const now = new Date();
   try {
     return await withTenant(organizationId, async (tx) => {
+      // CON CERROJO, aunque esto solo "consulte": `ensurePeriodAccrued` ESCRIBE —acredita
+      // los créditos del plan al abrir el período— y su idempotencia es un `findFirst` del
+      // asiento seguido de un `create`, o sea un check-then-act. Sin cerrojo, dos turnos
+      // simultáneos de la misma org al cruzar el mes leían los dos "no está acreditado" y
+      // acreditaban los dos: un plan entero regalado (600 créditos por un pago de 300), y
+      // encima invisible, porque el libro queda consistente —cada lote duplicado trae su
+      // asiento— y el medidor tapa el síntoma (`used` se clava en 0 con lotes > incluidos).
+      await lockOrg(tx, organizationId);
       await ensurePeriodAccrued(tx, organizationId, now, { includedKey: "aiCreditsIncluded" });
       const bal = await balanceInTx(tx, organizationId, now);
       const puedeUnaMas = bal.lots > 0 || bal.grace < policy.graceCredits;
@@ -171,7 +180,7 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
   const now = new Date();
   return withTenant(organizationId, async (tx) => {
     // Serializa los débitos de la org: dos turnos a la vez no pueden gastar el mismo lote.
-    await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
+    await lockOrg(tx, organizationId);
 
     const yaEsta = await tx.conversationCreditLedger.findFirst({
       where: { organizationId, reason: "ai_credit_debit", refType: "turn", refId: usage.turnId },
@@ -194,7 +203,10 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
     await tx.conversationCreditLedger.create({
       data: {
         organizationId,
-        delta: -detail.credits,
+        // Lo CONSUMIDO, no lo pedido: cuando el turno no cabe en el colchón se cobra hasta
+        // el tope y el resto no se puede cobrar. Un asiento por el monto pedido dejaría el
+        // libro diciendo que salió plata que nunca salió.
+        delta: -consumo.consumido,
         reason: "ai_credit_debit",
         balanceAfter: after.net,
         costUsd: usage.costUsd != null ? usage.costUsd : undefined,
@@ -207,7 +219,7 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
       data: {
         organizationId,
         type: "ai_credits",
-        quantity: detail.credits,
+        quantity: consumo.consumido,
         costUsd: usage.costUsd != null ? usage.costUsd : undefined,
         meta: {
           conversationId: usage.conversationId,
@@ -220,13 +232,34 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
           tokensPerCredit: policy.tokensPerCredit,
+          // Qué pedía la fórmula y si el colchón topeó el cobro. Sin esto, la auditoría
+          // vería "cobrado de menos" en un turno que se cobró todo lo cobrable, y el
+          // informe mezclaría un error de cobro con el regalo de la última respuesta.
+          pedido: detail.credits,
+          alTope: consumo.alTope,
         },
       },
     });
 
+    // Se llegó al tope del colchón: el turno siguiente ya no se responde (el gate corta
+    // porque la gracia quedó EXACTAMENTE en el límite). El super admin tiene que verlo
+    // ahora, no cuando el cliente llame preguntando por qué su bot dejó de contestar.
+    if (consumo.alTope) {
+      await raiseException(getAdminPrisma(), {
+        organizationId,
+        type: "saldo_gracia_sin_recarga",
+        severity: "warning",
+        title: "Colchón de créditos agotado",
+        detail:
+          `El último turno pedía ${detail.credits} créditos y solo se pudieron cobrar ${consumo.consumido}: ` +
+          `la cuenta llegó al tope de gracia (${policy.graceCredits}). El bot deja de responder hasta que recargue.`,
+        dedupeKey: `tope:${organizationId}`,
+      }).catch(() => undefined);
+    }
+
     return {
       charged: true as const,
-      credits: detail.credits,
+      credits: consumo.consumido,
       balanceAfter: after.net,
       inGrace: consumo.graceUsed > 0,
       graceUsed: consumo.graceUsed,
@@ -249,7 +282,7 @@ export async function getAiCreditsSummary(organizationId: string): Promise<{
   return withTenant(organizationId, async (tx) => {
     const feats = await planFeatures(organizationId);
     const included = Number(feats.aiCreditsIncluded) || 0;
-    await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
+    await lockOrg(tx, organizationId);
     await ensurePeriodAccrued(tx, organizationId, now, { includedKey: "aiCreditsIncluded" });
     const bal = await balanceInTx(tx, organizationId, now);
     return {

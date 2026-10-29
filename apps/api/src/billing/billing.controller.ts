@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, refillMessageWallet } from "@conversia/database";
-import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, PREFIJO_ORDEN_RECARGA, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
@@ -612,6 +612,18 @@ export class BillingController {
     // esa marca (una org Conversia no debe ver/comprar packs TuBot ni viceversa). Un pack
     // sin marca es común a ambas (compat con el catálogo actual de TuBot).
     if (pkg.brand && pkg.brand !== brandOf(org).key) throw new BadRequestException("Paquete no disponible");
+    // Y por UNIDAD. Los packs de conversación y los de Créditos IA acreditan el MISMO
+    // bucket de lotes (`isLotPack`), así que vender uno de la unidad equivocada regala
+    // saldo: el pack de créditos da 420 unidades por $24.990 ($59,5 cada una) y el de
+    // conversaciones 100 por $21.900 ($219 cada una). Un cliente que cobra por
+    // CONVERSACIÓN comprando el de créditos se llevaba 420 conversaciones por $24.990 en
+    // vez de ~$92.000 — y tras el go-live, con sus propios packs apagados, era el único
+    // comprable por API. La pantalla ya filtra por tipo (`GET /billing/wallet`), pero eso
+    // es la UI: el endpoint aceptaba el código igual.
+    if (isLotPack(pkg.type)) {
+      const unidad = await packUnitForOrg(ctx.organizationId);
+      if (pkg.type !== unidad) throw new BadRequestException("Ese paquete no corresponde a tu plan");
+    }
     const currency = org?.currency ?? "CLP";
     const amount = currency === "CLP" ? pkg.priceClp : Number(pkg.priceUsd);
     const user = await this.prisma.admin.user.findUnique({ where: { id: ctx.userId }, select: { email: true } });
@@ -781,6 +793,19 @@ export class BillingController {
           return { received: true, rejected: "amount_mismatch" };
         }
         await this.activateOrCredit(meta.organizationId, meta.planCode, "flow", token, meta.interval === "yearly" ? "yearly" : "monthly");
+        // CERRAR EL INTENTO DE RECARGA. Nada lo hacía: el motor de suscripciones excluye a
+        // propósito los cobros `rec-` (si los viera, al confirmarse una recarga le
+        // renovaría el mes gratis al cliente), y acá no se tocaba `payment_attempts`. El
+        // intento quedaba `pending` para siempre y "hay una recarga en vuelo" pasaba a ser
+        // verdad para siempre: la recarga automática cobraba UNA vez en la vida de cada
+        // cliente, sin un solo log. Solo se cierran los `rec-`: pisar un intento de
+        // suscripción le robaría al motor la renovación del período.
+        const orden = String(status?.commerceOrder ?? "");
+        if (orden.startsWith(PREFIJO_ORDEN_RECARGA)) {
+          await this.prisma.admin.paymentAttempt
+            .updateMany({ where: { commerceOrder: orden, status: "pending" }, data: { status: "succeeded", providerRef: token } })
+            .catch(() => undefined);
+        }
       }
     }
     return { received: true };
@@ -1104,9 +1129,14 @@ export class BillingController {
     }
     if (d.enabled && d.packCode) {
       const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: d.packCode } });
-      // CRE 2: vale cualquier pack que acredite la bolsa de lotes (conversaciones o
-      // créditos). Lo que NO vale es un pack de plantillas: ese saldo no mantiene vivo al bot.
-      if (!pkg || !pkg.active || !isLotPack(pkg.type)) throw new BadRequestException("El pack de auto-recarga debe ser un pack de conversaciones o de Créditos IA válido");
+      // Tiene que acreditar la bolsa de LOTES (un pack de plantillas no mantiene vivo al
+      // bot) y ser de la UNIDAD del plan: si no, el arbitraje de precios entre las dos
+      // unidades quedaba además automatizado, cobrándose solo cada vez que baja el saldo.
+      if (!pkg || !pkg.active || !isLotPack(pkg.type)) {
+        throw new BadRequestException("El pack de auto-recarga debe ser un pack de conversaciones o de Créditos IA válido");
+      }
+      const unidadPack = await packUnitForOrg(ctx.organizationId);
+      if (pkg.type !== unidadPack) throw new BadRequestException("Ese paquete no corresponde a tu plan");
     }
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const prev = (org?.settings as Record<string, unknown> | null) ?? {};

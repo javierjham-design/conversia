@@ -97,6 +97,31 @@ async function main() {
 
     // Una transacción por organización: o se convierte todo su saldo, o nada.
     await prisma.$transaction(async (tx) => {
+      // CERROJO + RELECTURA DENTRO DE LA TRANSACCIÓN.
+      //
+      // Los valores de arriba se leyeron para IMPRIMIR el antes/después, y escribir con
+      // ellos era una carrera contra el worker: si entre la lectura y la escritura el bot
+      // cobraba un turno, se escribía `remaining = viejo × 10` —resucitando lo gastado— y
+      // el asiento quedaba por un delta que no correspondía al movimiento real. El sello es
+      // por organización, así que no hay segunda corrida que lo corrija. Con el cerrojo de
+      // aviso (el mismo que usa el cobro) y releyendo acá, la conversión es atómica
+      // respecto del tráfico y no hace falta detener el worker.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${org.id}))`;
+      // El sello, otra vez y ya con el cerrojo: la lectura de arriba fue para imprimir, y
+      // dos corridas del script a la vez la habrían pasado las dos (×100 en vez de ×10).
+      const yaSellada = await tx.conversationCreditLedger.findFirst({
+        where: { organizationId: org.id, refType: SELLO, refId: `org:${org.id}` },
+        select: { id: true },
+      });
+      if (yaSellada) return;
+      const lots = await tx.conversationCreditLot.findMany({
+        where: { organizationId: org.id, ...vigentes(new Date()) },
+        orderBy: { createdAt: "asc" },
+      });
+      const w0 = await tx.conversationWallet.findUnique({ where: { organizationId: org.id }, select: { graceUsed: true } });
+      const graceUsed = w0?.graceUsed ?? 0;
+      const antes = lots.reduce((a, l) => a + l.remaining, 0) - graceUsed;
+
       // Saldo CORRIENTE, para que cada asiento diga el saldo real tras ese movimiento. Un
       // libro de dinero con `balanceAfter` en 0 no se puede auditar después: hay que poder
       // seguir la cuenta asiento por asiento.

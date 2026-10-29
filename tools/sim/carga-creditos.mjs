@@ -464,42 +464,66 @@ async function main() {
   }
 
   // ─────── 6. Modelo sin peso + la gracia exactamente en el tope ───────
-  paso("6. Modelo sin peso de crédito, la gracia al tope y la recarga que la paga");
+  paso("6. El turno que no cabe en el colchón: se cobra parcial, la gracia topea y el gate corta");
   const gc = await registrar("gracia");
   await dejarOperando(gc.token);
   const graciaLimite = 100;
   const politicaOriginal = sql(`SELECT value FROM platform_settings WHERE key='aiCredits';`);
-  // Se le QUITA el peso a gpt-4o-mini, el modelo con que responde todo bot. Con eso el
-  // modelo que responde deja de estar en la política y cada respuesta se cobra como
-  // premium (50 por bloque), que es la regla del §4 para un modelo sin peso definido. De
-  // paso, 200 créditos se agotan en 4 respuestas en vez de 200: así la gracia llega a su
-  // tope de verdad. Dos caminos que no se ejercitaban nunca, con un solo setup.
-  sql(`UPDATE platform_settings SET value = (value::jsonb #- '{models,gpt-4o-mini}')::text WHERE key='aiCredits';`);
+  // Se le sube el PESO a gpt-4o-mini —el modelo con que responde todo bot— a 70 por bloque.
+  //
+  // Por qué 70 y no 50: tiene que NO dividir el saldo. Con 200 créditos de prueba y 100 de
+  // colchón, un peso que divide (50) hace que la gracia aterrice siempre exacta en el tope
+  // y el caso interesante no aparece nunca. Con 70: dos respuestas (140), la tercera toma
+  // los 60 que quedan más 10 de gracia, la cuarta llega a 80, y la QUINTA pide 70 teniendo
+  // solo 20 de colchón. Ese es el turno que antes no se cobraba —y la respuesta salía
+  // igual, dejando el estado idéntico para el turno siguiente: respuestas gratis para
+  // siempre—. Ahora cobra los 20 y la gracia aterriza en el tope, así el gate corta.
+  //
+  // Se sube el peso en vez de borrar el modelo de la política a propósito: `parseCreditPolicy`
+  // FUSIONA la fila con la semilla del repo (tolerante por diseño: una fila mal editada no
+  // puede dejar el cobro en 0), así que borrar un modelo no lo deja sin peso. La primera
+  // versión de esta prueba lo intentaba así y "pasaba" cobrando peso 1.
+  sql(`UPDATE platform_settings SET value = jsonb_set(value::jsonb, '{models,gpt-4o-mini,credits}', '70')::text WHERE key='aiCredits';`);
   docker(["restart", "worker"]); // la política se cachea 60 s dentro del proceso
   await esperarApi();
   let gTurnos = 0;
   for (let k = 0; k < 12 && graciaDe(gc.organizationId) < graciaLimite; k++) {
-    await entra(gc.slug, `consulta ${k} con el modelo sin peso`, `5696${String(1_000_000 + k)}`);
+    await entra(gc.slug, `consulta ${k} con el modelo caro`, `5696${String(1_000_000 + k)}`);
     await esperarCola([gc.organizationId], { quietoMs: 5_000, maxMs: 120_000 });
     gTurnos = turnosDe(gc.organizationId);
   }
   const gGracia = graciaDe(gc.organizationId);
   const gSaldo = saldoDe(gc.organizationId);
   const gCobrado = debitosDe(gc.organizationId);
-  const gEsperadoPremium = esperadoDe(gc.organizationId, 50);
-  console.log(`      ${nf(gTurnos)} respuestas · cobrado ${nf(gCobrado)} · saldo ${nf(gSaldo)} · gracia ${nf(gGracia)}/${graciaLimite}`);
+  const gPedido = esperadoDe(gc.organizationId, 70);
+  const gTopeados = sqlNum(
+    `SELECT count(*) FROM usage_events WHERE organization_id='${gc.organizationId}' AND type='ai_credits' AND meta->>'alTope'='true';`,
+  );
+  console.log(
+    `      ${nf(gTurnos)} respuestas · pedido ${nf(gPedido)} · cobrado ${nf(gCobrado)} · saldo ${nf(gSaldo)} · gracia ${nf(gGracia)}/${graciaLimite}`,
+  );
+  // 200 de saldo + 100 de colchón = 300, ni un crédito más ni uno menos. Es la cuenta que
+  // demuestra que no se regaló nada por el camino: lo pedido fue más (peso 70 × turnos) y
+  // lo cobrado es exactamente todo lo que se podía cobrar.
   check(
-    gCobrado === gEsperadoPremium,
-    `un modelo sin peso se cobra como premium (50 por bloque): ${nf(gCobrado)} = ${nf(gEsperadoPremium)}`,
-    `→ se cobró ${nf(gCobrado)} y correspondía ${nf(gEsperadoPremium)}`,
+    gCobrado === 300,
+    `se cobró TODO lo cobrable: ${nf(gCobrado)} = 200 de saldo + ${graciaLimite} de colchón`,
+    `→ se cobró ${nf(gCobrado)} de ${nf(gPedido)} pedidos`,
   );
   check(
-    excepcionesDe(gc.organizationId, "modelo_sin_peso_de_credito") >= 1,
-    "y queda la excepción para el super admin (si no, cobramos premium sin que nadie se entere)",
+    gTopeados >= 1,
+    `el turno que no cabía se cobró PARCIAL y quedó marcado (${gTopeados} turno(s) al tope)`,
+    "→ sin esa marca, la auditoría leería un cobro parcial como un cobro mal hecho",
+  );
+  check(
+    excepcionesDe(gc.organizationId, "saldo_gracia_sin_recarga") >= 1,
+    "y queda la excepción para el super admin antes de que el bot se corte",
   );
   check(gGracia === graciaLimite, `la gracia se detuvo EXACTAMENTE en el tope: ${nf(gGracia)} = ${graciaLimite}`, `→ ${nf(gGracia)}`);
   check(gSaldo === -graciaLimite, `el saldo quedó en −${graciaLimite}, no más abajo: ${nf(gSaldo)}`);
   // Agotado el colchón: el bot NO queda mudo, pero tampoco se cobra lo que no se puede cobrar.
+  // Y acá se prueba la otra mitad: que con el colchón en el tope el gate CORTE. Si no
+  // cortara, cada turno siguiente sería una respuesta gratis más, que es el agujero entero.
   const antesDelMudo = { asientos: asientosDe(gc.organizationId), respuestas: respuestasDe(gc.organizationId) };
   await entra(gc.slug, "¿me atienden sin saldo?", "56969999999");
   await esperarCola([gc.organizationId], { quietoMs: 5_000, maxMs: 90_000 });

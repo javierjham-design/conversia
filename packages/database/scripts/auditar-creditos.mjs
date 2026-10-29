@@ -176,7 +176,9 @@ async function pesosAplicados(orgId, desde) {
   const rows = await prisma.$queryRaw`
     SELECT meta ->> 'turnId' AS "turnId",
            (meta ->> 'weight')::numeric AS weight,
-           (meta ->> 'tokensPerCredit')::numeric AS "tokensPerCredit"
+           (meta ->> 'tokensPerCredit')::numeric AS "tokensPerCredit",
+           (meta ->> 'alTope') = 'true' AS "alTope",
+           (meta ->> 'pedido')::numeric AS pedido
     FROM usage_events
     WHERE organization_id = ${orgId}
       AND type = 'ai_credits'
@@ -186,7 +188,15 @@ async function pesosAplicados(orgId, desde) {
   for (const r of rows) {
     const weight = Number(r.weight);
     const tokensPerCredit = Number(r.tokensPerCredit);
-    if (Number.isFinite(weight) && Number.isFinite(tokensPerCredit)) m.set(r.turnId, { weight, tokensPerCredit });
+    const pedido = Number(r.pedido);
+    if (Number.isFinite(weight) && Number.isFinite(tokensPerCredit)) {
+      m.set(r.turnId, {
+        weight,
+        tokensPerCredit,
+        alTope: r.alTope === true,
+        ...(Number.isFinite(pedido) ? { pedido } : {}),
+      });
+    }
   }
   return m;
 }
@@ -504,9 +514,17 @@ async function main() {
   console.log(`   respuestas auditadas: ${n(total.turnos)}`);
   console.log(
     `   veredictos: ok ${n(total.porVeredicto.ok)} · sin cobrar ${n(total.porVeredicto.sin_cobrar)} · de menos ${n(total.porVeredicto.cobrado_de_menos)}` +
-      ` · de más ${n(total.porVeredicto.cobrado_de_mas)} · doble cobro ${n(total.porVeredicto.doble_cobro)} · no cobrables ${n(total.porVeredicto.no_cobrable)}`,
+      ` · de más ${n(total.porVeredicto.cobrado_de_mas)} · doble cobro ${n(total.porVeredicto.doble_cobro)} · no cobrables ${n(total.porVeredicto.no_cobrable)}` +
+      ` · topeados por gracia ${n(total.porVeredicto.tope_gracia)}`,
   );
   console.log(`   créditos esperados ${n(total.esperado)} / cobrados ${n(total.cobrado)} → regalados ${n(total.regalados)} · de más ${n(total.deMas)}`);
+  if (total.porTope > 0) {
+    // Plata que no entró, pero por diseño: es la última respuesta del cliente sin saldo.
+    console.log(
+      `   ${n(total.porTope)} crédito(s) no se pudieron cobrar porque la cuenta llegó al tope del colchón ` +
+        `(${n(total.porVeredicto.tope_gracia)} turno(s)). Es el regalo de la última respuesta, no un error.`,
+    );
+  }
   if (total.conPesoCambiado > 0) {
     // No es un problema: es lo que pasa cuando el dueño ajusta un peso. Se dice para que un
     // cambio de precios no se lea como un error de cobro, ni al revés.

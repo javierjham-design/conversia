@@ -44,9 +44,10 @@ vi.mock("@conversia/database", () => ({
 
 vi.mock("./conversation-credits", () => ({
   balanceInTx: async () => ({ lots: estado.lots, grace: estado.grace, net: estado.lots - estado.grace }),
-  consumeCreditsInTx: async () => ({ ok: true, graceUsed: 0 }),
+  consumeCreditsInTx: async ({ amount }: any) => ({ ok: true, graceUsed: 0, consumido: amount, alTope: false }),
   ensurePeriodAccrued: async () => undefined,
   isConversiaOrg: async () => true,
+  lockOrg: async () => undefined,
   planFeatures: async () => estado.features,
 }));
 

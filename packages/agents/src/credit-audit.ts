@@ -53,7 +53,7 @@ export interface DebitosDelTurno {
    * Cuando está, el veredicto se decide con ella (coherencia interna del cobro) y la
    * diferencia contra la política vigente se informa aparte, que es otra cosa.
    */
-  aplicado?: { weight: number; tokensPerCredit: number } | null;
+  aplicado?: { weight: number; tokensPerCredit: number; alTope?: boolean; pedido?: number } | null;
 }
 
 export type VeredictoTurno =
@@ -68,7 +68,14 @@ export type VeredictoTurno =
   /** Se cobró más de lo que corresponde: le sacamos créditos de más al cliente. */
   | "cobrado_de_mas"
   /** Más de un asiento para el MISMO turno: el reintento cobró dos veces. */
-  | "doble_cobro";
+  | "doble_cobro"
+  /**
+   * Se cobró todo lo cobrable y el colchón de gracia topeó el resto. NO es un error: es la
+   * última respuesta del cliente sin saldo, el precio de no dejar al bot mudo. Se cuenta
+   * aparte porque el crédito que no se cobró es real y hay que poder verlo, pero confundirlo
+   * con un cobro mal hecho haría ignorar los que sí lo son.
+   */
+  | "tope_gracia";
 
 export interface AuditoriaTurno {
   turnId: string;
@@ -121,10 +128,16 @@ export function auditarTurno(turno: TurnoAuditado, debitos: DebitosDelTurno, pol
   const cobrado = debitos.deltas.reduce((a, d) => a + Math.abs(Number(d) || 0), 0);
   const asientos = debitos.deltas.length;
 
+  // El cobro topeado por el colchón se juzga contra lo que PEDÍA la fórmula, no contra lo
+  // cobrado: cobró menos a propósito y el consumo lo dejó anotado.
+  const topeado = ap?.alTope === true;
+  const pedido = topeado && ap?.pedido != null && ap.pedido > 0 ? ap.pedido : null;
+
   let veredicto: VeredictoTurno;
   if (asientos > 1) veredicto = "doble_cobro";
   else if (esperado === 0 && cobrado === 0) veredicto = "no_cobrable";
   else if (cobrado === 0) veredicto = "sin_cobrar";
+  else if (topeado && cobrado > 0 && cobrado <= (pedido ?? esperado)) veredicto = "tope_gracia";
   else if (cobrado > esperado) veredicto = "cobrado_de_mas";
   else if (cobrado < esperado) veredicto = "cobrado_de_menos";
   else veredicto = "ok";
@@ -151,8 +164,14 @@ export interface ResumenAuditoria {
   esperado: number;
   /** Créditos efectivamente cobrados. */
   cobrado: number;
-  /** Créditos regalados (los que faltan por cobrar). */
+  /** Créditos regalados por un DEFECTO (sin cobrar o cobrado de menos). */
   regalados: number;
+  /**
+   * Créditos que no se pudieron cobrar porque la cuenta llegó al tope del colchón. Es el
+   * regalo por diseño —la última respuesta de quien se quedó sin saldo—, así que se cuenta
+   * aparte: es plata que no entró y hay que verla, pero no es un error que haya que arreglar.
+   */
+  porTope: number;
   /** Créditos cobrados de más al cliente. */
   deMas: number;
   /** Turnos cobrados con un peso distinto del vigente (cambio de precios, no error). */
@@ -168,6 +187,7 @@ const VACIO: Record<VeredictoTurno, number> = {
   cobrado_de_menos: 0,
   cobrado_de_mas: 0,
   doble_cobro: 0,
+  tope_gracia: 0,
 };
 
 /**
@@ -181,13 +201,18 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
   let esperado = 0;
   let cobrado = 0;
   let regalados = 0;
+  let porTope = 0;
   let deMas = 0;
   let conPesoCambiado = 0;
   for (const i of items) {
     porVeredicto[i.veredicto]++;
     esperado += i.esperado;
     cobrado += i.cobrado;
-    if (i.diferencia < 0) regalados += -i.diferencia;
+    // Lo que no se cobró por el tope del colchón va a su propia cuenta: es plata que no
+    // entró, hay que verla, y NO es un defecto. Mezclarla con lo regalado por error haría
+    // que un informe en rojo sea lo normal, y entonces nadie mira los rojos de verdad.
+    if (i.veredicto === "tope_gracia") porTope += Math.max(0, -i.diferencia);
+    else if (i.diferencia < 0) regalados += -i.diferencia;
     if (i.diferencia > 0) deMas += i.diferencia;
     if (i.pesoCambiado) conPesoCambiado++;
   }
@@ -197,6 +222,7 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
     esperado,
     cobrado,
     regalados,
+    porTope,
     deMas,
     conPesoCambiado,
     cuadra: regalados === 0 && deMas === 0 && porVeredicto.doble_cobro === 0,
