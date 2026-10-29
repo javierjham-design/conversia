@@ -25,13 +25,13 @@ import { FakeSubscriptionProvider } from "./subscription-billing/provider";
 const CFG_OK: AutoRechargeConfig = {
   enabled: true,
   thresholdRemaining: 50,
-  packCode: "conversia-cred-1000",
-  monthlyCapClp: 56_970,
+  packCode: "conversia-cred-420",
+  monthlyCapClp: 249_900,
   consentAt: "2026-10-28T00:00:00.000Z",
 };
 
 describe("§6 — la decisión: ¿se cobra o no?", () => {
-  const base = { cfg: CFG_OK, saldo: 10, precioClp: 18_990, gastadoEsteMesClp: 0, tieneTarjeta: true, enVuelo: false };
+  const base = { cfg: CFG_OK, saldo: 10, precioClp: 24_990, gastadoEsteMesClp: 0, tieneTarjeta: true, enVuelo: false };
 
   it("saldo bajo el umbral, todo en orden → se cobra", () => {
     expect(decidirRecarga(base)).toBe("cobrar");
@@ -77,9 +77,9 @@ describe("§6 — la decisión: ¿se cobra o no?", () => {
   });
 
   it("el tope mensual se mide CON el cobro incluido", () => {
-    // Tope 56.970 = exactamente 3 recargas de 18.990. La tercera entra, la cuarta no.
-    expect(decidirRecarga({ ...base, gastadoEsteMesClp: 18_990 * 2 })).toBe("cobrar");
-    expect(decidirRecarga({ ...base, gastadoEsteMesClp: 18_990 * 3 })).toBe("tope_mensual");
+    // Tope 249.900 = exactamente 10 recargas de 24.990. La décima entra, la undécima no.
+    expect(decidirRecarga({ ...base, gastadoEsteMesClp: 24_990 * 9 })).toBe("cobrar");
+    expect(decidirRecarga({ ...base, gastadoEsteMesClp: 24_990 * 10 })).toBe("tope_mensual");
   });
 
   it("el orden de las guardas: lo que es 'no y punto' manda sobre el estado", () => {
@@ -96,7 +96,7 @@ describe("§6 — la decisión: ¿se cobra o no?", () => {
  * aviso cada vez. Estos son los dos frenos.
  */
 describe("§6 — una tarjeta rechazada no se reintenta en ráfaga", () => {
-  const base = { cfg: CFG_OK, saldo: 10, precioClp: 18_990, gastadoEsteMesClp: 0, tieneTarjeta: true, enVuelo: false };
+  const base = { cfg: CFG_OK, saldo: 10, precioClp: 24_990, gastadoEsteMesClp: 0, tieneTarjeta: true, enVuelo: false };
   const now = new Date("2026-10-28T12:00:00.000Z");
   const haceHoras = (h: number) => new Date(now.getTime() - h * 3_600_000);
 
@@ -123,17 +123,17 @@ describe("§6 — una tarjeta rechazada no se reintenta en ráfaga", () => {
 });
 
 describe("§6 — config leída de los ajustes de la organización", () => {
-  const def = { threshold: 50, monthlyCapClp: 56_970 };
+  const def = { threshold: 50, monthlyCapClp: 249_900 };
 
   it("ajustes vacíos: apagada y con los defaults del §6", () => {
     const c = parseAutoRechargeConfig(undefined, def);
-    expect(c).toEqual({ enabled: false, thresholdRemaining: 50, packCode: null, monthlyCapClp: 56_970, consentAt: null });
+    expect(c).toEqual({ enabled: false, thresholdRemaining: 50, packCode: null, monthlyCapClp: 249_900, consentAt: null });
   });
 
   it("valores corruptos caen a los defaults (nunca a 0, que cobraría siempre)", () => {
     const c = parseAutoRechargeConfig({ enabled: true, thresholdRemaining: -5, monthlyCapClp: 0, packCode: "   " }, def);
     expect(c.thresholdRemaining).toBe(50);
-    expect(c.monthlyCapClp).toBe(56_970);
+    expect(c.monthlyCapClp).toBe(249_900);
     expect(c.packCode).toBeNull();
   });
 
@@ -168,7 +168,7 @@ function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: 
   const port: AutoRechargePort = {
     listCandidates: async () => [candidato],
     balanceOf: async () => over.saldo ?? 10,
-    packOf: async (code) => (code === "conversia-cred-1000" ? { code, credits: 1000, priceClp: 18_990 } : null),
+    packOf: async (code) => (code === "conversia-cred-420" ? { code, credits: 420, priceClp: 24_990 } : null),
     spentThisMonth: async () => over.gastado ?? 0,
     hasPendingRecharge: async () => over.enVuelo ?? false,
     failedRecharges: async () => ({ seguidos: 0, ultimoAt: null }),
@@ -204,9 +204,9 @@ describe("§6 — pasada completa", () => {
     expect(r.cobradas).toBe(1);
     expect(attempts).toHaveLength(1);
     expect(attempts[0].status).toBe("pending");
-    expect(attempts[0].amount).toBe(18_990);
+    expect(attempts[0].amount).toBe(24_990);
     expect(avisos.map((a) => a.kind)).toEqual(["recharge_started"]);
-    expect(avisos[0].data).toMatchObject({ credits: 1000, amountClp: 18_990 });
+    expect(avisos[0].data).toMatchObject({ credits: 420, amountClp: 24_990 });
   });
 
   it("el cobro lleva la metadata que el webhook necesita para acreditar el pack", async () => {
@@ -217,8 +217,8 @@ describe("§6 — pasada completa", () => {
     await runAutoRecharge(port, async () => provider, new Date(), URLS);
     expect(provider.charges[0].metadata).toEqual({
       organizationId: "org1",
-      planCode: "pkg:conversia-cred-1000",
-      expectedAmount: "18990",
+      planCode: "pkg:conversia-cred-420",
+      expectedAmount: "24990",
       autoRecharge: "1",
     });
   });
@@ -267,15 +267,15 @@ describe("§6 — pasada completa", () => {
   });
 
   it("en el tope mensual avisa UNA vez y no cobra", async () => {
-    const { port, attempts, avisos } = makePort({ gastado: 18_990 * 3 });
+    const { port, attempts, avisos } = makePort({ gastado: 24_990 * 10 });
     const r = await runAutoRecharge(port, async () => provider, new Date(), URLS);
     expect(r.cobradas).toBe(0);
     expect(attempts).toEqual([]);
-    expect(avisos).toEqual([{ kind: "recharge_cap_reached", data: { monthlyCapClp: 56_970 } }]);
+    expect(avisos).toEqual([{ kind: "recharge_cap_reached", data: { monthlyCapClp: 249_900 } }]);
   });
 
   it("el aviso de tope no se repite en cada pasada", async () => {
-    const { port, avisos } = makePort({ gastado: 18_990 * 3, firstTimeThisMonth: async () => false });
+    const { port, avisos } = makePort({ gastado: 24_990 * 10, firstTimeThisMonth: async () => false });
     await runAutoRecharge(port, async () => provider, new Date(), URLS);
     expect(avisos).toEqual([]);
   });

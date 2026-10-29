@@ -178,18 +178,27 @@ Sembrado **INACTIVO**. Los precios viven en
 `packages/database/seeds/creditos-catalogo.json` —no en el código— y son los que aprobaste
 el 27-oct (§5 opción B, IVA incluido):
 
+**Precios vigentes: los del 28-oct** (el criterio pasó de costo a VALOR; el cálculo completo
+está en `MODELO_COBRO_CREDITOS_IA.md` §8.3).
+
 | Producto | Créditos | Precio | Ganancia sobre costo | ≈ conversaciones |
 |---|---|---|---|---|
 | Prueba gratis | 200 | $0 | — | ~48 |
-| **Plan Base** mensual | 100 | **$18.990/mes** | 260% ⚠ excepción | ~24 |
-| **Recarga básica** | 1.000 | **$18.990** | 465% | ~240 |
-| Pack | 3.000 | $49.990 | 412% | ~710 |
-| Pack | 6.000 | $89.990 | 372% | ~1.430 |
-| Pack | 8.500 | $109.990 | 319% | ~2.020 |
-| Pack | 16.000 | $199.990 | 308% | ~3.810 |
+| **Plan Base** mensual | 300 | **$24.990/mes** | 313% | ~71 |
+| **Recarga** (única) | 420 | **$24.990** | 1.045% | ~100 |
 
-Gracia: 100 créditos. Los packs de 1.150 / 2.500 / 5.000 / 11.000 / 20.000 **no** se
-siembran (no cumplían la regla).
+Gracia: 100 créditos. **No hay packs con descuento por volumen.** No se siembran los de
+1.000 / 3.000 / 6.000 / 8.500 / 16.000 (catálogo del 27-oct, reemplazado) ni los de
+1.150 / 2.500 / 5.000 / 11.000 / 20.000 (no cumplían la regla de ganancia).
+
+Está calibrado para que una cuenta con el uso real de Digital-Dent en septiembre-2026
+(3.172 créditos) pague **$199.920** al mes: el plan más 7 recargas. El plan Base ya **no
+necesita la excepción del 260%**, pero es el que queda más al límite: con el crédito 20%
+más caro cae a 303%.
+
+⚠ Las columnas "≈ conversaciones" usan el supuesto de 4,2 créditos por conversación, que
+**no coincide** con el 9 del estimador del panel (ver #576). El dato medido es 1,043
+créditos por RESPUESTA; falta medir cuántas respuestas tiene una conversación.
 
 **Hay un test que encierra tu regla**: calcula la ganancia de cada pack con las tres partes
 del costo (créditos, comisión de Flow y, en el plan, el costo fijo por cliente) y falla si
@@ -254,8 +263,10 @@ el go-live y su rollback dejan el catálogo como estaba.
 podía usarla ni enterarse de que existía.
 
 Ahora: cuando el saldo baja de **50 créditos** (≈12 conversaciones), se cobra la **recarga
-básica de $18.990 (1.000 créditos)** a la tarjeta guardada con Flow. Se dispara antes de
-llegar a cero para que el bot no se corte mientras el pago se procesa.
+de $24.990 (420 créditos)** a la tarjeta guardada con Flow. Se dispara antes de llegar a
+cero para que el bot no se corte mientras el pago se procesa. El tope por defecto son **10
+recargas al mes** ($249.900), editable por el cliente: el cliente de referencia necesita 7
+en un mes, así que el tope anterior de 3 le habría cortado el bot a mitad de mes.
 
 Como esto **cobra plata de verdad**, cada forma de que salga mal tiene su freno, y cada
 freno tiene su test:

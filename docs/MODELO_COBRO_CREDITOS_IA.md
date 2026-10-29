@@ -285,22 +285,87 @@ Lo que muestran los datos:
 ### 8. Decisiones del dueño
 
 1. **Unidad:** ¿aprobado "Créditos IA" con 1 respuesta estándar = 1 crédito?
-2. ~~Precios~~ **Decidido (27-oct, corregido): opción B del §5, precios con IVA incluido y
-   regla de ganancia mínima de 300% sobre el costo** (= 75% de margen sobre el neto):
-   - Plan Base **$18.990/mes con 100 créditos** (260%: única excepción, por el costo fijo
-     por cliente; la ganancia del negocio viene de las recargas).
-   - Recarga básica **1.000 créditos a $18.990** (465%) — la más barata y la que usa la
-     recarga automática.
-   - Packs: **3.000/$49.990** (412%) · **6.000/$89.990** (372%) · **8.500/$109.990** (319%)
-     · **16.000/$199.990** (308%).
+2. ~~Precios~~ **Decidido (28-oct). Reemplaza los precios del 27-oct** (que están en
+   §8.2, abajo, solo como historia). Ver **§8.3** para el cálculo completo.
+   - Plan Base **$24.990/mes con 300 créditos**.
+   - Recarga única **420 créditos a $24.990** — también es la de la recarga automática.
+   - **Sin packs con descuento por volumen.** Se eliminan los de 1.000, 3.000, 6.000, 8.500
+     y 16.000.
+   - Recarga automática: tope por defecto **10 recargas al mes** (antes 3), editable por el
+     cliente. Umbral y resto, igual.
    - Prueba gratis **200** créditos; gracia **100**.
-   - Se **eliminan** los packs anteriores de 1.150, 2.500, 5.000, 11.000 y 20.000.
+   - La regla de créditos no cambia: 1 crédito por respuesta hasta 20.000 tokens, +1 por
+     cada 20.000 más, por el peso del modelo.
 3. ~~Modelo estándar~~ **Decidido (27-oct):** gpt-4o-mini por defecto; modelos más
    avanzados solo los activa el equipo de Conversia desde el super admin, con el cliente
    avisado y conforme (§4).
 4. **Clientes actuales:** se convierten a 10 créditos por cada conversación que les quede
    (las 30 de prueba pasan a 300). Como una conversación usa ~4 créditos, ganan saldo y
    nadie pierde.
+
+#### 8.2 — Precios del 27-oct (REEMPLAZADOS, se dejan como historia)
+
+Plan Base $18.990/100 créditos (260%) · recarga básica 1.000/$18.990 (465%) · packs
+3.000/$49.990 · 6.000/$89.990 · 8.500/$109.990 · 16.000/$199.990. Salían del costo más una
+regla de ganancia mínima de 300%, con el Base como única excepción documentada.
+
+#### 8.3 — Precios vigentes (28-oct): calibrados por VALOR, no por costo
+
+**El criterio cambió.** Antes el precio salía del costo hacia arriba. Ahora sale del valor
+para el cliente: se fija para que una cuenta con el uso REAL de Digital-Dent en
+septiembre-2026 pague **~$200.000 al mes**, que es lo que ese servicio vale para un negocio
+de ese tamaño. La regla de ganancia de 300% sigue viva, pero como **piso** que hay que
+respetar, no como generadora del precio.
+
+**El consumo de referencia (Digital-Dent, septiembre-2026):** 30,8M tokens · 3.042
+respuestas del bot · **3.172 créditos**. Por tramos:
+
+| Respuestas | Créditos c/u | Por qué | Subtotal |
+|---:|---:|---|---:|
+| 2.926 | 1 | hasta 20.000 tokens | 2.926 |
+| 102 | 2 | entre 20.001 y 40.000 | 204 |
+| 14 | 3 | entre 40.001 y 60.000 | 42 |
+| **3.042** | | | **3.172** |
+
+Son **1,043 créditos por respuesta**: la enorme mayoría de las respuestas entra en el primer
+tramo, así que el ajuste por tokens casi no pesa — está para los casos raros, no para la
+facturación normal.
+
+**La cuenta del mes con los precios nuevos:**
+
+| Concepto | Créditos | CLP |
+|---|---:|---:|
+| Plan Base | 300 | $24.990 |
+| 7 recargas de 420 | 2.940 | $174.930 |
+| **Total** | **3.240** | **$199.920** |
+
+Entran 3.240 créditos para un consumo de 3.172: sobra poco, que es justo lo que se busca.
+
+**Por qué el tope de la recarga automática sube de 3 a 10:** este cliente necesita 7
+recargas en el mes. Con el tope viejo el bot se le habría cortado a mitad de mes, justo al
+que más paga.
+
+**Por qué desaparecen los packs con descuento por volumen:** un descuento por volumen le
+baja el precio por crédito justo al cliente que más cuesta atender. Con el criterio de
+valor, cada crédito vale lo mismo. Se puede reintroducir después como decisión comercial,
+no como consecuencia del costo.
+
+**Margen con los precios nuevos** (costo $2,1/crédito, comisión Flow 3,81%, costo fijo
+$3.500/cliente, IVA 19%):
+
+| | Ganancia sobre el costo | Piso |
+|---|---:|---:|
+| Recarga 420 / $24.990 | **1.045%** | 300% |
+| Plan Base 300 / $24.990 | **313%** | 300% |
+
+El plan Base **ya no necesita la excepción del 260%**: la cumple por derecho propio. Pero
+es el que queda más al límite — si el costo por crédito subiera 20%, cae a **303%**, al
+borde. **Si el costo sube de verdad, lo que hay que revisar es el plan, no las recargas.**
+
+**Lo que sigue abierto:** cuántas **conversaciones** rinde un crédito. El dato medido es por
+RESPUESTA (1,043); cuántas respuestas tiene una conversación no está medido, y hoy el repo
+tiene dos supuestos distintos — 4,2 en el catálogo y 9 en el estimador del panel (ver
+#576). Las equivalencias "≈ N conversaciones" que ve el cliente dependen de ese número.
 
 ---
 

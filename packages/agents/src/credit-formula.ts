@@ -82,6 +82,29 @@ export const CREDIT_POLICY_SEED: CreditPolicy = {
 /** El nivel premium no se puede elegir en planes de autoservicio (§4). */
 export const SELF_SERVE_LEVELS: AiLevel[] = ["standard", "plus", "advanced"];
 
+/**
+ * Defaults de la RECARGA AUTOMÁTICA en Créditos IA (§6), editables por el cliente.
+ *
+ * Viven acá, en un solo lugar, porque los necesitan el api (para mostrar y guardar la
+ * configuración) y el worker (para decidir el cobro). Estaban escritos a mano en los dos y
+ * repetirlos una tercera vez es cómo aparecen las contradicciones: el 28-oct hubo que
+ * arreglar una pantalla que prometía 238 conversaciones mientras el medidor decía 111,
+ * exactamente por tener el mismo número en dos sitios.
+ *
+ * El tope son **10 recargas** al mes (28-oct-2026). Antes eran 3, y con el consumo real de
+ * Digital-Dent en septiembre —que necesita 7— el tope viejo habría cortado el servicio a
+ * mitad de mes justo al cliente que más paga. Si cambia el precio de la recarga en
+ * `seeds/creditos-catalogo.json`, este número tiene que seguirlo; hay un test que lo exige.
+ */
+export const AUTO_RECARGA_DEFAULTS = {
+  /** Dispara cuando quedan menos de estos créditos. */
+  umbralCreditos: 50,
+  /** Tope de gasto al mes: 10 recargas de $24.990. */
+  topeMensualClp: 249_900,
+  /** Para las cuentas que todavía cobran por conversación (unidad vieja). */
+  conversaciones: { umbral: 20, topeMensualClp: 40_000 },
+} as const;
+
 export interface ModelWeightLookup extends ModelCreditWeight {
   /** false = el modelo no está en la política: se cobró como premium y hay que alertar. */
   known: boolean;

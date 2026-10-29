@@ -1,4 +1,5 @@
 import IORedis from "ioredis";
+import { AUTO_RECARGA_DEFAULTS } from "@conversia/agents";
 import { getEnv, brandOf } from "@conversia/config";
 import { getAdminPrisma, raiseException, withTenant } from "@conversia/database";
 import { enqueueNotification } from "./notifications/queue";
@@ -14,8 +15,12 @@ import {
  * memoria). Acá está todo el SQL y ningún criterio: las reglas viven en `auto-recharge.ts`.
  */
 
-/** Defaults del §6: dispara bajo 50 créditos, tope de 3 recargas básicas al mes. */
-const DEFAULTS = { threshold: 50, monthlyCapClp: 56_970 };
+/**
+ * Defaults del §6: dispara bajo 50 créditos, tope de 10 recargas al mes. Los valores vienen
+ * de `@conversia/agents` porque el api los necesita también, y tenerlos escritos en los dos
+ * lados es como terminan contradiciéndose.
+ */
+const DEFAULTS = { threshold: AUTO_RECARGA_DEFAULTS.umbralCreditos, monthlyCapClp: AUTO_RECARGA_DEFAULTS.topeMensualClp };
 
 let redis: IORedis | undefined;
 function getRedis(): IORedis {
