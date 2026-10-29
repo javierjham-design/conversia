@@ -248,6 +248,9 @@ const envSchema = z.object({
   // que el simulador pueda VERIFICAR la recuperación sin esperar 10 minutos.
   AI_CREDITS_RECONCILE_MS: z.coerce.number().default(600_000),
   AI_CREDITS_RECONCILE_GRACIA_MIN: z.coerce.number().default(3),
+  // Cada cuánto se cierran las RECARGAS a medias: un cobro que entró y cuyo webhook se
+  // perdió deja la tarjeta cobrada y al cliente sin créditos. Configurable por lo mismo.
+  RECHARGE_RECONCILE_MS: z.coerce.number().default(600_000),
   MOCK_CLARIVA_PORT: z.coerce.number().default(4010),
 
   // --- Facturación / pasarela de pago (opcional; mock si vacío) ---

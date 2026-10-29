@@ -6,6 +6,7 @@ import { enqueueNotification } from "./notifications/queue";
 import {
   parseAutoRechargeConfig,
   RECHARGE_ORDER_PREFIX,
+  VENTANA_EN_VUELO_MS,
   type AutoRechargePort,
   type RechargeCandidate,
 } from "./auto-recharge";
@@ -32,14 +33,8 @@ function startOfMonth(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-/**
- * Cuánto tiempo se considera que una recarga puede seguir "en vuelo".
- *
- * Es el plazo que se le da al webhook de la pasarela para cerrar el intento. Pasado eso se
- * asume que no va a llegar y la cuenta puede volver a intentarlo: sin este plazo, un
- * webhook perdido dejaba la recarga automática apagada para siempre y en silencio.
- */
-export const VENTANA_EN_VUELO_MS = 6 * 60 * 60 * 1000;
+/** El valor vive en el módulo puro (lo comparte con la reconciliación); se re-exporta acá. */
+export { VENTANA_EN_VUELO_MS };
 
 /**
  * Cuánto se respeta una recarga comprada A MANO antes de volver a cobrar automáticamente.

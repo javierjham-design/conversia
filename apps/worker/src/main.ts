@@ -43,6 +43,7 @@ import { startInboxRules } from "./inbox-rules";
 import { startBillingDunning } from "./billing-dunning";
 import { startSubscriptionBilling } from "./subscription-billing/start";
 import { startAiCreditsReconcile } from "./ai-credits-reconcile";
+import { startRechargeReconcile } from "./recharge-reconcile-start";
 import { startTrialLifecycle } from "./trial-lifecycle";
 import { startV2TrialLifecycle } from "./v2-trial-lifecycle";
 import { startAnnualWalletRefill } from "./annual-wallet-refill";
@@ -257,6 +258,9 @@ async function main() {
   // Cobra las respuestas que quedaron sin asiento (reinicio, timeout de base). Va aparte
   // del cobro recurrente: ese está gateado por env y, apagado, se perderían los cargos.
   const stopCreditsReconcile = startAiCreditsReconcile();
+  // Cierra las RECARGAS a medias: un cobro que entró y cuyo webhook se perdió deja la
+  // tarjeta cobrada y al cliente sin créditos. Aparte del recurrente por el mismo motivo.
+  const stopRechargeReconcile = startRechargeReconcile();
   const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
   const stopV2TrialLifecycle = startV2TrialLifecycle(); // V2: 30 gratis → copiloto 7d → pausa (sin purga)
   const stopAnnualRefill = startAnnualWalletRefill(); // anual: acredita el cupo mes a mes (no 12 de una)
@@ -308,6 +312,7 @@ async function main() {
     stopBillingDunning();
     stopSubscriptionBilling();
     stopCreditsReconcile();
+    stopRechargeReconcile();
     stopTrialLifecycle();
     stopV2TrialLifecycle();
     stopAnnualRefill();

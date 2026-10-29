@@ -48,6 +48,21 @@ export const HORAS_ESPERA_TRAS_FALLO = 24;
 /** Rechazos SEGUIDOS tras los cuales se deja de intentar: hace falta otra tarjeta. */
 export const MAX_FALLOS_SEGUIDOS = 3;
 
+/**
+ * Cuánto tiempo se considera que una recarga puede seguir "en vuelo".
+ *
+ * Es el plazo que se le da al webhook de la pasarela para cerrar el intento. Pasado eso se
+ * asume que no va a llegar y la cuenta puede volver a intentarlo: sin este plazo, un webhook
+ * perdido dejaba la recarga automática apagada para siempre y en silencio.
+ *
+ * Vive en el módulo PURO porque son dos quienes dependen del mismo número: la guarda de "un
+ * cobro a la vez" (que lo usa para soltar la cuenta) y la reconciliación de recargas (que lo
+ * usa para decidir cuándo un cobro sin respuesta pasa a ser cosa de una persona). Si no
+ * fueran el mismo valor, habría una franja en la que la cuenta ya puede volver a cobrar y
+ * nadie revisó el cobro anterior — o al revés, una cuenta frenada sin que nadie lo mire.
+ */
+export const VENTANA_EN_VUELO_MS = 6 * 60 * 60 * 1000;
+
 /** Rechazos consecutivos de recarga (desde el último cobro que no falló). */
 export interface FallosDeRecarga {
   seguidos: number;
@@ -208,6 +223,8 @@ export interface AutoRechargePort {
 export interface AutoRechargeResult {
   cobradas: number;
   motivos: Record<string, number>;
+  /** Cobros emitidos sin respuesta de la pasarela: no se sabe si la tarjeta quedó cobrada. */
+  sinRespuesta: number;
 }
 
 /**
@@ -225,7 +242,7 @@ export async function runAutoRecharge(
   now: Date,
   urls: { confirmation: string; ret: string },
 ): Promise<AutoRechargeResult> {
-  const out: AutoRechargeResult = { cobradas: 0, motivos: {} };
+  const out: AutoRechargeResult = { cobradas: 0, motivos: {}, sinRespuesta: 0 };
   const candidatos = await port.listCandidates();
   for (const c of candidatos) {
     const pack = c.cfg.packCode ? await port.packOf(c.cfg.packCode) : null;
@@ -307,8 +324,37 @@ export async function runAutoRecharge(
         },
       });
     } catch (err) {
-      await port.markAttempt(commerceOrder, "failed", null, (err as Error).message.slice(0, 200));
-      await port.notify(c.organizationId, "recharge_failed", { reason: "error_tecnico", credits: pack.credits }).catch(() => undefined);
+      // NO SABEMOS SI SE COBRÓ, y eso es exactamente lo que se registra.
+      //
+      // Un `charge` que revienta por timeout o red puede haber entrado perfectamente en la
+      // pasarela: la tarjeta quedó cobrada y lo que se perdió fue nuestra respuesta.
+      // Marcarlo `failed` —como estaba— era AFIRMAR que no se cobró, y de esa afirmación
+      // falsa salían tres cosas, las tres malas: el intento dejaba de contar contra el tope
+      // mensual (que mide los exitosos y los en vuelo), soltaba la guarda de "un cobro a la
+      // vez", y el tick siguiente volvía a cobrar. Con una pasarela que responde lento eso
+      // es un cobro cada 15 minutos; y los tres primeros "rechazos" apagarían la recarga
+      // automática de un cliente al que en realidad ya le cobramos tres veces.
+      //
+      // Queda PENDIENTE, que es la verdad: cuenta contra el tope, bloquea el próximo cobro
+      // y espera. Si el cobro entró, el webhook lo cierra y acredita; si no entró, nadie
+      // acredita nada y la ventana en vuelo libera la cuenta en unas horas.
+      await port.markAttempt(commerceOrder, "pending", null, `sin_respuesta: ${(err as Error).message}`.slice(0, 200));
+      // Y se avisa al DUEÑO, no al cliente: decirle "tu tarjeta falló" cuando puede estar
+      // cobrada es mentirle, y si está cobrada además le van a llegar los créditos. Esto
+      // necesita que una persona abra el panel de la pasarela y mire esa orden.
+      await port
+        .raiseOps?.(c.organizationId, {
+          type: "recarga_sin_respuesta",
+          severity: "critical",
+          title: "Un cobro de recarga se emitió sin respuesta de la pasarela",
+          detail:
+            `La orden ${commerceOrder} por $${pack.priceClp.toLocaleString("es-CL")} se envió y la pasarela no respondió ` +
+            `(${(err as Error).message}). NO se sabe si la tarjeta quedó cobrada: hay que buscar esa orden en el panel de ` +
+            `Flow y, si está pagada, acreditar los ${pack.credits} créditos. Mientras tanto no se le vuelve a cobrar.`,
+          dedupeKey: `sin_respuesta:${commerceOrder}`,
+        })
+        .catch(() => undefined);
+      out.sinRespuesta++;
       continue;
     }
 
