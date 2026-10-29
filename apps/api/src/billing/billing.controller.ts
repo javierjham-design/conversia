@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, refillMessageWallet } from "@conversia/database";
-import { CLP_PER_USD_REF, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
@@ -1066,9 +1066,10 @@ export class BillingController {
     const unit = await packUnitForOrg(ctx.organizationId);
     const packs = await this.prisma.admin.messagePackage.findMany({ where: { active: true, brand: "conversia", type: unit }, orderBy: { order: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } });
     // CRE 2 (§6) — con Créditos IA los defaults son otros: dispara bajo 50 créditos y el
-    // tope son 3 recargas básicas al mes. El umbral de 20 era "conversaciones".
-    const defThreshold = unit === "credit" ? 50 : 20;
-    const defCap = unit === "credit" ? 56970 : 40000;
+    // tope son 10 recargas al mes. El umbral de 20 era "conversaciones". Los valores
+    // vienen de `@conversia/agents` para no tenerlos escritos acá Y en el worker.
+    const defThreshold = unit === "credit" ? AUTO_RECARGA_DEFAULTS.umbralCreditos : AUTO_RECARGA_DEFAULTS.conversaciones.umbral;
+    const defCap = unit === "credit" ? AUTO_RECARGA_DEFAULTS.topeMensualClp : AUTO_RECARGA_DEFAULTS.conversaciones.topeMensualClp;
     return {
       unit,
       enabled: ar.enabled === true,
@@ -1124,9 +1125,11 @@ export class BillingController {
     const unitPut = await packUnitForOrg(ctx.organizationId);
     const nextAr = {
       enabled: d.enabled,
-      thresholdRemaining: d.thresholdRemaining ?? prevAr.thresholdRemaining ?? (unitPut === "credit" ? 50 : 20),
+      thresholdRemaining:
+        d.thresholdRemaining ?? prevAr.thresholdRemaining ?? (unitPut === "credit" ? AUTO_RECARGA_DEFAULTS.umbralCreditos : AUTO_RECARGA_DEFAULTS.conversaciones.umbral),
       packCode: d.packCode ?? prevAr.packCode ?? null,
-      monthlyCapClp: d.monthlyCapClp ?? prevAr.monthlyCapClp ?? (unitPut === "credit" ? 56970 : 40000),
+      monthlyCapClp:
+        d.monthlyCapClp ?? prevAr.monthlyCapClp ?? (unitPut === "credit" ? AUTO_RECARGA_DEFAULTS.topeMensualClp : AUTO_RECARGA_DEFAULTS.conversaciones.topeMensualClp),
       consentAt,
       ...(consentAt && !prevAr.consentAt ? { consentBy: ctx.userId } : prevAr.consentBy ? { consentBy: prevAr.consentBy } : {}),
     };

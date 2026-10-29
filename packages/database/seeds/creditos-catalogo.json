@@ -1,22 +1,22 @@
 {
-  "_doc": "CRE 2 — catálogo de Créditos IA aprobado por el dueño el 27-oct-2026 (docs/MODELO_COBRO_CREDITOS_IA.md §5 opción B y §8.2). Precios CON IVA INCLUIDO. Regla: ganancia mínima de 300% sobre el costo (= 75% de margen sobre el neto), con el plan Base como única excepción (260%), porque además carga el costo fijo por cliente. Lo verifica apps/api/test/creditos-catalogo.spec.ts; si se cambia un precio acá y deja de cumplir la regla, ese test se cae.",
+  "_doc": "CRE 2 — catálogo de Créditos IA. PRECIOS VIGENTES: los del 28-oct-2026 (docs/MODELO_COBRO_CREDITOS_IA.md §8.3). Precios CON IVA INCLUIDO. El criterio cambió: antes el precio salía del costo + una regla de ganancia mínima; ahora sale del VALOR PARA EL CLIENTE, calibrado para que una cuenta con el uso real de Digital-Dent en septiembre-2026 (30,8M tokens · 3.042 respuestas · 3.172 créditos) pague ~$200.000 al mes → plan Base ($24.990) + 7 recargas ($24.990 c/u) = $199.920. La regla de ganancia mínima de 300% sigue vigente como PISO y ahora la cumple todo, incluido el plan Base (313%), que antes necesitaba una excepción documentada del 260%. Lo verifica apps/api/test/creditos-catalogo.spec.ts; si se cambia un precio acá y deja de cumplir el piso, ese test se cae.",
   "supuestos": {
     "costoPorCreditoClp": 2.1,
     "comisionFlowPct": 3.81,
     "costoFijoPorClienteClp": 3500,
     "ivaPct": 19,
+    "_creditosPorConversacion": "PREGUNTA ABIERTA (ver §8.3 del documento). El dato medido de septiembre es 1,043 créditos por RESPUESTA del bot; cuántas respuestas tiene una conversación es lo que falta. Este 4,2 es el supuesto histórico del §5 y NO coincide con el 9 que usa el estimador del panel (packages/agents/src/credit-estimate.ts). Hasta que se mida, las equivalencias en conversaciones son orientativas.",
     "creditosPorConversacion": 4.2,
-    "gananciaMinimaPct": 300,
-    "gananciaMinimaPlanBasePct": 260
+    "gananciaMinimaPct": 300
   },
   "planes": [
     {
       "code": "conversia_creditos_base",
       "name": "Base",
-      "priceClp": 18990,
-      "priceUsd": 19,
+      "priceClp": 24990,
+      "priceUsd": 25,
       "order": 11,
-      "creditos": 100,
+      "creditos": 300,
       "esPlanBase": true
     },
     {
@@ -31,14 +31,15 @@
     }
   ],
   "packs": [
-    { "code": "conversia-cred-1000", "name": "Recarga 1.000 créditos", "credits": 1000, "priceClp": 18990, "priceUsd": 19, "order": 30, "esRecargaBasica": true },
-    { "code": "conversia-cred-3000", "name": "Pack 3.000 créditos", "credits": 3000, "priceClp": 49990, "priceUsd": 50, "order": 31 },
-    { "code": "conversia-cred-6000", "name": "Pack 6.000 créditos", "credits": 6000, "priceClp": 89990, "priceUsd": 90, "order": 32 },
-    { "code": "conversia-cred-8500", "name": "Pack 8.500 créditos", "credits": 8500, "priceClp": 109990, "priceUsd": 110, "order": 33 },
-    { "code": "conversia-cred-16000", "name": "Pack 16.000 créditos", "credits": 16000, "priceClp": 199990, "priceUsd": 200, "order": 34 }
+    { "code": "conversia-cred-420", "name": "Recarga 420 créditos", "credits": 420, "priceClp": 24990, "priceUsd": 25, "order": 30, "esRecargaBasica": true }
   ],
   "packsEliminados": {
-    "_doc": "Packs de la versión anterior del documento que NO se siembran: no cumplían la regla de 300% de ganancia (§5).",
-    "creditos": [1150, 2500, 5000, 11000, 20000]
+    "_doc": "Packs que NO se siembran. Los de 1.150/2.500/5.000/11.000/20.000 salieron en la primera calibración por no cumplir el 300%. Los de 1.000/3.000/6.000/8.500/16.000 son los del catálogo del 27-oct: el dueño los eliminó el 28-oct al pasar al criterio de valor, porque un descuento por volumen premia justo al cliente que más cuesta. Por ahora hay UNA sola recarga y no hay descuentos por volumen.",
+    "creditos": [1000, 1150, 2500, 3000, 5000, 6000, 8500, 11000, 16000, 20000]
+  },
+  "recargaAutomatica": {
+    "_doc": "Default del tope mensual de la recarga automática, editable por el cliente. Son 10 recargas: con el uso de Digital-Dent en septiembre hacían falta 7, así que el tope viejo (3 recargas) habría cortado el servicio a mitad de mes.",
+    "topeMensualClp": 249900,
+    "recargasEquivalentes": 10
   }
 }

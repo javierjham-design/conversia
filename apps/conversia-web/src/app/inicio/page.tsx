@@ -495,8 +495,11 @@ function V2Banner() {
     const left = st.trial.freeRemaining;
     const used = st.trial.freeTotal - left;
     const urgent = left <= 5;
-    const price = st.activation ? clpN(st.activation.basePriceClp) : "$18.990";
-    const included = st.activation?.baseIncluded ?? 100;
+    // El precio y los créditos los manda el backend desde el catálogo; estos son solo el
+    // respaldo para cuando esa llamada no llegó. Deben seguir al plan Base de
+    // `seeds/creditos-catalogo.json` (28-oct-2026: $24.990 con 300 créditos).
+    const price = st.activation ? clpN(st.activation.basePriceClp) : "$24.990";
+    const included = st.activation?.baseIncluded ?? 300;
     // CRE 2 — la unidad la manda el backend: a quien paga con Créditos IA no se le habla
     // de conversaciones, porque los números no son los mismos (1 conversación ≈ 4 créditos).
     const unidad = st.unit === "credit" ? "créditos" : "conversaciones";

@@ -50,8 +50,10 @@ export default function Landing() {
   // sería una promesa falsa en la página de precios.
   const esCreditos = base?.code === "conversia_creditos_base";
   const unidad = esCreditos ? "créditos" : "conversaciones";
-  const basePrice = base ? clp(base.priceClp) : "$18.990";
-  const baseIncluded = base ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || 100 : 100;
+  // Respaldos para cuando la llamada de precios no llegó: siguen al plan Base de
+  // `seeds/creditos-catalogo.json` (28-oct-2026: $24.990 con 300 créditos).
+  const basePrice = base ? clp(base.priceClp) : "$24.990";
+  const baseIncluded = base ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || 300 : 300;
   const pruebaGratis = esCreditos ? 200 : 30;
   // CRE 3 — EQUIVALENCIA EN CONVERSACIONES. "100 créditos" no le dice nada a alguien que
   // está decidiendo si contratar: en la página de precios el número tiene que poder
@@ -226,15 +228,13 @@ export default function Landing() {
 
           <div className="lp-price card">
             <span className="lp-price-tag"><Zap size={14} /> Cuando creces</span>
-            <h3 className="display">Packs</h3>
+            <h3 className="display">{esCreditos ? "Recarga" : "Packs"}</h3>
             <p className="lp-price-amount display">+ {unidad}</p>
             <p className="lp-price-note">Suma cuando lo necesites. No vencen pronto.</p>
             <ul className="lp-check">
-              {(packs.length ? packs : [
-                { code: "a", name: "Recarga 100", credits: 100, priceClp: 21900 },
-                { code: "b", name: "Pack 400", credits: 400, priceClp: 84900 },
-                { code: "c", name: "Pack 1.000", credits: 1000, priceClp: 199900 },
-              ]).map((p) => (
+              {/* El respaldo sigue al catálogo (28-oct-2026: una sola recarga de 420 a
+                  $24.990, sin descuentos por volumen). Los de verdad los manda el servidor. */}
+              {(packs.length ? packs : [{ code: "a", name: "Recarga 420", credits: 420, priceClp: 24990 }]).map((p) => (
                 <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad}{aprox(p.credits)} · {clp(p.priceClp)}</li>
               ))}
             </ul>

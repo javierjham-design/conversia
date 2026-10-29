@@ -1,21 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { AUTO_RECARGA_DEFAULTS } from "@conversia/agents";
 
 /**
- * CRE 2 — EL CATÁLOGO DE CRÉDITOS IA CUMPLE LA REGLA DEL DUEÑO.
+ * CRE 2 — EL CATÁLOGO DE CRÉDITOS IA CUMPLE LO QUE DECIDIÓ EL DUEÑO.
  *
- * El dueño fijó el 27-oct: **ganancia mínima de 300% sobre el costo** (= 75% de margen
- * sobre el neto) en todo pack, con el plan Base como única excepción (260%), porque además
- * carga el costo fijo por cliente.
+ * **El criterio cambió el 28-oct-2026.** Antes el precio salía del costo más una regla de
+ * ganancia mínima. Ahora sale del VALOR PARA EL CLIENTE: está calibrado para que una cuenta
+ * con el uso real de Digital-Dent en septiembre-2026 pague ~$200.000 al mes. La regla de
+ * ganancia de 300% sigue viva, pero como PISO que hay que respetar, no como generadora del
+ * precio.
  *
- * Este test encierra esa regla. Los precios se editan en
- * `packages/database/seeds/creditos-catalogo.json`, y el día que alguien cambie uno —o que
- * suba el costo del dólar y haya que recalibrar— este test dice si el catálogo sigue en
- * pie, en vez de que nos enteremos por el reporte de margen tres meses después.
+ * Este test encierra las dos cosas: la calibración (si alguien toca un precio, el cliente de
+ * referencia deja de pagar ~$200.000 y se entera acá) y el piso de ganancia. Los precios se
+ * editan en `packages/database/seeds/creditos-catalogo.json`.
  *
- * El costo de un pack son tres cosas, no una: los créditos que el cliente va a consumir,
- * la comisión de Flow sobre lo cobrado, y (solo en el plan) el costo fijo por cliente.
+ * El costo de un pack son tres cosas, no una: los créditos que el cliente va a consumir, la
+ * comisión de Flow sobre lo cobrado, y (solo en el plan) el costo fijo por cliente.
  */
 
 const catalogo = JSON.parse(
@@ -28,14 +30,30 @@ const catalogo = JSON.parse(
     ivaPct: number;
     creditosPorConversacion: number;
     gananciaMinimaPct: number;
-    gananciaMinimaPlanBasePct: number;
   };
   planes: Array<{ code: string; priceClp: number; creditos: number; esPlanBase?: boolean; trial?: boolean; regaloBienvenida?: number }>;
   packs: Array<{ code: string; credits: number; priceClp: number; esRecargaBasica?: boolean }>;
   packsEliminados: { creditos: number[] };
+  recargaAutomatica: { topeMensualClp: number; recargasEquivalentes: number };
 };
 
 const S = catalogo.supuestos;
+
+/**
+ * El cliente de referencia de la calibración: Digital-Dent, septiembre-2026. El consumo es
+ * un hecho medido, no un supuesto — por eso los tramos se escriben acá y se comprueba que
+ * sumen las 3.042 respuestas y los 3.172 créditos reales.
+ */
+const SEPTIEMBRE_DIGITAL_DENT = {
+  tramos: [
+    { respuestas: 2926, creditosCadaUna: 1 },
+    { respuestas: 102, creditosCadaUna: 2 },
+    { respuestas: 14, creditosCadaUna: 3 },
+  ],
+  respuestas: 3042,
+  creditos: 3172,
+  objetivoMensualClp: 200_000,
+};
 
 /** Neto (sin IVA) de un precio con IVA incluido. */
 function neto(precioConIva: number): number {
@@ -49,10 +67,19 @@ function gananciaSobreCosto(precioConIva: number, creditos: number, costoFijo = 
   return ((ingresoNeto - costo) / costo) * 100;
 }
 
-describe("§5/§8.2 — los precios aprobados están sembrados tal cual", () => {
-  it("el plan Base es $18.990 con 100 créditos", () => {
-    const base = catalogo.planes.find((p) => p.esPlanBase);
-    expect(base).toMatchObject({ code: "conversia_creditos_base", priceClp: 18990, creditos: 100 });
+const base = () => catalogo.planes.find((p) => p.esPlanBase)!;
+const recarga = () => catalogo.packs.find((p) => p.esRecargaBasica)!;
+
+/** Lo que paga en un mes quien consume `creditos`: el plan más las recargas que necesite. */
+function cuentaDelMes(creditos: number): { recargas: number; totalClp: number } {
+  const faltan = Math.max(0, creditos - base().creditos);
+  const recargas = Math.ceil(faltan / recarga().credits);
+  return { recargas, totalClp: base().priceClp + recargas * recarga().priceClp };
+}
+
+describe("§8.3 — los precios aprobados el 28-oct están sembrados tal cual", () => {
+  it("el plan Base es $24.990 con 300 créditos", () => {
+    expect(base()).toMatchObject({ code: "conversia_creditos_base", priceClp: 24990, creditos: 300 });
   });
 
   it("la prueba regala 200 créditos y no incluye saldo mensual", () => {
@@ -60,67 +87,92 @@ describe("§5/§8.2 — los precios aprobados están sembrados tal cual", () => 
     expect(trial).toMatchObject({ code: "conversia_creditos_trial", priceClp: 0, creditos: 0, regaloBienvenida: 200 });
   });
 
-  it("los cinco packs son los aprobados, con sus precios exactos", () => {
-    expect(catalogo.packs.map((p) => [p.credits, p.priceClp])).toEqual([
-      [1000, 18990],
-      [3000, 49990],
-      [6000, 89990],
-      [8500, 109990],
-      [16000, 199990],
-    ]);
-  });
-
-  it("la recarga básica (la de la recarga automática) es la de 1.000 a $18.990", () => {
-    const basica = catalogo.packs.filter((p) => p.esRecargaBasica);
-    expect(basica).toHaveLength(1);
-    expect(basica[0]).toMatchObject({ credits: 1000, priceClp: 18990 });
+  it("hay UNA sola recarga —420 créditos a $24.990— y ningún pack por volumen", () => {
+    // Decisión del dueño: sin descuentos por volumen por ahora. Un pack grande con
+    // descuento premia justo al cliente que más cuesta.
+    expect(catalogo.packs).toHaveLength(1);
+    expect(recarga()).toMatchObject({ code: "conversia-cred-420", credits: 420, priceClp: 24990 });
   });
 
   it("los packs eliminados NO están sembrados", () => {
-    // 1.150 / 2.500 / 5.000 / 11.000 / 20.000 no cumplían la regla de 300%.
     for (const c of catalogo.packsEliminados.creditos) {
-      expect(catalogo.packs.some((p) => p.credits === c)).toBe(false);
+      expect(catalogo.packs.some((p) => p.credits === c), `el pack de ${c} créditos volvió`).toBe(false);
+    }
+  });
+
+  it("los packs del catálogo anterior quedaron en la lista de eliminados", () => {
+    // Si alguien los borra de la lista, el guardián de arriba deja de protegerlos.
+    for (const c of [1000, 3000, 6000, 8500, 16000]) {
+      expect(catalogo.packsEliminados.creditos).toContain(c);
     }
   });
 });
 
-describe("§5 — la regla de ganancia mínima de 300%", () => {
-  it("TODOS los packs la cumplen", () => {
-    const fallan: string[] = [];
-    for (const p of catalogo.packs) {
-      const g = gananciaSobreCosto(p.priceClp, p.credits);
-      if (g < S.gananciaMinimaPct) fallan.push(`${p.code}: ${g.toFixed(0)}% (mínimo ${S.gananciaMinimaPct}%)`);
-    }
-    expect(fallan).toEqual([]);
+describe("§8.3 — la calibración: el cliente de referencia paga ~$200.000 al mes", () => {
+  it("los tramos de septiembre suman las respuestas y los créditos medidos", () => {
+    const r = SEPTIEMBRE_DIGITAL_DENT.tramos.reduce((a, t) => a + t.respuestas, 0);
+    const c = SEPTIEMBRE_DIGITAL_DENT.tramos.reduce((a, t) => a + t.respuestas * t.creditosCadaUna, 0);
+    expect(r).toBe(SEPTIEMBRE_DIGITAL_DENT.respuestas);
+    expect(c).toBe(SEPTIEMBRE_DIGITAL_DENT.creditos);
   });
 
-  it("el pack más grande es el que queda más al límite (el primero a revisar si sube el costo)", () => {
-    const ganancias = catalogo.packs.map((p) => ({ code: p.code, g: gananciaSobreCosto(p.priceClp, p.credits) }));
-    const peor = ganancias.reduce((a, b) => (a.g <= b.g ? a : b));
-    expect(peor.code).toBe("conversia-cred-16000");
-    expect(peor.g).toBeGreaterThanOrEqual(S.gananciaMinimaPct);
+  it("con ese consumo la cuenta del mes da ~$200.000", () => {
+    const { recargas, totalClp } = cuentaDelMes(SEPTIEMBRE_DIGITAL_DENT.creditos);
+    expect(recargas).toBe(7);
+    expect(totalClp).toBe(199_920);
+    // Dentro del 5% del objetivo: es una calibración, no una coincidencia exacta.
+    expect(Math.abs(totalClp - SEPTIEMBRE_DIGITAL_DENT.objetivoMensualClp)).toBeLessThan(SEPTIEMBRE_DIGITAL_DENT.objetivoMensualClp * 0.05);
   });
 
-  it("el plan Base cumple SU mínimo (260%: la excepción documentada por el costo fijo)", () => {
-    const base = catalogo.planes.find((p) => p.esPlanBase)!;
-    const g = gananciaSobreCosto(base.priceClp, base.creditos, S.costoFijoPorClienteClp);
-    // El §5 da 260%, que es el redondeo de 259,94% (sale de sus propios números: $4.434 de
-    // costo contra $15.958 netos). Se compara redondeado para no perseguir centésimas.
-    expect(Math.round(g)).toBe(S.gananciaMinimaPlanBasePct);
-    // Y es, efectivamente, peor que cualquier pack: la ganancia viene de las recargas.
-    const mejorPack = Math.min(...catalogo.packs.map((p) => gananciaSobreCosto(p.priceClp, p.credits)));
-    expect(g).toBeLessThan(mejorPack);
+  it("el tope por defecto de la recarga automática alcanza para ese mes", () => {
+    // El tope viejo (3 recargas) habría cortado el servicio a mitad de mes justo al cliente
+    // que más paga. Por eso sube a 10.
+    const { recargas } = cuentaDelMes(SEPTIEMBRE_DIGITAL_DENT.creditos);
+    expect(catalogo.recargaAutomatica.recargasEquivalentes).toBe(10);
+    expect(catalogo.recargaAutomatica.topeMensualClp).toBe(recarga().priceClp * 10);
+    expect(recargas).toBeLessThanOrEqual(catalogo.recargaAutomatica.recargasEquivalentes);
   });
 
-  it("si el costo por crédito subiera 20%, los packs seguirían sobre 200% (colchón real)", () => {
-    // La "sensibilidad" del §5. No es un requisito del dueño: es saber cuánto aguanta el
-    // catálogo antes de que haya que recalibrar, con un número en vez de a ojo.
+  it("el tope que usan el api y el worker es el MISMO que dice el catálogo", () => {
+    // El tope vive en `@conversia/agents` y el precio de la recarga en el JSON del
+    // catálogo. Si alguien cambia el precio y no el tope, el default deja de ser "10
+    // recargas" sin que nadie lo note — y el cliente se queda sin bot antes de tiempo o
+    // gasta más de lo que cree. Este test los ata.
+    expect(AUTO_RECARGA_DEFAULTS.topeMensualClp).toBe(catalogo.recargaAutomatica.topeMensualClp);
+    expect(AUTO_RECARGA_DEFAULTS.topeMensualClp).toBe(recarga().priceClp * catalogo.recargaAutomatica.recargasEquivalentes);
+  });
+});
+
+describe("§5 — el piso de ganancia de 300% sigue vigente", () => {
+  it("la recarga lo cumple", () => {
+    expect(gananciaSobreCosto(recarga().priceClp, recarga().credits)).toBeGreaterThanOrEqual(S.gananciaMinimaPct);
+  });
+
+  it("el plan Base también, y ya NO necesita la excepción del 260%", () => {
+    // Con los precios del 27-oct el Base quedaba en 260% y estaba documentado como la única
+    // excepción al piso. Con los del 28-oct lo cumple por derecho propio.
+    const g = gananciaSobreCosto(base().priceClp, base().creditos, S.costoFijoPorClienteClp);
+    expect(g).toBeGreaterThanOrEqual(S.gananciaMinimaPct);
+  });
+
+  it("el Base es el que queda más al límite: es el primero a revisar si sube el costo", () => {
+    const gBase = gananciaSobreCosto(base().priceClp, base().creditos, S.costoFijoPorClienteClp);
+    const gRecarga = gananciaSobreCosto(recarga().priceClp, recarga().credits);
+    expect(gBase).toBeLessThan(gRecarga);
+  });
+
+  it("si el crédito costara 20% más, el Base queda al BORDE del piso (colchón real)", () => {
+    // No es un requisito: es saber cuánto aguanta el catálogo antes de recalibrar, con un
+    // número en vez de a ojo. El Base pasa de 313% a 303% — diez puntos de margen. La
+    // recarga ni se despeina. Si el costo por crédito sube de verdad, lo que hay que
+    // revisar es el PLAN, no las recargas.
     const costoOriginal = S.costoPorCreditoClp;
     try {
       (S as { costoPorCreditoClp: number }).costoPorCreditoClp = costoOriginal * 1.2;
-      for (const p of catalogo.packs) {
-        expect(gananciaSobreCosto(p.priceClp, p.credits)).toBeGreaterThan(200);
-      }
+      expect(gananciaSobreCosto(recarga().priceClp, recarga().credits)).toBeGreaterThan(500);
+      const gBase = gananciaSobreCosto(base().priceClp, base().creditos, S.costoFijoPorClienteClp);
+      expect(gBase).toBeGreaterThan(S.gananciaMinimaPct);
+      expect(gBase).toBeLessThan(S.gananciaMinimaPct + 20); // al borde, y queremos saberlo
     } finally {
       (S as { costoPorCreditoClp: number }).costoPorCreditoClp = costoOriginal;
     }
@@ -128,16 +180,14 @@ describe("§5 — la regla de ganancia mínima de 300%", () => {
 });
 
 describe("§5 — lo que el cliente recibe por su plata", () => {
-  it("la recarga básica rinde ~240 conversaciones, como dice el documento", () => {
-    const basica = catalogo.packs.find((p) => p.esRecargaBasica)!;
-    const conversaciones = Math.round(basica.credits / S.creditosPorConversacion);
-    expect(conversaciones).toBeGreaterThanOrEqual(230);
-    expect(conversaciones).toBeLessThanOrEqual(250);
+  // OJO: estas equivalencias usan `creditosPorConversacion`, que es un supuesto en revisión
+  // (el estimador del panel usa otro número). Ver la nota en el JSON del catálogo.
+  it("la recarga rinde ~100 conversaciones con el supuesto del catálogo", () => {
+    expect(Math.round(recarga().credits / S.creditosPorConversacion)).toBe(100);
   });
 
-  it("el plan Base rinde ~24 conversaciones al mes (por eso la ganancia viene de las recargas)", () => {
-    const base = catalogo.planes.find((p) => p.esPlanBase)!;
-    expect(Math.round(base.creditos / S.creditosPorConversacion)).toBe(24);
+  it("el plan Base rinde ~71 conversaciones al mes", () => {
+    expect(Math.round(base().creditos / S.creditosPorConversacion)).toBe(71);
   });
 
   it("la prueba gratis rinde ~48 conversaciones", () => {
@@ -145,22 +195,9 @@ describe("§5 — lo que el cliente recibe por su plata", () => {
     expect(Math.round((trial.regaloBienvenida ?? 0) / S.creditosPorConversacion)).toBe(48);
   });
 
-  it("la recarga básica cuesta lo mismo que el plan pero trae 10 veces más créditos", () => {
-    const base = catalogo.planes.find((p) => p.esPlanBase)!;
-    const basica = catalogo.packs.find((p) => p.esRecargaBasica)!;
-    expect(basica.priceClp).toBe(base.priceClp);
-    expect(basica.credits).toBe(base.creditos * 10);
-  });
-});
-
-describe("CRE 2 — el precio por crédito baja a medida que el pack crece", () => {
-  it("ningún pack grande sale más caro por crédito que uno más chico", () => {
-    // Si se rompiera, al cliente le convendría comprar dos packs chicos que uno grande:
-    // el catálogo estaría castigando justo al que más nos deja.
-    const porCredito = catalogo.packs.map((p) => ({ code: p.code, credits: p.credits, clp: p.priceClp / p.credits }));
-    const ordenados = [...porCredito].sort((a, b) => a.credits - b.credits);
-    for (let i = 1; i < ordenados.length; i++) {
-      expect(ordenados[i].clp).toBeLessThanOrEqual(ordenados[i - 1].clp);
-    }
+  it("la recarga cuesta lo mismo que el plan y trae 40% más créditos", () => {
+    // Misma plata, más créditos: el plan carga además el costo fijo del cliente.
+    expect(recarga().priceClp).toBe(base().priceClp);
+    expect(recarga().credits / base().creditos).toBeCloseTo(1.4, 2);
   });
 });
