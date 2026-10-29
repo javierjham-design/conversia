@@ -43,13 +43,26 @@ import type { SubscriptionProvider } from "./subscription-billing/provider";
 export const GRACIA_WEBHOOK_MS = 5 * 60 * 1000;
 
 /**
- * Tras esto, un cobro que la pasarela sigue sin resolver pasa a ser cosa de una persona.
+ * Tras esto, un cobro que la pasarela sigue diciendo "pendiente" se trata como la firma de
+ * una tarjeta que NO admite cargos recurrentes (débito o prepago).
  *
- * Flow resuelve un collect en minutos. Dos días diciendo "pendiente" no es lentitud: es un
- * cobro que quedó colgado, y dejarlo pendiente para siempre le come el tope mensual al
- * cliente (los pendientes cuentan contra el tope, y tienen que contar).
+ * **Dos horas, no dos días, y la evidencia no es un sandbox.** El diagnóstico de cobro que
+ * ya corre en producción (`platform.controller.ts`, `billing-diagnose`) lo dice desde el E2E
+ * con tarjeta real del 29-ago-2026: *"si el estado en Flow es 'pendiente' y la tarjeta es de
+ * débito, Flow no admite cargo automático en débito"*. Un collect legítimo resuelve en
+ * segundos; dos horas de "pendiente" ya no es lentitud.
+ *
+ * Estaba en 48 h cuando esa confirmación no estaba a la vista, y 48 h significan **dos días
+ * de un cliente creyendo que su recarga automática lo cubre**, que es justo el daño que esto
+ * viene a evitar. Bajarlo es seguro porque el veredicto SE CORRIGE SOLO: el día que un cobro
+ * a esa tarjeta se confirme, la marca se limpia (ver `marcarTarjetaApta`). Entre avisar de
+ * más —con un link para pagar y una marca que se borra al primer cobro bueno— y avisar dos
+ * días tarde, de más.
  */
-export const VENTANA_ABANDONO_MS = 48 * 60 * 60 * 1000;
+export const VENTANA_TARJETA_NO_APTA_MS = 2 * 60 * 60 * 1000;
+
+/** Nombre anterior del mismo umbral; se mantiene para no romper a quien lo importe. */
+export const VENTANA_ABANDONO_MS = VENTANA_TARJETA_NO_APTA_MS;
 
 /** Un cobro de recarga que todavía no tiene resultado aplicado. */
 export interface RecargaPendiente {
@@ -118,6 +131,13 @@ export interface RechargeReconcilePort {
    */
   marcarTarjetaNoApta?(organizationId: string): Promise<void>;
   /**
+   * Levanta la marca: esta tarjeta SÍ sirve para cobros automáticos. Es lo que hace seguro
+   * acusar temprano — un cobro confirmado es la prueba de que admite cargos recurrentes, y
+   * borra cualquier veredicto anterior. Solo se llama cuando el pago vino de un COBRO
+   * automático: pagar con el link no prueba nada sobre la tarjeta guardada.
+   */
+  marcarTarjetaApta?(organizationId: string): Promise<void>;
+  /**
    * Link de pago único por el mismo monto, para que el cliente pueda recargar aunque su
    * tarjeta no sirva para cobros automáticos. Devuelve la URL o null si no se pudo emitir.
    */
@@ -170,6 +190,10 @@ export async function reconciliarRecargas(
           await port.reaplicarWebhook({ providerRef: p.providerRef!, commerceOrder: p.commerceOrder });
           if (await port.creditoAcreditado(p.organizationId, p.providerRef!)) {
             await port.cerrarIntento(p.commerceOrder, "succeeded", "reconciliado");
+            // El cobro automático ENTRÓ: esta tarjeta admite cargos recurrentes. Se levanta
+            // cualquier marca de "no apta" puesta antes. Es lo que hace seguro acusar
+            // temprano: un veredicto equivocado se borra solo con el primer cobro bueno.
+            await port.marcarTarjetaApta?.(p.organizationId).catch(() => undefined);
             out.acreditadas++;
             break;
           }
@@ -248,9 +272,10 @@ export async function reconciliarRecargas(
               title: "La tarjeta del cliente no sirve para cobros automáticos",
               detail:
                 `El cobro ${p.commerceOrder} por ${CLP(p.amountClp)} (ref ${p.providerRef}) quedó "pendiente" en la pasarela ` +
-                `48 h: el síntoma de una tarjeta de débito o prepago, que no permite cargos recurrentes. Se marcó la tarjeta ` +
-                `como no apta y se le mandó un link para pagar a mano. Para que la recarga automática le funcione tiene que ` +
-                `registrar una tarjeta de CRÉDITO.`,
+                `más de ${Math.round(VENTANA_TARJETA_NO_APTA_MS / 3_600_000)} h: el síntoma de una tarjeta de débito o prepago, que no permite cargos ` +
+                `recurrentes. Se marcó la tarjeta como no apta y se le mandó un link para pagar a mano. Para que la recarga ` +
+                `automática le funcione tiene que registrar una tarjeta de CRÉDITO. Si de todos modos entra un cobro ` +
+                `automático a esa tarjeta, la marca se levanta sola.`,
               dedupeKey: `tarjeta_no_apta:${p.organizationId}`,
             })
             .catch(() => undefined);
