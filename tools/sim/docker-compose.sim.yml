@@ -86,7 +86,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      # 127.0.0.1 y NO localhost: en Alpine `localhost` resuelve ::1 primero (está así en
+      # /etc/hosts) y la API escucha en IPv4, así que el chequeo daba "Connection refused"
+      # SIEMPRE — 465 fallos seguidos cuando lo encontré, con la API respondiendo perfecto
+      # desde el host. Costó dos veces media hora: el `worker` espera a que la api esté
+      # healthy, así que cada `docker compose up` se quedaba colgado sin decir por qué.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 20
