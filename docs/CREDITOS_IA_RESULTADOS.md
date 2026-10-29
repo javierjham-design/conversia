@@ -184,8 +184,8 @@ está en `MODELO_COBRO_CREDITOS_IA.md` §8.3).
 | Producto | Créditos | Precio | Ganancia sobre costo | ≈ conversaciones |
 |---|---|---|---|---|
 | Prueba gratis | 200 | $0 | — | ~48 |
-| **Plan Base** mensual | 300 | **$24.990/mes** | 313% | ~71 |
-| **Recarga** (única) | 420 | **$24.990** | 1.045% | ~100 |
+| **Plan Base** mensual | 300 | **$24.990/mes** | 313% | ~67 |
+| **Recarga** (única) | 420 | **$24.990** | 1.045% | ~93 |
 
 Gracia: 100 créditos. **No hay packs con descuento por volumen.** No se siembran los de
 1.000 / 3.000 / 6.000 / 8.500 / 16.000 (catálogo del 27-oct, reemplazado) ni los de
@@ -196,9 +196,11 @@ Está calibrado para que una cuenta con el uso real de Digital-Dent en septiembr
 necesita la excepción del 260%**, pero es el que queda más al límite: con el crédito 20%
 más caro cae a 303%.
 
-⚠ Las columnas "≈ conversaciones" usan el supuesto de 4,2 créditos por conversación, que
-**no coincide** con el 9 del estimador del panel (ver #576). El dato medido es 1,043
-créditos por RESPUESTA; falta medir cuántas respuestas tiene una conversación.
+Las columnas "≈ conversaciones" usan **4,5 créditos por conversación**, que es el valor
+MEDIDO en septiembre (3.172 créditos en 727 conversaciones = 4,36) redondeado hacia arriba.
+El catálogo y el estimador del panel comparten ese número y hay un test que lo exige: antes
+el estimador usaba 9 y le mostraba al cliente menos de la mitad de lo que su saldo rinde.
+Ver `MODELO_COBRO_CREDITOS_IA.md` §8.4.
 
 **Hay un test que encierra tu regla**: calcula la ganancia de cada pack con las tres partes
 del costo (créditos, comisión de Flow y, en el plan, el costo fijo por cliente) y falla si

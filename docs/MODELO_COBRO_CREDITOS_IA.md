@@ -362,10 +362,31 @@ El plan Base **ya no necesita la excepción del 260%**: la cumple por derecho pr
 es el que queda más al límite — si el costo por crédito subiera 20%, cae a **303%**, al
 borde. **Si el costo sube de verdad, lo que hay que revisar es el plan, no las recargas.**
 
-**Lo que sigue abierto:** cuántas **conversaciones** rinde un crédito. El dato medido es por
-RESPUESTA (1,043); cuántas respuestas tiene una conversación no está medido, y hoy el repo
-tiene dos supuestos distintos — 4,2 en el catálogo y 9 en el estimador del panel (ver
-#576). Las equivalencias "≈ N conversaciones" que ve el cliente dependen de ese número.
+#### 8.4 — Cuántas conversaciones rinde un crédito (MEDIDO, 29-oct)
+
+Quedaba abierto, y se midió contra producción sobre el mismo mes y la misma cuenta. Las
+3.042 respuestas con IA de Digital-Dent en septiembre se repartieron en **727
+conversaciones**:
+
+| | |
+|---|---:|
+| Respuestas por conversación | **4,18** |
+| **Créditos por conversación** | **4,36** |
+
+Se adopta **4,5**, redondeando **hacia arriba**: el costo conservador es el alto, así el
+saldo dura algo más de lo prometido y nunca menos (la misma regla con que se redondean los
+días).
+
+**Esto corrige un error que se iba a lanzar.** El estimador del panel usaba **9**, sin
+medición detrás: le decía a cada cliente que su saldo rendía **menos de la mitad** de lo que
+rinde. Con los 200 créditos de prueba mostraba "≈22 conversaciones" en vez de ≈44 — el
+producto parecía el doble de caro justo en la primera pantalla que ve alguien que está
+decidiendo si contratar. Ahora el catálogo y el estimador comparten el mismo número, con un
+test que lo exige.
+
+Es **una** clínica: sirve como piso razonable, no como verdad universal. En cuanto una
+cuenta junta 20 conversaciones propias, el estimador usa su promedio y este número deja de
+aplicarse.
 
 ---
 

@@ -193,10 +193,10 @@ describe("§4 — el impacto se calcula con el saldo real del cliente", () => {
     store.lots = 500;
     store.grace = 100;
     const i = await buildImpact("o", "gpt-4o-mini", "claude-haiku-4-5");
-    // 400 créditos / (9 × 1) = 44 conversaciones antes; / (9 × 4) = 11 después. El 9 es el
-    // respaldo del estimador, el mismo que ve el cliente en el medidor.
-    expect(i.from.conversations).toBe(44);
-    expect(i.to.conversations).toBe(11);
+    // 400 créditos / (4,5 × 1) = 88 conversaciones antes; / (4,5 × 4) = 22 después. El 4,5
+    // es el respaldo del estimador, el mismo que ve el cliente en el medidor.
+    expect(i.from.conversations).toBe(88);
+    expect(i.to.conversations).toBe(22);
   });
 
   it("usa el CONSUMO REAL del cliente, no un supuesto, cuando ya tiene historia", async () => {
