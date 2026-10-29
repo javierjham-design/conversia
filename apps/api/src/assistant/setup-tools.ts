@@ -79,9 +79,15 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
+        name: "verEstadoDelCobro",
+        description:
+          "Revisa cómo está el cobro del cliente: si tiene tarjeta guardada, si esa tarjeta sirve para COBROS AUTOMÁTICOS (las de débito y prepago no), si la recarga automática está activada y aceptada, y con qué pack. Devuelve qué le falta y el pack recomendado. Úsalo SIEMPRE antes de hablar de pago, de recargas o de que se le pueden acabar los créditos: es lo que distingue a un cliente que pagó de uno que además está cubierto.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
         name: "explicarPagoEnMeta",
         description:
-          "Explica, sin jerga, que hay DOS cobros distintos (Conversia cobra el plan; Meta cobra aparte ciertos mensajes de WhatsApp a la tarjeta del propio cliente) y entrega el botón que abre la página de Meta para cargar la tarjeta. Úsalo cuando pregunten por el costo de los mensajes, cuando Meta rechace un envío por falta de método de pago, o justo después de conectar WhatsApp.",
+          "Explica, sin jerga, que hay DOS cobros distintos (Conversia cobra el plan; Meta cobra aparte ciertos mensajes de WhatsApp a la tarjeta del propio cliente), recomienda tarjeta de CRÉDITO también en Meta, y entrega el botón que abre la página de Meta para cargar la tarjeta. Úsalo cuando pregunten por el costo de los mensajes, cuando Meta rechace un envío por falta de método de pago, o justo después de conectar WhatsApp.",
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
@@ -367,6 +373,62 @@ export async function runSetupTool(
     };
   }
 
+  if (name === "verEstadoDelCobro") {
+    // §5 — PAGÓ NO ES LO MISMO QUE ESTÁ CUBIERTO, y Convi tiene que poder distinguirlo antes
+    // de abrir la boca. Un cliente con el plan pagado y una tarjeta de débito no tiene cobro
+    // automático: el día que se le acaben los créditos su asistente se pausa. Si Convi le
+    // dice "listo, ya está todo", le está prometiendo algo que no va a pasar.
+    const tarjeta = await prisma.admin.paymentMethod
+      .findFirst({ where: { organizationId: ctx.organizationId, provider: "flow" }, orderBy: { createdAt: "desc" }, select: { brand: true, last4: true, autoChargeable: true } })
+      .catch(() => null);
+    const org = await prisma.admin.organization
+      .findUnique({ where: { id: ctx.organizationId }, select: { settings: true } })
+      .catch(() => null);
+    const ar = ((((org?.settings ?? {}) as Record<string, any>).autoRecharge ?? {}) as Record<string, any>);
+    const recargaActiva = ar.enabled === true && typeof ar.consentAt === "string" && ar.consentAt.trim() !== "";
+    // El pack recomendado es el MÁS CHICO que existe: el §5 pide recomendar según el consumo
+    // esperado y, sin historial, el más chico es el que no le hace gastar de más. Cuando ya
+    // eligió uno, se respeta su elección.
+    const packs = await prisma.admin.messagePackage
+      .findMany({ where: { active: true, brand: "conversia", type: "credit" }, orderBy: { priceClp: "asc" }, select: { code: true, name: true, credits: true, priceClp: true } })
+      .catch(() => []);
+    const elegido = packs.find((p) => p.code === ar.packCode) ?? packs[0] ?? null;
+    const falta = !tarjeta
+      ? "registrar_tarjeta"
+      : tarjeta.autoChargeable === false
+        ? "cambiar_a_tarjeta_de_credito"
+        : !recargaActiva
+          ? "activar_recarga_automatica"
+          : null;
+    return {
+      content: JSON.stringify({
+        tarjeta: tarjeta
+          ? {
+              marca: tarjeta.brand,
+              last4: tarjeta.last4,
+              // null = todavía no se sabe: la pasarela informa la marca, no si es de crédito
+              // o de débito, y se confirma con el primer cobro. Convi NO debe presentarlo
+              // como un problema: una tarjeta nueva no es una tarjeta mala.
+              sirveParaCobroAutomatico: tarjeta.autoChargeable,
+            }
+          : null,
+        recargaAutomatica: { activa: recargaActiva, flagEncendido: ar.enabled === true, aceptada: typeof ar.consentAt === "string" && !!ar.consentAt },
+        packElegido: elegido ? { ...elegido, priceClp: Number(elegido.priceClp) } : null,
+        packsDisponibles: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: Number(p.priceClp) })),
+        falta,
+        queDecir:
+          falta === "registrar_tarjeta"
+            ? "Todavía no hay tarjeta. Pídele que registre una de CRÉDITO: con débito o prepago no se pueden hacer cobros automáticos y su asistente se pausaría al quedarse sin créditos. Si solo tiene débito, explícale el plan B: le mandamos un link para pagar cada vez."
+            : falta === "cambiar_a_tarjeta_de_credito"
+              ? "Su tarjeta NO sirve para cobros automáticos (es de débito o prepago). Dile que la cambie por una de crédito, sin dramatizar, y que mientras tanto puede pagar con el link que le mandamos."
+              : falta === "activar_recarga_automatica"
+                ? "Tiene tarjeta apta pero la recarga automática está apagada. Propónsela con el pack recomendado y el tope: es lo que evita que su asistente se pause."
+                : "Está cubierto: tarjeta apta y recarga automática activada. Confírmaselo con los últimos 4 dígitos y no insistas más con el tema.",
+      }),
+      actions: falta ? [{ type: "navigate", to: "/cobros" }, { type: "highlight", target: "cobros-recarga-automatica", text: "Aquí se configura la recarga automática." }] : [],
+    };
+  }
+
   if (name === "explicarPagoEnMeta") {
     // COP 3 — DECISIÓN DEL DUEÑO (27-oct): cada cliente paga a Meta con SU tarjeta (rama
     // "sin línea de crédito"). La otra rama —línea de crédito compartida de un Solution
@@ -386,6 +448,10 @@ export async function runSetupTool(
           "Agrega una tarjeta como método de pago de esa cuenta.",
         ],
         siNoLaCarga: "Sin método de pago en Meta, Meta deja de entregar los mensajes que cobra. El asistente sigue recibiendo, pero no puede responder por WhatsApp.",
+        // §5 — el mismo consejo en los dos lados, porque el problema es el mismo: muchas
+        // tarjetas de débito chilenas no sirven para cobros recurrentes ni internacionales.
+        // Decírselo solo en Conversia lo deja tropezando igual en Meta un mes después.
+        tarjetaRecomendada: "En Meta también conviene una tarjeta de CRÉDITO: muchas de débito chilenas no sirven para pagos internacionales recurrentes.",
         dondeVerElGasto: "En Cobros aparece lo que Meta te cobró este mes, informativo (Conversia no cobra eso).",
       }),
       actions: [

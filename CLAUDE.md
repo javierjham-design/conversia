@@ -23,7 +23,7 @@ Plataforma SaaS multi-tenant de atención conversacional (WhatsApp + agentes IA 
 - Validación con zod (no class-validator). JWT manual con `jsonwebtoken` (no passport).
 - Nest: API en `apps/api` (CJS, tsc build, dev con ts-node). Worker sin Nest (TS plano + BullMQ).
 - Prisma: tablas snake_case vía `@@map`, columnas `@map`. Migraciones + `sql/setup.sql` (RLS/FKs dinámicas sobre columnas `organization_id`).
-- Modelos IA por defecto: `claude-opus-4-8` (conversación), `claude-haiku-4-5` (clasificación). Configurable por agente/tenant. Precios en `packages/agents/src/pricing.ts`.
+- Modelos IA por defecto: el de los bots de CLIENTE es `gpt-4o-mini` (`CREDIT_POLICY_SEED.defaultModel`, editable sin desplegar desde `platform_settings.aiCredits`); `claude-haiku-4-5` para clasificación. Configurable por agente/tenant desde el Super Admin — el tenant no lo elige. Precios en `packages/agents/src/pricing.ts` y pesos de crédito en `packages/agents/src/credit-formula.ts`.
 
 ## Estado y registro
 

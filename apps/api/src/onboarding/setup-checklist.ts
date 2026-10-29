@@ -47,6 +47,16 @@ export interface SetupChecklistStep {
   title: string;
   description: string;
   cta: { label: string; href: string };
+  /**
+   * §5 — AVISO SOBRE UN PASO QUE ESTÁ LISTO PERO NO DEL TODO.
+   *
+   * El caso que lo trae: el paso de pago queda ✅ con el plan pagado, pero si pagó con
+   * tarjeta de débito o con un link no hay cobro automático, y el día que se le acaben los
+   * créditos su bot se pausa igual. Marcarlo como pendiente sería mentir (pagó) y marcarlo
+   * ✅ a secas también (no está cubierto). Un paso listo con un aviso dice la verdad sin
+   * bloquearle el 100%.
+   */
+  warn?: string;
 }
 
 /**
@@ -78,6 +88,15 @@ export interface SetupFacts {
   botReplied: boolean;
   /** Suscripción ACTIVE (plan activado, ya no prueba). */
   planActive: boolean;
+  /**
+   * §5 — ¿el cobro se va a hacer SOLO? Tarjeta apta para cargos recurrentes Y recarga
+   * automática activada con consentimiento. Es otra cosa que "pagó": un cliente puede haber
+   * pagado con débito o con un link y quedar sin cobro automático, y ese es justo el que se
+   * queda sin bot creyendo que está cubierto.
+   */
+  autoChargeReady: boolean;
+  /** La tarjeta guardada NO sirve para cobros automáticos (débito o prepago). */
+  cardNotAutoChargeable: boolean;
   /** Tarjeta guardada o una factura pagada (ya demostró poder pagar). */
   hasPaymentMethod: boolean;
   // ---- Opcionales (no bloquean el 100%) ----
@@ -103,6 +122,8 @@ export const EMPTY_SETUP_FACTS: SetupFacts = {
   channelsWithAgent: 0,
   botReplied: false,
   planActive: false,
+  autoChargeReady: false,
+  cardNotAutoChargeable: false,
   hasPaymentMethod: false,
   miniSiteEnabled: false,
   teamMembers: 1,
@@ -112,6 +133,12 @@ export const EMPTY_SETUP_FACTS: SetupFacts = {
 };
 
 /** Arma el paso completando el contrato viejo de `/onboarding` desde el nuevo. */
+/** ¿La recarga automática está encendida Y aceptada? Sin lo segundo el worker no cobra. */
+function autoRechargeEncendida(settings: Record<string, any>): boolean {
+  const ar = (settings.autoRecharge ?? {}) as Record<string, unknown>;
+  return ar.enabled === true && typeof ar.consentAt === "string" && ar.consentAt.trim() !== "";
+}
+
 function step(s: {
   key: string;
   label: string;
@@ -121,6 +148,7 @@ function step(s: {
   done: boolean;
   blocking: boolean;
   minutes: number;
+  warn?: string;
 }): SetupChecklistStep {
   return {
     key: s.key,
@@ -132,6 +160,7 @@ function step(s: {
     title: s.label,
     description: s.description,
     cta: { label: s.ctaLabel, href: s.href },
+    ...(s.warn ? { warn: s.warn } : {}),
   };
 }
 
@@ -220,6 +249,16 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
       done: facts.planActive || facts.hasPaymentMethod,
       minutes: 2,
       blocking: true,
+      // §5 — PAGADO NO ES LO MISMO QUE CUBIERTO. Si pagó con débito o con un link, no hay
+      // cobro automático: el día que se le acaben los créditos su bot se pausa igual. El
+      // paso queda ✅ porque pagó —marcarlo pendiente sería mentir— con el aviso de lo que
+      // falta, que es lo único que puede evitar que se entere cuando ya se cortó.
+      warn:
+        (facts.planActive || facts.hasPaymentMethod) && !facts.autoChargeReady
+          ? facts.cardNotAutoChargeable
+            ? "Pagado, pero sin cobro automático: tu tarjeta es de débito o prepago y esas no permiten cargos recurrentes. Registra una de CRÉDITO para que tus recargas se cobren solas."
+            : "Pagado, pero sin cobro automático: activa la recarga automática con una tarjeta de crédito para que tu asistente no se pause cuando se acaben los créditos."
+          : undefined,
     }),
     // ---- Opcionales: suman, pero JAMÁS impiden llegar al 100% ----
     step({
@@ -373,6 +412,7 @@ export async function readSetupFacts(
     botReply,
     activeSub,
     paymentMethods,
+    tarjetaFlow,
     paidInvoices,
     teamMembers,
     pwaEvent,
@@ -396,6 +436,12 @@ export async function readSetupFacts(
     admin.message.findFirst({ where: { organizationId, direction: "OUTBOUND", authorType: "AGENT" }, select: { id: true } }).catch(() => null),
     admin.subscription.findFirst({ where: { organizationId, status: "ACTIVE" }, select: { id: true } }).catch(() => null),
     admin.paymentMethod.count({ where: { organizationId } }).catch(() => 0),
+    // §5 — la tarjeta más reciente de Flow, para saber si el cobro va a salir SOLO.
+    // `autoChargeable` es null mientras no se sabe (se confirma con el primer cobro), y ese
+    // estado no se cuenta como "no sirve": una tarjeta nueva no es una tarjeta mala.
+    admin.paymentMethod
+      .findFirst({ where: { organizationId, provider: "flow" }, orderBy: { createdAt: "desc" }, select: { autoChargeable: true } })
+      .catch(() => null),
     admin.invoice.count({ where: { organizationId, status: "PAID" } }).catch(() => 0),
     admin.organizationUser.count({ where: { organizationId, active: true } }).catch(() => 0),
     admin.auditLog.findFirst({ where: { organizationId, action: "pwa.installed" }, select: { id: true } }).catch(() => null),
@@ -426,6 +472,10 @@ export async function readSetupFacts(
     channelsWithAgent,
     botReplied: !!botReply,
     planActive: !!activeSub,
+    // La recarga automática solo cuenta si tiene el CONSENTIMIENTO: sin él el worker no
+    // cobra, aunque el flag esté encendido, así que el checklist no puede darlo por cubierto.
+    autoChargeReady: autoRechargeEncendida(settings) && tarjetaFlow?.autoChargeable === true,
+    cardNotAutoChargeable: tarjetaFlow?.autoChargeable === false,
     hasPaymentMethod: paymentMethods > 0 || paidInvoices > 0,
     miniSiteEnabled: miniSite.enabled === true,
     teamMembers,

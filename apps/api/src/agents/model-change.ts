@@ -1,5 +1,5 @@
 import { getAdminPrisma, leerMuestraConsumoCreditos, leerPromedioDelRubro, withTenant } from "@conversia/database";
-import { estimarAlcance, weightOfModel, type CreditPolicy } from "@conversia/agents";
+import { estimarAlcance, gastoMensualConOtroModelo, weightOfModel, type CreditPolicy } from "@conversia/agents";
 import { modelChangeImpact, readAiModelPolicy } from "./model-policy";
 
 /**
@@ -222,11 +222,71 @@ async function creditosPorConversacionAEstandar(organizationId: string, modeloAc
 /** Impacto en el lenguaje del cliente, con su saldo real y su consumo real. */
 export async function buildImpact(organizationId: string, from: string, to: string) {
   const policy = await readAiModelPolicy();
-  return modelChangeImpact({
+  const impacto = modelChangeImpact({
     from,
     to,
     remainingCredits: await remainingCredits(organizationId),
     policy,
     creditsPerConversationAtStandard: await creditosPorConversacionAEstandar(organizationId, from, policy),
   });
+  // Extra del §6 — LO QUE VA A PAGAR AL MES, y si su tope alcanza. El impacto de arriba le
+  // dice al CLIENTE cuántas conversaciones le quedan; esto le dice al SUPER ADMIN cuánto va
+  // a costarle mantener el servicio, que es otra pregunta y la que decide si el cambio se
+  // aplica. Y sobre todo: si pasa del tope que el cliente fijó, su recarga automática deja
+  // de cobrar y el bot se le pausa a mitad de mes. Un cambio bien intencionado que le corta
+  // el servicio a alguien que paga.
+  const gastoMensual = await gastoMensualDeLaOrg(organizationId, from, to, policy);
+  return { ...impacto, gastoMensual };
+}
+
+/** Lee lo que hace falta para proyectar el gasto mensual. Degrada a "sin datos", no revienta. */
+async function gastoMensualDeLaOrg(organizationId: string, from: string, to: string, policy: CreditPolicy) {
+  try {
+    const admin = getAdminPrisma();
+    const muestra = await withTenant(organizationId, (tx) => leerMuestraConsumoCreditos(tx, organizationId)).catch(() => ({
+      conversaciones: 0,
+      creditos: 0,
+      dias: 0,
+    }));
+    const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { settings: true } }).catch(() => null);
+    const ar = ((((org?.settings ?? {}) as Record<string, any>).autoRecharge ?? {}) as Record<string, any>);
+    const sub = await admin.subscription
+      .findFirst({ where: { organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } })
+      .catch(() => null);
+    const plan = sub?.planId
+      ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { features: true } }).catch(() => null)
+      : null;
+    const incluidos = Number(((plan?.features ?? {}) as Record<string, unknown>).aiCreditsIncluded) || 0;
+    // El pack con el que recargaría: el que eligió, o el más barato si no eligió ninguno.
+    const pack =
+      (typeof ar.packCode === "string" && ar.packCode
+        ? await admin.messagePackage.findUnique({ where: { code: ar.packCode }, select: { credits: true, priceClp: true } }).catch(() => null)
+        : null) ??
+      (await admin.messagePackage
+        .findFirst({ where: { active: true, brand: "conversia", type: "credit" }, orderBy: { priceClp: "asc" }, select: { credits: true, priceClp: true } })
+        .catch(() => null));
+    return gastoMensualConOtroModelo({
+      creditosDeLaMuestra: muestra.creditos,
+      diasDeLaMuestra: muestra.dias,
+      pesoActual: weightOfModel(from, policy).credits,
+      pesoNuevo: weightOfModel(to, policy).credits,
+      incluidosDelPlan: incluidos,
+      packPrecioClp: Number(pack?.priceClp ?? 0),
+      packCreditos: pack?.credits ?? 0,
+      topeMensualClp: Number(ar.monthlyCapClp) || 0,
+    });
+  } catch {
+    // Sin datos se devuelve el estimado vacío, que la frase traduce a "no se puede estimar".
+    // Inventar un número sobre el que alguien va a decidir es peor que no decir nada.
+    return gastoMensualConOtroModelo({
+      creditosDeLaMuestra: 0,
+      diasDeLaMuestra: 0,
+      pesoActual: 1,
+      pesoNuevo: 1,
+      incluidosDelPlan: 0,
+      packPrecioClp: 0,
+      packCreditos: 0,
+      topeMensualClp: 0,
+    });
+  }
 }

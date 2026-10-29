@@ -33,6 +33,12 @@ function fakePrisma(initial: { settings?: Row; name?: string } = {}) {
     agents: [] as Row[],
     agentVersions: [] as Row[],
     canales: { activos: 0, sinAgente: 0 },
+    /** §5 — tarjeta guardada en la pasarela. null = no hay; autoChargeable null = no se sabe. */
+    tarjeta: null as { brand: string; last4: string; autoChargeable: boolean | null } | null,
+    packs: [
+      { code: "conversia-cred-420", name: "Recarga 420 créditos", credits: 420, priceClp: 24990 },
+      { code: "conversia-cred-880", name: "Pack 880 créditos", credits: 880, priceClp: 49900 },
+    ] as Row[],
     ultimoError: null as string | null,
     verticalDefinition: null as Row | null,
   };
@@ -86,6 +92,8 @@ function fakePrisma(initial: { settings?: Row; name?: string } = {}) {
         findMany: async () => db.agents.map((a) => ({ ...a, versions: [] })),
       },
       agentVersion: { findFirst: async () => db.agentVersions.at(-1) ?? null },
+      paymentMethod: { findFirst: async () => db.tarjeta },
+      messagePackage: { findMany: async () => db.packs },
     },
     withTenant: async (_orgId: string, fn: (t: typeof tx) => unknown) => fn(tx),
   };
@@ -359,5 +367,93 @@ describe("activarMiniSitio", () => {
     const r = await runSetupTool(prisma, ctx, "activarMiniSitio", {});
     expect(r?.didWrite).toBe(true);
     expect(db.org.settings.miniSite).toEqual({ tagline: "Cortes a tu medida", enabled: true });
+  });
+});
+
+/**
+ * §5 — CONVI TIENE QUE SABER SI EL CLIENTE ESTÁ CUBIERTO, NO SOLO SI PAGÓ.
+ *
+ * Un cliente con el plan pagado y una tarjeta de débito no tiene cobro automático: el día
+ * que se le acaben los créditos su asistente se pausa. Si Convi le dice "listo, ya está
+ * todo", le prometió algo que no va a pasar — y es la clase de promesa que termina en un
+ * cliente enojado con razón. La herramienta existe para que no tenga que adivinar.
+ */
+describe("verEstadoDelCobro", () => {
+  const leer = async (over: Partial<ReturnType<typeof fakePrisma>["db"]> = {}) => {
+    const { prisma, db } = fakePrisma();
+    Object.assign(db, over);
+    const r = await runSetupTool(prisma, ctx, "verEstadoDelCobro", {});
+    return { r: r!, datos: JSON.parse(r!.content as string), db };
+  };
+
+  it("es de LECTURA: mirar el estado del cobro no cambia nada", () => {
+    expect(isSetupWriteTool("verEstadoDelCobro")).toBe(false);
+  });
+
+  it("sin tarjeta: dice que falta registrarla y menciona el plan B", async () => {
+    const { datos } = await leer();
+    expect(datos.falta).toBe("registrar_tarjeta");
+    expect(datos.tarjeta).toBeNull();
+    expect(datos.queDecir).toContain("CRÉDITO");
+    expect(datos.queDecir).toContain("link"); // el que no tiene crédito no queda bloqueado
+  });
+
+  it("tarjeta de DÉBITO: dice que hay que cambiarla, sin dramatizar", async () => {
+    const { datos } = await leer({ tarjeta: { brand: "Visa", last4: "4242", autoChargeable: false } });
+    expect(datos.falta).toBe("cambiar_a_tarjeta_de_credito");
+    expect(datos.tarjeta.sirveParaCobroAutomatico).toBe(false);
+    expect(datos.queDecir).toContain("sin dramatizar");
+  });
+
+  it("tarjeta recién registrada (no se sabe aún): NO se presenta como un problema", async () => {
+    // La pasarela informa la marca, no si es de crédito o de débito: se confirma con el
+    // primer cobro. Una tarjeta nueva no es una tarjeta mala, y tratarla así asustaría al
+    // cliente justo cuando acaba de hacer lo que le pedimos.
+    const { datos } = await leer({ tarjeta: { brand: "Visa", last4: "4242", autoChargeable: null } });
+    expect(datos.tarjeta.sirveParaCobroAutomatico).toBeNull();
+    expect(datos.falta).toBe("activar_recarga_automatica");
+    expect(datos.queDecir).not.toContain("NO sirve");
+  });
+
+  it("recarga ENCENDIDA pero sin aceptar: no cuenta como activa (el worker no cobra)", async () => {
+    const { prisma, db } = fakePrisma({ settings: { autoRecharge: { enabled: true, consentAt: null } } });
+    db.tarjeta = { brand: "Visa", last4: "4242", autoChargeable: true };
+    const r = await runSetupTool(prisma, ctx, "verEstadoDelCobro", {});
+    const datos = JSON.parse(r!.content as string);
+    expect(datos.recargaAutomatica).toMatchObject({ activa: false, flagEncendido: true, aceptada: false });
+    expect(datos.falta).toBe("activar_recarga_automatica");
+  });
+
+  it("todo en orden: lo confirma y dice que NO insista más con el tema", async () => {
+    const { prisma, db } = fakePrisma({ settings: { autoRecharge: { enabled: true, consentAt: "2026-10-29T00:00:00.000Z" } } });
+    db.tarjeta = { brand: "Visa", last4: "4242", autoChargeable: true };
+    const r = await runSetupTool(prisma, ctx, "verEstadoDelCobro", {});
+    const datos = JSON.parse(r!.content as string);
+    expect(datos.falta).toBeNull();
+    expect(datos.queDecir).toContain("no insistas");
+    // Y sin nada que arreglar no lo navega a ninguna parte: no se mueve al cliente por nada.
+    expect(r!.actions ?? []).toEqual([]);
+  });
+
+  it("recomienda el pack MÁS CHICO cuando el cliente no eligió ninguno", async () => {
+    // Sin historial de consumo, el más chico es el que no le hace gastar de más.
+    const { datos } = await leer({ tarjeta: { brand: "Visa", last4: "4242", autoChargeable: true } });
+    expect(datos.packElegido.code).toBe("conversia-cred-420");
+    expect(datos.packsDisponibles).toHaveLength(2);
+  });
+
+  it("respeta el pack que el cliente YA eligió", async () => {
+    const { prisma, db } = fakePrisma({ settings: { autoRecharge: { packCode: "conversia-cred-880" } } });
+    db.tarjeta = { brand: "Visa", last4: "4242", autoChargeable: true };
+    const r = await runSetupTool(prisma, ctx, "verEstadoDelCobro", {});
+    expect(JSON.parse(r!.content as string).packElegido.code).toBe("conversia-cred-880");
+  });
+
+  it("cuando falta algo, lleva a /cobros y resalta la recarga automática", async () => {
+    const { r } = await leer();
+    expect(r.actions).toEqual([
+      { type: "navigate", to: "/cobros" },
+      { type: "highlight", target: "cobros-recarga-automatica", text: "Aquí se configura la recarga automática." },
+    ]);
   });
 });

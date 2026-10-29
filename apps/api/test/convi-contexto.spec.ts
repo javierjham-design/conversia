@@ -36,7 +36,7 @@ function prismaCon(opts: { features?: Record<string, unknown>; lotes?: number; g
     channelConnection: { count: async () => 0 },
     whatsappPhoneNumber: { count: async () => 0 },
     message: { findFirst: async () => null },
-    paymentMethod: { count: async () => 0 },
+    paymentMethod: { count: async () => 0, findFirst: async () => null },
     invoice: { count: async () => 0 },
     organizationUser: { count: async () => 1 },
     auditLog: { findFirst: async () => null, create: async () => undefined },

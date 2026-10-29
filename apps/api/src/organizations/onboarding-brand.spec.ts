@@ -31,7 +31,7 @@ function fakePrisma(org: { brand?: string; name?: string; settings?: unknown } |
     agentVersion: { count: async () => 0 },
     workflowVersion: { count: async () => 0 },
     organizationUser: { count: async () => 1 },
-    paymentMethod: { count: async () => 0 },
+    paymentMethod: { count: async () => 0, findFirst: async () => null },
     invoice: { count: async () => 0 },
   };
   const admin = {
@@ -49,7 +49,7 @@ function fakePrisma(org: { brand?: string; name?: string; settings?: unknown } |
     whatsappPhoneNumber: { count: async () => 0 },
     message: { findFirst: async () => null },
     subscription: { findFirst: async () => null },
-    paymentMethod: { count: async () => 0 },
+    paymentMethod: { count: async () => 0, findFirst: async () => null },
     invoice: { count: async () => 0 },
     organizationUser: { count: async () => 1 },
     auditLog: { findFirst: async () => null },

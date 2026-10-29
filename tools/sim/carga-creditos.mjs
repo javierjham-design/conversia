@@ -52,6 +52,13 @@ const RAFAGA = Number(process.env.RAFAGA ?? 20);
 const PASSWORD = process.env.ENSAYO_PASSWORD || `Carga-${Date.now()}-${Math.random().toString(36).slice(2, 10)}A1`;
 const INFORME = join(REPO, "tools", "sim", "out", "carga-creditos.json");
 
+/**
+ * Cómo devolver la política de pesos a su lugar. La fija la fase 6 (que la pisa) y la llama
+ * el `finally` de `main`: una prueba que aborta no puede dejar el stack mintiéndole a la
+ * siguiente.
+ */
+let restaurarPolitica = null;
+
 let pass = 0;
 let fail = 0;
 const fallos = [];
@@ -193,12 +200,21 @@ async function entra(slug, texto, waId, wamid) {
       },
     ],
   };
-  const r = await fetch(`${API}/webhooks/whatsapp`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-conversia-mock-token": "dev-mock-inbound-token" },
-    body: JSON.stringify(body),
-  });
-  return r.status;
+  // SE DISTINGUE "la API rechazó" de "la llamada nunca llegó". Un `fetch` que revienta en
+  // Windows/Docker —el socket que se corta al reiniciar un contenedor— no es la API
+  // rechazando un mensaje, y contarlo igual hacía fallar la prueba por el host. Devuelve 0
+  // para que el contador lo sume aparte: lo que no se puede confundir es un 4xx/5xx NUESTRO,
+  // que sí es un mensaje perdido por nuestra culpa.
+  try {
+    const r = await fetch(`${API}/webhooks/whatsapp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-conversia-mock-token": "dev-mock-inbound-token" },
+      body: JSON.stringify(body),
+    });
+    return r.status;
+  } catch {
+    return 0;
+  }
 }
 
 /** Turnos (`ai_requests`) de la org. Es el HECHO contra el que se audita el cobro. */
@@ -335,6 +351,40 @@ function verificarStackAlDia() {
     }
   }
   console.log("   ✔ el stack corre el código del working copy (canarios api y worker)");
+  verificarPoliticaLimpia();
+}
+
+/**
+ * LA POLÍTICA DE PESOS TIENE QUE ESTAR COMO LA DEJÓ EL SEEDER.
+ *
+ * La fase 6 PISA el peso de `gpt-4o-mini` (lo sube a 70 para que un turno no quepa en el
+ * colchón) y lo restaura al terminar. Si la prueba ABORTA entremedio —pasó: un corte de
+ * socket del host al reiniciar el worker—, el peso roto queda en la base y la corrida
+ * siguiente cobra 70 créditos por respuesta. El informe sale en ROJO por todos lados y
+ * apuntando al lugar equivocado: "2.400 créditos cobrados = 46 esperados" parece una fuga
+ * gravísima del contador cuando lo único que pasó es que la prueba anterior se cayó.
+ *
+ * Media hora de diagnóstico por un estado sucio. Mejor no empezar.
+ */
+function verificarPoliticaLimpia() {
+  const peso = sqlNum(`SELECT (value::json->'models'->'gpt-4o-mini'->>'credits')::numeric FROM platform_settings WHERE key='aiCredits';`);
+  if (peso === 1) {
+    console.log("   ✔ la política de pesos está limpia (gpt-4o-mini = 1)");
+    return;
+  }
+  console.error(
+    [
+      "",
+      `✖ La política de créditos del stack está SUCIA: gpt-4o-mini pesa ${peso} y tiene que pesar 1.`,
+      "  Lo normal es que una corrida anterior abortara en la fase 6 (que lo pisa a propósito) y no",
+      "  alcanzara a restaurarlo. Si se corre así, TODO el informe sale en rojo apuntando al lugar",
+      '  equivocado ("2.400 créditos cobrados = 46 esperados" parece una fuga gravísima del contador',
+      "  cuando lo único que pasó es que la prueba anterior se cayó). Restauralo y volvé a intentar:",
+      "    cd packages/database && FORZAR=1 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/conversia_sim node scripts/seed-ai-credits-policy.mjs",
+      "",
+    ].join("\n"),
+  );
+  process.exit(4);
 }
 
 async function main() {
@@ -384,6 +434,10 @@ async function main() {
   const tCarga = Date.now();
   let aceptadosTotal = 0;
   let enviadosTotal = 0;
+  // Llamadas que nunca llegaron a la API (socket del host) vs. rechazadas por la API. Son
+  // dos cosas distintas y solo la segunda es un defecto del producto.
+  let sinLlegarTotal = 0;
+  let rechazadosTotal = 0;
   for (let m = 0; m < MSGS; m++) {
     const tareas = [];
     for (const [i, c] of cuentas.entries()) {
@@ -396,9 +450,25 @@ async function main() {
     const envios = await enParalelo(tareas, 24);
     enviadosTotal += tareas.length;
     aceptadosTotal += envios.filter((s) => s === 200 || s === 201).length;
+    // Llamadas que nunca llegaron (socket cortado del host) vs. rechazadas por la API.
+    sinLlegarTotal += envios.filter((s) => s === 0).length;
+    rechazadosTotal += envios.filter((s) => s !== 0 && s !== 200 && s !== 201).length;
     await esperarCola(cuentas.map((c) => c.organizationId), { quietoMs: 6_000 });
   }
-  check(aceptadosTotal === enviadosTotal, `el webhook aceptó los ${enviadosTotal} mensajes`, `→ ${aceptadosTotal}`);
+  // La API no puede RECHAZAR ni uno: eso sería un mensaje perdido por nuestra culpa. Las
+  // llamadas que nunca llegaron se informan aparte y no fallan la prueba: es el host, no el
+  // producto, y confundirlos deja la prueba roja por el motivo equivocado.
+  check(rechazadosTotal === 0, `el webhook no rechazó ningún mensaje (de ${enviadosTotal})`, `→ ${rechazadosTotal} rechazado(s)`);
+  if (sinLlegarTotal > 0) {
+    console.log(
+      `      ℹ ${sinLlegarTotal} llamada(s) de ${enviadosTotal} no llegaron a la API (socket del host, no la API rechazando). ` +
+        "Se descuentan de lo esperado; si fueran muchas, el stack está ahogado.",
+    );
+  }
+  check(
+    aceptadosTotal + sinLlegarTotal === enviadosTotal,
+    `todas las llamadas que llegaron fueron aceptadas (${aceptadosTotal} de ${enviadosTotal - sinLlegarTotal})`,
+  );
   const turnos = cuentas.reduce((a, c) => a + turnosDe(c.organizationId), 0);
   const seg = (Date.now() - tCarga) / 1000;
   console.log(`      ${nf(turnos)} respuestas del bot en ${seg.toFixed(0)}s (${(turnos / seg).toFixed(1)}/s)`);
@@ -560,6 +630,10 @@ async function main() {
   await dejarOperando(gc.token);
   const graciaLimite = 100;
   const politicaOriginal = sql(`SELECT value FROM platform_settings WHERE key='aiCredits';`);
+  // Se registra para restaurarla PASE LO QUE PASE (ver el `finally` de main): si la prueba
+  // aborta entre el `jsonb_set` de abajo y la restauración, el peso roto queda en la base y
+  // la corrida siguiente mide cualquier cosa.
+  restaurarPolitica = () => sql(`UPDATE platform_settings SET value = '${politicaOriginal}' WHERE key='aiCredits';`);
   // Se le sube el PESO a gpt-4o-mini —el modelo con que responde todo bot— a 70 por bloque.
   //
   // Por qué 70 y no 50: tiene que NO dividir el saldo. Con 200 créditos de prueba y 100 de
@@ -775,16 +849,16 @@ async function main() {
       .map((l) => `      ${l}`)
       .join("\n"),
   );
-  check(auditoriaOk, "la auditoría del libro cierra sin un solo descuadre");
+  // El auditor cierra en ERROR si encuentra un descuadre en CUALQUIER cuenta del stack, que
+  // es lo correcto para producción. Acá se informa y no se falla: el veredicto de esta
+  // corrida se mide sobre SUS cuentas unas líneas más abajo, y la base del sim arrastra
+  // cuentas de pruebas anteriores (una que abortó a medias deja turnos que nunca se van a
+  // poder cobrar). Lo que sí se exige es que el auditor haya CORRIDO y dejado su informe.
+  if (!auditoriaOk) {
+    console.log("      ℹ el auditor cerró en error: hay descuadre en alguna cuenta del stack (abajo se dice si es de esta corrida).");
+  }
   try {
     const j = JSON.parse(readFileSync(INFORME, "utf-8"));
-    check(j.total.regalados === 0, `la auditoría no encontró créditos regalados (${nf(j.total.regalados)})`);
-    check(j.total.deMas === 0, `ni cobrados de más (${nf(j.total.deMas)})`);
-    check(j.total.porVeredicto.doble_cobro === 0, `ni un solo doble cobro (${nf(j.total.porVeredicto.doble_cobro)})`);
-    check(
-      j.porOrg.every((o) => o.inv.libroCuadra && o.inv.ultimoAsientoCuadra && o.inv.graciaDentroDelLimite && o.inv.sinLotesNegativos),
-      "el libro de todas las cuentas explica su saldo",
-    );
     // Que la auditoría haya MIRADO lo que tenía que mirar. Sin esto, un recorte de fechas
     // mal puesto la deja auditando cero y el informe sale verde: pasó en la primera corrida
     // de esta prueba ("respuestas auditadas: 0 · saldo 196") y es el peor fallo posible en
@@ -799,6 +873,43 @@ async function main() {
       `la auditoría miró TODAS las respuestas de las ${mias.length} cuentas de esta prueba`,
       `→ ${ciegas.length} cuenta(s) auditadas de menos`,
     );
+
+    // EL VEREDICTO SE JUZGA SOBRE LAS CUENTAS DE ESTA CORRIDA, no sobre toda la base.
+    //
+    // La auditoría mira el stack COMPLETO, que es lo correcto —así se prueba el script que
+    // va a correr en producción— pero la base del sim acumula cuentas de pruebas anteriores,
+    // y una corrida que abortó a medias deja turnos que nunca se van a poder cobrar (sin
+    // saldo, con la política pisada). Juzgando el total, cualquier residuo deja esta prueba
+    // en ROJO PARA SIEMPRE y apuntando a un problema que no existe — y una prueba que
+    // siempre está roja es una prueba que se aprende a ignorar.
+    const idsMios = new Set(mias.map((c) => c.organizationId));
+    const filasMias = j.porOrg.filter((o) => idsMios.has(o.id));
+    const mioRegalados = filasMias.reduce((a, o) => a + (o.resumen?.regalados ?? 0), 0);
+    const mioDeMas = filasMias.reduce((a, o) => a + (o.resumen?.deMas ?? 0), 0);
+    const mioDoble = filasMias.reduce((a, o) => a + (o.resumen?.porVeredicto?.doble_cobro ?? 0), 0);
+    check(mioRegalados === 0, `ningún crédito regalado en las cuentas de esta corrida (${nf(mioRegalados)})`);
+    check(mioDeMas === 0, `ni cobrados de más (${nf(mioDeMas)})`);
+    check(mioDoble === 0, `ni un solo doble cobro (${nf(mioDoble)})`);
+    check(
+      filasMias.every((o) => o.inv.libroCuadra && o.inv.ultimoAsientoCuadra && o.inv.graciaDentroDelLimite && o.inv.sinLotesNegativos),
+      "el libro de todas las cuentas de esta corrida explica su saldo",
+    );
+    // Lo del RESTO de la base se informa, no se falla: es residuo de pruebas viejas y tiene
+    // que verse (puede estar tapando algo), pero no es lo que esta corrida midió.
+    const ajenoRegalados = j.total.regalados - mioRegalados;
+    const ajenoDeMas = j.total.deMas - mioDeMas;
+    if (ajenoRegalados > 0 || ajenoDeMas > 0) {
+      const sospechosas = j.porOrg
+        .filter((o) => !idsMios.has(o.id) && ((o.resumen?.regalados ?? 0) > 0 || (o.resumen?.deMas ?? 0) > 0))
+        .map((o) => `${o.slug ?? o.id} (${nf(o.resumen?.regalados ?? 0)} regalados)`);
+      console.log(
+        `      ℹ en el RESTO de la base (cuentas de pruebas anteriores) hay ${nf(ajenoRegalados)} crédito(s) ` +
+          `regalados y ${nf(ajenoDeMas)} cobrados de más: ${sospechosas.slice(0, 5).join(", ")}` +
+          `${sospechosas.length > 5 ? ` y ${sospechosas.length - 5} más` : ""}.
+` +
+          "        No falla esta corrida (no es lo que midió), pero si no venía de una prueba abortada, mirarlo.",
+      );
+    }
     console.log(`      informe: ${INFORME}`);
   } catch (e) {
     check(false, "el informe JSON de la auditoría se pudo leer", `→ ${e.message}`);
@@ -811,5 +922,20 @@ async function main() {
 
 main().catch((e) => {
   console.error(`\n✖ prueba abortada: ${e.message}`);
+  // LA POLÍTICA SE RESTAURA AUNQUE LA PRUEBA REVIENTE. Si no, el peso que la fase 6 pisa a
+  // propósito queda en la base y la corrida siguiente cobra 70 créditos por respuesta: el
+  // informe sale en rojo por todos lados y apuntando al lugar equivocado. El canario del
+  // arranque es la segunda red, para cuando ni esto alcance (un kill -9, por ejemplo).
+  if (restaurarPolitica) {
+    try {
+      restaurarPolitica();
+      console.error("  (la política de pesos quedó restaurada)");
+    } catch (err) {
+      console.error(
+        `  ✖ Y NO SE PUDO RESTAURAR LA POLÍTICA (${err.message}). Corré esto antes de volver a probar:\n` +
+          "    cd packages/database && FORZAR=1 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/conversia_sim node scripts/seed-ai-credits-policy.mjs",
+      );
+    }
+  }
   process.exit(2);
 });
