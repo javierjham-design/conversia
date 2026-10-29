@@ -25,6 +25,7 @@ import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrai
 import { refundForMessage } from "./wallet";
 import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
+import { observeTurnModel } from "./ai-health";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
 
 const registry = new ToolRegistry();
@@ -773,6 +774,17 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
       console.error(`✖ Aviso de degradación (${conversationId}):`, (e as Error).message);
     }
   }
+
+  // Vigilancia de salud del router: ¿el proveedor que respondió es el del modelo
+  // configurado, o el router cayó en silencio a otro (llave muerta)? Si degradó, marca
+  // Redis (→ /health/status 503 → alerta) y avisa una vez. Best-effort, no bloquea el
+  // turno (en el camino de error la respuesta no trae provider → se ignora sola).
+  void observeTurnModel({
+    organizationId,
+    configuredModel: runtime.model,
+    respondedModel: result.model,
+    respondedProvider: result.provider,
+  });
 
   // 4. Persistir trazabilidad + respuesta.
   // Guarda E4 (una respuesta por turno): tope configurable por invocación de turno.

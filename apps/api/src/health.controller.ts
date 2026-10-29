@@ -1,6 +1,7 @@
 import { Controller, Get, Header, Headers, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { getEnv, BRANDS, messagingFuseKeys } from "@conversia/config";
 import { getDbRoleStatus } from "@conversia/database";
+import { AI_DEGRADED_PROVIDERS, aiDegradedRedisKey } from "@conversia/types";
 import { QueueService } from "./queues";
 import { PrismaService } from "./prisma.service";
 
@@ -171,11 +172,42 @@ export class HealthController {
         ? { ok: false, detail: "el usuario de DATABASE_URL puede saltarse la RLS (rolsuper/rolbypassrls)" }
         : { ok: true, detail: dbRole.checked ? "rol restringido" : "sin verificar" };
 
+    // 7. Degradación SILENCIOSA del router de IA: el worker marca
+    //    `conversia:ai:degraded:<provider>` cuando responde con un proveedor distinto al del
+    //    modelo configurado (p. ej. gpt-* → Haiku porque murió OPENAI_API_KEY). El bot sigue
+    //    respondiendo, pero con otro modelo y a otro costo, y hay que reponer la llave → el
+    //    monitor externo debe verlo como caída. Sin marca = sano. La marca caduca sola (TTL) si
+    //    deja de haber tráfico, y se borra cuando el proveedor vuelve (el incidente se resuelve).
+    try {
+      const claves = AI_DEGRADED_PROVIDERS.map(aiDegradedRedisKey);
+      const valores = await this.queues.connection.mget(...claves);
+      const caidos = AI_DEGRADED_PROVIDERS.map((p, i) => ({ p, raw: valores[i] })).filter((x) => x.raw);
+      if (caidos.length === 0) {
+        checks.ai = { ok: true };
+      } else {
+        const detalle = caidos
+          .map(({ p, raw }) => {
+            try {
+              const j = JSON.parse(raw as string) as { actualProvider?: string; respondedModel?: string };
+              return `${p}→${j.actualProvider ?? "?"}(${j.respondedModel ?? "?"})`;
+            } catch {
+              return p;
+            }
+          })
+          .join(", ");
+        checks.ai = { ok: false, detail: `IA degradada: ${detalle}` };
+      }
+    } catch {
+      // redis ya está cubierto en el check 2; aquí no afirmamos degradación si no se pudo leer.
+      checks.ai = { ok: true, detail: "no verificable" };
+    }
+
     const ok = Object.values(checks).every((c) => c.ok);
-    // `whatsappTokenOk` y `dbRoleOk` explícitos para el humo (smoke-prod) además del agregado.
+    // `whatsappTokenOk`, `dbRoleOk` y `aiOk` explícitos para el humo (smoke-prod) además del agregado.
     const whatsappTokenOk = checks.whatsappToken?.ok ?? true;
     const dbRoleOk = checks.dbRole?.ok ?? true;
-    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, dbRoleOk, checks });
-    return { ok, whatsappTokenOk, dbRoleOk, checks };
+    const aiOk = checks.ai?.ok ?? true;
+    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, dbRoleOk, aiOk, checks });
+    return { ok, whatsappTokenOk, dbRoleOk, aiOk, checks };
   }
 }
