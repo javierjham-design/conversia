@@ -4,12 +4,12 @@
 
 ## Veredicto: 🟡 NO-GO (condicional)
 
-El **núcleo está sólido y en verde** (plataforma, PWA, visual, robustez del asistente). Quedan **2 bloqueantes que dependen del dueño** antes de abrir la campaña:
+El **núcleo está sólido y en verde** (plataforma, PWA, visual, robustez del asistente). Queda **1 bloqueante** antes de abrir la campaña:
 
-1. **Evaluación de CALIDAD del asistente (F4)** — los 12 guiones + agente juez ≥ 90% requieren una **`ANTHROPIC_API_KEY` real** (IA real, no mock). No se pudo correr sin la clave. El arnés está listo (`tools/sim/assistant-eval.mjs`); la **robustez** y el **rate-limit** sí se verificaron (ver F4).
-2. **Datos legales** — `apps/conversia-web/src/app/legal/_config.tsx` tiene `[RAZÓN SOCIAL — completar]`, `[RUT — completar]`, domicilio y comuna visibles en Términos y Privacidad públicos. Son tus datos legales reales; no se pueden inventar.
+1. **Evaluación de CALIDAD del asistente (F4)** — los 12 guiones + agente juez ≥ 90% requieren una **`ANTHROPIC_API_KEY` real** (IA real, no mock). El arnés está listo (`tools/sim/assistant-eval.mjs`) y el procedimiento para pasarle la clave al contenedor sin commitearla está en `tools/sim/docker-compose.eval.yml`; la **robustez** y el **rate-limit** sí se verificaron (ver F4).
+2. ~~**Datos legales**~~ — **RESUELTO (verificado 2026-10-28).** `apps/conversia-web/src/app/legal/_config.tsx` ya trae razón social (Sociedad de Inversiones H y A SpA), RUT, domicilio y comuna de jurisdicción reales; los cargó el dueño en #547. Lo único que queda es **opcional**: que un abogado revise los textos de Términos y Privacidad.
 
-**Con esas dos cosas resueltas (F4 ≥ 90 % + legales cargados) → GO.** Todo lo demás de esta pasada está verde.
+**Con F4 ≥ 90 % → GO.** Todo lo demás de esta pasada está verde.
 
 ## Resultados por fase
 
@@ -51,8 +51,8 @@ Capturas móviles (iPhone 13) antes (encargo PWA) y después (esta pasada) en el
 
 ## Pasos para Javier (para pasar a GO)
 
-1. **`ANTHROPIC_API_KEY`** (gasto acotado): la paso al compose como variable local del contenedor `api` (gitignored, jamás commiteada) + `AI_PROVIDER=anthropic`, y corro F4 completo (12 guiones + juez). Si el juez da ≥ 90 % → GO de F4; si no, ajusto prompt/tools/copy y repito.
-2. **Datos legales**: completar `apps/conversia-web/src/app/legal/_config.tsx` (razón social, RUT, domicilio, comuna) con los reales.
+1. **`ANTHROPIC_API_KEY`** (gasto acotado): la paso al compose como variable local del contenedor `api` (gitignored, jamás commiteada) + `AI_PROVIDER=anthropic`, y corro F4 completo (12 guiones + juez). Si el juez da ≥ 90 % → GO de F4; si no, ajusto prompt/tools/copy y repito. **La clave ya no hay que conseguirla:** hay una válida en el servicio `api` de producción. El procedimiento (override de compose + archivo ignorado por git) está en `tools/sim/docker-compose.eval.yml`.
+2. ~~**Datos legales**~~ — hecho (#547, verificado 2026-10-28). Queda opcional: revisión de un abogado.
 3. (Para producción, aparte de esta validación) claves **VAPID** de prod en Railway (ver `docs/APP_MOVIL_RESULTADOS.md`) y conexión real de canales (app Meta Conversia).
 
 ## Cómo reproducir

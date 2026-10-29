@@ -1,0 +1,25 @@
+# Override para correr la EVALUACIÓN DE CALIDAD DEL ASISTENTE con IA de verdad.
+#
+# El stack normal (.env.sim) corre con AI_PROVIDER=mock a propósito: es gratis, determinista y
+# no depende de la red. Pero la calidad de las respuestas del asistente no se puede evaluar
+# contra un mock —es el único punto de `docs/PROMPT_VALIDACION_FINAL.md` que quedó sin medir—,
+# así que este override agrega un segundo env_file con el proveedor y la clave reales.
+#
+#   1) Escribir tools/sim/.env.sim.local (IGNORADO por git, nunca se commitea):
+#        AI_PROVIDER=anthropic
+#        ANTHROPIC_API_KEY=sk-ant-…
+#      La clave se saca de producción sin imprimirla:
+#        railway run -s api -- node -e "require('fs').writeFileSync('tools/sim/.env.sim.local','AI_PROVIDER=anthropic\nANTHROPIC_API_KEY='+process.env.ANTHROPIC_API_KEY+'\n')"
+#
+#   2) Recrear solo el api con la clave puesta:
+#        docker compose -f tools/sim/docker-compose.sim.yml -f tools/sim/docker-compose.eval.yml up -d --force-recreate api
+#
+#   3) Correr la evaluación y BORRAR el archivo de la clave al terminar.
+#
+# La clave vive SOLO en .env.sim.local. Este archivo no contiene secretos y por eso sí se
+# commitea: lo que se versiona es el procedimiento, no la credencial.
+services:
+  api:
+    env_file:
+      - .env.sim
+      - .env.sim.local
