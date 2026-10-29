@@ -5,8 +5,8 @@
     "comisionFlowPct": 3.81,
     "costoFijoPorClienteClp": 3500,
     "ivaPct": 19,
-    "_creditosPorConversacion": "PREGUNTA ABIERTA (ver §8.3 del documento). El dato medido de septiembre es 1,043 créditos por RESPUESTA del bot; cuántas respuestas tiene una conversación es lo que falta. Este 4,2 es el supuesto histórico del §5 y NO coincide con el 9 que usa el estimador del panel (packages/agents/src/credit-estimate.ts). Hasta que se mida, las equivalencias en conversaciones son orientativas.",
-    "creditosPorConversacion": 4.2,
+    "_creditosPorConversacion": "MEDIDO (29-oct-2026), ya no supuesto: Digital-Dent en septiembre tuvo 3.042 respuestas con IA en 727 conversaciones y 3.172 créditos → 4,36 créditos por conversación. Se redondea a 4,5 HACIA ARRIBA (el costo conservador es el alto: el saldo dura algo más de lo prometido, nunca menos). Tiene que coincidir con CREDITOS_POR_CONVERSACION_POR_DEFECTO de packages/agents/src/credit-estimate.ts; hay un test que lo exige.",
+    "creditosPorConversacion": 4.5,
     "gananciaMinimaPct": 300
   },
   "planes": [

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AUTO_RECARGA_DEFAULTS } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CREDITOS_POR_CONVERSACION_POR_DEFECTO } from "@conversia/agents";
 
 /**
  * CRE 2 — EL CATÁLOGO DE CRÉDITOS IA CUMPLE LO QUE DECIDIÓ EL DUEÑO.
@@ -180,19 +180,31 @@ describe("§5 — el piso de ganancia de 300% sigue vigente", () => {
 });
 
 describe("§5 — lo que el cliente recibe por su plata", () => {
-  // OJO: estas equivalencias usan `creditosPorConversacion`, que es un supuesto en revisión
-  // (el estimador del panel usa otro número). Ver la nota en el JSON del catálogo.
-  it("la recarga rinde ~100 conversaciones con el supuesto del catálogo", () => {
-    expect(Math.round(recarga().credits / S.creditosPorConversacion)).toBe(100);
+  it("el catálogo y el estimador del panel usan EL MISMO costo por conversación", () => {
+    // Si se separan, la página de precios promete una cantidad de conversaciones y el
+    // medidor de adentro otra, para el mismo saldo. Ya pasó una vez (#576).
+    expect(S.creditosPorConversacion).toBe(CREDITOS_POR_CONVERSACION_POR_DEFECTO);
   });
 
-  it("el plan Base rinde ~71 conversaciones al mes", () => {
-    expect(Math.round(base().creditos / S.creditosPorConversacion)).toBe(71);
+  it("es el valor MEDIDO en septiembre, redondeado hacia arriba", () => {
+    // 3.172 créditos en 727 conversaciones = 4,36. Hacia arriba, porque el costo
+    // conservador es el alto: el saldo dura algo más de lo prometido, nunca menos.
+    const medido = 3172 / 727;
+    expect(S.creditosPorConversacion).toBeGreaterThanOrEqual(medido);
+    expect(S.creditosPorConversacion).toBeLessThan(medido + 0.5);
   });
 
-  it("la prueba gratis rinde ~48 conversaciones", () => {
+  it("la recarga rinde ~93 conversaciones", () => {
+    expect(Math.round(recarga().credits / S.creditosPorConversacion)).toBe(93);
+  });
+
+  it("el plan Base rinde ~67 conversaciones al mes", () => {
+    expect(Math.round(base().creditos / S.creditosPorConversacion)).toBe(67);
+  });
+
+  it("la prueba gratis rinde ~44 conversaciones", () => {
     const trial = catalogo.planes.find((p) => p.trial)!;
-    expect(Math.round((trial.regaloBienvenida ?? 0) / S.creditosPorConversacion)).toBe(48);
+    expect(Math.round((trial.regaloBienvenida ?? 0) / S.creditosPorConversacion)).toBe(44);
   });
 
   it("la recarga cuesta lo mismo que el plan y trae 40% más créditos", () => {

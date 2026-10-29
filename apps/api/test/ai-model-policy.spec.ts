@@ -115,13 +115,13 @@ describe("§4 — el modelo estándar sale de configuración", () => {
 
 describe("§4 — impacto que se le muestra al cliente antes de aceptar", () => {
   it("traduce el cambio a conversaciones, que es lo que el cliente entiende", async () => {
-    // Sin dato propio, el respaldo es el MISMO del estimador (9 créditos por conversación
-    // al modelo estándar): 1.000 créditos → 111 conversaciones con el estándar y 27 con el
-    // Plus (peso 4). Antes esta función usaba un 4,2 propio y decía 238 — más del doble de
-    // lo que el medidor le mostraba al mismo cliente en la misma sesión.
+    // Sin dato propio, el respaldo es el MISMO del estimador (4,5 créditos por conversación
+    // al modelo estándar, medido en septiembre): 1.000 créditos → 222 conversaciones con el
+    // estándar y 55 con el Plus (peso 4). Antes esta función usaba un 4,2 propio mientras el
+    // medidor usaba 9: dos números para la misma plata en la misma sesión.
     const i = modelChangeImpact({ from: "gpt-4o-mini", to: "claude-haiku-4-5", remainingCredits: 1_000 });
-    expect(i.from.conversations).toBe(111);
-    expect(i.to.conversations).toBe(27);
+    expect(i.from.conversations).toBe(222);
+    expect(i.to.conversations).toBe(55);
     expect(i.to.creditsPerReply).toBe(4);
     expect(i.cheaper).toBe(false);
   });

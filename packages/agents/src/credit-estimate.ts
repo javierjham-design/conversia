@@ -32,8 +32,25 @@ export const MIN_CONVERSACIONES_PARA_PROMEDIO_PROPIO = 20;
  */
 export const MIN_DIAS_PARA_RITMO = 7;
 
-/** Promedio de respaldo cuando no hay datos ni de la org ni del rubro. */
-export const CREDITOS_POR_CONVERSACION_POR_DEFECTO = 9;
+/**
+ * Promedio de respaldo cuando no hay datos ni de la org ni del rubro.
+ *
+ * **MEDIDO, ya no supuesto (29-oct-2026).** Digital-Dent, septiembre-2026: 3.042 respuestas
+ * del bot que gastaron IA, repartidas en **727 conversaciones** y 3.172 créditos → **4,36
+ * créditos por conversación** (4,18 respuestas por conversación). Se redondea a 4,5 HACIA
+ * ARRIBA porque el costo conservador es el alto: así el saldo dura un poco más de lo
+ * prometido, nunca menos, que es la misma regla con que se redondean los días.
+ *
+ * Antes era **9**, sin medición detrás, y eso le decía a cada cliente que su saldo rendía
+ * menos de la MITAD de lo que rinde: con 200 créditos de prueba, "≈22 conversaciones" en
+ * vez de ≈44. Al lanzar, eso hace parecer el producto el doble de caro de lo que es.
+ *
+ * Es UNA clínica, así que es un piso razonable y no una verdad universal; en cuanto una org
+ * tiene 20 conversaciones propias el estimador usa SU promedio y este número deja de
+ * aplicarse. El catálogo (`seeds/creditos-catalogo.json`) repite este valor para calcular
+ * equivalencias y hay un test que exige que coincidan.
+ */
+export const CREDITOS_POR_CONVERSACION_POR_DEFECTO = 4.5;
 
 export interface MuestraDeConsumo {
   /** Conversaciones del período con al menos una respuesta del bot. */
