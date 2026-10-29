@@ -361,6 +361,51 @@ describe("Etapa 1 — vencimiento y FIFO", () => {
   });
 });
 
+describe("§6 — el respaldo del modelo no lo paga el cliente", () => {
+  it("configurado mini y respondió Haiku: se cobra 1, no 4", async () => {
+    // El caso real del 24 al 29 de octubre: cinco días con la clave de OpenAI revocada y los
+    // bots respondiendo con Haiku. Cobrando por el que respondió, a cada cliente con
+    // gpt-4o-mini se le cobraba CUATRO veces más por una caída NUESTRA.
+    lote(100);
+    const r = await turno("t1", { model: "claude-haiku-4-5", configuredModel: "gpt-4o-mini" });
+    if (r.charged) expect(r.credits).toBe(1);
+    expect(store.lots[0].remaining).toBe(99);
+  });
+
+  it("deja en el consumo los DOS modelos y la marca de respaldo", async () => {
+    // Sin esto, un turno cobrado con peso 1 mientras `ai_requests` dice que respondió Haiku
+    // se lee como un cobro de menos: la auditoría necesita saber que fue a propósito.
+    lote(100);
+    await turno("t1", { model: "claude-haiku-4-5", configuredModel: "gpt-4o-mini" });
+    expect(store.usage.find((e) => e.type === "ai_credits").meta).toMatchObject({
+      configuredModel: "gpt-4o-mini",
+      respondedModel: "claude-haiku-4-5",
+      fallback: true,
+      weight: 1,
+    });
+  });
+
+  it("sin respaldo (configurado = respondió) se cobra lo de siempre y no se marca nada", async () => {
+    lote(100);
+    const r = await turno("t1", { model: "claude-haiku-4-5", configuredModel: "claude-haiku-4-5" });
+    if (r.charged) expect(r.credits).toBe(4);
+    expect(store.usage.find((e) => e.type === "ai_credits").meta).toMatchObject({ fallback: false, weight: 4 });
+  });
+
+  it("un turno viejo sin modelo configurado se cobra con el que respondió", async () => {
+    lote(100);
+    const r = await turno("t1", { model: "claude-haiku-4-5", configuredModel: null });
+    if (r.charged) expect(r.credits).toBe(4);
+  });
+
+  it("si respondió un modelo DESCONOCIDO sigue siendo premium (y con alerta)", async () => {
+    lote(100);
+    const r = await turno("t1", { model: "modelo-raro-v9", configuredModel: "gpt-4o-mini" });
+    if (r.charged) expect(r.credits).toBe(50);
+    expect(store.excepciones.map((e) => e.type)).toContain("modelo_sin_peso_de_credito");
+  });
+});
+
 describe("Etapa 1 — modelo sin peso definido", () => {
   it("se cobra como premium y levanta excepción al super admin", async () => {
     lote(100);

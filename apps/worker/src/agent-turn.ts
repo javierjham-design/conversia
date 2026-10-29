@@ -808,6 +808,10 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
         // cuando OpenAI no está— la fila debe reflejar ESE, o el costo no calza con el modelo.
         provider: result.provider ?? ai.kind,
         model: result.model ?? runtime.model,
+        // Y el que estaba CONFIGURADO, que es con el que se cobra cuando es más barato (§6):
+        // el respaldo lo pagamos nosotros. Sin guardarlo acá, un turno recuperado por la
+        // reconciliación se cobraría con el peso del respaldo.
+        configuredModel: runtime.model,
         purpose: "CHAT",
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
@@ -867,9 +871,12 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     await debitAiCreditsForTurn(organizationId, {
       conversationId,
       turnId,
-      // El modelo que RESPONDIÓ (ver TurnUsage.model): el peso de crédito y la excepción
-      // "modelo sin peso" deben calcularse con el modelo real, no con la etiqueta configurada.
+      // El modelo que RESPONDIÓ (ver TurnUsage.model): la excepción "modelo sin peso" se
+      // calcula con el modelo real, no con la etiqueta configurada.
       model: result.model ?? runtime.model,
+      // Y el configurado, para cobrar el peso MENOR de los dos (§6): si el router cayó al
+      // respaldo porque el proveedor configurado no está, el sobrecosto es nuestro.
+      configuredModel: runtime.model,
       inputTokens: result.usage.inputTokens,
       outputTokens: result.usage.outputTokens,
       costUsd: result.usage.costUsd,

@@ -1,7 +1,7 @@
 import { getAdminPrisma, leerMuestraConsumoCreditos, leerPromedioDelRubro, raiseException, withTenant } from "@conversia/database";
 import {
   CREDIT_POLICY_SEED,
-  creditsForTurn,
+  creditsForTurnConRespaldo,
   estimarAlcance,
   explicarBase,
   frasePorSaldo,
@@ -143,6 +143,12 @@ export interface TurnUsage {
   turnId: string;
   /** Modelo que RESPONDIÓ (si el router cambió de proveedor, el que terminó respondiendo). */
   model: string;
+  /**
+   * Modelo que el agente tiene CONFIGURADO. Se cobra el peso MENOR de los dos: cuando el
+   * router cae al respaldo porque el proveedor configurado no está, el sobrecosto lo
+   * absorbemos nosotros (§6). Ausente = no se sabe, y se cobra el que respondió.
+   */
+  configuredModel?: string | null;
   inputTokens: number;
   outputTokens: number;
   /** Costo real en USD del turno, para el reporte de margen (Etapa 4). */
@@ -167,7 +173,14 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
 
   const policy = await readCreditPolicy();
   const tokens = Math.max(0, usage.inputTokens) + Math.max(0, usage.outputTokens);
-  const detail = creditsForTurn({ model: usage.model, tokens, policy });
+  // §6 — el peso MENOR entre el configurado y el que respondió: el respaldo del modelo no
+  // lo paga el cliente. Los tokens y el costo en dólares se registran reales.
+  const detail = creditsForTurnConRespaldo({
+    configuredModel: usage.configuredModel,
+    respondedModel: usage.model,
+    tokens,
+    policy,
+  });
   // Turno sin llamada a la IA (proveedor caído, modo degradado): no se cobra nada.
   if (detail.credits <= 0) return { charged: false, reason: "sin_tokens" };
 
@@ -236,6 +249,12 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
           turnId: usage.turnId,
           agentId: usage.agentId ?? null,
           model: usage.model,
+          // Los DOS modelos y si entró el respaldo. Sin esto, un turno cobrado con peso 1
+          // mientras `ai_requests` dice que respondió Haiku (peso 4) se lee como un cobro de
+          // menos: la auditoría necesita saber que el peso bajo fue a propósito.
+          configuredModel: usage.configuredModel ?? null,
+          respondedModel: usage.model,
+          fallback: detail.respaldo,
           level: detail.level,
           weight: detail.weight,
           blocks: detail.blocks,

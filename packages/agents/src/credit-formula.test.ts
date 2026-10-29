@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CREDIT_POLICY_SEED, creditsForTurn, parseCreditPolicy, weightOfModel } from "./credit-formula";
+import { CREDIT_POLICY_SEED, creditsForTurn, creditsForTurnConRespaldo, parseCreditPolicy, weightOfModel } from "./credit-formula";
 import { MODEL_PRICING } from "./pricing";
 
 /**
@@ -151,5 +151,72 @@ describe("política leída de platform_settings", () => {
     for (const raw of [null, undefined, 42, "texto", []]) {
       expect(parseCreditPolicy(raw).tokensPerCredit).toBe(20_000);
     }
+  });
+});
+
+/**
+ * EL RESPALDO DEL MODELO NO LO PAGA EL CLIENTE.
+ *
+ * Entre el 24 y el 29 de octubre estuvimos cinco días con la clave de OpenAI revocada y los
+ * bots respondiendo con Haiku. Cobrando por el modelo que respondió, a cada cliente con
+ * gpt-4o-mini configurado se le cobraba CUATRO veces más por una caída nuestra: pidió peso 1
+ * y recibió peso 4 sin enterarse.
+ */
+describe("§6 — el peso menor entre el configurado y el que respondió", () => {
+  it("configurado mini y respondió Haiku por respaldo → 1 crédito por bloque", () => {
+    const r = creditsForTurnConRespaldo({ configuredModel: "gpt-4o-mini", respondedModel: "claude-haiku-4-5", tokens: 1_000 });
+    expect(r.credits).toBe(1);
+    expect(r.weight).toBe(1);
+    expect(r.level).toBe("standard");
+    expect(r.respaldo).toBe(true);
+  });
+
+  it("configurado Haiku y respondió Haiku → 4 (no hay respaldo que absorber)", () => {
+    const r = creditsForTurnConRespaldo({ configuredModel: "claude-haiku-4-5", respondedModel: "claude-haiku-4-5", tokens: 1_000 });
+    expect(r.credits).toBe(4);
+    expect(r.respaldo).toBe(false);
+  });
+
+  it("el ajuste multiplica por los BLOQUES, no cobra un crédito y listo", () => {
+    // Una respuesta larga sigue costando lo que ocupa: lo que baja es el peso, no el largo.
+    const r = creditsForTurnConRespaldo({ configuredModel: "gpt-4o-mini", respondedModel: "claude-sonnet-4-6", tokens: 45_000 });
+    expect(r.blocks).toBe(3);
+    expect(r.credits).toBe(3);
+  });
+
+  it("si respondió uno MÁS BARATO que el configurado, se cobra el barato", () => {
+    // El cliente no paga por un modelo que no recibió.
+    const r = creditsForTurnConRespaldo({ configuredModel: "claude-sonnet-4-6", respondedModel: "gpt-4o-mini", tokens: 1_000 });
+    expect(r.credits).toBe(1);
+    expect(r.respaldo).toBe(false);
+  });
+
+  it("modelo DESCONOCIDO: se mantiene premium y no se abarata por la etiqueta configurada", () => {
+    // Un modelo que no sabemos tasar puede ser nuestro respaldo o un agente apuntando a algo
+    // que nadie revisó. Entre regalar el servicio y cobrar premium con una alerta, la alerta.
+    const r = creditsForTurnConRespaldo({ configuredModel: "gpt-4o-mini", respondedModel: "modelo-raro-v9", tokens: 1_000 });
+    expect(r.credits).toBe(50);
+    expect(r.modelKnown).toBe(false);
+    expect(r.respaldo).toBe(false);
+  });
+
+  it("sin modelo configurado (turno viejo, recuperado) se cobra el que respondió", () => {
+    for (const configuredModel of [null, undefined, "", "   "]) {
+      const r = creditsForTurnConRespaldo({ configuredModel, respondedModel: "claude-haiku-4-5", tokens: 1_000 });
+      expect(r.credits).toBe(4);
+      expect(r.respaldo).toBe(false);
+    }
+  });
+
+  it("cero tokens sigue siendo cero créditos (no hubo respuesta que cobrar)", () => {
+    const r = creditsForTurnConRespaldo({ configuredModel: "gpt-4o-mini", respondedModel: "claude-opus-4-8", tokens: 0 });
+    expect(r.credits).toBe(0);
+    expect(r.respaldo).toBe(false);
+  });
+
+  it("respeta la política vigente, no la semilla", () => {
+    const p = parseCreditPolicy({ models: { "gpt-4o-mini": { level: "standard", credits: 2 } } });
+    const r = creditsForTurnConRespaldo({ configuredModel: "gpt-4o-mini", respondedModel: "claude-haiku-4-5", tokens: 1_000, policy: p });
+    expect(r.credits).toBe(2);
   });
 });
