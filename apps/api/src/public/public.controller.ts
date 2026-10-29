@@ -224,7 +224,10 @@ export class PublicController {
   // lo PRUEBA en un simulador, y se registra para GUARDARLO. Sin cuenta. Draft efímero (72h).
 
   private ipHash(req: Request): string {
-    const ip = (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+    // §3.7 — IP real del cliente vía `req.ip` (Express la deriva con `trust proxy`, ver main.ts).
+    // Leer a mano el primer valor de X-Forwarded-For la hacía FALSIFICABLE: el cliente mandaba
+    // la cabecera a su antojo y se saltaba el antiabuso por IP de /crear (máx 3 drafts/hora).
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
     return createHash("sha256").update(ip).digest("hex").slice(0, 32);
   }
 
