@@ -11,6 +11,10 @@
  * se cae sin que nadie se entere hasta que llega la factura del proveedor. Esto lo hace
  * visible por cuenta y por mes.
  */
+import {
+  costoPorCreditoClp as costoRealPorCredito,
+  margenSobreCostoPct as margenDelCredito,
+} from "@conversia/agents";
 
 /** Umbral de alerta del dueño: por debajo de esto una cuenta deja de ser negocio. */
 export const MARGEN_MINIMO_PCT = 40;
@@ -131,10 +135,11 @@ export const MIN_TURNOS_PARA_CALIBRAR = 200;
 export function recomendarCalibracion(e: EntradaCalibracion): Calibracion {
   const creditosPorConversacion = e.conversaciones > 0 ? Math.round((e.creditos / e.conversaciones) * 10) / 10 : 0;
   const tokensPorTurno = e.turnos > 0 ? Math.round(e.tokens / e.turnos) : 0;
-  const costoPorCreditoClp =
-    e.creditos > 0 ? Math.round(((e.costoIaUsd * e.clpPorUsd) / e.creditos) * 100) / 100 : 0;
-  const margenSobreCostoPct =
-    costoPorCreditoClp > 0 ? Math.round(((e.precioCreditoClp - costoPorCreditoClp) / costoPorCreditoClp) * 100) : null;
+  // Las dos cuentas del costo viven en @conversia/agents: las necesitan este reporte y la
+  // auditoría del contador (`scripts/auditar-creditos.mjs`), y tenerlas dos veces es
+  // exactamente cómo aparecen dos superficies diciendo números distintos del mismo mes.
+  const costoPorCreditoClp = costoRealPorCredito({ costoIaUsd: e.costoIaUsd, creditos: e.creditos, clpPorUsd: e.clpPorUsd });
+  const margenSobreCostoPct = margenDelCredito({ precioCreditoClp: e.precioCreditoClp, costoPorCreditoClp });
 
   if (e.turnos < MIN_TURNOS_PARA_CALIBRAR) {
     return {

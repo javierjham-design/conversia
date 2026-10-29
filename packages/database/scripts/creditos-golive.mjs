@@ -33,6 +33,30 @@ const prisma = new PrismaClient();
 const ON = process.env.OFF !== "1";
 
 async function main() {
+  // FRENO: sin la fila `platform_settings.aiCredits` el cobro igual funciona —el código cae
+  // a la semilla calibrada, a propósito, para que una fila borrada no deje a nadie sin
+  // servicio— pero quedaríamos cobrando con una tabla de precios que vive SOLO en un
+  // artefacto desplegado: el dueño no podría cambiar un peso sin un deploy, y no habría en
+  // la base ningún registro de con qué se cobró. Encender la venta en esas condiciones es
+  // justo lo que no se puede hacer. Se arregla con un comando, así que frena en vez de avisar.
+  if (ON) {
+    const pol = await prisma.platformSetting.findUnique({ where: { key: "aiCredits" } });
+    if (!pol) {
+      console.error(
+        "✖ Falta platform_settings.aiCredits (la política de pesos, bloque de tokens y gracia).\n" +
+          "  Sembrala primero:  node scripts/seed-ai-credits-policy.mjs\n" +
+          "  (para encender igual, aun sabiendo que el dueño no podrá tocar los pesos sin desplegar: IGNORAR_POLITICA=1)",
+      );
+      if (process.env.IGNORAR_POLITICA !== "1") process.exit(1);
+      console.error("  ⚠ IGNORAR_POLITICA=1: se enciende sin la fila de política.\n");
+    } else {
+      const p = JSON.parse(pol.value);
+      console.log(
+        `✔ política vigente: bloque ${p.tokensPerCredit} tokens · gracia ${p.graceCredits} · estándar ${p.defaultModel} · ${Object.keys(p.models ?? {}).length} modelos con peso`,
+      );
+    }
+  }
+
   // Aviso (no bloquea): si hay saldo sin convertir, al encender quedaría gente con lotes
   // en "conversaciones" gastándose como créditos, o sea 10 veces más rápido.
   if (ON) {

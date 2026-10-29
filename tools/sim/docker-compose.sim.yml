@@ -61,7 +61,8 @@ services:
         pnpm --filter @conversia/database db:seed &&
         node packages/database/scripts/v2-golive.mjs &&
         node packages/database/scripts/seed-wa-rate-schedule.mjs &&
-        echo "db-init OK (migrate+setup+seed+golive+rate)"
+        node packages/database/scripts/seed-ai-credits-policy.mjs &&
+        echo "db-init OK (migrate+setup+seed+golive+rate+politica-creditos)"
 
   api:
     image: conversia-sim-api:latest # construida por db-init (misma imagen del monorepo)

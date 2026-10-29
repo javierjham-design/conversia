@@ -18,6 +18,7 @@
     "verify:rls": "tsx src/verify-rls-coverage.ts"
   },
   "dependencies": {
+    "@conversia/agents": "workspace:*",
     "@prisma/client": "^6.2.1",
     "bcryptjs": "^2.4.3"
   },

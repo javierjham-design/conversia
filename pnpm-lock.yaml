@@ -327,6 +327,9 @@ importers:
 
   packages/database:
     dependencies:
+      '@conversia/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@prisma/client':
         specifier: ^6.2.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)

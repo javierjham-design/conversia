@@ -15,7 +15,9 @@
     "db:setup": "pnpm --filter @conversia/database db:setup",
     "db:seed": "pnpm --filter @conversia/database db:seed",
     "sim:up": "bash tools/sim/up.sh",
-    "sim:down": "DOWN=1 bash tools/sim/up.sh"
+    "sim:down": "DOWN=1 bash tools/sim/up.sh",
+    "sim:ensayo": "node tools/sim/ensayo-golive.mjs",
+    "sim:carga-creditos": "node tools/sim/carga-creditos.mjs"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

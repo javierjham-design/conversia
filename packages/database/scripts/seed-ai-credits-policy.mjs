@@ -11,9 +11,17 @@
  * que el dueño apruebe los precios. Esta fila sola no le cobra nada a nadie — el cobro
  * solo se activa cuando un plan tiene `features.aiCreditsWallet`.
  *
+ * NO PISA UNA POLÍTICA YA AFINADA. El dueño cambia los pesos desde esta fila, sin
+ * desplegar; si el seeder la sobreescribiera, volver a sembrar el catálogo le revertiría en
+ * silencio una decisión de precios y el síntoma sería un margen que cambia sin que nadie
+ * haya tocado nada. Es la misma trampa que ya apagó planes vivos una vez. Si la fila existe
+ * y es distinta, muestra la diferencia y no escribe; para pisarla de verdad hace falta
+ * FORZAR=1.
+ *
  * Idempotente:
  *   DATABASE_URL=... node packages/database/scripts/seed-ai-credits-policy.mjs
  *   DATABASE_URL=... node packages/database/scripts/seed-ai-credits-policy.mjs --dry-run
+ *   DATABASE_URL=... FORZAR=1 node packages/database/scripts/seed-ai-credits-policy.mjs
  */
 import { PrismaClient } from "@prisma/client";
 
@@ -51,6 +59,25 @@ async function main() {
     if (dryRun) {
       console.log(`\n(dry-run) escribiría:\n${JSON.stringify(policy, null, 2)}`);
       return;
+    }
+    if (actual) {
+      // Igual: no hay nada que hacer. Distinta: es una decisión del dueño y no se pisa.
+      const mismo = JSON.stringify(JSON.parse(actual.value)) === JSON.stringify(policy);
+      if (mismo) {
+        console.log(`· ya está sembrada con estos mismos valores: no se escribe nada.`);
+        return;
+      }
+      if (process.env.FORZAR !== "1") {
+        console.log(
+          `\n⚠ La política de la base es DISTINTA de la del repo y no se pisa.\n` +
+            `  Lo más probable es que el dueño haya ajustado pesos desde acá, que es para lo que existe esta fila.\n` +
+            `  Del repo:\n${JSON.stringify(policy, null, 2)}\n` +
+            `  Para pisarla igual: FORZAR=1`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      console.log("· FORZAR=1: se pisa la política de la base con la del repo.");
     }
     await prisma.platformSetting.upsert({
       where: { key: KEY },

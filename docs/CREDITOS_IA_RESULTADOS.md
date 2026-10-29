@@ -217,7 +217,7 @@ cambia ninguna decisión, pero el test compara redondeado para no perseguir cent
 `--aplicar` no escribe nada, solo imprime el antes y el después por organización.
 
 - Cada conversación que le quede al cliente pasa a **10 créditos**, con su vencimiento
-  original. Como una conversación consume ~4,2 créditos, todos ganan saldo.
+  original. Como una conversación consume 4,36 créditos medidos (§8.4), todos ganan saldo.
 - La **gracia usada también se multiplica**: si alguien debía 4 conversaciones, debe 40
   créditos. Si no, le perdonaríamos deuda en una unidad y se la cobraríamos en la otra.
 - **Idempotente por organización**: al convertirla queda un sello y la corrida siguiente se
@@ -229,6 +229,19 @@ cambia ninguna decisión, pero el test compara redondeado para no perseguir cent
 - Los lotes vencidos no se tocan. TuBot no se toca.
 
 ### Encender el modelo nuevo
+
+**Antes del go-live hay que sembrar la política**: `node
+packages/database/scripts/seed-ai-credits-policy.mjs` escribe
+`platform_settings.aiCredits`, la tabla de pesos por modelo, el bloque de tokens y la
+gracia. Sin esa fila el cobro igual funciona —el código cae a la semilla calibrada del
+repo, a propósito, para que una fila borrada no deje a nadie sin servicio— pero
+estaríamos cobrando con una tabla que vive solo en un artefacto desplegado: el dueño no
+podría cambiar un peso sin un deploy y en la base no quedaría registro de con qué se
+cobró. Por eso `creditos-golive.mjs` **se niega a encender** si la fila no está
+(`IGNORAR_POLITICA=1` para saltarlo sabiendo lo que implica). El seeder, a su vez, **no
+pisa una política ya afinada**: si la fila existe y es distinta muestra la diferencia y no
+escribe, porque esos pesos son decisiones de precio del dueño y volver a sembrar el
+catálogo no puede revertírselas en silencio (`FORZAR=1` para pisarla).
 
 `node packages/database/scripts/creditos-golive.mjs` (y `OFF=1 …` para volver atrás).
 Activa los planes y packs de créditos, y **deja de vender** los de conversación sin
