@@ -5,6 +5,7 @@ export * from "./credit-audit.js";
 export * from "./pack-bonus.js";
 export * from "./aviso-recarga.js";
 export * from "./pack-margen.js";
+export * from "./gasto-por-modelo.js";
 export * from "./providers.js";
 export * from "./resilient.js";
 export * from "./transcription.js";
