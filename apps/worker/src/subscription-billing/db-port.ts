@@ -3,11 +3,11 @@
  * datos de tenant va por withTenant (RLS activa) y queda auditada. La lectura cross-tenant
  * (catálogo de subs a cobrar) usa admin, como los demás ticks de plataforma.
  */
-import { getAdminPrisma, refillMessageWallet, withTenant } from "@conversia/database";
+import { getAdminPrisma, raiseException, refillMessageWallet, withTenant } from "@conversia/database";
 import { planIncludedQuota } from "../annual-wallet-refill";
 import { alertOwner, sendBillingEmail } from "./billing-emails";
 import { getEnv } from "@conversia/config";
-import type { BillingPort, EngineSub } from "./engine";
+import { VENTANA_INTENTO_HUERFANO_MS, type BillingPort, type EngineSub } from "./engine";
 import type { SubState } from "./state-machine";
 import { RECHARGE_ORDER_PREFIX } from "../auto-recharge";
 
@@ -74,19 +74,35 @@ export function createDbBillingPort(): BillingPort {
         // cobros de suscripción. Si entraran, al confirmarse una recarga la reconciliación
         // llamaría a applyOutcome y le RENOVARÍA EL PERÍODO GRATIS a ese cliente.
         where: { status: "pending", createdAt: { lte: cutoff }, NOT: { commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } } },
-        select: { commerceOrder: true, providerRef: true, subscriptionId: true },
+        select: { commerceOrder: true, providerRef: true, subscriptionId: true, createdAt: true },
         take: 200,
       });
-      return rows.map((r) => ({ commerceOrder: r.commerceOrder, providerRef: r.providerRef ?? "", subscriptionId: r.subscriptionId }));
+      return rows.map((r) => ({ commerceOrder: r.commerceOrder, providerRef: r.providerRef ?? "", subscriptionId: r.subscriptionId, createdAt: r.createdAt }));
     },
 
     async pendingSubscriptionIds() {
-      // TODOS los intentos pendientes (sin importar la antigüedad): mientras uno esté en vuelo,
-      // no se re-cobra esa suscripción. La reconciliación (cada tick) los resuelve.
+      // Intentos pendientes DENTRO DE UNA VENTANA: mientras uno esté en vuelo no se re-cobra
+      // esa suscripción, pero un intento que se quedó colgado no puede apagarle el cobro al
+      // cliente para siempre. Sin la ventana, un `collect` cuya llamada HTTP murió antes de
+      // devolver el token dejaba a esa cuenta con el servicio GRATIS, en silencio: nadie la
+      // volvía a cobrar y nadie se enteraba. La reconciliación cierra esos huérfanos y avisa;
+      // la ventana es el segundo cerrojo, para que ningún otro motivo reproduzca el mismo
+      // silencio.
       // CRE 2 — una RECARGA de créditos en vuelo no debe frenar la mensualidad: son cobros
       // distintos a la misma tarjeta. Se excluyen por prefijo.
-      const rows = await admin.paymentAttempt.findMany({ where: { status: "pending", NOT: { commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } } }, select: { subscriptionId: true }, distinct: ["subscriptionId"], take: 1000 });
+      const desde = new Date(Date.now() - VENTANA_INTENTO_HUERFANO_MS);
+      const rows = await admin.paymentAttempt.findMany({ where: { status: "pending", createdAt: { gte: desde }, NOT: { commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX } } }, select: { subscriptionId: true }, distinct: ["subscriptionId"], take: 1000 });
       return new Set(rows.map((r) => r.subscriptionId));
+    },
+
+    async abandonAttempt(commerceOrder, reason) {
+      // Solo si sigue pendiente: si el webhook o una reconsulta lo cerraron entremedio, su
+      // resultado manda. Y NO se toca la suscripción: no sabemos si el cobro entró.
+      await admin.paymentAttempt.updateMany({ where: { commerceOrder, status: "pending" }, data: { status: "failed", reason } });
+    },
+
+    async raiseOps(organizationId, input) {
+      await raiseException(admin, { organizationId, ...input });
     },
 
     async getSub(subscriptionId) {
