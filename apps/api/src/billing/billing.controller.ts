@@ -14,6 +14,7 @@ import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStr
 import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus } from "./flow-subscriptions";
 import { PaymentSettingsService } from "./payment-settings.service";
 import { isLotPack, packUnitForOrg } from "./pack-unit";
+import { PREFIJO_ORDEN_SUSCRIPCION, reservarCobro } from "./cobro-en-vuelo";
 import { resolveConsent } from "./auto-recharge-consent";
 
 /**
@@ -436,11 +437,22 @@ export class BillingController {
     const currency = org?.currency ?? "CLP";
     const amount = plan ? this.subAmount(plan, sub.interval, currency, org) : 0;
     // Guarda el medio de pago (solo token/brand/last4 — nunca datos de tarjeta).
-    const pm = await this.prisma.admin.paymentMethod.create({ data: { organizationId: ctx.organizationId, provider: "flow", kind: "card", brand: st.brand, last4: st.last4, providerRef: sub.providerCustomerRef, isDefault: true } });
+    //
+    // REUTILIZA el que ya exista para esta tarjeta: volver de Flow dos veces con el mismo
+    // token —un refresh de la pantalla de retorno alcanza— creaba una fila nueva cada vez,
+    // todas con `isDefault: true`. Dos medios de pago "por defecto" para la misma tarjeta
+    // dejan la pantalla de cobros mostrando lo que salga primero y ensucian el historial.
+    const pm =
+      (await this.prisma.admin.paymentMethod.findFirst({ where: { organizationId: ctx.organizationId, provider: "flow", providerRef: sub.providerCustomerRef } })) ??
+      (await this.prisma.admin.paymentMethod.create({ data: { organizationId: ctx.organizationId, provider: "flow", kind: "card", brand: st.brand, last4: st.last4, providerRef: sub.providerCustomerRef, isDefault: true } }));
     await this.prisma.admin.subscription.update({ where: { id: sub.id }, data: { paymentMethodId: pm.id, nextChargeAt: new Date() } });
     // Primer cobro (collect). El worker aplica el resultado por reconciliación.
-    await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "auto", 1);
-    return { registered: true };
+    //
+    // Si el cliente vuelve dos veces de Flow con el mismo token, la reserva atómica del
+    // cobro impide el segundo cargo: se le responde que su pago ya se está procesando en vez
+    // de cobrarle el primer mes dos veces.
+    const cobro = await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "auto", 1);
+    return { registered: true, charging: cobro.cobrado, alreadyInFlight: !cobro.cobrado };
   }
 
   /** Pago MANUAL del monto adeudado (dentro de la ventana de 48 h o estando suspendido). */
@@ -453,8 +465,11 @@ export class BillingController {
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId } });
     const currency = org?.currency ?? "CLP";
     const amount = plan ? this.subAmount(plan, sub.interval, currency, org) : 0;
-    await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "manual", (sub.retriesDone ?? 0) + 1);
-    return { ok: true, amount };
+    const cobro = await this.startCollect(ctx.organizationId, sub.id, sub.providerCustomerRef, amount, currency, plan?.name ?? "Plan", sub.interval, "manual", (sub.retriesDone ?? 0) + 1);
+    // Dos clics en "Pagar ahora" eran dos cargos a la tarjeta por el mismo mes. Ahora el
+    // segundo no cobra y se le dice la verdad: su pago está en curso.
+    if (!cobro.cobrado) return { ok: true, amount, alreadyInFlight: true, message: "Tu pago ya se está procesando; en unos minutos verás el resultado." };
+    return { ok: true, amount, alreadyInFlight: false };
   }
 
   /** Cancelar: sigue activa hasta el fin del período pagado y ahí se suspende. */
@@ -494,16 +509,25 @@ export class BillingController {
     };
   }
 
-  /** Inicia un cobro (collect) y registra el intento PENDIENTE; el worker aplica el resultado. */
-  private async startCollect(organizationId: string, subId: string, customerRef: string, amount: number, currency: string, planName: string, interval: string, kind: "auto" | "manual", attemptNumber: number) {
+  /**
+   * Inicia un cobro (collect) y registra el intento PENDIENTE; el worker aplica el resultado.
+   *
+   * UN COBRO A LA VEZ: la reserva es atómica (cerrojo + alta del intento en una transacción),
+   * así que dos clics en "Pagar ahora" —o el reintento de un fetch— no pueden convertirse en
+   * dos cargos a la misma tarjeta por el mismo mes. Si ya había uno en vuelo devuelve
+   * `enVuelo` y NO cobra; el llamador le dice al cliente que su pago se está procesando.
+   */
+  private async startCollect(organizationId: string, subId: string, customerRef: string, amount: number, currency: string, planName: string, interval: string, kind: "auto" | "manual", attemptNumber: number): Promise<{ cobrado: boolean; enVuelo?: string }> {
     const cfg = await this.flowCfg();
-    const commerceOrder = `sub-${subId}-${Date.now()}`;
+    const commerceOrder = `${PREFIJO_ORDEN_SUSCRIPCION}${subId}-${Date.now()}`;
     // F1/B2 — asunto y retorno por marca del tenant (no el panel de TuBot fijo).
     const org = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } });
     const brand = brandOf(org);
-    await this.prisma.admin.paymentAttempt.create({ data: { organizationId, subscriptionId: subId, commerceOrder, amount, currency, kind, attemptNumber, status: "pending", provider: "flow" } });
+    const reserva = await reservarCobro(this.prisma.admin, { organizationId, subscriptionId: subId, commerceOrder, amount, currency, kind, attemptNumber });
+    if (!reserva.reservado) return { cobrado: false, enVuelo: reserva.enVuelo.commerceOrder };
     const r = await flowCollect(cfg, { customerId: customerRef, commerceOrder, subject: `${brand.paymentSubjectPrefix} · Plan ${planName} (${interval === "yearly" ? "anual" : "mensual"})`, amount, currency, urlConfirmation: `${getEnv().API_URL}/billing/webhooks/flow`, urlReturn: billingReturnUrls(org).home });
     await this.prisma.admin.paymentAttempt.updateMany({ where: { commerceOrder }, data: { providerRef: r.token ?? undefined, status: r.ok ? "pending" : "failed", reason: r.reason ?? undefined } });
+    return { cobrado: true };
   }
 
   /** Bolsa de mensajes del tenant: saldo, incluido y paquetes disponibles. */
@@ -1180,6 +1204,9 @@ export class BillingController {
     if (d.enabled && !(typeof d.monthlyCapClp === "number" && d.monthlyCapClp > 0)) {
       throw new BadRequestException("Para activar la auto-recarga debes fijar un tope mensual de gasto.");
     }
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
+    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
+    const prevAr = (prev.autoRecharge as Record<string, any>) ?? {};
     if (d.enabled && d.packCode) {
       const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: d.packCode } });
       // Tiene que acreditar la bolsa de LOTES (un pack de plantillas no mantiene vivo al
@@ -1191,9 +1218,6 @@ export class BillingController {
       const unidadPack = await packUnitForOrg(ctx.organizationId);
       if (pkg.type !== unidadPack) throw new BadRequestException("Ese paquete no corresponde a tu plan");
     }
-    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
-    const prev = (org?.settings as Record<string, unknown> | null) ?? {};
-    const prevAr = (prev.autoRecharge as Record<string, any>) ?? {};
     // CRE 2 (§6) — CONSENTIMIENTO EXPLÍCITO Y REGISTRADO. Activar la recarga automática es
     // autorizarnos a cobrarle a su tarjeta sin que él vuelva a apretar nada, así que queda
     // la fecha y el usuario. Si ya lo había dado, no se vuelve a pedir; al apagarla se
