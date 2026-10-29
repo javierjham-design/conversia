@@ -37,6 +37,14 @@ describe("§6 — la decisión: ¿se cobra o no?", () => {
     expect(decidirRecarga(base)).toBe("cobrar");
   });
 
+  it("si el cliente acaba de recargar A MANO, no se le cobra otra vez por lo mismo", () => {
+    // El aviso de saldo bajo lo manda a comprar al panel y el tick corre cada 15 minutos:
+    // sin esta guarda, compraba su recarga y al rato le llegaba OTRO cobro por lo mismo.
+    // Dos cobros a la tarjeta y el doble de créditos de los que quiso.
+    expect(decidirRecarga({ ...base, compraReciente: true })).toBe("compra_reciente");
+    expect(decidirRecarga({ ...base, compraReciente: false })).toBe("cobrar");
+  });
+
   it("una org que NO cobra en CLP no se cobra automáticamente", () => {
     // El cobro va con `priceClp` y la moneda de la org, y el cobro recurrente es por Flow,
     // que es CLP. Una org en USD habría recibido un cargo de 24.990 DÓLARES (~23 millones
@@ -165,7 +173,7 @@ describe("§6 — los cobros de recarga no se confunden con los de suscripción"
 
 /* ───────────────────────── Pasada completa, con puerto en memoria ───────────────────────── */
 
-function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: number; enVuelo?: boolean } = {}) {
+function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: number; enVuelo?: boolean; compraReciente?: boolean } = {}) {
   const attempts: Array<{ commerceOrder: string; amount: number; status: string; reason: string | null }> = [];
   const avisos: Array<{ kind: string; data: Record<string, unknown> }> = [];
   const excepciones: Array<{ type: string; title: string; detail: string; dedupeKey: string; severity: string }> = [];
@@ -183,6 +191,7 @@ function makePort(over: Partial<AutoRechargePort> & { saldo?: number; gastado?: 
     packOf: async (code) => (code === "conversia-cred-420" ? { code, credits: 420, priceClp: 24_990 } : null),
     spentThisMonth: async () => over.gastado ?? 0,
     hasPendingRecharge: async () => over.enVuelo ?? false,
+    compraReciente: async () => over.compraReciente ?? false,
     failedRecharges: async () => ({ seguidos: 0, ultimoAt: null }),
     createAttempt: async (i) => void attempts.push({ commerceOrder: i.commerceOrder, amount: i.amount, status: "pending", reason: null }),
     markAttempt: async (co, status, _ref, reason) => {

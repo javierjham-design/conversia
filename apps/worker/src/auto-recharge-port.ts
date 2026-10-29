@@ -41,6 +41,16 @@ function startOfMonth(now: Date): Date {
  */
 export const VENTANA_EN_VUELO_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Cuánto se respeta una recarga comprada A MANO antes de volver a cobrar automáticamente.
+ *
+ * El aviso de saldo bajo manda al cliente a comprar al panel y el tick corre cada 15
+ * minutos: sin esta ventana, el cliente compraba su recarga y al rato le llegaba OTRO cobro
+ * por lo mismo — dos cobros y el doble de créditos de los que quiso. Una hora cubre de
+ * sobra el ida y vuelta de un checkout.
+ */
+export const VENTANA_COMPRA_MANUAL_MS = 60 * 60 * 1000;
+
 export function createDbAutoRechargePort(): AutoRechargePort {
   const admin = getAdminPrisma();
 
@@ -137,6 +147,20 @@ export function createDbAutoRechargePort(): AutoRechargePort {
           commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX },
           status: "pending",
           createdAt: { gte: new Date(Date.now() - VENTANA_EN_VUELO_MS) },
+        },
+        select: { id: true },
+      });
+      return Boolean(row);
+    },
+
+    async compraReciente(organizationId, now) {
+      // Cualquier acreditación de pack reciente cuenta, venga de donde venga: lo que se
+      // evita es cobrarle de nuevo por un saldo que ya recibió.
+      const row = await admin.conversationCreditLedger.findFirst({
+        where: {
+          organizationId,
+          reason: "package_purchase",
+          createdAt: { gte: new Date(now.getTime() - VENTANA_COMPRA_MANUAL_MS) },
         },
         select: { id: true },
       });
