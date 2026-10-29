@@ -268,8 +268,46 @@ async function enParalelo(tareas, n) {
 
 // ───────────────────────────────── la prueba ─────────────────────────────────
 
+/**
+ * ¿El stack está corriendo el código del working copy?
+ *
+ * Trampa que ya costó una corrida entera: el servicio `api` del compose no tiene sección
+ * `build` (su imagen la construye `db-init`), así que `docker compose build api` no
+ * construye nada y NO AVISA. Se queda con la imagen vieja y la prueba "verifica" los
+ * arreglos contra el código anterior, en verde. Se comprueba con un canario: un símbolo que
+ * solo existe en el código nuevo.
+ */
+function verificarStackAlDia() {
+  const canarios = [
+    ["api", "packages/database/scripts/seed-ai-credits-policy.mjs", "FORZAR"],
+    ["worker", "apps/worker/dist/ai-credits-reconcile.js", "cobrarTurnosSinCobrar"],
+  ];
+  for (const [servicio, archivo, simbolo] of canarios) {
+    let hay = "0";
+    try {
+      hay = execFileSync("docker", [...COMPOSE, "exec", "-T", servicio, "sh", "-c", `grep -c '${simbolo}' ${archivo} 2>/dev/null || echo 0`], {
+        cwd: REPO,
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      hay = "0";
+    }
+    if (Number(hay) < 1) {
+      console.error(
+        `\n✖ El contenedor "${servicio}" está corriendo código VIEJO (no encuentro "${simbolo}" en ${archivo}).\n` +
+          `  Reconstruilo antes de probar, o la prueba te va a dar verde sobre el código anterior:\n` +
+          `    docker compose -f tools/sim/docker-compose.sim.yml build db-init worker\n` +
+          `    docker compose -f tools/sim/docker-compose.sim.yml up -d --force-recreate api worker\n`,
+      );
+      process.exit(3);
+    }
+  }
+  console.log("   ✔ el stack corre el código del working copy (canarios api y worker)");
+}
+
 async function main() {
   console.log("══ PRUEBA DE CARGA DEL CONTADOR DE CRÉDITOS ══");
+  verificarStackAlDia();
   console.log(`   ${ORGS} cuentas · ${CONTACTOS} contactos × ${MSGS} mensajes · ráfaga de ${RAFAGA} simultáneos\n`);
 
   // ─────── 0. Créditos encendidos (idempotente) ───────

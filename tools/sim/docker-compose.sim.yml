@@ -65,6 +65,12 @@ services:
         echo "db-init OK (migrate+setup+seed+golive+rate+politica-creditos)"
 
   api:
+    # OJO: este servicio NO tiene sección `build` (la imagen la construye `db-init`, que usa
+    # el mismo Dockerfile del monorepo). Consecuencia que cuesta caro: `docker compose build
+    # api` NO CONSTRUYE NADA y no avisa — se queda con la imagen vieja, y entonces se
+    # "verifican" arreglos contra código viejo. Para reconstruir la api hay que pedir
+    # `db-init`:  docker compose -f tools/sim/docker-compose.sim.yml build db-init worker
+    # (o `bash tools/sim/up.sh`, que hace `up -d --build` de todo).
     image: conversia-sim-api:latest # construida por db-init (misma imagen del monorepo)
     container_name: conversia-sim-api
     env_file: .env.sim
