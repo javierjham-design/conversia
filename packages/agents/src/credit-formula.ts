@@ -120,6 +120,21 @@ export const AUTO_RECARGA_DEFAULTS = {
   conversaciones: { umbral: 20, topeMensualClp: 40_000 },
 } as const;
 
+/**
+ * TECHO del tope mensual: como máximo estas recargas del pack elegido, al mes.
+ *
+ * El tope lo pone el cliente, y hasta ahora lo único que lo limitaba del lado del servidor
+ * era un `max(100000000)` del validador: un error de la pantalla, un decimal de más escrito a
+ * mano o una llamada directa a la API dejaban autorizados **cien millones de pesos** de
+ * cobros automáticos a su tarjeta. El tope es una protección del cliente, así que no puede
+ * depender de que el cliente escriba bien.
+ *
+ * Es el mismo 10 de la decisión del 28-oct (el consumo real de Digital-Dent en septiembre
+ * necesita 7 recargas; con el tope viejo de 3 se le cortaba el servicio a mitad de mes).
+ * Expresado en recargas y no en pesos para que siga valiendo con packs de otro precio.
+ */
+export const MAX_RECARGAS_MES = 10;
+
 export interface ModelWeightLookup extends ModelCreditWeight {
   /** false = el modelo no está en la política: se cobró como premium y hay que alertar. */
   known: boolean;

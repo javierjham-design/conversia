@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, raiseException, refillMessageWallet } from "@conversia/database";
-import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, PREFIJO_ORDEN_RECARGA, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, MAX_RECARGAS_MES, PREFIJO_ORDEN_RECARGA, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
@@ -15,6 +15,7 @@ import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus }
 import { PaymentSettingsService } from "./payment-settings.service";
 import { isLotPack, packUnitForOrg } from "./pack-unit";
 import { PREFIJO_ORDEN_SUSCRIPCION, reservarCobro } from "./cobro-en-vuelo";
+import { revisarTope, techoDelTope } from "./tope-recarga";
 import { resolveConsent } from "./auto-recharge-consent";
 
 /**
@@ -1207,8 +1208,14 @@ export class BillingController {
     const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const prev = (org?.settings as Record<string, unknown> | null) ?? {};
     const prevAr = (prev.autoRecharge as Record<string, any>) ?? {};
-    if (d.enabled && d.packCode) {
-      const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: d.packCode } });
+    // El pack a validar es el que pide la petición o, si no lo trae, el que ya tenía: antes
+    // solo se miraba el de la petición, así que un PUT que solo cambiaba el tope no validaba
+    // nada sobre el pack con el que de verdad se va a cobrar.
+    const codigoPack = d.packCode ?? (typeof prevAr.packCode === "string" ? prevAr.packCode : null);
+    let precioPackClp: number | null = null;
+    let nombrePack: string | null = null;
+    if (d.enabled && codigoPack) {
+      const pkg = await this.prisma.admin.messagePackage.findUnique({ where: { code: codigoPack } });
       // Tiene que acreditar la bolsa de LOTES (un pack de plantillas no mantiene vivo al
       // bot) y ser de la UNIDAD del plan: si no, el arbitraje de precios entre las dos
       // unidades quedaba además automatizado, cobrándose solo cada vez que baja el saldo.
@@ -1217,6 +1224,27 @@ export class BillingController {
       }
       const unidadPack = await packUnitForOrg(ctx.organizationId);
       if (pkg.type !== unidadPack) throw new BadRequestException("Ese paquete no corresponde a tu plan");
+      precioPackClp = pkg.priceClp;
+      nombrePack = pkg.name;
+    }
+    // EL TOPE, VALIDADO DEL LADO DEL SERVIDOR (reglas en `tope-recarga.ts`): no puede pasar
+    // del techo, y subirlo exige volver a aceptar.
+    const problemaTope = revisarTope({
+      enabled: d.enabled,
+      pedido: d.monthlyCapClp,
+      previo: Number(prevAr.monthlyCapClp),
+      precioPackClp,
+      consintio: d.consent === true,
+    });
+    if (problemaTope === "sobre_el_techo") {
+      const techo = techoDelTope(precioPackClp ?? 0);
+      throw new BadRequestException(
+        `El tope mensual no puede pasar de $${techo.toLocaleString("es-CL")} (${MAX_RECARGAS_MES} recargas de ${nombrePack ?? "tu pack"}). ` +
+          `Si necesitás más que eso, conviene cambiar de plan en vez de recargar.`,
+      );
+    }
+    if (problemaTope === "sube_sin_consentir") {
+      throw new BadRequestException("Para subir el tope mensual tenés que aceptar de nuevo que cobremos a tu tarjeta hasta ese monto.");
     }
     // CRE 2 (§6) — CONSENTIMIENTO EXPLÍCITO Y REGISTRADO. Activar la recarga automática es
     // autorizarnos a cobrarle a su tarjeta sin que él vuelva a apretar nada, así que queda
