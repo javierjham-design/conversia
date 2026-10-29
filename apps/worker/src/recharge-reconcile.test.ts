@@ -103,6 +103,8 @@ function makePort(
   const replays: string[] = [];
   const excepciones: Array<{ type: string; severity: string; dedupeKey: string }> = [];
   const avisos: Array<{ kind: string; data: Record<string, unknown> }> = [];
+  const marcadas: string[] = [];
+  const links: Array<{ org: string; monto: number }> = [];
   let acreditado = false;
 
   const port: RechargeReconcilePort = {
@@ -116,8 +118,13 @@ function makePort(
     cerrarIntento: async (commerceOrder, status, reason) => void cierres.push({ commerceOrder, status, reason }),
     notificar: async (_org, kind, data) => void avisos.push({ kind, data }),
     raiseOps: async (_org, i) => void excepciones.push({ type: i.type, severity: i.severity, dedupeKey: i.dedupeKey }),
+    marcarTarjetaNoApta: async (org) => void marcadas.push(org),
+    linkDePago: async (org, monto) => {
+      links.push({ org, monto });
+      return "https://pago/link";
+    },
   };
-  return { port, cierres, replays, excepciones, avisos };
+  return { port, cierres, replays, excepciones, avisos, marcadas, links };
 }
 
 const providerCon = (estado: EstadoPasarela) => {
@@ -202,14 +209,35 @@ describe("pasada completa", () => {
     expect(cierres).toEqual([{ commerceOrder: "rec-org1-123", status: "failed", reason: "sin_respuesta" }]);
   });
 
-  it("dos días sin resolver: excepción crítica y se cierra", async () => {
+  it("dos días sin resolver = TARJETA DE DÉBITO: se marca, se avisa con link y se cierra", async () => {
+    // §4 — un cobro que la pasarela nunca cierra es el síntoma documentado de una tarjeta de
+    // débito o prepago: no permiten cargos recurrentes. Al registrar no se puede distinguir
+    // (la pasarela informa la marca, no el tipo), así que el primer cobro ES la prueba.
+    // Lo que importa no es la etiqueta: antes el cobro se colgaba EN SILENCIO, la recarga
+    // seguía "activada" y al cliente se le cortaba el bot al agotarse la gracia.
     const viejo = pendiente({ createdAt: haceMs(VENTANA_ABANDONO_MS + 1000) });
-    const { port, cierres, excepciones } = makePort({ pendientes: [viejo] });
+    const { port, cierres, excepciones, avisos, marcadas, links } = makePort({ pendientes: [viejo] });
     const r = await reconciliarRecargas(port, providerCon(EN_CURSO), AHORA);
 
     expect(r.sinResolver).toBe(1);
-    expect(excepciones[0]).toMatchObject({ type: "recarga_sin_resolver", severity: "critical" });
-    expect(cierres).toEqual([{ commerceOrder: "rec-org1-123", status: "failed", reason: "sin_resolver_48h" }]);
+    expect(r.tarjetasNoAptas).toBe(1);
+    expect(marcadas).toEqual(["org1"]); // la tarjeta queda marcada: no se reintenta a ciegas
+    expect(links).toEqual([{ org: "org1", monto: 24_990 }]); // y el plan B: pagar a mano
+    expect(excepciones[0]).toMatchObject({ type: "tarjeta_no_apta_cobro_automatico", severity: "warning" });
+    // El aviso al cliente es el de "tu tarjeta no sirve", NO el de "tu tarjeta rechazó":
+    // mandarle el segundo lo hace mirar su cupo, que no es donde está el problema.
+    expect(avisos).toEqual([{ kind: "tarjeta_no_apta", data: { amountClp: 24_990, link: "https://pago/link" } }]);
+    expect(cierres).toEqual([{ commerceOrder: "rec-org1-123", status: "failed", reason: "tarjeta_no_apta" }]);
+  });
+
+  it("si no se puede emitir el link, igual se marca y se avisa (no se pierde el caso)", async () => {
+    const viejo = pendiente({ createdAt: haceMs(VENTANA_ABANDONO_MS + 1000) });
+    const { port, excepciones, avisos, marcadas } = makePort({ pendientes: [viejo] });
+    port.linkDePago = async () => null;
+    await reconciliarRecargas(port, providerCon(EN_CURSO), AHORA);
+    expect(marcadas).toEqual(["org1"]);
+    expect(excepciones[0]).toMatchObject({ type: "tarjeta_no_apta_cobro_automatico" });
+    expect(avisos[0].data.link).toBeNull();
   });
 
   it("un cobro recién emitido no se toca ni se consulta", async () => {
@@ -217,7 +245,7 @@ describe("pasada completa", () => {
     const { port, cierres, replays, excepciones } = makePort({ pendientes: [nuevo] });
     const r = await reconciliarRecargas(port, providerCon(PAGADO), AHORA);
 
-    expect(r).toMatchObject({ revisadas: 1, acreditadas: 0, rechazadas: 0, sinResolver: 0, errores: 0 });
+    expect(r).toMatchObject({ revisadas: 1, acreditadas: 0, rechazadas: 0, sinResolver: 0, tarjetasNoAptas: 0, errores: 0 });
     expect(cierres).toEqual([]);
     expect(replays).toEqual([]);
     expect(excepciones).toEqual([]);

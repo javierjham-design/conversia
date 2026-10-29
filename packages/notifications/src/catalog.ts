@@ -234,7 +234,10 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     // V2-1 — crédito-conversación: aviso al 75% y 90% de las conversaciones del plan.
     key: "credits.low",
     title: "Te quedan pocas conversaciones",
-    body: "Llevas {used} de {included} conversaciones de tu plan ({pct}%). Recarga para no quedarte sin atención automática.",
+    // §4d — `{queHacer}` dice qué va a pasar según cómo esté su cobro (recarga automática
+    // activa, tarjeta que no sirve para cargos recurrentes, sin tarjeta…). Sin eso, el
+    // porcentaje solo le dice que algo se está acabando, no qué hacer ni si ya está cubierto.
+    body: "Llevas {used} de {included} conversaciones de tu plan ({pct}%). {queHacer}",
     audience: ["owner", "tenant_admins"],
     urgency: "critical",
     channels: ["in_app", "web_push", "email", "whatsapp"],
@@ -245,7 +248,7 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     // V2-1 — entraste en GRACIA (saldo 0): el bot sigue atendiendo hasta 20 conversaciones.
     key: "credits.grace",
     title: "Tu bolsa de conversaciones llegó a 0",
-    body: "Se acabaron tus conversaciones. Tu asistente sigue atendiendo {grace} conversaciones de cortesía; recarga para no interrumpir el servicio.",
+    body: "Se acabaron tus conversaciones. Tu asistente sigue atendiendo {grace} conversaciones de cortesía. {queHacer}",
     audience: ["owner", "tenant_admins"],
     urgency: "critical",
     channels: ["in_app", "web_push", "email", "whatsapp"],
@@ -273,6 +276,27 @@ export const NOTIF_EVENTS: NotifEventDef[] = [
     body:
       "Intentamos cobrar la recarga automática y tu tarjeta no la aceptó. Tu asistente sigue atendiendo con el saldo de " +
       "cortesía, pero conviene revisar el medio de pago o recargar a mano para no quedarte sin atención automática.",
+    audience: ["owner", "tenant_admins"],
+    urgency: "critical",
+    channels: ["in_app", "web_push", "email", "whatsapp"],
+    defaultChannels: ["in_app", "email"],
+    link: "/cobros",
+  },
+  {
+    // §4 — LA TARJETA NO SIRVE PARA COBROS AUTOMÁTICOS. Es otro aviso que el de "tu tarjeta
+    // rechazó el cobro", y la diferencia importa: acá no hay nada que revisar en el cupo, hay
+    // que cambiar de tarjeta o pagar con el link. Mandarle el aviso de rechazo lo haría
+    // mirar donde no está el problema, y mientras tanto el bot se le corta.
+    //
+    // Las tarjetas de débito y prepago chilenas (Redcompra incluida) no permiten cargos
+    // recurrentes: el cobro queda "pendiente" en la pasarela para siempre. Al registrar no se
+    // puede distinguir, así que esto se descubre con el primer cobro.
+    key: "credits.tarjeta_no_apta",
+    title: "Tu tarjeta no permite cobros automáticos",
+    body:
+      "Intentamos recargar tus Créditos IA y el cobro quedó sin procesar: tu tarjeta parece ser de débito o prepago, y " +
+      "esas no permiten cargos automáticos. Tu asistente sigue atendiendo con el saldo de cortesía. Para que la recarga " +
+      "funcione sola, registra una tarjeta de CRÉDITO en Cobros; si prefieres, paga esta recarga con el link y listo.",
     audience: ["owner", "tenant_admins"],
     urgency: "critical",
     channels: ["in_app", "web_push", "email", "whatsapp"],

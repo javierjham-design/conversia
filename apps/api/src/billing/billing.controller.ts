@@ -115,7 +115,16 @@ export class BillingController {
         templates: await getTemplateUsage(tx),
         invoices,
         paymentMethod: paymentMethod
-          ? { provider: paymentMethod.provider, brand: paymentMethod.brand, last4: paymentMethod.last4 }
+          ? {
+              provider: paymentMethod.provider,
+              brand: paymentMethod.brand,
+              last4: paymentMethod.last4,
+              // §4 — ¿sirve para COBROS AUTOMÁTICOS? `null` = todavía no se sabe, que es la
+              // verdad al registrar: la pasarela informa la MARCA de la tarjeta, no si es de
+              // crédito o de débito. Se resuelve con el primer cobro. El panel tiene que
+              // poder decir las tres cosas, porque "no sabemos" es distinto de "no sirve".
+              autoChargeable: paymentMethod.autoChargeable,
+            }
           : null,
         // Proveedor con el que pagaría hoy (asignado por TuBot o según moneda)
         paymentProvider: ((org?.settings as any)?.paymentProvider as string | undefined) ?? ((org?.currency ?? "CLP") === "CLP" ? "flow" : "lemonsqueezy"),

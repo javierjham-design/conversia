@@ -1,0 +1,12 @@
+-- §4 — ¿sirve la tarjeta guardada para COBROS AUTOMÁTICOS?
+--
+-- Las tarjetas de débito y prepago chilenas (Redcompra incluida) no permiten cargos
+-- recurrentes: en Flow el cobro queda "pendiente" para siempre. Hasta ahora el cliente no se
+-- enteraba de nada —el cobro se colgaba en silencio y después se le cortaba el bot—, y no
+-- había dónde anotar que esa tarjeta no sirve para esto.
+--
+-- NULL = todavía no se sabe, que es el estado honesto al registrar: Flow informa la MARCA de
+-- la tarjeta, no si es de crédito o de débito. Se resuelve con el primer cobro.
+--
+-- Aditiva y nullable: el código viejo la ignora y el nuevo trata el nulo como "no se sabe".
+ALTER TABLE "payment_methods" ADD COLUMN IF NOT EXISTS "auto_chargeable" BOOLEAN;

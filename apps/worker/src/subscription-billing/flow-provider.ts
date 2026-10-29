@@ -101,6 +101,39 @@ export class FlowSubscriptionProvider implements SubscriptionProvider {
     return { ok: false, providerRef: null, reason: r?.message ?? "collect_failed", settled: true };
   }
 
+  /**
+   * §4 — LINK DE PAGO ÚNICO (`payment/create`), el plan B cuando la tarjeta del cliente no
+   * sirve para cobros automáticos.
+   *
+   * Es otro endpoint que `customer/collect`: no toca la tarjeta guardada, abre una página de
+   * pago que acepta cualquier medio —débito y prepago incluidos— porque el pago es único. La
+   * metadata viaja en `optional` con el mismo formato que el cobro automático, así que al
+   * pagarlo el webhook acredita el pack por el camino de siempre.
+   */
+  async crearLinkDePago(input: {
+    commerceOrder: string;
+    subject: string;
+    amount: number;
+    currency: string;
+    email: string;
+    urlConfirmation: string;
+    urlReturn: string;
+    metadata?: Record<string, string>;
+  }): Promise<{ url: string; token: string }> {
+    const r = await this.post("payment/create", {
+      commerceOrder: input.commerceOrder,
+      subject: input.subject,
+      currency: input.currency,
+      amount: String(Math.round(input.amount)),
+      email: input.email,
+      urlConfirmation: input.urlConfirmation,
+      urlReturn: input.urlReturn,
+      ...(input.metadata ? { optional: JSON.stringify(input.metadata) } : {}),
+    });
+    if (!r?.url || !r?.token) throw new Error(`Flow payment/create: ${r?.message ?? "sin url/token"}`);
+    return { url: `${r.url}?token=${r.token}`, token: String(r.token) };
+  }
+
   async getChargeStatus(providerRef: string): Promise<{ settled: boolean; ok: boolean; reason: string | null }> {
     // providerRef = token de collect. status: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado.
     // OJO: Flow a veces devuelve `status` como STRING ("2") — hay que coercer a número, si no

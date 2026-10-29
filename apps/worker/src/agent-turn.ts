@@ -19,7 +19,7 @@ import { recordServiceSend } from "./service-metering";
 import { readMaxAgentMessagesPerTurn } from "./agent-turn-guard";
 import { chargeServiceSend, outOfConversationCreditsPhrase } from "./messaging-guard";
 import { planDebitsConversation } from "./conversation-credits";
-import { aiCreditsGate, aiCreditsNotifyDecision, debitAiCreditsForTurn, getAiCreditsMeter } from "./ai-credits";
+import { aiCreditsGate, aiCreditsNotifyDecision, debitAiCreditsForTurn, fraseDeQueVaAPasar, getAiCreditsMeter } from "./ai-credits";
 import { informarHitoCapi } from "./funnel-capi";
 import { guardrailInstruction, bumpResponseGuardrail } from "./response-guardrail";
 import { refundForMessage } from "./wallet";
@@ -897,14 +897,20 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     if (aviso?.fire) {
       const medidor = await getAiCreditsMeter(organizationId).catch(() => null);
       const pct = aviso.included > 0 ? Math.round((aviso.used / aviso.included) * 100) : 0;
+      // §4d — QUÉ VA A PASAR con su saldo, no solo cuánto queda. "Te queda el 10%" significa
+      // cosas muy distintas según cómo esté su cobro: con recarga automática y tarjeta de
+      // crédito no pasa nada; con una de débito el cobro va a quedar colgado y el bot se
+      // pausa. El cliente no puede deducirlo de un porcentaje, y el momento de decírselo es
+      // mientras todavía le queda saldo para arreglarlo.
+      const queHacer = await fraseDeQueVaAPasar(organizationId).catch(() => "");
       const { enqueueNotification } = await import("./notifications/queue.js");
       await enqueueNotification({
         eventKey: aviso.fire === "grace" ? "credits.grace" : "credits.low",
         organizationId,
         data:
           aviso.fire === "grace"
-            ? { grace: aviso.graceUsed, restantes: aviso.remaining, estimado: medidor?.frase ?? "" }
-            : { pct, used: aviso.used, included: aviso.included, restantes: aviso.remaining, estimado: medidor?.frase ?? "" },
+            ? { grace: aviso.graceUsed, restantes: aviso.remaining, estimado: medidor?.frase ?? "", queHacer }
+            : { pct, used: aviso.used, included: aviso.included, restantes: aviso.remaining, estimado: medidor?.frase ?? "", queHacer },
       }).catch(() => undefined);
     }
   }
