@@ -242,6 +242,12 @@ const envSchema = z.object({
 
   WORKER_CONCURRENCY: z.coerce.number().default(5),
   SCHEDULER_POLL_MS: z.coerce.number().default(15000),
+  // Cada cuánto se buscan respuestas del bot que quedaron SIN cobrar (un reinicio del
+  // worker o un timeout de base se lleva el cargo). Y cuántos minutos se le dan a un turno
+  // recién respondido antes de tocarlo, para no pisar el cobro en vivo. Configurables para
+  // que el simulador pueda VERIFICAR la recuperación sin esperar 10 minutos.
+  AI_CREDITS_RECONCILE_MS: z.coerce.number().default(600_000),
+  AI_CREDITS_RECONCILE_GRACIA_MIN: z.coerce.number().default(3),
   MOCK_CLARIVA_PORT: z.coerce.number().default(4010),
 
   // --- Facturación / pasarela de pago (opcional; mock si vacío) ---

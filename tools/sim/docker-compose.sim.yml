@@ -107,6 +107,12 @@ services:
       DATABASE_URL: postgresql://conversia_app:conversia_app_dev_password@postgres:5432/conversia_sim?connection_limit=10
       DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
       WORKER_CONCURRENCY: "8"
+      # Recuperación de los cobros que se perdieron (un reinicio del worker se lleva el
+      # cargo del turno que estaba en vuelo). En producción pasa cada 10 min y respeta 3
+      # min de gracia; acá se baja para que la prueba de carga pueda VERIFICAR que el
+      # crédito vuelve, en vez de medir el hueco y darlo por bueno.
+      AI_CREDITS_RECONCILE_MS: "20000"
+      AI_CREDITS_RECONCILE_GRACIA_MIN: "1"
     depends_on:
       db-init:
         condition: service_completed_successfully

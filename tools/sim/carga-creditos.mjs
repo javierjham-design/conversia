@@ -491,7 +491,28 @@ async function main() {
     `      ${nf(kTurnos)} turnos · ${nf(kRespuestas)} respuestas enviadas de ${MENSAJES_KILL} mensajes · cobrado ${nf(kCobrado)}/${nf(kEsperado)}`,
   );
   check(kDobles === 0, "ningún turno quedó con dos asientos tras el reintento", `→ ${nf(kDobles)} turno(s) cobrados dos veces`);
-  check(kCobrado === kEsperado, `el cobro cuadra con los turnos tras matar el worker: ${nf(kCobrado)} = ${nf(kEsperado)}`);
+  // Matar el worker DEJA cargos sin cobrar: el cobro no frena la respuesta, así que el
+  // turno que estaba en vuelo sale gratis. Medido: 29 de 30. Eso no se arregla "con
+  // cuidado", se arregla con una red — el pase de reconciliación— y lo que hay que exigir
+  // es que la red FUNCIONE, no que el hueco no exista.
+  if (kCobrado < kEsperado) {
+    console.log(`      ⓘ el kill dejó ${nf(kEsperado - kCobrado)} crédito(s) sin cobrar; esperando al pase de reconciliación…`);
+  }
+  const limiteRec = Date.now() + 180_000;
+  let recuperado = debitosDe(kc.organizationId);
+  while (recuperado < kEsperado && Date.now() < limiteRec) {
+    await dormir(5_000);
+    recuperado = debitosDe(kc.organizationId);
+  }
+  check(
+    recuperado === kEsperado,
+    `la reconciliación recuperó TODOS los cargos: ${nf(recuperado)} = ${nf(kEsperado)}`,
+    `→ quedaron ${nf(kEsperado - recuperado)} crédito(s) sin cobrar después de ${Math.round((Date.now() - (limiteRec - 180_000)) / 1000)}s`,
+  );
+  check(
+    turnosCobradosDosVeces(kc.organizationId) === 0,
+    "y no cobró dos veces lo que el cobro en vivo ya había cobrado (sello del turno)",
+  );
   // Lo que de verdad duele, y que el sello de idempotencia NO cubre: el sello es el id del
   // turno y cada intento crea un turno nuevo, así que si el reintento vuelve a generar la
   // respuesta, el cliente paga dos veces el mismo mensaje y encima recibe dos respuestas.

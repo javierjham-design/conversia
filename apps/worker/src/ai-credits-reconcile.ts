@@ -1,3 +1,4 @@
+import { getEnv } from "@conversia/config";
 import { getAdminPrisma, raiseException } from "@conversia/database";
 import { debitAiCreditsForTurn, planDebitsAiCredits } from "./ai-credits";
 
@@ -32,6 +33,12 @@ import { debitAiCreditsForTurn, planDebitsAiCredits } from "./ai-credits";
 /** Un turno recién respondido todavía puede estar cobrándose en vivo. */
 export const MINUTOS_DE_GRACIA = 3;
 
+/** El valor vigente (el simulador lo baja para poder verificar la recuperación). */
+function minutosDeGracia(): number {
+  const v = Number(getEnv().AI_CREDITS_RECONCILE_GRACIA_MIN);
+  return Number.isFinite(v) && v >= 0 ? v : MINUTOS_DE_GRACIA;
+}
+
 /** Cuántos turnos sin cobrar son "raro" y merecen una excepción para el super admin. */
 export const SOSPECHOSO = 25;
 
@@ -52,7 +59,7 @@ export async function cobrarTurnosSinCobrar(
   const admin = getAdminPrisma();
   const now = opts.now ?? new Date();
   const desde = new Date(now.getTime() - (opts.horas ?? 48) * 3_600_000);
-  const hasta = new Date(now.getTime() - MINUTOS_DE_GRACIA * 60_000);
+  const hasta = new Date(now.getTime() - minutosDeGracia() * 60_000);
   const tope = opts.tope ?? 500;
 
   // Turnos CHAT sin asiento de cobro. El LEFT JOIN es por el sello del turno, que es
@@ -140,7 +147,7 @@ export async function cobrarTurnosSinCobrar(
   return { encontrados: aplicables, cobrados, creditos, sinCobrar };
 }
 
-/** Cada cuánto se pasa a buscar respuestas sin cobrar. */
+/** Cada cuánto se pasa a buscar respuestas sin cobrar (por defecto 10 min). */
 export const TICK_MS = 10 * 60 * 1000;
 
 /**
@@ -163,7 +170,8 @@ export function startAiCreditsReconcile(): () => void {
     }
   };
   void run();
-  const interval = setInterval(run, TICK_MS);
+  const cada = Number(getEnv().AI_CREDITS_RECONCILE_MS) || TICK_MS;
+  const interval = setInterval(run, cada);
   interval.unref?.();
   return () => clearInterval(interval);
 }
