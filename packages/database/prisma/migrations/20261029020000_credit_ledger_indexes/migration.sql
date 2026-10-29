@@ -1,5 +1,5 @@
 -- CRE — índices del libro de créditos. Aditiva: no reescribe ni borra datos.
--- Reversa: DROP INDEX "conversation_credit_ledger_organization_id_reason_ref_id_idx", "conversation_credit_ledger_turno_unico";
+-- Reversa: DROP INDEX "ccledger_org_reason_ref_idx", "conversation_credit_ledger_turno_unico";
 --
 -- 1) ÍNDICE DE LOS DEDUPES. Cada débito de un turno y cada acreditación de período
 --    preguntan "¿ya existe este asiento?" filtrando por (organization_id, reason, ref_id).
@@ -8,7 +8,7 @@
 --    tomado, o sea serializando los cobros detrás de un escaneo que crece cada día del mes.
 --    Con un asiento por respuesta del bot, al cliente más grande se le degrada el cobro
 --    justo cuando más responde.
-CREATE INDEX IF NOT EXISTS "conversation_credit_ledger_organization_id_reason_ref_id_idx"
+CREATE INDEX IF NOT EXISTS "ccledger_org_reason_ref_idx"
   ON "conversation_credit_ledger" ("organization_id", "reason", "ref_id");
 
 -- 2) UN SOLO COBRO POR TURNO, garantizado por la base.
