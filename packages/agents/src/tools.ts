@@ -459,6 +459,10 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         slotId: z.string().describe("El `id` del slot elegido tal como lo dio getAvailability (ej. h0409-1015; su hora DEBE coincidir con la que eligió el paciente)"),
         notes: z.string().optional(),
         telefono: z.string().min(7).max(20).optional().describe("SOLO si el contacto no tiene teléfono registrado (canales como Instagram): el número que dio el paciente; se guarda y se usa para la cita"),
+        esCitaAdicional: z
+          .boolean()
+          .optional()
+          .describe("SOLO true si el paciente pide una cita ADICIONAL además de la que YA tiene (no mover la existente). Si está REAGENDANDO su hora (cambiarla de día/hora), NO lo pases: el sistema moverá su cita y no creará una segunda."),
       }),
       async execute(ctx, input: any) {
         const s = services(ctx);
@@ -494,35 +498,48 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         }
         // GUARDIA PERSISTENTE anti doble-agendamiento (sobrevive reinicios del worker y
         // ventanas largas, al revés que bookedCache que es memoria por 3 min). Consulta las
-        // citas REALES del paciente en el proveedor: si YA tiene una cita ACTIVA con el MISMO
-        // profesional el MISMO día:
-        //   • misma hora → es un reintento → se devuelve la existente (no se crea otra).
-        //   • otra hora  → es un cambio de hora → se REAGENDA (mueve) la existente, NO se crea
-        //     una 2ª. "Reagendar" aquí = getAvailability + createAppointment (no hay tool aparte)
-        //     y antes NO cancelaba la anterior → quedaban 2 citas (caso Margarita: 09:15 y luego
-        //     09:30 por un "ok"; y duplicados sistémicos a la MISMA hora de varios pacientes).
+        // citas REALES del paciente en el proveedor y, si YA tiene una cita ACTIVA:
+        //   • MISMA hora y mismo profesional → es un reintento → se devuelve la existente.
+        //   • el paciente está REAGENDANDO (no pidió una cita adicional) → se MUEVE su cita
+        //     existente al nuevo cupo, NO se crea una segunda. "Reagendar" aquí = getAvailability +
+        //     createAppointment (no hay tool aparte).
+        // Antes el "mover" solo aplicaba cuando el nuevo cupo caía el MISMO día: un cambio a otra
+        // semana (caso Rubén: 30-oct 16:45 → 9-nov) NO lo reconocía, creaba una 2ª cita y dejaba la
+        // vieja viva ocupando el bloque. Ahora mueve la cita del MISMO profesional en CUALQUIER día
+        // cuando es inequívoca (una sola con ese profesional). Si hay varias con ese profesional
+        // (teléfono familiar / paciente con varias citas), se mantiene el criterio conservador del
+        // MISMO día para no mover la equivocada. `esCitaAdicional` (lo pone el agente solo cuando el
+        // paciente pide una hora ADEMÁS de la que tiene) salta el "mover" y crea una nueva.
         const chileDay = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
         try {
           const targetDay = chileDay(slot.start);
           const targetMs = new Date(slot.start).getTime();
-          const active = (await s.scheduling.getPatientAppointments(phone)) ?? [];
-          const dup = active.find(
-            (a) => (a.status === "pending" || a.status === "confirmed") && a.professionalId === slot.professionalId && chileDay(a.start) === targetDay,
+          const active = ((await s.scheduling.getPatientAppointments(phone)) ?? []).filter(
+            (a) => a.status === "pending" || a.status === "confirmed",
           );
-          if (dup) {
-            const sameSlot = Math.abs(new Date(dup.start).getTime() - targetMs) < 60000;
-            if (sameSlot) {
-              const cuandoEx = slotWhen.format(new Date(dup.start));
-              bookedCache.set(convId, { appt: dup, cuando: cuandoEx, at: Date.now() });
-              return { ok: true, alreadyBooked: true, appointment: dup, cuando: cuandoEx, message: `El paciente ya tenía ESTA misma cita: ${cuandoEx}. No se creó otra; confírmasela tal cual.` };
-            }
-            // Otra hora el mismo día con el mismo profesional → MOVER la cita (no duplicar).
+          // Reintento exacto: ya tiene ESTA misma hora con el mismo profesional → devolver la existente.
+          const sameExact = active.find(
+            (a) => a.professionalId === slot.professionalId && Math.abs(new Date(a.start).getTime() - targetMs) < 60000,
+          );
+          if (sameExact) {
+            const cuandoEx = slotWhen.format(new Date(sameExact.start));
+            bookedCache.set(convId, { appt: sameExact, cuando: cuandoEx, at: Date.now() });
+            return { ok: true, alreadyBooked: true, appointment: sameExact, cuando: cuandoEx, message: `El paciente ya tenía ESTA misma cita: ${cuandoEx}. No se creó otra; confírmasela tal cual.` };
+          }
+          // ¿Cita a MOVER? Solo si NO es una cita adicional explícita.
+          const sameProf = active.filter((a) => a.professionalId === slot.professionalId);
+          const toMove = input.esCitaAdicional
+            ? undefined
+            : sameProf.length === 1
+              ? sameProf[0] // inequívoco → mover aunque sea otro día (reagendamiento, caso Rubén)
+              : sameProf.find((a) => chileDay(a.start) === targetDay); // varias → conservador: solo el mismo día
+          if (toMove) {
             const endMove = slot.end ?? new Date(targetMs + 30 * 60000).toISOString();
-            const moved = await s.scheduling.updateAppointment(dup.id, { start: slot.start, end: endMove });
+            const moved = await s.scheduling.updateAppointment(toMove.id, { start: slot.start, end: endMove });
             const cuandoMove = slotWhen.format(new Date(slot.start));
             bookedCache.set(convId, { appt: moved, cuando: cuandoMove, at: Date.now() });
             await s.recordAppointment(moved);
-            return { ok: true, rescheduled: true, appointment: moved, cuando: cuandoMove, message: `Se MOVIÓ la cita del paciente a ${cuandoMove} (NO se creó una segunda: ya tenía una ese día con el mismo profesional). Confírmale EXACTAMENTE "${cuandoMove}".` };
+            return { ok: true, rescheduled: true, appointment: moved, cuando: cuandoMove, message: `Se MOVIÓ la cita del paciente a ${cuandoMove} (NO se creó una segunda: se reagendó la que ya tenía con ese profesional). Confírmale EXACTAMENTE "${cuandoMove}".` };
           }
         } catch {
           // Si el proveedor no responde la consulta/cambio, seguimos al flujo de creación normal:

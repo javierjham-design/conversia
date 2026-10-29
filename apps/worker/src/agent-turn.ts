@@ -27,6 +27,7 @@ import { getChannelProvider } from "./channel-providers";
 import { emitPlatformEvent } from "./platform-events";
 import { observeTurnModel } from "./ai-health";
 import { buildAssistedSetupStatusBlock, buildToolServices } from "./tool-services";
+import { buildUpcomingAppointmentBlock } from "./appointment-prompt";
 
 const registry = new ToolRegistry();
 for (const tool of buildCoreTools()) registry.register(tool);
@@ -569,15 +570,14 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
         const m = (appt.meta as Record<string, unknown> | null) ?? {};
         const tz = appt.timezone || "America/Santiago";
         const cuando = appt.startsAt.toLocaleString("es-CL", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: tz });
-        const prof = typeof m.professionalName === "string" ? ` con ${m.professionalName}` : "";
-        return (
-          `\n\n## ⚠️ Este paciente YA tiene una hora agendada\n` +
-          `Tiene una cita el ${cuando}${prof} (estado: ${String(appt.status).toLowerCase()}). ` +
-          `NO lo trates como paciente nuevo: no le pidas nombre ni datos ni le mandes un link para agendar. ` +
-          `Si escribe sobre su hora (confirmarla, cambiarla, reagendar o dice que no puede asistir), ayúdalo con ESA cita ` +
-          `(confírmala, o reagéndala con su MISMO profesional) o, si no manejas agenda, deriva al agente de Agendamiento. ` +
-          `Solo si pide EXPLÍCITAMENTE una cita ADICIONAL y distinta, procede a agendar una nueva.`
-        );
+        const professionalName = typeof m.professionalName === "string" ? m.professionalName : null;
+        // id LOCAL del profesional (el que entiende getAvailability). Las citas de Cláriva lo guardan
+        // en meta.professionalId; caemos a la columna FK y, por último, al ref externo del meta.
+        const professionalId =
+          (typeof m.professionalId === "string" ? m.professionalId : null) ??
+          appt.professionalId ??
+          (typeof m.professionalExternalId === "string" ? m.professionalExternalId : null);
+        return buildUpcomingAppointmentBlock({ cuando, professionalName, professionalId, status: String(appt.status) });
       })
     : "";
 

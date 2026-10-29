@@ -129,3 +129,63 @@ describe("createAppointment — guardia anti doble-agendamiento", () => {
     expect(scheduling.appts[0].start).toBe(`${DAY}T12:15:00.000Z`);
   });
 });
+
+// Reagendamiento a OTRA semana (caso Rubén, 29-oct-2026): el paciente pidió mover su hora del
+// 30-oct a la semana siguiente. Antes el "mover en vez de duplicar" solo cubría el MISMO día →
+// un cambio a otro día creaba una 2ª cita y dejaba la vieja VIVA ocupando el bloque. Ahora, si
+// la cita del mismo profesional es inequívoca (una sola), se mueve aunque sea otro día.
+const DAY2 = "2026-12-14"; // otra semana (DAY = 2026-12-07)
+
+async function offerForDay(registry: ToolRegistry, ctx: any, day: string): Promise<{ id: string; cuando: string }[]> {
+  const r = await registry.execute("getAvailability", { professionalId: "p1", fromDate: day, toDate: day }, ctx);
+  expect(r.isError).toBe(false);
+  return JSON.parse(r.content).horas as { id: string; cuando: string }[];
+}
+
+describe("createAppointment — reagendar a otro día no duplica", () => {
+  it("mueve la cita a OTRA semana con el MISMO profesional (caso Rubén), no crea una segunda", async () => {
+    const scheduling = makeScheduling();
+
+    // Turno 1: agenda 09:15 el DAY.
+    const reg1 = new ToolRegistry();
+    for (const t of buildCoreTools()) reg1.register(t);
+    const ctx1 = makeCtx(scheduling, "conv-ruben");
+    const h1 = await offerForDay(reg1, ctx1, DAY);
+    await reg1.execute("createAppointment", { slotId: h1.find((h) => /0915$/.test(h.id))!.id }, ctx1);
+    expect(scheduling.appts).toHaveLength(1);
+
+    // Turno 2, worker "reiniciado" (tools nuevas → bookedCache vacío): reagenda a la OTRA semana.
+    const reg2 = new ToolRegistry();
+    for (const t of buildCoreTools()) reg2.register(t);
+    const ctx2 = makeCtx(scheduling, "conv-ruben");
+    const h2 = await offerForDay(reg2, ctx2, DAY2);
+    const r2 = await reg2.execute("createAppointment", { slotId: h2.find((h) => /0915$/.test(h.id))!.id }, ctx2);
+    const out2 = JSON.parse(r2.content);
+
+    expect(out2.rescheduled).toBe(true);
+    expect(scheduling.appts).toHaveLength(1); // ← una sola cita, la vieja se movió
+    expect(scheduling.appts[0].start).toBe(`${DAY2}T12:15:00.000Z`);
+  });
+
+  it("esCitaAdicional=true crea una SEGUNDA cita (no mueve la existente)", async () => {
+    const scheduling = makeScheduling();
+
+    const reg1 = new ToolRegistry();
+    for (const t of buildCoreTools()) reg1.register(t);
+    const ctx1 = makeCtx(scheduling, "conv-add");
+    const h1 = await offerForDay(reg1, ctx1, DAY);
+    await reg1.execute("createAppointment", { slotId: h1.find((h) => /0915$/.test(h.id))!.id }, ctx1);
+    expect(scheduling.appts).toHaveLength(1);
+
+    const reg2 = new ToolRegistry();
+    for (const t of buildCoreTools()) reg2.register(t);
+    const ctx2 = makeCtx(scheduling, "conv-add");
+    const h2 = await offerForDay(reg2, ctx2, DAY2);
+    const r2 = await reg2.execute("createAppointment", { slotId: h2.find((h) => /0915$/.test(h.id))!.id, esCitaAdicional: true }, ctx2);
+    const out2 = JSON.parse(r2.content);
+
+    expect(out2.ok).toBe(true);
+    expect(out2.rescheduled).toBeUndefined();
+    expect(scheduling.appts).toHaveLength(2); // ← cita ADICIONAL: se crean dos
+  });
+});
