@@ -169,13 +169,62 @@ export async function ensurePeriodAccrued(
       select: { id: true },
     });
     if (!done) {
-      await creditLotInTx(tx, organizationId, { source: "plan", amount: included, expiresAt: addMonths(periodStart, PLAN_ROLLOVER_MONTHS), refType: "subscription", refId, now });
+      // SE ACREDITA LA DIFERENCIA, NO UN MES COMPLETO OTRA VEZ.
+      //
+      // El sello es por (plan, período) a propósito: un upgrade el mismo día tiene que
+      // acreditar el plan nuevo, porque si no el cliente paga y recibe 0 créditos hasta el
+      // mes siguiente. Pero por eso mismo, CADA plan distinto por el que pasara la cuenta en
+      // el mes abría su propio mes completo: dos saltos de plan y el cliente se llevaba dos
+      // meses de créditos pagando uno, y el que quisiera abusarlo solo tenía que ir saltando.
+      // Neteando se conservan las dos cosas buenas: el plan nuevo acredita de inmediato, y
+      // lo que ya recibió este mes no se le regala de nuevo. Un downgrade acredita 0 — no se
+      // le quita nada de lo que ya tenía, tampoco se le suma.
+      const yaRecibido = await creditosDelPlanEnElPeriodo(tx, organizationId, periodStart, includedKey);
+      const aAcreditar = Math.max(0, included - yaRecibido);
+      await creditLotInTx(tx, organizationId, { source: "plan", amount: aAcreditar, expiresAt: addMonths(periodStart, PLAN_ROLLOVER_MONTHS), refType: "subscription", refId, now });
       await tx.conversationWallet.update({ where: { organizationId }, data: { periodStart, lastNotifiedPct: 0 } });
       return;
     }
   }
   if (walletPeriod.getTime() >= periodStart.getTime()) return; // ya acreditado este período
   await tx.conversationWallet.update({ where: { organizationId }, data: { periodStart, lastNotifiedPct: 0 } });
+}
+
+/**
+ * Créditos que el PLAN ya le dio a esta organización en ESTE período, en esta misma unidad.
+ *
+ * Es la cuenta que permite netear un cambio de plan dentro del mes. Se suman dos razones:
+ * `plan_renewal` (lo que entró al lote) y `grace_repay` (lo que se fue a cubrir su deuda).
+ * La segunda cuenta igual: ese crédito lo recibió, solo que no llegó a verlo como saldo. Sin
+ * contarla, un cliente que cerró el mes en gracia —que es el fin de saldo normal— se llevaría
+ * esa diferencia regalada en cada cambio de plan.
+ *
+ * Los sellos del período son `<planId>:<fecha>` para conversaciones y `ai:<planId>:<fecha>`
+ * para Créditos IA, así que todos terminan en la fecha del período y el prefijo distingue la
+ * unidad. La unidad importa: si una cuenta cambió de unidad dentro del mes, su mes de
+ * conversaciones no puede descontarse de su mes de créditos — son bolsas que se cobran
+ * distinto, y es justamente el caso que el prefijo del sello vino a resolver.
+ */
+async function creditosDelPlanEnElPeriodo(
+  tx: Tx,
+  organizationId: string,
+  periodStart: Date,
+  includedKey: "conversationsIncluded" | "aiCreditsIncluded",
+): Promise<number> {
+  const fecha = periodStart.toISOString().slice(0, 10);
+  const asientos = await tx.conversationCreditLedger.findMany({
+    where: {
+      organizationId,
+      refType: "subscription",
+      refId: { endsWith: `:${fecha}` },
+      reason: { in: ["plan_renewal", "grace_repay"] },
+    },
+    select: { delta: true, refId: true },
+  });
+  const esDeCreditos = includedKey === "aiCreditsIncluded";
+  return asientos
+    .filter((a) => (a.refId ?? "").startsWith("ai:") === esDeCreditos)
+    .reduce((a, x) => a + Number(x.delta), 0);
 }
 
 /** Crea un lote de crédito; primero PAGA la gracia pendiente (los créditos nuevos cubren el negativo). */

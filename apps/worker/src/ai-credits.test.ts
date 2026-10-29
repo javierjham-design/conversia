@@ -89,6 +89,15 @@ const tx = {
       store.ledger.find(
         (e) => e.reason === where.reason && (where.refId === undefined || e.refId === where.refId),
       ) ?? null,
+    // Lo usa el neteo del período (lo que el plan ya dio este mes): se filtra como la
+    // consulta real, por refType, razones y el final del sello.
+    findMany: async ({ where }: any) =>
+      store.ledger.filter(
+        (e: any) =>
+          e.refType === where.refType &&
+          (where.reason?.in ?? []).includes(e.reason) &&
+          String(e.refId ?? "").endsWith(where.refId?.endsWith ?? ""),
+      ),
   },
   usageEvent: {
     create: async ({ data }: any) => {
