@@ -1,6 +1,6 @@
 import { Controller, Get, Header, Headers, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { getEnv, BRANDS, messagingFuseKeys } from "@conversia/config";
-import { getDbRoleStatus } from "@conversia/database";
+import { ensureTenantDbRoleChecked } from "@conversia/database";
 import { AI_DEGRADED_PROVIDERS, aiDegradedRedisKey } from "@conversia/types";
 import { QueueService } from "./queues";
 import { PrismaService } from "./prisma.service";
@@ -166,7 +166,9 @@ export class HealthController {
     //    DATABASE_URL puede saltarse la RLS (rolsuper/rolbypassrls), el aislamiento entre
     //    clientes queda dependiendo solo de los filtros del código → caída para el monitor.
     //    "sin verificar" (dev, o no se pudo consultar) NO rompe el health.
-    const dbRole = getDbRoleStatus();
+    // Reintenta el chequeo si sigue "sin verificar" (tope 1/min): no depende de una única
+    // pasada al arrancar, que en prod podía fallar en silencio y quedar así para siempre.
+    const dbRole = await ensureTenantDbRoleChecked(getEnv().NODE_ENV === "production");
     checks.dbRole =
       dbRole.ok === false
         ? { ok: false, detail: "el usuario de DATABASE_URL puede saltarse la RLS (rolsuper/rolbypassrls)" }

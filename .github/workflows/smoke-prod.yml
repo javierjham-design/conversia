@@ -15,6 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # El chequeo 12 compara el sha que sirve producción con `main` usando
+          # `git cat-file` + `git merge-base --is-ancestor`, que necesitan TODA la historia.
+          # Con el checkout por defecto (shallow, profundidad 1) ese commit no está en el clon
+          # y el chequeo daba un FAIL FALSO ("el commit no está en esta rama").
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

@@ -35,6 +35,10 @@ function withPoolParams(rawUrl: string | undefined, defaultLimit: number): strin
  * `false` = el usuario de `DATABASE_URL` puede SALTARSE la RLS.
  */
 let dbRoleOk: boolean | null = null;
+/** Última vez (ms) que se INTENTÓ el chequeo — para acotar el reintento desde /health. */
+let lastDbRoleCheckAt = 0;
+/** Tope del reintento: como mucho una pasada por minuto mientras siga sin verificar. */
+export const DB_ROLE_RECHECK_MS = 60_000;
 
 /**
  * Lo consume `/health/status` para avisar si el aislamiento entre clientes está
@@ -45,18 +49,46 @@ export function getDbRoleStatus(): { checked: boolean; ok: boolean | null } {
 }
 
 /**
+ * ¿La fila de `pg_roles` dice que el rol puede saltarse la RLS? `null` = no se pudo
+ * determinar (sin fila). Pura y exportada para testear la regla sin una BD.
+ */
+export function roleBypassesRls(
+  row: { rolsuper?: boolean; rolbypassrls?: boolean } | undefined | null,
+): boolean | null {
+  if (!row) return null;
+  return row.rolsuper === true || row.rolbypassrls === true;
+}
+
+/**
+ * ¿Toca (re)intentar el chequeo AHORA? Solo en producción, solo si sigue sin verificar y
+ * respetando el tope de una pasada por minuto. Pura y exportada para testearla sin estado.
+ */
+export function shouldRecheckDbRole(
+  status: { ok: boolean | null },
+  isProduction: boolean,
+  now: number,
+  lastCheckAt: number,
+  recheckMs: number = DB_ROLE_RECHECK_MS,
+): boolean {
+  return isProduction && status.ok === null && now - lastCheckAt >= recheckMs;
+}
+
+/**
  * Verifica que el rol de `DATABASE_URL` NO pueda saltarse la RLS. Deliberadamente
  * NO tumba el proceso: TuBot tiene clientes 24/7 y un arranque fallido sería peor
  * que el aviso. Solo deja registro ruidoso y marca `/health/status` en 503.
+ *
+ * El error se REGISTRA (solo el mensaje, nunca el URL/credenciales), no se traga: antes el
+ * catch silencioso dejaba el estado en "sin verificar" para siempre en producción y nadie
+ * sabía por qué. Una sola pasada al arrancar no basta — ver `ensureTenantDbRoleChecked`.
  */
-async function checkTenantDbRole(client: PrismaClient): Promise<void> {
+export async function checkTenantDbRole(client: PrismaClient = getPrisma()): Promise<void> {
   try {
     const rows = await client.$queryRaw<Array<{ rolsuper: boolean; rolbypassrls: boolean }>>`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user
     `;
-    const row = rows[0];
-    if (!row) return; // no se pudo determinar: se deja sin verificar
-    const bypasses = row.rolsuper === true || row.rolbypassrls === true;
+    const bypasses = roleBypassesRls(rows[0]);
+    if (bypasses === null) return; // no se pudo determinar: se deja sin verificar
     dbRoleOk = !bypasses;
     if (bypasses) {
       console.error(
@@ -66,9 +98,30 @@ async function checkTenantDbRole(client: PrismaClient): Promise<void> {
           "(conversia_app) definiendo además DIRECT_DATABASE_URL como admin. Ver docs/PROMPT_CORRECCIONES_AUDITORIA.md §2.0.",
       );
     }
-  } catch {
-    // Un fallo del chequeo no debe afectar el arranque ni el tráfico.
+  } catch (err) {
+    // Antes se tragaba en silencio → en prod el estado quedaba "sin verificar" para siempre.
+    // Ahora se registra para poder diagnosticar (SIN el URL: `.message` no trae credenciales).
+    console.error("✖ No se pudo verificar el rol de BD (RLS):", (err as Error).message);
   }
+}
+
+/**
+ * Asegura (desde `/health/status`) que el chequeo de rol se haya INTENTADO, sin depender de
+ * una única pasada al arrancar. Si sigue "sin verificar", lo reintenta —como mucho una vez
+ * por minuto— y devuelve el estado ya actualizado. `isProduction` lo decide el llamador con
+ * el env YA validado (`getEnv().NODE_ENV`), no con `process.env` crudo: así el chequeo no
+ * vuelve a quedarse sin correr por un desajuste de esa variable en el contenedor.
+ */
+export async function ensureTenantDbRoleChecked(
+  isProduction: boolean,
+  opts: { client?: PrismaClient; now?: number } = {},
+): Promise<{ checked: boolean; ok: boolean | null }> {
+  const now = opts.now ?? Date.now();
+  if (shouldRecheckDbRole(getDbRoleStatus(), isProduction, now, lastDbRoleCheckAt)) {
+    lastDbRoleCheckAt = now;
+    await checkTenantDbRole(opts.client ?? getPrisma());
+  }
+  return getDbRoleStatus();
 }
 
 /**
