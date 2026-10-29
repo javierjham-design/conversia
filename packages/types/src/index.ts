@@ -470,6 +470,19 @@ export const QUEUE_NAMES = {
   broadcast: "broadcast-send",
 } as const;
 
+/**
+ * Proveedores de IA que el worker vigila por DEGRADACIÓN silenciosa del router: si la
+ * llave del proveedor esperado muere, el router responde con el otro (gpt-* → Haiku) y
+ * nadie se entera. El worker marca `conversia:ai:degraded:<provider>` en Redis y la API
+ * lo lee en /health/status (503 → alerta al teléfono). Clave compartida para que el
+ * productor (worker) y el lector (api) usen EXACTAMENTE la misma cadena.
+ */
+export const AI_DEGRADED_PROVIDERS = ["openai", "anthropic"] as const;
+export type AiDegradedProvider = (typeof AI_DEGRADED_PROVIDERS)[number];
+export function aiDegradedRedisKey(provider: string): string {
+  return `conversia:ai:degraded:${provider}`;
+}
+
 /** Fila del export de MENSAJES de Respond.io (histórico, ya parseada). */
 export interface MessageImportRow {
   dateTime: string; // "2026-08-18 21:05:56" en America/Santiago
