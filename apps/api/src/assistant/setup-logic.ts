@@ -28,7 +28,15 @@ const PASO_A_PANTALLA: Record<string, { to: string; target?: CopilotTarget; text
   asistente: { to: "/inicio" },
   whatsapp: { to: "/canales", target: "conectar-whatsapp", text: "Conecta tu WhatsApp aquí; toma unos 3 minutos." },
   prueba: { to: "/conversaciones" },
-  pago: { to: "/cobros", target: "plan", text: "Activa tu plan o deja tu tarjeta para que no se corte." },
+  // §5 — el texto dice CUÁL tarjeta y por qué. "Deja tu tarjeta" no distingue, y con una de
+  // débito el cobro automático no existe: el cliente queda creyendo que está cubierto y el
+  // día que se le acaben los créditos su asistente se pausa. Este resaltado es el único
+  // momento en que está mirando justo el control donde elige.
+  pago: {
+    to: "/cobros",
+    target: "plan",
+    text: "Activa tu plan y deja una tarjeta de CRÉDITO: con débito no se pueden hacer cobros automáticos y tu asistente se pausaría al quedarse sin créditos.",
+  },
   mini_sitio: { to: "/mini-sitio" },
 };
 

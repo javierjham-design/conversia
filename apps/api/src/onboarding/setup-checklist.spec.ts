@@ -135,6 +135,52 @@ describe("checklist de montaje — condiciones que la auditoría encontró mal",
     expect(checklistOf({ ...FULL, planActive: false, hasPaymentMethod: true }).steps.find((s) => s.key === "pago")?.done).toBe(true);
     expect(checklistOf({ ...FULL, planActive: true, hasPaymentMethod: false }).steps.find((s) => s.key === "pago")?.done).toBe(true);
   });
+
+  /**
+   * §5 — PAGADO NO ES LO MISMO QUE CUBIERTO.
+   *
+   * Un cliente con el plan pagado y una tarjeta de débito no tiene cobro automático: el día
+   * que se le acaben los créditos su asistente se pausa igual. Marcar el paso como pendiente
+   * sería mentir (pagó) y marcarlo ✅ a secas también (no está cubierto). Queda ✅ con un
+   * aviso, que es lo único que puede evitar que se entere cuando ya se cortó.
+   */
+  describe("pago: el aviso de 'pagado, sin cobro automático'", () => {
+    const pago = (f: Partial<typeof FULL>) => checklistOf({ ...FULL, ...f }).steps.find((s) => s.key === "pago")!;
+
+    it("con tarjeta apta y recarga activa: ✅ sin aviso", () => {
+      const p = pago({ planActive: true, autoChargeReady: true, cardNotAutoChargeable: false });
+      expect(p.done).toBe(true);
+      expect(p.warn).toBeUndefined();
+    });
+
+    it("pagó con tarjeta de DÉBITO: ✅ con el aviso que nombra el problema", () => {
+      const p = pago({ planActive: true, autoChargeReady: false, cardNotAutoChargeable: true });
+      expect(p.done).toBe(true);
+      expect(p.warn).toContain("sin cobro automático");
+      expect(p.warn).toContain("CRÉDITO");
+    });
+
+    it("tarjeta que podría servir pero SIN recarga activada: ✅ con otro aviso", () => {
+      // Son dos problemas distintos y mandan a hacer dos cosas distintas: cambiar la
+      // tarjeta no es lo mismo que activar la recarga.
+      const p = pago({ planActive: true, autoChargeReady: false, cardNotAutoChargeable: false });
+      expect(p.done).toBe(true);
+      expect(p.warn).toContain("activa la recarga automática");
+      expect(p.warn).not.toContain("débito");
+    });
+
+    it("sin pagar no hay aviso: el paso simplemente está pendiente", () => {
+      const p = pago({ planActive: false, hasPaymentMethod: false, autoChargeReady: false });
+      expect(p.done).toBe(false);
+      expect(p.warn).toBeUndefined();
+    });
+
+    it("el aviso NO impide llegar al 100%: pagó, y eso es lo que el paso mide", () => {
+      const c = checklistOf({ ...FULL, planActive: true, autoChargeReady: false, cardNotAutoChargeable: true });
+      expect(c.steps.find((s) => s.key === "pago")?.done).toBe(true);
+      expect(c.percent).toBe(100);
+    });
+  });
 });
 
 /* ------------------------------------------------------------------------------------- *
@@ -152,6 +198,8 @@ interface Seed {
   messages?: { direction: string; authorType: string }[];
   subscriptions?: { status: string }[];
   paymentMethods?: number;
+  /** §5 — ¿la tarjeta de Flow sirve para cobros automáticos? null = todavía no se sabe. */
+  tarjetaApta?: boolean | null;
   paidInvoices?: number;
   members?: number;
   verifiedMembers?: number;
@@ -183,7 +231,12 @@ function fakePrisma(seed: Seed) {
         messages.find((m) => m.direction === where.direction && m.authorType === where.authorType) ?? null,
     },
     subscription: { findFirst: async ({ where }: any) => subscriptions.find((x) => x.status === where.status) ?? null },
-    paymentMethod: { count: async () => seed.paymentMethods ?? 0 },
+    paymentMethod: {
+      count: async () => seed.paymentMethods ?? 0,
+      // La tarjeta solo "existe" si hay métodos de pago sembrados: así un caso que no
+      // habla de tarjetas no empieza a comportarse como si tuviera una.
+      findFirst: async () => ((seed.paymentMethods ?? 0) > 0 ? { autoChargeable: seed.tarjetaApta ?? null } : null),
+    },
     invoice: { count: async () => seed.paidInvoices ?? 0 },
     organizationUser: { count: async ({ where }: any) => (where.user ? (seed.verifiedMembers ?? 0) : (seed.members ?? 1)) },
     auditLog: { findFirst: async () => (seed.pwaInstalled ? { id: "a1" } : null) },

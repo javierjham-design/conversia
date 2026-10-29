@@ -51,6 +51,11 @@ export const COPILOT_TARGETS = [
   "conectar-whatsapp", // camino de conexión en /canales
   "plan", // activar plan / cargar tarjeta en /cobros
   "comprar-creditos", // packs en /cobros
+  // §5 — el copiloto tiene que poder señalar las dos piezas del cobro automático, que es
+  // lo que decide si al cliente se le pausa el asistente o no. Antes solo podía apuntar a
+  // "plan", y "activa tu plan" no dice nada sobre la tarjeta ni sobre la recarga.
+  "cobros-metodo-pago", // registrar/cambiar la tarjeta en /cobros
+  "cobros-recarga-automatica", // interruptor, pack, umbral y tope en /cobros
 ] as const;
 
 export type CopilotTarget = (typeof COPILOT_TARGETS)[number];
