@@ -70,6 +70,7 @@ export async function cobrarTurnosSinCobrar(
       organizationId: string;
       conversationId: string | null;
       model: string;
+      configuredModel: string | null;
       inputTokens: number;
       outputTokens: number;
       costUsd: unknown;
@@ -77,7 +78,8 @@ export async function cobrarTurnosSinCobrar(
     }>
   >`
     SELECT r.id, r.organization_id AS "organizationId", r.conversation_id AS "conversationId",
-           r.model, r.input_tokens AS "inputTokens", r.output_tokens AS "outputTokens",
+           r.model, r.configured_model AS "configuredModel",
+           r.input_tokens AS "inputTokens", r.output_tokens AS "outputTokens",
            r.cost_usd AS "costUsd", r.agent_id AS "agentId"
     FROM ai_requests r
     LEFT JOIN conversation_credit_ledger l
@@ -113,6 +115,9 @@ export async function cobrarTurnosSinCobrar(
       conversationId: t.conversationId ?? "",
       turnId: t.id,
       model: t.model,
+      // Nulo en las filas anteriores a la columna: ahí se cobra el que respondió, que es el
+      // comportamiento que tenían cuando se emitieron.
+      configuredModel: t.configuredModel,
       inputTokens: Number(t.inputTokens),
       outputTokens: Number(t.outputTokens),
       costUsd: t.costUsd == null ? undefined : Number(t.costUsd),

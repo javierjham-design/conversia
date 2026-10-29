@@ -262,8 +262,17 @@ describe("§6 — pasada completa", () => {
     expect(avisos[0]).toMatchObject({ kind: "recharge_failed" });
   });
 
-  it("si la pasarela revienta, queda registrado y se avisa (no se pierde en silencio)", async () => {
-    const { port, attempts, avisos } = makePort();
+  it("si la pasarela revienta, el cobro queda PENDIENTE (no fallido): no sabemos si entró", async () => {
+    // El fallo más caro de este módulo, y el más fácil de escribir mal.
+    //
+    // Un `charge` que revienta por timeout puede haber entrado perfectamente en Flow: la
+    // tarjeta quedó cobrada y lo que se perdió fue nuestra respuesta. Marcarlo `failed` era
+    // AFIRMAR que no se cobró, y de esa afirmación falsa salían tres cosas: el intento
+    // dejaba de contar contra el tope mensual (que mide exitosos y en vuelo), soltaba la
+    // guarda de "un cobro a la vez", y el tick siguiente volvía a cobrar la misma tarjeta.
+    // Cada 15 minutos. Y a los tres "rechazos" se apagaba la recarga automática de un
+    // cliente al que ya le habíamos cobrado tres veces.
+    const { port, attempts, avisos, excepciones } = makePort();
     const roto = {
       ...provider,
       charge: async () => {
@@ -272,9 +281,14 @@ describe("§6 — pasada completa", () => {
     } as unknown as FakeSubscriptionProvider;
     const r = await runAutoRecharge(port, async () => roto, new Date(), URLS);
     expect(r.cobradas).toBe(0);
-    expect(attempts[0].status).toBe("failed");
+    expect(r.sinRespuesta).toBe(1);
+    expect(attempts[0].status).toBe("pending");
+    expect(attempts[0].reason).toContain("sin_respuesta");
     expect(attempts[0].reason).toContain("timeout");
-    expect(avisos[0]).toMatchObject({ kind: "recharge_failed" });
+    // Al cliente NO se le dice "tu tarjeta falló": puede estar cobrada, y si lo está además
+    // le van a llegar los créditos. El que tiene que mirar el panel de Flow es el dueño.
+    expect(avisos).toEqual([]);
+    expect(excepciones[0]).toMatchObject({ type: "recarga_sin_respuesta", severity: "critical" });
   });
 
   it("con saldo suficiente no cobra NI crea intento", async () => {
@@ -375,7 +389,7 @@ describe("§6 — pasada completa", () => {
   it("sin candidatos no hace nada (el caso de todos los días)", async () => {
     const { port } = makePort({ listCandidates: async () => [] });
     const r = await runAutoRecharge(port, async () => provider, new Date(), URLS);
-    expect(r).toEqual({ cobradas: 0, motivos: {} });
+    expect(r).toEqual({ cobradas: 0, motivos: {}, sinRespuesta: 0 });
   });
 
   it("varias organizaciones: una cobra y la otra no, sin pisarse", async () => {

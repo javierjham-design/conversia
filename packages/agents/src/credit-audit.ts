@@ -53,7 +53,7 @@ export interface DebitosDelTurno {
    * Cuando está, el veredicto se decide con ella (coherencia interna del cobro) y la
    * diferencia contra la política vigente se informa aparte, que es otra cosa.
    */
-  aplicado?: { weight: number; tokensPerCredit: number; alTope?: boolean; pedido?: number } | null;
+  aplicado?: { weight: number; tokensPerCredit: number; alTope?: boolean; pedido?: number; respaldo?: boolean } | null;
 }
 
 export type VeredictoTurno =
@@ -98,6 +98,14 @@ export interface AuditoriaTurno {
    * precios no se confunda con un error de cobro, ni al revés.
    */
   pesoCambiado: boolean;
+  /**
+   * El turno se cobró con el peso del modelo CONFIGURADO porque respondió el de respaldo
+   * (§6): el sobrecosto lo absorbimos nosotros. Se informa aparte de `pesoCambiado` porque
+   * no es un cambio de precios: durante una caída del proveedor son MILES de turnos, y
+   * mezclarlos con los cambios de política haría ilegible justo el informe del día en que
+   * algo se rompió.
+   */
+  respaldo: boolean;
   asientos: number;
   model: string;
   tokens: number;
@@ -150,7 +158,11 @@ export function auditarTurno(turno: TurnoAuditado, debitos: DebitosDelTurno, pol
     esperadoVigente,
     cobrado,
     diferencia: cobrado - esperado,
-    pesoCambiado: conElAplicado != null && conElAplicado !== esperadoVigente,
+    // Un turno cobrado con el peso del configurado porque entró el respaldo SÍ difiere de la
+    // política vigente, pero no por un cambio de precios: se cuenta como respaldo y no como
+    // peso cambiado, para que las dos cosas se puedan leer por separado.
+    pesoCambiado: conElAplicado != null && conElAplicado !== esperadoVigente && ap?.respaldo !== true,
+    respaldo: ap?.respaldo === true,
     asientos,
     model: turno.model,
     tokens,
@@ -176,6 +188,12 @@ export interface ResumenAuditoria {
   deMas: number;
   /** Turnos cobrados con un peso distinto del vigente (cambio de precios, no error). */
   conPesoCambiado: number;
+  /**
+   * Turnos cobrados con el peso del modelo CONFIGURADO porque respondió el de respaldo. No
+   * es un error ni un cambio de precios: es el sobrecosto de una caída nuestra que no le
+   * pasamos al cliente. Un número grande acá es un aviso de infraestructura, no de cobro.
+   */
+  conRespaldo: number;
   /** true = todo cuadra al crédito. */
   cuadra: boolean;
 }
@@ -204,6 +222,7 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
   let porTope = 0;
   let deMas = 0;
   let conPesoCambiado = 0;
+  let conRespaldo = 0;
   for (const i of items) {
     porVeredicto[i.veredicto]++;
     esperado += i.esperado;
@@ -215,6 +234,7 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
     else if (i.diferencia < 0) regalados += -i.diferencia;
     if (i.diferencia > 0) deMas += i.diferencia;
     if (i.pesoCambiado) conPesoCambiado++;
+    if (i.respaldo) conRespaldo++;
   }
   return {
     turnos: items.length,
@@ -225,6 +245,7 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
     porTope,
     deMas,
     conPesoCambiado,
+    conRespaldo,
     cuadra: regalados === 0 && deMas === 0 && porVeredicto.doble_cobro === 0,
   };
 }

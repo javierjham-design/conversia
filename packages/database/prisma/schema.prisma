@@ -2009,7 +2009,16 @@ model AiRequest {
   conversationId String?   @map("conversation_id")
   workflowRunId  String?   @map("workflow_run_id")
   provider       String
+  /** Modelo que RESPONDIÓ (si el router cayó al respaldo, el del respaldo). */
   model          String
+  /**
+   * Modelo que el agente tenía CONFIGURADO en ese turno. Distinto de `model` solo cuando
+   * entró nuestro respaldo, y por eso hay que guardarlo: el cobro usa el peso MENOR de los
+   * dos (§6), y sin esta columna un turno recuperado por la reconciliación se cobraría con
+   * el peso del respaldo — justo el sobrecosto que el cliente no tiene que pagar. Nulo en
+   * las filas anteriores al cambio.
+   */
+  configuredModel String?  @map("configured_model")
   purpose        AiPurpose @default(CHAT)
   inputTokens    Int       @default(0) @map("input_tokens")
   outputTokens   Int       @default(0) @map("output_tokens")

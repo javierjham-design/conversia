@@ -21,6 +21,10 @@
  *     el margen se va justo con los clientes que más gastan.
  *  4. LA GRACIA. El bot sigue respondiendo en negativo hasta el colchón. Si el tope no
  *     frena, un cliente sin saldo opera gratis para siempre.
+ *  5. EL WEBHOOK DE LA RECARGA QUE SE PIERDE. La pasarela cobra la tarjeta y la confirmación
+ *     no llega: cargo hecho, cero créditos, cero factura, cero alerta, y el bot del cliente
+ *     cortándose cuando se le acabe la gracia. Se ensaya con el Flow de juguete del stack
+ *     (`tools/sim/mock-flow.mjs`), que NUNCA llama a la URL de confirmación.
  *
  * Y al final cierra el círculo: el **marcador que ve el cliente** (`/billing/wallet/summary`)
  * tiene que decir exactamente el mismo número que la base, y la auditoría del libro
@@ -31,6 +35,7 @@
  *       MSGS_KILL (30) · SIM_API · SIM_DATABASE_URL
  */
 import { execFileSync } from "node:child_process";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,6 +256,27 @@ async function esperarCola(orgIds, { quietoMs = 8_000, maxMs = 420_000 } = {}) {
   return ultimo;
 }
 
+/**
+ * Cifra un secreto como lo guarda la plataforma (AES-256-GCM, misma forma que
+ * `apps/api/src/common/crypto.ts`): base64(iv[12] || tag[16] || ciphertext). La clave es la
+ * del stack, que está en `.env.sim` y es de PRUEBA.
+ *
+ * Se replica acá en vez de importar la del api porque el api es TypeScript compilado dentro
+ * de su imagen; esto corre en el host con node pelado.
+ */
+function cifrar(plano) {
+  const env = readFileSync(join(REPO, "tools", "sim", ".env.sim"), "utf-8");
+  const clave = /^CREDENTIALS_ENCRYPTION_KEY=(.+)$/m.exec(env)?.[1]?.trim();
+  if (!clave) throw new Error("falta CREDENTIALS_ENCRYPTION_KEY en tools/sim/.env.sim");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", Buffer.from(clave, "hex"), iv);
+  const enc = Buffer.concat([cipher.update(plano, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
+}
+
+/** Token del Flow de juguete: lleva el pago dentro (ver tools/sim/mock-flow.mjs). */
+const tokenMockFlow = (pago) => `simtok.${Buffer.from(JSON.stringify(pago), "utf8").toString("base64url")}`;
+
 /** Pool de concurrencia: dispara `tareas` con `n` en vuelo. */
 async function enParalelo(tareas, n) {
   const resultados = [];
@@ -283,8 +309,10 @@ function verificarStackAlDia() {
   const canarios = [
     ["api", "packages/database/scripts/seed-ai-credits-policy.mjs", "FORZAR"],
     ["api", "apps/api/dist/billing/billing.controller.js", "conSello"],
+    ["api", "apps/api/dist/billing/cobro-en-vuelo.js", "pg_advisory_xact_lock"],
     ["worker", "apps/worker/dist/ai-credits-reconcile.js", "cobrarTurnosSinCobrar"],
-    ["worker", "apps/worker/dist/auto-recharge.js", "compra_reciente"],
+    ["worker", "apps/worker/dist/auto-recharge.js", "sin_respuesta"],
+    ["worker", "apps/worker/dist/recharge-reconcile.js", "reconciliarRecargas"],
   ];
   for (const [servicio, archivo, simbolo] of canarios) {
     let hay = "0";
@@ -618,8 +646,87 @@ async function main() {
     "la política quedó restaurada tal como estaba",
   );
 
-  // ─────── 7. El marcador que ve el cliente ───────
-  paso("7. El marcador del panel contra la base, cuenta por cuenta");
+  // ─────── 7. La recarga cobrada cuyo webhook se perdió ───────
+  //
+  // El peor modo de falla del producto: Flow cobra la tarjeta, llama a nuestra URL de
+  // confirmación y ese POST no llega. El cargo queda hecho, el cliente sin créditos, sin
+  // factura y sin una sola alerta — y su bot se corta cuando se le acaba la gracia. El motor
+  // de suscripciones no lo recupera porque excluye a propósito los cobros `rec-` (si los
+  // viera, al confirmarse una recarga le renovaría el mes GRATIS al cliente).
+  //
+  // Se ensaya con el Flow de juguete del stack, que NUNCA llama a `urlConfirmation`: el pago
+  // existe, está pagado, y la única forma de que el cliente reciba lo suyo es que la
+  // reconciliación del worker lo note. Se fabrica el estado que deja el webhook perdido —un
+  // intento `rec-` pendiente con su token— y se exige que el crédito llegue.
+  paso("7. La recarga cobrada cuyo webhook SE PERDIÓ: el cliente no puede quedarse sin créditos");
+  const saldoAntesRecarga = saldoDe(gc.organizationId);
+  const subId = sql(`SELECT id FROM subscriptions WHERE organization_id='${gc.organizationId}' ORDER BY created_at DESC LIMIT 1;`);
+  const ordenPerdida = `rec-${gc.organizationId}-${Date.now()}`;
+  const tokenPerdido = tokenMockFlow({
+    commerceOrder: ordenPerdida,
+    amount: 24_990,
+    optional: JSON.stringify({
+      organizationId: gc.organizationId,
+      planCode: "pkg:conversia-cred-420",
+      expectedAmount: "24990",
+      autoRecharge: "1",
+    }),
+    status: 2,
+  });
+  check(Boolean(subId), `la cuenta tiene suscripción para colgar el cobro (${subId.slice(0, 8)}…)`);
+  // Credenciales de la pasarela de juguete. Se escriben acá y se borran al final del paso:
+  // mientras existan, `mock-confirm` queda bloqueado ("hay pasarela real configurada"), que
+  // es justo la guarda que no se quiere desarmar.
+  sql(
+    `INSERT INTO platform_settings (key, value, updated_at) VALUES ` +
+      `('flow.apiKey', '${cifrar("sim-flow-api-key")}', now()), ` +
+      `('flow.secretKey', '${cifrar("sim-flow-secret-key")}', now()), ` +
+      `('flow.baseUrl', 'http://mock-flow:4021/api', now()) ` +
+      `ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now();`,
+  );
+  // El intento que dejó el webhook perdido: cobrado, con token, y nadie que lo cierre. Diez
+  // minutos de antigüedad para que haya pasado la gracia que la reconciliación le da al
+  // webhook (5 min) y no se ensaye un caso que en producción se resuelve solo.
+  sql(
+    `INSERT INTO payment_attempts (id, organization_id, subscription_id, commerce_order, amount, currency, kind, attempt_number, status, provider, provider_ref, created_at, updated_at)` +
+      ` VALUES ('${ordenPerdida}', '${gc.organizationId}', '${subId}', '${ordenPerdida}', 24990, 'CLP', 'auto', 1, 'pending', 'flow', '${tokenPerdido}', now() - interval '10 minutes', now());`,
+  );
+  const estadoDelCobro = () => sql(`SELECT status FROM payment_attempts WHERE commerce_order='${ordenPerdida}';`);
+  const asientosDeLaRecarga = () =>
+    sqlNum(
+      `SELECT count(*) FROM conversation_credit_ledger WHERE organization_id='${gc.organizationId}'` +
+        ` AND reason='package_purchase' AND ref_id='${tokenPerdido}';`,
+    );
+  check(estadoDelCobro() === "pending", "el cobro arranca pendiente (lo que deja un webhook perdido)");
+  const limiteWebhook = Date.now() + 150_000;
+  while (Date.now() < limiteWebhook && estadoDelCobro() === "pending") await dormir(3000);
+  const estadoFinal = estadoDelCobro();
+  check(estadoFinal === "succeeded", `la reconciliación cerró el cobro como cobrado (quedó "${estadoFinal}")`);
+  const asientosRec = asientosDeLaRecarga();
+  check(asientosRec === 1, `y acreditó el pack UNA vez (asientos: ${nf(asientosRec)})`);
+  const saldoTrasRecarga = saldoDe(gc.organizationId);
+  check(
+    saldoTrasRecarga === saldoAntesRecarga + 420,
+    `el cliente recibió sus 420 créditos: ${nf(saldoAntesRecarga)} → ${nf(saldoTrasRecarga)}`,
+  );
+  check(
+    sqlNum(`SELECT count(*) FROM invoices WHERE organization_id='${gc.organizationId}' AND provider_ref='${tokenPerdido}';`) === 1,
+    "y su boleta, con la referencia del pago",
+  );
+  // El pase corre cada 20 s en el stack: se le deja dar otra vuelta COMPLETA y se exige que
+  // no haya acreditado de nuevo. Un reconciliador que cobra bien una vez y acredita dos es
+  // peor que no tenerlo.
+  await dormir(45_000);
+  check(asientosDeLaRecarga() === 1, "tras otra vuelta del pase, sigue acreditado una sola vez (no hay doble crédito)");
+  check(saldoDe(gc.organizationId) === saldoTrasRecarga, "y el saldo no se movió solo");
+  sql(`DELETE FROM platform_settings WHERE key IN ('flow.apiKey','flow.secretKey','flow.baseUrl');`);
+  check(
+    sqlNum(`SELECT count(*) FROM platform_settings WHERE key LIKE 'flow.%';`) === 0,
+    "las credenciales de la pasarela de juguete quedaron borradas",
+  );
+
+  // ─────── 8. El marcador que ve el cliente ───────
+  paso("8. El marcador del panel contra la base, cuenta por cuenta");
   for (const [i, c] of [...cuentas, rc, dc, kc, gc].entries()) {
     const w = await api("/billing/wallet/summary", { token: c.token });
     const base = saldoDe(c.organizationId);
@@ -632,8 +739,8 @@ async function main() {
     if (w.json?.unit) check(w.json.unit === "credit", `cuenta ${i + 1}: la unidad del panel es "credit"`);
   }
 
-  // ─────── 8. La auditoría del libro ───────
-  paso("8. Auditoría del libro contra ai_requests (el script que va a correr en producción)");
+  // ─────── 9. La auditoría del libro ───────
+  paso("9. Auditoría del libro contra ai_requests (el script que va a correr en producción)");
   try {
     rmSync(INFORME, { force: true });
   } catch {

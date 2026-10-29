@@ -120,6 +120,21 @@ export const AUTO_RECARGA_DEFAULTS = {
   conversaciones: { umbral: 20, topeMensualClp: 40_000 },
 } as const;
 
+/**
+ * TECHO del tope mensual: como máximo estas recargas del pack elegido, al mes.
+ *
+ * El tope lo pone el cliente, y hasta ahora lo único que lo limitaba del lado del servidor
+ * era un `max(100000000)` del validador: un error de la pantalla, un decimal de más escrito a
+ * mano o una llamada directa a la API dejaban autorizados **cien millones de pesos** de
+ * cobros automáticos a su tarjeta. El tope es una protección del cliente, así que no puede
+ * depender de que el cliente escriba bien.
+ *
+ * Es el mismo 10 de la decisión del 28-oct (el consumo real de Digital-Dent en septiembre
+ * necesita 7 recargas; con el tope viejo de 3 se le cortaba el servicio a mitad de mes).
+ * Expresado en recargas y no en pesos para que siga valiendo con packs de otro precio.
+ */
+export const MAX_RECARGAS_MES = 10;
+
 export interface ModelWeightLookup extends ModelCreditWeight {
   /** false = el modelo no está en la política: se cobró como premium y hay que alertar. */
   known: boolean;
@@ -168,6 +183,56 @@ export function creditsForTurn(input: {
   const per = Math.max(1, Math.floor(policy.tokensPerCredit) || CREDIT_POLICY_SEED.tokensPerCredit);
   const blocks = Math.max(1, Math.ceil(tokens / per));
   return { credits: w.credits * blocks, blocks, level: w.level, weight: w.credits, modelKnown: w.known };
+}
+
+export interface TurnCreditsConRespaldo extends TurnCredits {
+  /**
+   * true = respondió un modelo MÁS CARO que el configurado porque nuestro respaldo entró.
+   * El sobrecosto lo absorbemos nosotros: se cobra con el peso del configurado.
+   */
+  respaldo: boolean;
+}
+
+/**
+ * Créditos de un turno cuando el modelo que RESPONDIÓ no es el que estaba CONFIGURADO.
+ *
+ * Pasa cuando el router cae al modelo de respaldo porque el proveedor configurado no está
+ * —entre el 24 y el 29 de octubre estuvimos cinco días con la clave de OpenAI revocada y los
+ * bots respondiendo con Haiku—. Cobrar con el peso del modelo que respondió significa
+ * cobrarle al cliente CUATRO veces más por una caída nuestra: él configuró gpt-4o-mini (peso
+ * 1) y recibió Haiku (peso 4) sin pedirlo y sin enterarse.
+ *
+ * La regla es el peso MENOR de los dos. Nunca cobra más que lo configurado (el respaldo lo
+ * pagamos nosotros) ni más que lo que respondió (si al cliente le toca un modelo más barato
+ * que el que tiene configurado, paga el barato). Los tokens y el costo en dólares se
+ * registran REALES: lo que se ajusta es el precio al cliente, no la contabilidad.
+ *
+ * LA EXCEPCIÓN: si el modelo que respondió NO está en la política, se mantiene premium y se
+ * alerta. Un modelo que no sabemos tasar no puede abaratarse por la etiqueta configurada —
+ * ahí no sabemos si fue nuestro respaldo o un agente apuntando a algo que nadie revisó, y
+ * entre regalar y cobrar de más con una alerta encima, la alerta.
+ */
+export function creditsForTurnConRespaldo(input: {
+  /** Modelo que el agente tiene configurado. Vacío o ausente = no se sabe (no se ajusta). */
+  configuredModel?: string | null;
+  /** Modelo que efectivamente respondió. */
+  respondedModel: string;
+  tokens: number;
+  policy?: CreditPolicy;
+}): TurnCreditsConRespaldo {
+  const policy = input.policy ?? CREDIT_POLICY_SEED;
+  const respondio = weightOfModel(input.respondedModel, policy);
+  const configurado = input.configuredModel?.trim() ? weightOfModel(input.configuredModel, policy) : null;
+  const ajusta = respondio.known && configurado?.known === true && configurado.credits < respondio.credits;
+  const base = creditsForTurn({ model: input.respondedModel, tokens: input.tokens, policy });
+  if (!ajusta || base.credits <= 0) return { ...base, respaldo: false };
+  return {
+    ...base,
+    credits: configurado!.credits * base.blocks,
+    level: configurado!.level,
+    weight: configurado!.credits,
+    respaldo: true,
+  };
 }
 
 function positiveInt(v: unknown, fallback: number): number {

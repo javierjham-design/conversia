@@ -51,13 +51,35 @@ export interface BillingPort {
   /** Avisa por los canales (correo/panel/WhatsApp) y al owner. */
   notify(orgId: string, kind: "payment_failed" | "payment_succeeded" | "suspended" | "reactivated", data: Record<string, unknown>): Promise<void>;
   /** Intentos de cobro aún PENDIENTES (para reconciliar contra la pasarela). */
-  listPending(now: Date): Promise<Array<{ commerceOrder: string; providerRef: string; subscriptionId: string }>>;
+  listPending(now: Date): Promise<Array<{ commerceOrder: string; providerRef: string; subscriptionId: string; createdAt?: Date }>>;
   /** IDs de suscripciones con un intento de cobro AÚN pendiente: NO se re-cobra mientras haya
    *  uno en vuelo (evita el loop que dispara N cobras por tick hasta que la pasarela confirme). */
   pendingSubscriptionIds(now: Date): Promise<Set<string>>;
   /** Carga la suscripción de un intento (para aplicar el resultado reconciliado). */
   getSub(subscriptionId: string): Promise<EngineSub | null>;
+  /**
+   * Cierra un intento HUÉRFANO (pendiente y sin referencia de la pasarela) sin tocar el
+   * estado de la suscripción. OPCIONAL: los dobles de test viejos no la implementan.
+   */
+  abandonAttempt?(commerceOrder: string, reason: string): Promise<void>;
+  /** Excepción para la consola de operación. OPCIONAL por el mismo motivo. */
+  raiseOps?(
+    organizationId: string,
+    input: { type: string; title: string; detail: string; dedupeKey: string; severity: "warning" | "critical" },
+  ): Promise<void>;
 }
+
+/**
+ * Tras esto, un intento pendiente SIN referencia de la pasarela se da por perdido.
+ *
+ * Un `collect` cuya llamada HTTP murió antes de devolver el token deja un intento pendiente
+ * que nadie puede reconsultar (la reconciliación necesita el token). Y como "esta suscripción
+ * tiene un cobro en vuelo" no mira la fecha, ese intento **le apagaba el cobro a esa
+ * suscripción para siempre**: el cliente se quedaba con el servicio gratis, en silencio y sin
+ * un solo log. Es el mismo agujero que tenía la recarga automática, del otro lado del
+ * producto. Seis horas es de sobra para que un cobro real haya resuelto.
+ */
+export const VENTANA_INTENTO_HUERFANO_MS = 6 * 60 * 60 * 1000;
 
 const URL_CONFIRM = "/billing/webhooks/flow"; // se completa con API_URL en el tick real
 const RETRY_KIND: Record<string, "auto" | "retry"> = { charge: "auto", retry: "retry" };
@@ -114,8 +136,29 @@ export async function reconcilePending(
   const pending = await port.listPending(now);
   let reconciled = 0;
   for (const p of pending) {
-    if (!p.providerRef) continue;
     const sub = await port.getSub(p.subscriptionId);
+    if (!p.providerRef) {
+      // SIN TOKEN NO HAY NADA QUE RECONSULTAR. Si además ya es viejo, se cierra y se avisa:
+      // dejarlo pendiente es dejar de cobrarle a ese cliente para siempre. NO se toca el
+      // estado de la suscripción —no sabemos si el cobro entró— así que el ciclo normal
+      // volverá a intentarlo; de eso justamente avisa la excepción, para que alguien mire
+      // esa orden en la pasarela antes de que se cobre de nuevo.
+      if (!sub || !p.createdAt || now.getTime() - p.createdAt.getTime() < VENTANA_INTENTO_HUERFANO_MS) continue;
+      await port.abandonAttempt?.(p.commerceOrder, "sin_referencia");
+      await port
+        .raiseOps?.(sub.organizationId, {
+          type: "cobro_sin_referencia",
+          severity: "critical",
+          title: "Un cobro de la mensualidad se emitió sin referencia de la pasarela",
+          detail:
+            `La orden ${p.commerceOrder} quedó pendiente sin token, así que no se puede reconsultar y no se sabe si la ` +
+            `tarjeta quedó cobrada. Se cierra para que el cobro de esta cuenta no quede apagado, y el ciclo normal la ` +
+            `volverá a intentar: hay que buscar esa orden en el panel de la pasarela ANTES de que eso pase.`,
+          dedupeKey: `sin_referencia:${p.commerceOrder}`,
+        })
+        .catch(() => undefined);
+      continue;
+    }
     if (!sub) continue;
     const provider = await providerFor(sub.organizationId);
     const st = await provider.getChargeStatus(p.providerRef);

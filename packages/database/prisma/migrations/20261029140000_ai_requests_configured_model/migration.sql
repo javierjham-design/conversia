@@ -1,0 +1,12 @@
+-- §6 — el modelo que el agente tenía CONFIGURADO en el turno.
+--
+-- `model` guarda el que RESPONDIÓ, que es lo correcto para el costo. Pero el cobro al cliente
+-- usa el peso MENOR de los dos: cuando el router cae a nuestro respaldo porque el proveedor
+-- configurado no está, el sobrecosto lo absorbemos nosotros. Sin esta columna, un turno que la
+-- reconciliación recupera se cobraría con el peso del respaldo (Haiku, 4) en vez del
+-- configurado (mini, 1) — cuatro veces más por una caída nuestra.
+--
+-- Aditiva y nullable: el código viejo la ignora y el nuevo trata el nulo como "no se sabe"
+-- (cobra el que respondió, que es el comportamiento anterior). Sin índice: nadie filtra por
+-- ella, se lee junto a la fila.
+ALTER TABLE "ai_requests" ADD COLUMN IF NOT EXISTS "configured_model" TEXT;

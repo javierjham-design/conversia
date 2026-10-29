@@ -96,6 +96,19 @@ services:
       timeout: 5s
       retries: 20
 
+  # Flow de JUGUETE (tools/sim/mock-flow.mjs). Solo lo usa la prueba de carga de créditos,
+  # que configura `flow.baseUrl` apuntando acá y lo borra al terminar. No llama nunca a
+  # `urlConfirmation`: ESE es el escenario que se ensaya (el webhook que se pierde).
+  mock-flow:
+    image: node:22-alpine
+    container_name: conversia-sim-mock-flow
+    working_dir: /app
+    volumes:
+      - ./mock-flow.mjs:/app/mock-flow.mjs:ro
+    command: ["node", "/app/mock-flow.mjs"]
+    ports:
+      - "4021:4021"
+
   worker:
     build:
       context: ../..
@@ -107,12 +120,23 @@ services:
       DATABASE_URL: postgresql://conversia_app:conversia_app_dev_password@postgres:5432/conversia_sim?connection_limit=10
       DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
       WORKER_CONCURRENCY: "8"
+      # DENTRO del compose la api es `api:4000`. En `.env.sim` API_URL es localhost:4000
+      # porque ahí se usa para armar URLs que mira el NAVEGADOR (y las que se le pasan a la
+      # pasarela). Pero la reconciliación de recargas la LLAMA de verdad —reaplica el webhook
+      # de pago contra `/billing/webhooks/flow`— y con localhost el worker se pegaría a sí
+      # mismo. En producción API_URL ya es la URL pública de la api, así que esto es solo del
+      # compose.
+      API_URL: http://api:4000
       # Recuperación de los cobros que se perdieron (un reinicio del worker se lleva el
       # cargo del turno que estaba en vuelo). En producción pasa cada 10 min y respeta 3
       # min de gracia; acá se baja para que la prueba de carga pueda VERIFICAR que el
       # crédito vuelve, en vez de medir el hueco y darlo por bueno.
       AI_CREDITS_RECONCILE_MS: "20000"
       AI_CREDITS_RECONCILE_GRACIA_MIN: "1"
+      # Recuperación de las RECARGAS a medias (webhook perdido): en producción cada 10 min;
+      # acá cada 20 s para que la prueba pueda VERIFICAR que el crédito llega, en vez de
+      # medir el hueco y darlo por bueno.
+      RECHARGE_RECONCILE_MS: "20000"
     depends_on:
       db-init:
         condition: service_completed_successfully

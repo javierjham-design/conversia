@@ -178,6 +178,7 @@ async function pesosAplicados(orgId, desde) {
            (meta ->> 'weight')::numeric AS weight,
            (meta ->> 'tokensPerCredit')::numeric AS "tokensPerCredit",
            (meta ->> 'alTope') = 'true' AS "alTope",
+           (meta ->> 'fallback') = 'true' AS respaldo,
            (meta ->> 'pedido')::numeric AS pedido
     FROM usage_events
     WHERE organization_id = ${orgId}
@@ -194,6 +195,11 @@ async function pesosAplicados(orgId, desde) {
         weight,
         tokensPerCredit,
         alTope: r.alTope === true,
+        // §6 — el turno se cobró con el peso del modelo CONFIGURADO porque respondió el de
+        // respaldo. Difiere de la política vigente igual que un cambio de precios, y por eso
+        // hay que distinguirlos: durante una caída del proveedor son MILES de turnos, y
+        // contarlos como "cambio de política" haría ilegible el informe del día que se rompió.
+        respaldo: r.respaldo === true,
         ...(Number.isFinite(pedido) ? { pedido } : {}),
       });
     }
@@ -523,6 +529,12 @@ async function main() {
     console.log(
       `   ${n(total.porTope)} crédito(s) no se pudieron cobrar porque la cuenta llegó al tope del colchón ` +
         `(${n(total.porVeredicto.tope_gracia)} turno(s)). Es el regalo de la última respuesta, no un error.`,
+    );
+  }
+  if (total.conRespaldo > 0) {
+    lineas.push(
+      `   ${n(total.conRespaldo)} turno(s) se cobraron con el peso del modelo CONFIGURADO porque respondió el de respaldo: ` +
+        `el sobrecosto lo absorbimos nosotros. Si el número es grande, revisá las claves del proveedor.`,
     );
   }
   if (total.conPesoCambiado > 0) {

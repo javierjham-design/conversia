@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AUTO_RECARGA_DEFAULTS, CREDITOS_POR_CONVERSACION_POR_DEFECTO } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CREDITOS_POR_CONVERSACION_POR_DEFECTO, MAX_RECARGAS_MES } from "@conversia/agents";
 
 /**
  * CRE 2 — EL CATÁLOGO DE CRÉDITOS IA CUMPLE LO QUE DECIDIÓ EL DUEÑO.
@@ -140,6 +140,15 @@ describe("§8.3 — la calibración: el cliente de referencia paga ~$200.000 al 
     // gasta más de lo que cree. Este test los ata.
     expect(AUTO_RECARGA_DEFAULTS.topeMensualClp).toBe(catalogo.recargaAutomatica.topeMensualClp);
     expect(AUTO_RECARGA_DEFAULTS.topeMensualClp).toBe(recarga().priceClp * catalogo.recargaAutomatica.recargasEquivalentes);
+  });
+
+  it("el TECHO que acepta el servidor es el mismo número de recargas que el default", () => {
+    // El techo (`MAX_RECARGAS_MES`) es lo que impide que un decimal de más escrito a mano
+    // autorice cien millones de pesos de cobros. Si no fuera el mismo número que el default,
+    // el tope de fábrica estaría por encima o por debajo de lo que el servidor acepta: en un
+    // caso la pantalla ofrece lo que la API rechaza, en el otro el techo no protege nada.
+    expect(MAX_RECARGAS_MES).toBe(catalogo.recargaAutomatica.recargasEquivalentes);
+    expect(MAX_RECARGAS_MES * recarga().priceClp).toBe(AUTO_RECARGA_DEFAULTS.topeMensualClp);
   });
 });
 
