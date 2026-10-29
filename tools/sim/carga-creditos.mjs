@@ -27,7 +27,8 @@
  * (`packages/database/scripts/auditar-creditos.mjs`) tiene que cuadrar al crédito.
  *
  * Uso:  pnpm sim:up  &&  node tools/sim/carga-creditos.mjs
- * Env:  ORGS (6) · CONTACTOS (8) · MSGS (3) · RAFAGA (12) · SIM_API
+ * Env:  ORGS (8) · CONTACTOS (20) · MSGS (2, vueltas por contacto) · RAFAGA (20) ·
+ *       MSGS_KILL (30) · SIM_API · SIM_DATABASE_URL
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
@@ -38,10 +39,11 @@ const API = process.env.SIM_API || "http://localhost:4000";
 const ORIGIN_CV = "http://localhost:3002";
 const REPO = process.env.REPO_DIR || join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const COMPOSE = ["compose", "-f", "tools/sim/docker-compose.sim.yml"];
-const ORGS = Number(process.env.ORGS ?? 6);
-const CONTACTOS = Number(process.env.CONTACTOS ?? 8);
-const MSGS = Number(process.env.MSGS ?? 3);
-const RAFAGA = Number(process.env.RAFAGA ?? 12);
+const DB_URL = process.env.SIM_DATABASE_URL || "postgresql://postgres:postgres@localhost:5433/conversia_sim";
+const ORGS = Number(process.env.ORGS ?? 8);
+const CONTACTOS = Number(process.env.CONTACTOS ?? 20);
+const MSGS = Number(process.env.MSGS ?? 2);
+const RAFAGA = Number(process.env.RAFAGA ?? 20);
 const PASSWORD = process.env.ENSAYO_PASSWORD || `Carga-${Date.now()}-${Math.random().toString(36).slice(2, 10)}A1`;
 const INFORME = join(REPO, "tools", "sim", "out", "carga-creditos.json");
 
@@ -76,12 +78,22 @@ function sql(q) {
 }
 const sqlNum = (q) => Number(sql(q) || 0);
 
-function enContenedor(script, env = "") {
-  const cmd = `cd packages/database && ${env} DATABASE_URL="$DIRECT_DATABASE_URL" node scripts/${script}`;
-  return execFileSync("docker", [...COMPOSE, "exec", "-T", "api", "sh", "-c", cmd], {
-    cwd: REPO,
+/**
+ * Un script de packages/database contra la base del stack, desde el host — igual que el
+ * ensayo y que producción. Dentro del contenedor se probaría la copia CONGELADA del repo
+ * que lleva la imagen, no el código que se está arreglando.
+ */
+/** Un comando de compose contra el stack (matar/arrancar/reiniciar un servicio). */
+function docker(args) {
+  return execFileSync("docker", [...COMPOSE, ...args], { cwd: REPO, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+}
+
+function correrScript(script, env = {}) {
+  return execFileSync(process.execPath, [`scripts/${script}`], {
+    cwd: join(REPO, "packages", "database"),
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, DATABASE_URL: DB_URL, DIRECT_DATABASE_URL: DB_URL, ...env },
   });
 }
 
@@ -186,6 +198,17 @@ async function entra(slug, texto, waId, wamid) {
 
 /** Turnos (`ai_requests`) de la org. Es el HECHO contra el que se audita el cobro. */
 const turnosDe = (orgId) => sqlNum(`SELECT count(*) FROM ai_requests WHERE organization_id='${orgId}' AND purpose='CHAT';`);
+/** Respuestas que de verdad salieron al cliente. Dos por un mismo mensaje = trabajo (y cobro) repetido. */
+const respuestasDe = (orgId) =>
+  sqlNum(`SELECT count(*) FROM messages WHERE organization_id='${orgId}' AND direction='OUTBOUND' AND author_type='AGENT';`);
+/** Turnos con MÁS DE UN asiento: el detector directo del doble cobro. */
+const turnosCobradosDosVeces = (orgId) =>
+  sqlNum(
+    `SELECT count(*) FROM (SELECT ref_id FROM conversation_credit_ledger WHERE organization_id='${orgId}'` +
+      ` AND reason='ai_credit_debit' GROUP BY ref_id HAVING count(*) > 1) t;`,
+  );
+const excepcionesDe = (orgId, tipo) =>
+  sqlNum(`SELECT count(*) FROM platform_exceptions WHERE organization_id='${orgId}' AND type='${tipo}';`);
 const debitosDe = (orgId) =>
   sqlNum(`SELECT coalesce(sum(-delta),0) FROM conversation_credit_ledger WHERE organization_id='${orgId}' AND reason='ai_credit_debit';`);
 const asientosDe = (orgId) =>
@@ -251,9 +274,9 @@ async function main() {
 
   // ─────── 0. Créditos encendidos (idempotente) ───────
   paso("0. Encender Créditos IA en el stack (idempotente)");
-  enContenedor("seed-conversia-catalog.mjs");
+  correrScript("seed-conversia-catalog.mjs");
   await esperarApi();
-  const on = enContenedor("creditos-golive.mjs");
+  const on = correrScript("creditos-golive.mjs");
   await esperarApi();
   check(/CRÉDITOS IA ENCENDIDO/.test(on), "catálogo de créditos activo en el stack");
 
@@ -278,25 +301,38 @@ async function main() {
   console.log(`      cuentas sin fila de monedero al registrarse: ${sinMonedero.length}/${ORGS}`);
 
   // ─────── 2. Carga general ───────
-  paso(`2. Carga: ${ORGS * CONTACTOS * MSGS} mensajes entrantes`);
+  paso(`2. Carga: ${ORGS} cuentas × ${CONTACTOS} contactos × ${MSGS} vuelta(s) = ${ORGS * CONTACTOS * MSGS} mensajes`);
   const largo = "necesito saber todo sobre sus servicios y precios, cuéntame con mucho detalle. ".repeat(1_100); // ~85k chars → >1 bloque
-  const tareas = [];
-  for (const c of cuentas) {
-    for (let k = 0; k < CONTACTOS; k++) {
-      const waId = `5691${String(1_000_000 + Math.floor(Math.random() * 8_999_999))}`;
-      for (let m = 0; m < MSGS; m++) {
+  const contactos = cuentas.map((c) =>
+    Array.from({ length: CONTACTOS }, (_, k) => `5691${String(1_000_000 + Math.floor(Math.random() * 8_999_999))}${k % 10}`.slice(0, 12)),
+  );
+  // POR VUELTAS, no todo de una: el bot agrupa las ráfagas de un mismo contacto en un solo
+  // turno (debounce), así que tres mensajes seguidos del mismo número son UNA respuesta.
+  // Mandarlos todos juntos "medía" 144 mensajes y generaba 48 turnos. Por vueltas, cada
+  // vuelta es un turno más por contacto y además la conversación crece: el historial suma
+  // tokens y el ajuste por largo entra en juego solo.
+  const tCarga = Date.now();
+  let aceptadosTotal = 0;
+  let enviadosTotal = 0;
+  for (let m = 0; m < MSGS; m++) {
+    const tareas = [];
+    for (const [i, c] of cuentas.entries()) {
+      for (const [k, waId] of contactos[i].entries()) {
         // Uno de cada ocho mensajes es LARGO: tiene que cobrar más de un bloque.
-        const texto = (k * MSGS + m) % 8 === 3 ? largo : `hola, consulta ${m + 1} del contacto ${k + 1}`;
+        const texto = (k + m) % 8 === 3 ? largo : `hola, consulta ${m + 1} del contacto ${k + 1}`;
         tareas.push(() => entra(c.slug, texto, waId));
       }
     }
+    const envios = await enParalelo(tareas, 24);
+    enviadosTotal += tareas.length;
+    aceptadosTotal += envios.filter((s) => s === 200 || s === 201).length;
+    await esperarCola(cuentas.map((c) => c.organizationId), { quietoMs: 6_000 });
   }
-  const envios = await enParalelo(tareas, 24);
-  const aceptados = envios.filter((s) => s === 200 || s === 201).length;
-  check(aceptados === tareas.length, `el webhook aceptó los ${tareas.length} mensajes`, `→ ${aceptados}`);
-  const turnos = await esperarCola(cuentas.map((c) => c.organizationId));
-  const seg = (Date.now() - t0) / 1000;
+  check(aceptadosTotal === enviadosTotal, `el webhook aceptó los ${enviadosTotal} mensajes`, `→ ${aceptadosTotal}`);
+  const turnos = cuentas.reduce((a, c) => a + turnosDe(c.organizationId), 0);
+  const seg = (Date.now() - tCarga) / 1000;
   console.log(`      ${nf(turnos)} respuestas del bot en ${seg.toFixed(0)}s (${(turnos / seg).toFixed(1)}/s)`);
+  check(turnos >= enviadosTotal * 0.9, `se respondió al menos el 90% de los mensajes: ${nf(turnos)}/${nf(enviadosTotal)}`);
 
   let bloquesMultiples = 0;
   for (const c of cuentas) {
@@ -386,44 +422,118 @@ async function main() {
   check(dTurnos === 1, `tres entregas del mismo mensaje = UNA respuesta del bot`, `→ ${nf(dTurnos)} respuestas`);
   check(dAsientos <= 1 && dCobrado === dEsperado, `y UN solo cobro: ${nf(dAsientos)} asiento(s), ${nf(dCobrado)} crédito(s)`);
 
-  // ─────── 5. La gracia: nadie opera gratis para siempre ───────
-  paso("5. Gracia: gastar el saldo y pasarse");
+  // ─────── 5. Matar el worker con trabajo en vuelo ───────
+  paso("5. Matar el worker a mitad del trabajo: el reintento NO puede cobrar dos veces");
+  const kc = await registrar("reintento");
+  await dejarOperando(kc.token);
+  const MENSAJES_KILL = Number(process.env.MSGS_KILL ?? 30);
+  await Promise.all(
+    Array.from({ length: MENSAJES_KILL }, (_, k) => entra(kc.slug, `consulta urgente ${k}`, `5695${String(1_000_000 + k)}`)),
+  );
+  // Matar cuando YA hay cobros escritos: así el kill cae con débitos hechos y cola
+  // pendiente, que es el estado donde un reintento cobraría dos veces.
+  const hastaDebito = Date.now() + 60_000;
+  while (asientosDe(kc.organizationId) < 2 && Date.now() < hastaDebito) await dormir(500);
+  console.log(`      matando el worker con ${nf(asientosDe(kc.organizationId))} cobro(s) ya escritos y cola pendiente`);
+  docker(["kill", "worker"]);
+  docker(["start", "worker"]);
+  // El lock de la cola de IA dura 120 s: el job huérfano se reencola como "stalled" y se
+  // reintenta (attempts: 2). Por eso la espera es larga — sin ella no se prueba el reintento.
+  await esperarCola([kc.organizationId], { quietoMs: 20_000, maxMs: 420_000 });
+  const kTurnos = turnosDe(kc.organizationId);
+  const kRespuestas = respuestasDe(kc.organizationId);
+  const kDobles = turnosCobradosDosVeces(kc.organizationId);
+  const kCobrado = debitosDe(kc.organizationId);
+  const kEsperado = esperadoDe(kc.organizationId);
+  console.log(
+    `      ${nf(kTurnos)} turnos · ${nf(kRespuestas)} respuestas enviadas de ${MENSAJES_KILL} mensajes · cobrado ${nf(kCobrado)}/${nf(kEsperado)}`,
+  );
+  check(kDobles === 0, "ningún turno quedó con dos asientos tras el reintento", `→ ${nf(kDobles)} turno(s) cobrados dos veces`);
+  check(kCobrado === kEsperado, `el cobro cuadra con los turnos tras matar el worker: ${nf(kCobrado)} = ${nf(kEsperado)}`);
+  // Lo que de verdad duele, y que el sello de idempotencia NO cubre: el sello es el id del
+  // turno y cada intento crea un turno nuevo, así que si el reintento vuelve a generar la
+  // respuesta, el cliente paga dos veces el mismo mensaje y encima recibe dos respuestas.
+  // Eso lo tiene que frenar el guardián de arriba del turno, no el cobrador.
+  check(
+    kTurnos <= MENSAJES_KILL && kRespuestas <= MENSAJES_KILL,
+    `ni un mensaje se respondió dos veces: ${nf(kTurnos)} turnos y ${nf(kRespuestas)} respuestas para ${MENSAJES_KILL} mensajes`,
+    `→ el reintento DUPLICÓ trabajo: el cliente paga dos veces el mismo mensaje`,
+  );
+  if (kTurnos < MENSAJES_KILL) {
+    console.log(`      ⓘ ${MENSAJES_KILL - kTurnos} mensaje(s) quedaron sin respuesta por el kill (pérdida de servicio, no de plata).`);
+  }
+
+  // ─────── 6. Modelo sin peso + la gracia exactamente en el tope ───────
+  paso("6. Modelo sin peso de crédito, la gracia al tope y la recarga que la paga");
   const gc = await registrar("gracia");
   await dejarOperando(gc.token);
   const graciaLimite = 100;
-  // Mensajes largos (varios bloques) para agotar 200 + 100 sin mandar 300 mensajes.
-  let vueltas = 0;
-  let bloqueado = false;
-  while (vueltas < 40 && !bloqueado) {
-    const lote = Array.from({ length: 4 }, (_, k) => {
-      const waId = `5694${String(1_000_000 + vueltas * 4 + k)}`;
-      return () => entra(gc.slug, largo, waId);
-    });
-    await enParalelo(lote, 4);
-    await esperarCola([gc.organizationId], { quietoMs: 4_000, maxMs: 120_000 });
-    vueltas++;
-    const gracia = graciaDe(gc.organizationId);
-    if (gracia >= graciaLimite) bloqueado = true;
-    if (gracia > graciaLimite) break;
+  const politicaOriginal = sql(`SELECT value FROM platform_settings WHERE key='aiCredits';`);
+  // Se le QUITA el peso a gpt-4o-mini, el modelo con que responde todo bot. Con eso el
+  // modelo que responde deja de estar en la política y cada respuesta se cobra como
+  // premium (50 por bloque), que es la regla del §4 para un modelo sin peso definido. De
+  // paso, 200 créditos se agotan en 4 respuestas en vez de 200: así la gracia llega a su
+  // tope de verdad. Dos caminos que no se ejercitaban nunca, con un solo setup.
+  sql(`UPDATE platform_settings SET value = (value::jsonb #- '{models,gpt-4o-mini}')::text WHERE key='aiCredits';`);
+  docker(["restart", "worker"]); // la política se cachea 60 s dentro del proceso
+  await esperarApi();
+  let gTurnos = 0;
+  for (let k = 0; k < 12 && graciaDe(gc.organizationId) < graciaLimite; k++) {
+    await entra(gc.slug, `consulta ${k} con el modelo sin peso`, `5696${String(1_000_000 + k)}`);
+    await esperarCola([gc.organizationId], { quietoMs: 5_000, maxMs: 120_000 });
+    gTurnos = turnosDe(gc.organizationId);
   }
   const gGracia = graciaDe(gc.organizationId);
   const gSaldo = saldoDe(gc.organizationId);
   const gCobrado = debitosDe(gc.organizationId);
-  const gEsperado = esperadoDe(gc.organizationId);
-  console.log(`      saldo ${nf(gSaldo)} · gracia usada ${nf(gGracia)}/${graciaLimite} · cobrado ${nf(gCobrado)} de ${nf(gEsperado)} esperados`);
-  check(gGracia <= graciaLimite, `la gracia NO pasó del tope: ${nf(gGracia)} ≤ ${graciaLimite}`, `→ se operó gratis ${nf(gGracia - graciaLimite)} crédito(s) de más`);
-  check(gSaldo >= -graciaLimite, `el saldo no cae más allá del colchón: ${nf(gSaldo)} ≥ −${graciaLimite}`);
-  // Pasado el colchón, el turno NO se cobra (el gate ni llama al modelo): lo que no se puede
-  // es cobrar MÁS de lo que manda la fórmula. Regalar algo acá es el comportamiento diseñado
-  // (el bot no queda mudo), y el informe lo dice con el número exacto.
-  check(gCobrado <= gEsperado, `nunca se cobró de más: ${nf(gCobrado)} ≤ ${nf(gEsperado)}`);
-  if (gCobrado < gEsperado) {
-    console.log(`      ⓘ ${nf(gEsperado - gCobrado)} crédito(s) de respuestas que ya estaban generadas y no se pudieron cobrar (colchón agotado: diseño).`);
-  }
+  const gEsperadoPremium = esperadoDe(gc.organizationId, 50);
+  console.log(`      ${nf(gTurnos)} respuestas · cobrado ${nf(gCobrado)} · saldo ${nf(gSaldo)} · gracia ${nf(gGracia)}/${graciaLimite}`);
+  check(
+    gCobrado === gEsperadoPremium,
+    `un modelo sin peso se cobra como premium (50 por bloque): ${nf(gCobrado)} = ${nf(gEsperadoPremium)}`,
+    `→ se cobró ${nf(gCobrado)} y correspondía ${nf(gEsperadoPremium)}`,
+  );
+  check(
+    excepcionesDe(gc.organizationId, "modelo_sin_peso_de_credito") >= 1,
+    "y queda la excepción para el super admin (si no, cobramos premium sin que nadie se entere)",
+  );
+  check(gGracia === graciaLimite, `la gracia se detuvo EXACTAMENTE en el tope: ${nf(gGracia)} = ${graciaLimite}`, `→ ${nf(gGracia)}`);
+  check(gSaldo === -graciaLimite, `el saldo quedó en −${graciaLimite}, no más abajo: ${nf(gSaldo)}`);
+  // Agotado el colchón: el bot NO queda mudo, pero tampoco se cobra lo que no se puede cobrar.
+  const antesDelMudo = { asientos: asientosDe(gc.organizationId), respuestas: respuestasDe(gc.organizationId) };
+  await entra(gc.slug, "¿me atienden sin saldo?", "56969999999");
+  await esperarCola([gc.organizationId], { quietoMs: 5_000, maxMs: 90_000 });
+  check(
+    respuestasDe(gc.organizationId) > antesDelMudo.respuestas,
+    "sin saldo ni gracia el cliente IGUAL recibe respuesta (el bot no queda mudo)",
+  );
+  check(
+    asientosDe(gc.organizationId) === antesDelMudo.asientos && graciaDe(gc.organizationId) === graciaLimite,
+    `y no se cobró nada de más: la gracia sigue en ${graciaLimite}`,
+  );
+  // La recarga PAGA la gracia primero: si no, el cliente compraría 420 y vería 320 sin
+  // explicación, o peor, 420 con la deuda perdonada en silencio.
+  await api("/billing/buy-package", { method: "POST", token: gc.token, body: { code: "conversia-cred-420" } });
+  const compra = await api("/billing/mock-confirm", { method: "POST", token: gc.token, body: { planCode: "pkg:conversia-cred-420" } });
+  check(compra.ok, `la recarga de 420 se confirma (HTTP ${compra.status})`);
+  const gSaldoFinal = saldoDe(gc.organizationId);
+  check(
+    gSaldoFinal === 420 - graciaLimite && graciaDe(gc.organizationId) === 0,
+    `la recarga pagó la gracia primero: saldo ${nf(gSaldoFinal)} = 420 − ${graciaLimite} y gracia en 0`,
+    `→ saldo ${nf(gSaldoFinal)} · gracia ${nf(graciaDe(gc.organizationId))}`,
+  );
+  // Devolver la política como estaba ANTES de auditar: la auditoría recalcula con ella.
+  sql(`UPDATE platform_settings SET value = '${politicaOriginal}' WHERE key='aiCredits';`);
+  docker(["restart", "worker"]);
+  await esperarApi();
+  check(
+    sql(`SELECT value FROM platform_settings WHERE key='aiCredits';`) === politicaOriginal,
+    "la política quedó restaurada tal como estaba",
+  );
 
-  // ─────── 6. El marcador que ve el cliente ───────
-  paso("6. El marcador del panel contra la base, cuenta por cuenta");
-  for (const [i, c] of [...cuentas, rc, dc, gc].entries()) {
+  // ─────── 7. El marcador que ve el cliente ───────
+  paso("7. El marcador del panel contra la base, cuenta por cuenta");
+  for (const [i, c] of [...cuentas, rc, dc, kc, gc].entries()) {
     const w = await api("/billing/wallet/summary", { token: c.token });
     const base = saldoDe(c.organizationId);
     const ok = check(
@@ -435,8 +545,8 @@ async function main() {
     if (w.json?.unit) check(w.json.unit === "credit", `cuenta ${i + 1}: la unidad del panel es "credit"`);
   }
 
-  // ─────── 7. La auditoría del libro ───────
-  paso("7. Auditoría del libro contra ai_requests (el script que va a correr en producción)");
+  // ─────── 8. La auditoría del libro ───────
+  paso("8. Auditoría del libro contra ai_requests (el script que va a correr en producción)");
   try {
     rmSync(INFORME, { force: true });
   } catch {
@@ -454,7 +564,7 @@ async function main() {
         maxBuffer: 16 * 1024 * 1024,
         env: {
           ...process.env,
-          DATABASE_URL: "postgresql://postgres:postgres@localhost:5433/conversia_sim",
+          DATABASE_URL: DB_URL,
           DIAS: "1",
           JSON_OUT: INFORME,
         },
@@ -480,6 +590,20 @@ async function main() {
     check(
       j.porOrg.every((o) => o.inv.libroCuadra && o.inv.ultimoAsientoCuadra && o.inv.graciaDentroDelLimite && o.inv.sinLotesNegativos),
       "el libro de todas las cuentas explica su saldo",
+    );
+    // Que la auditoría haya MIRADO lo que tenía que mirar. Sin esto, un recorte de fechas
+    // mal puesto la deja auditando cero y el informe sale verde: pasó en la primera corrida
+    // de esta prueba ("respuestas auditadas: 0 · saldo 196") y es el peor fallo posible en
+    // un auditor, porque no se distingue de que todo esté bien.
+    const mias = [...cuentas, rc, dc, kc, gc];
+    const ciegas = mias.filter((c) => {
+      const fila = j.porOrg.find((o) => o.id === c.organizationId);
+      return !fila || fila.turnos !== turnosDe(c.organizationId);
+    });
+    check(
+      ciegas.length === 0,
+      `la auditoría miró TODAS las respuestas de las ${mias.length} cuentas de esta prueba`,
+      `→ ${ciegas.length} cuenta(s) auditadas de menos`,
     );
     console.log(`      informe: ${INFORME}`);
   } catch (e) {

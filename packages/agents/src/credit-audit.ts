@@ -43,6 +43,17 @@ export interface TurnoAuditado {
 export interface DebitosDelTurno {
   /** `delta` de cada asiento, tal como está en el libro (negativo). */
   deltas: number[];
+  /**
+   * El peso y el bloque que se APLICARON, tal como quedaron en `usage_events.meta` al
+   * cobrar. Es lo que hace que la auditoría siga sirviendo después de que el dueño cambie
+   * un peso: sin esto, recalcular con la política de HOY marcaría como robo cada turno
+   * cobrado con los pesos de ayer, y el dueño cambia pesos sin desplegar justamente porque
+   * para eso existe la fila `platform_settings.aiCredits`.
+   *
+   * Cuando está, el veredicto se decide con ella (coherencia interna del cobro) y la
+   * diferencia contra la política vigente se informa aparte, que es otra cosa.
+   */
+  aplicado?: { weight: number; tokensPerCredit: number } | null;
 }
 
 export type VeredictoTurno =
@@ -63,12 +74,23 @@ export interface AuditoriaTurno {
   turnId: string;
   organizationId: string;
   veredicto: VeredictoTurno;
-  /** Créditos que manda la fórmula para este turno. */
+  /**
+   * Créditos que correspondían a este turno. Si el cobro dejó registrado el peso que
+   * aplicó, es con ESE peso (coherencia interna); si no, con la política vigente.
+   */
   esperado: number;
+  /** Créditos que costaría el mismo turno con la política de HOY. */
+  esperadoVigente: number;
   /** Créditos efectivamente debitados (suma de los asientos). */
   cobrado: number;
   /** cobrado − esperado. Positivo = de más al cliente; negativo = regalado. */
   diferencia: number;
+  /**
+   * El turno se cobró con un peso distinto del vigente. NO es un problema por sí mismo:
+   * es lo que pasa cuando el dueño cambia un peso. Se informa para que un cambio de
+   * precios no se confunda con un error de cobro, ni al revés.
+   */
+  pesoCambiado: boolean;
   asientos: number;
   model: string;
   tokens: number;
@@ -87,7 +109,15 @@ export const VEREDICTOS_MALOS: VeredictoTurno[] = ["sin_cobrar", "cobrado_de_men
  */
 export function auditarTurno(turno: TurnoAuditado, debitos: DebitosDelTurno, policy?: CreditPolicy): AuditoriaTurno {
   const tokens = Math.max(0, Number(turno.inputTokens) || 0) + Math.max(0, Number(turno.outputTokens) || 0);
-  const esperado = creditsForTurn({ model: turno.model, tokens, policy }).credits;
+  const esperadoVigente = creditsForTurn({ model: turno.model, tokens, policy }).credits;
+  // Con el peso que se aplicó de verdad, cuando el cobro lo dejó anotado. Un turno sin
+  // tokens sigue costando 0 con cualquier peso: eso no lo decide la política.
+  const ap = debitos.aplicado;
+  const conElAplicado =
+    ap && ap.weight > 0 && ap.tokensPerCredit > 0 && tokens > 0
+      ? ap.weight * Math.max(1, Math.ceil(tokens / ap.tokensPerCredit))
+      : null;
+  const esperado = conElAplicado ?? esperadoVigente;
   const cobrado = debitos.deltas.reduce((a, d) => a + Math.abs(Number(d) || 0), 0);
   const asientos = debitos.deltas.length;
 
@@ -104,8 +134,10 @@ export function auditarTurno(turno: TurnoAuditado, debitos: DebitosDelTurno, pol
     organizationId: turno.organizationId,
     veredicto,
     esperado,
+    esperadoVigente,
     cobrado,
     diferencia: cobrado - esperado,
+    pesoCambiado: conElAplicado != null && conElAplicado !== esperadoVigente,
     asientos,
     model: turno.model,
     tokens,
@@ -123,6 +155,8 @@ export interface ResumenAuditoria {
   regalados: number;
   /** Créditos cobrados de más al cliente. */
   deMas: number;
+  /** Turnos cobrados con un peso distinto del vigente (cambio de precios, no error). */
+  conPesoCambiado: number;
   /** true = todo cuadra al crédito. */
   cuadra: boolean;
 }
@@ -148,12 +182,14 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
   let cobrado = 0;
   let regalados = 0;
   let deMas = 0;
+  let conPesoCambiado = 0;
   for (const i of items) {
     porVeredicto[i.veredicto]++;
     esperado += i.esperado;
     cobrado += i.cobrado;
     if (i.diferencia < 0) regalados += -i.diferencia;
     if (i.diferencia > 0) deMas += i.diferencia;
+    if (i.pesoCambiado) conPesoCambiado++;
   }
   return {
     turnos: items.length,
@@ -162,6 +198,7 @@ export function resumirAuditoria(items: AuditoriaTurno[]): ResumenAuditoria {
     cobrado,
     regalados,
     deMas,
+    conPesoCambiado,
     cuadra: regalados === 0 && deMas === 0 && porVeredicto.doble_cobro === 0,
   };
 }

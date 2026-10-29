@@ -102,6 +102,62 @@ describe("auditar un turno contra sus asientos", () => {
   });
 });
 
+describe("cuando el dueño cambia un peso (la política no es eterna)", () => {
+  // El dueño ajusta pesos desde platform_settings.aiCredits SIN desplegar: para eso existe
+  // esa fila. Si la auditoría recalculara todo con la política de hoy, el día después de
+  // subir un peso marcaría como robo cada turno cobrado con el peso de ayer — y al revés,
+  // un cobro mal hecho se podría excusar como "cambio de precios". Son dos cosas distintas
+  // y la auditoría tiene que decir cuál es cuál.
+  const aplicado = { weight: 50, tokensPerCredit: 20_000 };
+
+  it("un turno cobrado con el peso de ayer cuadra, y el cambio se informa aparte", () => {
+    const a = auditarTurno(turno(), { deltas: [-50], aplicado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("ok");
+    expect(a.esperado).toBe(50); // con el peso que se aplicó
+    expect(a.esperadoVigente).toBe(1); // con el de hoy
+    expect(a.pesoCambiado).toBe(true);
+    expect(resumirAuditoria([a]).conPesoCambiado).toBe(1);
+  });
+
+  it("pero un cobro mal hecho NO se puede excusar con el peso aplicado", () => {
+    // Dice que aplicó 50 por bloque y cobró 80: eso no lo explica ningún cambio de precios.
+    const a = auditarTurno(turno(), { deltas: [-80], aplicado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("cobrado_de_mas");
+    expect(a.diferencia).toBe(30);
+  });
+
+  it("el bloque de tokens aplicado también manda", () => {
+    // 30.000 tokens con bloques de 10.000 son 3 bloques, no 2 (los 20.000 de hoy).
+    const a = auditarTurno(
+      turno({ inputTokens: 30_000, outputTokens: 0 }),
+      { deltas: [-3], aplicado: { weight: 1, tokensPerCredit: 10_000 } },
+      CREDIT_POLICY_SEED,
+    );
+    expect(a.esperado).toBe(3);
+    expect(a.esperadoVigente).toBe(2);
+    expect(a.veredicto).toBe("ok");
+  });
+
+  it("un turno sin tokens sigue costando 0 con cualquier peso", () => {
+    const a = auditarTurno(turno({ inputTokens: 0, outputTokens: 0 }), { deltas: [], aplicado }, CREDIT_POLICY_SEED);
+    expect(a.veredicto).toBe("no_cobrable");
+    expect(a.esperado).toBe(0);
+    expect(a.pesoCambiado).toBe(false);
+  });
+
+  it("sin registro del peso aplicado se usa el vigente (es todo lo que hay)", () => {
+    const a = auditarTurno(turno(), { deltas: [-1] }, CREDIT_POLICY_SEED);
+    expect(a.esperado).toBe(a.esperadoVigente);
+    expect(a.pesoCambiado).toBe(false);
+  });
+
+  it("un peso aplicado basura no borra el cobro: cae al vigente", () => {
+    const a = auditarTurno(turno(), { deltas: [-1], aplicado: { weight: 0, tokensPerCredit: 0 } }, CREDIT_POLICY_SEED);
+    expect(a.esperado).toBe(1);
+    expect(a.veredicto).toBe("ok");
+  });
+});
+
 describe("resumen de la auditoría", () => {
   const items = (vs: Array<[number, number]>): AuditoriaTurno[] =>
     vs.map(([esperado, cobrado], i) =>

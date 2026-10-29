@@ -11,12 +11,13 @@
  * Uso: node ensayo-golive.mjs     (requiere `pnpm sim:up` arriba)
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const API = process.env.SIM_API || "http://localhost:4000";
 const ORIGIN_CV = "http://localhost:3002";
-const COMPOSE = ["compose", "-f", "tools/sim/docker-compose.sim.yml"];
+const DB_URL = process.env.SIM_DATABASE_URL || "postgresql://postgres:postgres@localhost:5433/conversia_sim";
 const REPO = process.env.REPO_DIR || join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /**
  * Contraseña de UN SOLO USO para las cuentas del ensayo. Se genera en cada corrida en vez
@@ -40,19 +41,24 @@ const check = (ok, label, extra = "") => {
 const paso = (t) => console.log(`\n── ${t}`);
 
 /**
- * Corre un script de packages/database DENTRO del contenedor api, con el rol admin.
- * Después ESPERA a que la API vuelva: correr un script pesado dentro del mismo contenedor
- * hace que el proceso principal se reinicie (se vio en la primera corrida: la API volvió
- * con uptime de 0 y el `fetch` siguiente murió con "fetch failed").
+ * Corre un script de packages/database contra la base del stack, DESDE EL HOST.
+ *
+ * Antes se corrían dentro del contenedor api (`docker compose exec`) y eso tenía dos
+ * problemas: el contenedor lleva una copia CONGELADA del repo —así que el ensayo probaba
+ * los scripts de la última imagen construida, no los del working copy, y un arreglo recién
+ * escrito se "verificaba" con el código viejo— y además correr un script pesado dentro del
+ * mismo contenedor reiniciaba el proceso de la API, que es por lo que había que esperarla.
+ *
+ * Desde el host es más fiel, además: es exactamente como se corren en producción
+ * (`railway run -s Postgres -- … node scripts/…`), con la URL de la base por env.
  */
-function enContenedor(script, env = "") {
-  const cmd = `cd packages/database && ${env} DATABASE_URL="$DIRECT_DATABASE_URL" node scripts/${script}`;
-  const out = execFileSync("docker", [...COMPOSE, "exec", "-T", "api", "sh", "-c", cmd], {
-    cwd: REPO,
+function correrScript(script, env = {}) {
+  return execFileSync(process.execPath, [`scripts/${script}`], {
+    cwd: join(REPO, "packages", "database"),
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
+    env: { ...process.env, DATABASE_URL: DB_URL, DIRECT_DATABASE_URL: DB_URL, ...env },
   });
-  return out;
 }
 
 async function esperarApi(ms = 90_000) {
@@ -174,7 +180,7 @@ async function main() {
   // Idempotente y necesario para que el ensayo se pueda repetir: si quedó encendido de una
   // corrida anterior, el paso 1 mediría el modelo nuevo creyendo medir el viejo.
   paso("0. Normalizar el punto de partida (rollback, idempotente)");
-  const base0 = enContenedor("creditos-golive.mjs", "OFF=1");
+  const base0 = correrScript("creditos-golive.mjs", { OFF: "1" });
   check(/APAGADO/.test(base0), "se parte del modelo por conversación");
   await esperarApi();
 
@@ -188,13 +194,13 @@ async function main() {
 
   // ───────────────────────── 2. Sembrar + encender ─────────────────────────
   paso("2. Siembra del catálogo (queda INACTIVO) y go-live");
-  const seed = enContenedor("seed-conversia-catalog.mjs");
+  const seed = correrScript("seed-conversia-catalog.mjs");
   await esperarApi();
   check(/créditos|creditos|credit/i.test(seed), "el seeder corrió y tocó el catálogo de créditos");
-  const dry = enContenedor("creditos-migrar-saldos.mjs");
+  const dry = correrScript("creditos-migrar-saldos.mjs");
   await esperarApi();
   check(/DRY-RUN/.test(dry), "la migración de saldos en dry-run no escribe nada");
-  const golive = enContenedor("creditos-golive.mjs");
+  const golive = correrScript("creditos-golive.mjs");
   await esperarApi();
   check(/CRÉDITOS IA ENCENDIDO/.test(golive), "go-live encendido");
   console.log(golive.split("\n").filter((l) => l.trim()).map((l) => `      ${l}`).join("\n"));
@@ -207,7 +213,20 @@ async function main() {
   check(!codes.includes("conversia_v2_base"), "el plan por conversación ya no se ofrece");
   const packs = await api("/public/conversation-packs?brand=conversia");
   const pcodes = (Array.isArray(packs.json) ? packs.json : []).map((p) => p.code);
-  check(pcodes.some((c) => c.startsWith("conversia-cred-")), `packs públicos: ${pcodes.join(", ")}`);
+  // EXACTAMENTE los del catálogo, no "alguno que empiece con conversia-cred-". Un pack que
+  // el dueño sacó del catálogo y quedó en la base se vendería igual, y los viejos costaban
+  // $12,5–$19 por crédito contra los $59,5 aprobados: encender el modelo nuevo con ellos
+  // vivos es regalar el 79% del precio justo a los clientes que más gastan. Lo encontró
+  // este ensayo: el paso 3 listaba 6 packs públicos donde el catálogo tiene 1.
+  const delCatalogo = JSON.parse(readFileSync(join(REPO, "packages", "database", "seeds", "creditos-catalogo.json"), "utf-8")).packs.map(
+    (p) => p.code,
+  );
+  const creditos = pcodes.filter((c) => c.startsWith("conversia-cred-")).sort();
+  check(
+    creditos.join(",") === [...delCatalogo].sort().join(","),
+    `los packs públicos de créditos son EXACTAMENTE los del catálogo (${delCatalogo.join(", ")})`,
+    `→ públicos: ${creditos.join(", ") || "(ninguno)"}`,
+  );
 
   // ───────────────────────── 4. Una cuenta nueva nace en créditos ─────────────────────────
   paso("4. DESPUÉS del go-live: una cuenta nueva entra en Créditos IA");
@@ -274,7 +293,7 @@ async function main() {
 
   // ───────────────────────── 8. Rollback ─────────────────────────
   paso("8. Rollback: vuelve el modelo por conversación sin borrar nada");
-  const off = enContenedor("creditos-golive.mjs", "OFF=1");
+  const off = correrScript("creditos-golive.mjs", { OFF: "1" });
   await esperarApi();
   check(/APAGADO/.test(off), "rollback ejecutado");
   const planes2 = await api("/public/plans?brand=conversia");
