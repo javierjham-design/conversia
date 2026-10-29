@@ -52,6 +52,13 @@ const RAFAGA = Number(process.env.RAFAGA ?? 20);
 const PASSWORD = process.env.ENSAYO_PASSWORD || `Carga-${Date.now()}-${Math.random().toString(36).slice(2, 10)}A1`;
 const INFORME = join(REPO, "tools", "sim", "out", "carga-creditos.json");
 
+/**
+ * Cómo devolver la política de pesos a su lugar. La fija la fase 6 (que la pisa) y la llama
+ * el `finally` de `main`: una prueba que aborta no puede dejar el stack mintiéndole a la
+ * siguiente.
+ */
+let restaurarPolitica = null;
+
 let pass = 0;
 let fail = 0;
 const fallos = [];
@@ -335,6 +342,40 @@ function verificarStackAlDia() {
     }
   }
   console.log("   ✔ el stack corre el código del working copy (canarios api y worker)");
+  verificarPoliticaLimpia();
+}
+
+/**
+ * LA POLÍTICA DE PESOS TIENE QUE ESTAR COMO LA DEJÓ EL SEEDER.
+ *
+ * La fase 6 PISA el peso de `gpt-4o-mini` (lo sube a 70 para que un turno no quepa en el
+ * colchón) y lo restaura al terminar. Si la prueba ABORTA entremedio —pasó: un corte de
+ * socket del host al reiniciar el worker—, el peso roto queda en la base y la corrida
+ * siguiente cobra 70 créditos por respuesta. El informe sale en ROJO por todos lados y
+ * apuntando al lugar equivocado: "2.400 créditos cobrados = 46 esperados" parece una fuga
+ * gravísima del contador cuando lo único que pasó es que la prueba anterior se cayó.
+ *
+ * Media hora de diagnóstico por un estado sucio. Mejor no empezar.
+ */
+function verificarPoliticaLimpia() {
+  const peso = sqlNum(`SELECT (value::json->'models'->'gpt-4o-mini'->>'credits')::numeric FROM platform_settings WHERE key='aiCredits';`);
+  if (peso === 1) {
+    console.log("   ✔ la política de pesos está limpia (gpt-4o-mini = 1)");
+    return;
+  }
+  console.error(
+    [
+      "",
+      `✖ La política de créditos del stack está SUCIA: gpt-4o-mini pesa ${peso} y tiene que pesar 1.`,
+      "  Lo normal es que una corrida anterior abortara en la fase 6 (que lo pisa a propósito) y no",
+      "  alcanzara a restaurarlo. Si se corre así, TODO el informe sale en rojo apuntando al lugar",
+      '  equivocado ("2.400 créditos cobrados = 46 esperados" parece una fuga gravísima del contador',
+      "  cuando lo único que pasó es que la prueba anterior se cayó). Restauralo y volvé a intentar:",
+      "    cd packages/database && FORZAR=1 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/conversia_sim node scripts/seed-ai-credits-policy.mjs",
+      "",
+    ].join("\n"),
+  );
+  process.exit(4);
 }
 
 async function main() {
@@ -560,6 +601,10 @@ async function main() {
   await dejarOperando(gc.token);
   const graciaLimite = 100;
   const politicaOriginal = sql(`SELECT value FROM platform_settings WHERE key='aiCredits';`);
+  // Se registra para restaurarla PASE LO QUE PASE (ver el `finally` de main): si la prueba
+  // aborta entre el `jsonb_set` de abajo y la restauración, el peso roto queda en la base y
+  // la corrida siguiente mide cualquier cosa.
+  restaurarPolitica = () => sql(`UPDATE platform_settings SET value = '${politicaOriginal}' WHERE key='aiCredits';`);
   // Se le sube el PESO a gpt-4o-mini —el modelo con que responde todo bot— a 70 por bloque.
   //
   // Por qué 70 y no 50: tiene que NO dividir el saldo. Con 200 créditos de prueba y 100 de
@@ -811,5 +856,20 @@ async function main() {
 
 main().catch((e) => {
   console.error(`\n✖ prueba abortada: ${e.message}`);
+  // LA POLÍTICA SE RESTAURA AUNQUE LA PRUEBA REVIENTE. Si no, el peso que la fase 6 pisa a
+  // propósito queda en la base y la corrida siguiente cobra 70 créditos por respuesta: el
+  // informe sale en rojo por todos lados y apuntando al lugar equivocado. El canario del
+  // arranque es la segunda red, para cuando ni esto alcance (un kill -9, por ejemplo).
+  if (restaurarPolitica) {
+    try {
+      restaurarPolitica();
+      console.error("  (la política de pesos quedó restaurada)");
+    } catch (err) {
+      console.error(
+        `  ✖ Y NO SE PUDO RESTAURAR LA POLÍTICA (${err.message}). Corré esto antes de volver a probar:\n` +
+          "    cd packages/database && FORZAR=1 DATABASE_URL=postgresql://postgres:postgres@localhost:5433/conversia_sim node scripts/seed-ai-credits-policy.mjs",
+      );
+    }
+  }
   process.exit(2);
 });

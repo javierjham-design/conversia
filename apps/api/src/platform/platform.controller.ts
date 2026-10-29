@@ -20,7 +20,8 @@ import { MARGEN_MINIMO_PCT, calcularMargen, mesRango, recomendarCalibracion } fr
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
-import { computeWhatsappCostUsd } from "@conversia/agents";
+import { computeWhatsappCostUsd, explicarProblemaDelPack, problemaDelPack } from "@conversia/agents";
+import { leerSupuestosDeCosto } from "./supuestos-de-costo";
 import { enforcePlanLimit } from "../common/plan-limits";
 // R2 — lógica/schemas de agentes COMPARTIDOS con el controller del tenant (una sola fuente).
 import { createAgentSchema, draftSchema, testSchema, DEFAULT_PROMPT, slugify as agentSlugify, runAgentTest } from "../agents/agent-test";
@@ -576,6 +577,25 @@ export class PlatformController {
     ]);
     const plan = sub ? plans.find((p) => p.id === sub.planId) : null;
     const paymentAttempts = await db.paymentAttempt.findMany({ where: { organizationId: id }, orderBy: { createdAt: "desc" }, take: 10 });
+    // §3 — LA FICHA DEL COBRO AUTOMÁTICO del cliente. Cuando un cliente reclama que se quedó
+    // sin bot teniendo la recarga activada, la respuesta está casi siempre en uno de estos
+    // cinco datos, y hasta ahora había que ir a buscarlos a mano a tres tablas distintas.
+    const tarjeta = await db.paymentMethod.findFirst({
+      where: { organizationId: id, provider: "flow" },
+      orderBy: { createdAt: "desc" },
+      select: { brand: true, last4: true, autoChargeable: true, createdAt: true },
+    });
+    const arCfg = (((org.settings ?? {}) as Record<string, any>).autoRecharge ?? {}) as Record<string, any>;
+    const packRecarga = typeof arCfg.packCode === "string" && arCfg.packCode
+      ? await db.messagePackage.findUnique({ where: { code: arCfg.packCode }, select: { code: true, name: true, credits: true, priceClp: true } }).catch(() => null)
+      : null;
+    const inicioDelMes = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const recargasDelMes = await db.paymentAttempt.findMany({
+      where: { organizationId: id, commerceOrder: { startsWith: "rec-" }, createdAt: { gte: inicioDelMes } },
+      select: { amount: true, status: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
     const settings = (org.settings ?? {}) as Record<string, any>;
     const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
     const planLimits = (plan?.limits as Record<string, number>) ?? {};
@@ -644,6 +664,37 @@ export class PlatformController {
         ? { status: sub.status, interval: sub.interval, periodEnd: sub.periodEnd, nextChargeAt: sub.nextChargeAt, pastDueSince: sub.pastDueSince, retriesDone: sub.retriesDone, cancelAtPeriodEnd: sub.cancelAtPeriodEnd, hasCard: !!sub.providerCustomerRef }
         : null,
       paymentAttempts: paymentAttempts.map((a) => ({ id: a.id, amount: Number(a.amount), currency: a.currency, kind: a.kind, status: a.status, reason: a.reason, createdAt: a.createdAt })),
+      // §3 — la ficha del cobro automático, en un solo lugar.
+      cobroAutomatico: {
+        tarjeta: tarjeta
+          ? {
+              marca: tarjeta.brand,
+              last4: tarjeta.last4,
+              // null = todavía no se sabe (se confirma con el primer cobro). Es un estado
+              // real y distinto de "no sirve": mezclarlos haría ver tarjetas malas donde
+              // solo hay tarjetas nuevas.
+              aptaParaCobroAutomatico: tarjeta.autoChargeable,
+              registradaEl: tarjeta.createdAt,
+            }
+          : null,
+        recargaActiva: arCfg.enabled === true && typeof arCfg.consentAt === "string" && arCfg.consentAt.trim() !== "",
+        // El flag sin el consentimiento NO cobra (el worker lo exige), así que se informan
+        // los dos: "activada pero sin aceptar" es el estado que explica un cliente que creía
+        // estar cubierto.
+        flagEncendido: arCfg.enabled === true,
+        consentAt: typeof arCfg.consentAt === "string" ? arCfg.consentAt : null,
+        umbral: Number.isFinite(Number(arCfg.thresholdRemaining)) ? Number(arCfg.thresholdRemaining) : null,
+        topeMensualClp: Number.isFinite(Number(arCfg.monthlyCapClp)) ? Number(arCfg.monthlyCapClp) : null,
+        pack: packRecarga ? { ...packRecarga, priceClp: Number(packRecarga.priceClp) } : null,
+        recargasDelMes: {
+          cobradas: recargasDelMes.filter((r) => r.status === "succeeded").length,
+          enVuelo: recargasDelMes.filter((r) => r.status === "pending").length,
+          fallidas: recargasDelMes.filter((r) => r.status === "failed").length,
+          // Lo gastado cuenta exitosas Y en vuelo, igual que el tope: si contara solo las
+          // exitosas, la ficha diría que le queda cupo que en realidad ya está comprometido.
+          gastadoClp: recargasDelMes.filter((r) => r.status !== "failed").reduce((a, r) => a + Number(r.amount), 0),
+        },
+      },
       // Modelo de IA de TODA la plataforma del tenant (lo fija el Super Admin).
       ai: {
         model: (settings.ai as any)?.model ?? null,
@@ -2367,6 +2418,7 @@ export class PlatformController {
   @Post("packages")
   async createPackage(@Body() body: unknown, @Req() req: PlatformRequest) {
     const d = { ...this.parsePackage(body), brand: this.reqBrand(req) }; // A4 — el pack nace en la marca del admin
+    await this.assertPackVendible(req, null, d);
     const pkg = await this.prisma.admin.messagePackage.create({ data: d });
     await this.audit(req, "platform.package_create", "package", pkg.id, d);
     return pkg;
@@ -2379,6 +2431,7 @@ export class PlatformController {
     // iban por id a secas: el admin de una marca podía cambiarle el PRECIO o borrarle un
     // pack a la otra. 404 para no confirmar que el pack existe.
     await this.assertPackageBrand(req, id);
+    await this.assertPackVendible(req, id, d);
     const pkg = await this.prisma.admin.messagePackage.update({ where: { id }, data: d });
     await this.audit(req, "platform.package_update", "package", id, d);
     return pkg;
@@ -2403,17 +2456,65 @@ export class PlatformController {
 
   private parsePackage(body: unknown, partial = false) {
     const schema = z.object({
-      code: z.string().regex(/^[a-z0-9_]+$/, "código: minúsculas/números/_"),
+      // GUIONES PERMITIDOS. El regex pedía `^[a-z0-9_]+$` y TODOS los códigos que están
+      // vendidos de verdad llevan guión (`conversia-cred-420`, `conversia-sobre-500`): la
+      // pantalla del super admin no podía crear ni renombrar un pack al formato real, y el
+      // 400 que devolvía hablaba de guiones bajos, así que ni se entendía por qué.
+      code: z.string().regex(/^[a-z0-9_-]+$/, "código: minúsculas, números, guión o guión bajo"),
       name: z.string().min(2).max(60),
       credits: z.number().int().min(1),
       priceClp: z.number().int().min(0),
       priceUsd: z.number().min(0),
       active: z.boolean().default(true),
       order: z.number().int().default(0),
+      // §3 pide un campo "recarga básica" y NO está acá a propósito: la recarga básica es
+      // el pack de créditos ACTIVO más barato, y de ahí sale el precio por crédito de
+      // referencia con el que se calcula el bono de los demás. Es un hecho derivado del
+      // precio, así que un flag editable aparte podría contradecirlo —marcar como "básica"
+      // la más cara deja los bonos al revés— y además necesitaría su propia columna. Si el
+      // dueño quiere desacoplarla del precio, es una decisión suya y se agrega la columna.
     });
     const r = (partial ? schema.partial() : schema).safeParse(body);
     if (!r.success) throw new BadRequestException(r.error.issues.map((i) => i.message).join("; "));
     return r.data as any;
+  }
+
+  /**
+   * §3 — NO SE GUARDA UN PACK QUE PIERDA PLATA NI UNO QUE SEA UNA TRAMPA.
+   *
+   * El piso de 300% de ganancia vivía solo en el test del catálogo: protegía los precios del
+   * repo, no los que se escriben en esta pantalla. Un cero de más en los créditos y se
+   * empieza a vender saldo bajo costo sin que nada lo frene — y los packs que el dueño sacó
+   * del catálogo el 28-oct salieron justamente por no cumplir esta regla.
+   *
+   * La segunda regla es la que no se ve venir: si un pack MÁS CARO da menos créditos por peso
+   * que uno más barato, al cliente le conviene comprar el chico varias veces y el pack grande
+   * es una trampa.
+   *
+   * Es la MISMA cuenta que el test, literalmente: la función es la de `@conversia/agents` y
+   * los supuestos salen del mismo `seeds/creditos-catalogo.json`.
+   */
+  private async assertPackVendible(req: PlatformRequest, id: string | null, datos: Record<string, any>): Promise<void> {
+    const actual = id
+      ? await this.prisma.admin.messagePackage.findUnique({ where: { id }, select: { code: true, credits: true, priceClp: true, type: true } })
+      : null;
+    const tipo = String(datos.type ?? actual?.type ?? "credit");
+    // Solo los packs que acreditan CRÉDITOS entran en la regla: los de plantillas se cobran
+    // con otra unidad y otro costo (los cobra Meta), así que esta cuenta no los describe.
+    if (tipo !== "credit") return;
+    const pack = {
+      code: String(datos.code ?? actual?.code ?? ""),
+      credits: Number(datos.credits ?? actual?.credits ?? 0),
+      priceClp: Number(datos.priceClp ?? actual?.priceClp ?? 0),
+    };
+    const s = leerSupuestosDeCosto();
+    if (!s) return; // sin supuestos no se inventa un veredicto: se deja pasar y queda auditado
+    const otros = await this.prisma.admin.messagePackage.findMany({
+      where: { brand: this.reqBrand(req), type: "credit", active: true },
+      select: { code: true, credits: true, priceClp: true },
+    });
+    const problema = problemaDelPack({ pack, otros: otros.map((p) => ({ ...p, priceClp: Number(p.priceClp) })), s });
+    if (problema) throw new BadRequestException(explicarProblemaDelPack(problema, pack, s));
   }
 
   private async readWalletWeights(brand = "tubot"): Promise<{ utility: number; authentication: number; marketing: number; service: number }> {
