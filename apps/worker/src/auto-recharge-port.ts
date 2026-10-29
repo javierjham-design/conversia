@@ -32,6 +32,25 @@ function startOfMonth(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+/**
+ * Cuánto tiempo se considera que una recarga puede seguir "en vuelo".
+ *
+ * Es el plazo que se le da al webhook de la pasarela para cerrar el intento. Pasado eso se
+ * asume que no va a llegar y la cuenta puede volver a intentarlo: sin este plazo, un
+ * webhook perdido dejaba la recarga automática apagada para siempre y en silencio.
+ */
+export const VENTANA_EN_VUELO_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Cuánto se respeta una recarga comprada A MANO antes de volver a cobrar automáticamente.
+ *
+ * El aviso de saldo bajo manda al cliente a comprar al panel y el tick corre cada 15
+ * minutos: sin esta ventana, el cliente compraba su recarga y al rato le llegaba OTRO cobro
+ * por lo mismo — dos cobros y el doble de créditos de los que quiso. Una hora cubre de
+ * sobra el ida y vuelta de un checkout.
+ */
+export const VENTANA_COMPRA_MANUAL_MS = 60 * 60 * 1000;
+
 export function createDbAutoRechargePort(): AutoRechargePort {
   const admin = getAdminPrisma();
 
@@ -108,8 +127,41 @@ export function createDbAutoRechargePort(): AutoRechargePort {
     },
 
     async hasPendingRecharge(organizationId) {
+      // CON VENTANA DE TIEMPO, y esto es lo que hace que la recarga automática siga
+      // funcionando el segundo mes.
+      //
+      // Un intento de recarga lo cierra el webhook de la pasarela. Si ese webhook no llega
+      // —se pierde, o el handler devuelve error en todos los reintentos—, el intento queda
+      // `pending` para siempre. Y como esta consulta no miraba la fecha, "hay una recarga en
+      // vuelo" pasaba a ser verdad PARA SIEMPRE: la cuenta no se volvía a cobrar nunca más,
+      // sin un solo log, aunque el cliente nos hubiera autorizado a cobrarle y se estuviera
+      // quedando sin saldo. Un cobro una vez en la vida, y en silencio.
+      //
+      // Con la ventana, un webhook perdido frena la recarga unas horas (lo correcto: no
+      // cobrar dos veces mientras pueda estar en curso) y después se vuelve a intentar.
+      // Los intentos viejos siguen contando contra el tope mensual, así que una recarga que
+      // sí se cobró no se puede colar dos veces por esta puerta.
       const row = await admin.paymentAttempt.findFirst({
-        where: { organizationId, commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX }, status: "pending" },
+        where: {
+          organizationId,
+          commerceOrder: { startsWith: RECHARGE_ORDER_PREFIX },
+          status: "pending",
+          createdAt: { gte: new Date(Date.now() - VENTANA_EN_VUELO_MS) },
+        },
+        select: { id: true },
+      });
+      return Boolean(row);
+    },
+
+    async compraReciente(organizationId, now) {
+      // Cualquier acreditación de pack reciente cuenta, venga de donde venga: lo que se
+      // evita es cobrarle de nuevo por un saldo que ya recibió.
+      const row = await admin.conversationCreditLedger.findFirst({
+        where: {
+          organizationId,
+          reason: "package_purchase",
+          createdAt: { gte: new Date(now.getTime() - VENTANA_COMPRA_MANUAL_MS) },
+        },
         select: { id: true },
       });
       return Boolean(row);

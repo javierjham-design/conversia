@@ -28,11 +28,42 @@
  *   railway run -s Postgres -- bash -c 'cd packages/database && OFF=1 DATABASE_URL="$DATABASE_PUBLIC_URL" node scripts/creditos-golive.mjs'
  */
 import { PrismaClient } from "@prisma/client";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const prisma = new PrismaClient();
 const ON = process.env.OFF !== "1";
+/** El catálogo manda qué se vende: lo que no está acá no se enciende. */
+const CATALOGO = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "seeds", "creditos-catalogo.json"), "utf-8"),
+);
 
 async function main() {
+  // FRENO: sin la fila `platform_settings.aiCredits` el cobro igual funciona —el código cae
+  // a la semilla calibrada, a propósito, para que una fila borrada no deje a nadie sin
+  // servicio— pero quedaríamos cobrando con una tabla de precios que vive SOLO en un
+  // artefacto desplegado: el dueño no podría cambiar un peso sin un deploy, y no habría en
+  // la base ningún registro de con qué se cobró. Encender la venta en esas condiciones es
+  // justo lo que no se puede hacer. Se arregla con un comando, así que frena en vez de avisar.
+  if (ON) {
+    const pol = await prisma.platformSetting.findUnique({ where: { key: "aiCredits" } });
+    if (!pol) {
+      console.error(
+        "✖ Falta platform_settings.aiCredits (la política de pesos, bloque de tokens y gracia).\n" +
+          "  Sembrala primero:  node scripts/seed-ai-credits-policy.mjs\n" +
+          "  (para encender igual, aun sabiendo que el dueño no podrá tocar los pesos sin desplegar: IGNORAR_POLITICA=1)",
+      );
+      if (process.env.IGNORAR_POLITICA !== "1") process.exit(1);
+      console.error("  ⚠ IGNORAR_POLITICA=1: se enciende sin la fila de política.\n");
+    } else {
+      const p = JSON.parse(pol.value);
+      console.log(
+        `✔ política vigente: bloque ${p.tokensPerCredit} tokens · gracia ${p.graceCredits} · estándar ${p.defaultModel} · ${Object.keys(p.models ?? {}).length} modelos con peso`,
+      );
+    }
+  }
+
   // Aviso (no bloquea): si hay saldo sin convertir, al encender quedaría gente con lotes
   // en "conversaciones" gastándose como créditos, o sea 10 veces más rápido.
   if (ON) {
@@ -68,8 +99,23 @@ async function main() {
   const trial = await prisma.plan.updateMany({ where: { code: "conversia_creditos_trial" }, data: { active: ON, isPublic: false } });
   console.log(`✔ conversia_creditos_trial active = ${ON} (${trial.count} fila)`);
 
-  const packs = await prisma.messagePackage.updateMany({ where: { brand: "conversia", type: "credit" }, data: { active: ON } });
-  console.log(`✔ packs de Créditos IA active = ${ON} (${packs.count} filas)`);
+  // SOLO los packs que están en el catálogo. Antes se encendía todo `type: "credit"` de la
+  // marca, y eso incluye los packs que el dueño SACÓ del catálogo: los de la primera
+  // calibración costaban $12,5–$19 por crédito contra los $59,5 aprobados, así que
+  // encender el modelo nuevo los habría puesto a la venta con hasta 79% de descuento,
+  // justo para los clientes que más gastan. Lo encontró el ensayo del go-live: el catálogo
+  // ofrece UNA recarga y la pantalla pública listaba seis.
+  const delCatalogo = CATALOGO.packs.map((p) => p.code);
+  const packs = await prisma.messagePackage.updateMany({
+    where: { brand: "conversia", type: "credit", code: { in: delCatalogo } },
+    data: { active: ON },
+  });
+  const fuera = await prisma.messagePackage.updateMany({
+    where: { brand: "conversia", type: "credit", code: { notIn: delCatalogo } },
+    data: { active: false },
+  });
+  console.log(`✔ packs de Créditos IA del catálogo active = ${ON} (${packs.count} fila(s): ${delCatalogo.join(", ")})`);
+  if (fuera.count > 0) console.log(`✔ ${fuera.count} pack(s) de créditos que YA NO están en el catálogo quedaron apagados`);
 
   // El modelo por conversación deja de venderse (o vuelve, en rollback). No se borra nada.
   // El rollback tiene que dejarlo EXACTAMENTE como estaba: el plan base vuelve a aparecer

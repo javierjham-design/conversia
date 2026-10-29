@@ -77,6 +77,28 @@ export async function conversationCreditMultiplier(organizationId: string): Prom
 
 export type Tx = Parameters<Parameters<typeof withTenant>[1]>[0];
 
+/**
+ * CERROJO POR ORGANIZACIÓN para todo lo que toca su saldo. Primera sentencia de la
+ * transacción, siempre.
+ *
+ * Antes era `SELECT grace_used FROM conversation_wallets … FOR UPDATE`, y eso tenía un
+ * agujero silencioso: **si la fila del monedero no existe, `FOR UPDATE` no bloquea nada**
+ * (en Postgres, un `FOR UPDATE` que no matchea filas sigue de largo). La fila la crea
+ * `ensureWallet`, que corre DESPUÉS del cerrojo, así que justo en los primeros turnos de
+ * una cuenta —o en cualquier cuenta creada por un seed, por el super admin o migrada, que
+ * no la tienen— dos turnos simultáneos pasaban los dos: acreditaban el período dos veces y
+ * consumían los lotes leyendo el mismo `remaining` (lost update). La auditoría lo detecta
+ * después (avisa "tiene respuestas cobradas y NO tiene fila en conversation_wallets"),
+ * pero detectar no es prevenir.
+ *
+ * Un cerrojo de aviso no depende de que exista ninguna fila: se toma sobre el id de la
+ * organización y se suelta al cerrar la transacción. Y como es uno solo por org, no hay
+ * orden de adquisición que pueda generar un abrazo mortal.
+ */
+export async function lockOrg(tx: Tx, organizationId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${organizationId}))`;
+}
+
 /** Saldo = suma de remaining de lotes VIGENTES (no expirados) menos la gracia usada. */
 export async function balanceInTx(tx: Tx, organizationId: string, now: Date): Promise<{ lots: number; grace: number; net: number }> {
   const rows = await tx.conversationCreditLot.aggregate({
@@ -179,11 +201,25 @@ export async function creditLotInTx(
       data: { organizationId, source: input.source, amount: credit, remaining: credit, expiresAt: input.expiresAt, refType: input.refType, refId: input.refId },
     });
   }
+  // El asiento va por lo que ENTRÓ AL LOTE, no por el monto bruto.
+  //
+  // Antes se anotaba `input.amount` completo ADEMÁS del asiento de `grace_repay`, así que
+  // el libro sumaba `amount + gracia_pagada` para un movimiento real de `amount`: la suma
+  // de los asientos dejaba de explicar el saldo. Pasaba en cada renovación de un cliente
+  // que terminó el mes en gracia —el estado normal de fin de saldo— y ponía en rojo la
+  // invariante más importante de la auditoría por un descuadre que no era una fuga, con el
+  // riesgo de que se aprendiera a ignorarla. Las dos filas juntas siguen contando la
+  // historia completa: "+100 pagó tu deuda" y "+320 a tu saldo" para una compra de 420.
+  //
+  // El asiento se escribe SIEMPRE, incluso con delta 0 (la acreditación se fue entera a
+  // pagar la deuda): no es solo contabilidad, es el SELLO de idempotencia del período.
+  // `ensurePeriodAccrued` pregunta justamente por este asiento para no re-acreditar; sin
+  // él, cada turno volvería a acreditar el plan completo.
   const after = await balanceInTx(tx, organizationId, input.now);
   await tx.conversationCreditLedger.create({
     data: {
       organizationId,
-      delta: input.amount,
+      delta: credit,
       reason: input.source === "purchase" ? "package_purchase" : input.source === "plan" ? "plan_renewal" : "admin_adjust",
       balanceAfter: after.net,
       refType: input.refType,
@@ -224,21 +260,38 @@ export async function consumeCreditsInTx(
   tx: Tx,
   organizationId: string,
   opts: { amount: number; graceLimit: number; now: Date },
-): Promise<{ ok: true; graceUsed: number } | { ok: false; graceUsed: number }> {
-  let need = Math.max(0, Math.round(opts.amount));
+): Promise<{ ok: true; graceUsed: number; consumido: number; alTope: boolean } | { ok: false; graceUsed: number }> {
+  const pedido = Math.max(0, Math.round(opts.amount));
 
-  // DECIDIR ANTES DE CONSUMIR. El camino viejo consumía los lotes y recién después
-  // miraba la gracia: si el límite quedaba corto devolvía "bloqueado" con los lotes YA
-  // vaciados y sin asiento, así que esos créditos desaparecían del libro. No se podía
-  // llegar ahí con el flujo normal (toda recarga paga la gracia primero, así que no
-  // conviven saldo y gracia), pero un ajuste manual del super admin sí lo permitía, y
-  // con los Créditos IA el débito ya no es de 1 en 1: un turno caro pide 8 o 20 de una
-  // vez, que es exactamente cuando el pedido supera lo disponible.
+  // DECIDIR ANTES DE CONSUMIR, Y COBRAR TODO LO COBRABLE.
+  //
+  // El camino viejo consumía los lotes y recién después miraba la gracia: si el límite
+  // quedaba corto devolvía "bloqueado" con los lotes YA vaciados y sin asiento, así que
+  // esos créditos desaparecían del libro. Al arreglarlo pasó al otro extremo —todo o
+  // nada— y eso abrió un agujero peor: **el servicio gratis permanente**.
+  //
+  // Cómo se llegaba: el gate de antes de responder solo pregunta "¿queda al menos un
+  // crédito o colchón?" (`ai-credits.ts`), porque todavía no sabe cuántos tokens va a
+  // gastar el turno. Un turno caro —peso 20 o 50— puede pedir mucho más que lo que queda.
+  // Con el todo-o-nada ese turno NO se cobraba, la respuesta ya estaba generada y enviada,
+  // y el estado quedaba IDÉNTICO para el turno siguiente: gate pasa, consumo rechaza, otra
+  // respuesta gratis. Para siempre, con el saldo congelado y sin un asiento que lo delate.
+  // Un cliente con 3 créditos y un agente Sonnet tenía respuestas ilimitadas gratis.
+  //
+  // Ahora se cobra `min(pedido, lotes + colchón que queda)`: el cliente paga todo lo que se
+  // le puede cobrar, la gracia aterriza EXACTAMENTE en el tope y por eso el gate del turno
+  // siguiente sí corta (`grace < graceLimit` deja de ser verdad). Lo que no se pudo cobrar
+  // se informa (`alTope`) para que quede en el consumo y la auditoría lo pueda nombrar:
+  // es el único regalo, el de la última respuesta, y es el precio de no dejar al bot mudo.
   const disponible = await balanceInTx(tx, organizationId, opts.now);
-  const faltante = Math.max(0, need - disponible.lots);
-  if (faltante > 0 && disponible.grace + faltante > opts.graceLimit) {
+  const colchon = Math.max(0, opts.graceLimit - disponible.grace);
+  const cobrable = disponible.lots + colchon;
+  if (cobrable <= 0) {
+    // Ni saldo ni colchón: acá sí se bloquea (y el gate ya lo había visto venir).
     return { ok: false as const, graceUsed: disponible.grace };
   }
+  let need = Math.min(pedido, cobrable);
+  const alTope = need < pedido;
 
   const lots = await tx.conversationCreditLot.findMany({
     where: { organizationId, remaining: { gt: 0 }, OR: [{ expiresAt: null }, { expiresAt: { gt: opts.now } }] },
@@ -257,7 +310,7 @@ export async function consumeCreditsInTx(
     graceUsed += need;
     await tx.conversationWallet.update({ where: { organizationId }, data: { graceUsed } });
   }
-  return { ok: true as const, graceUsed };
+  return { ok: true as const, graceUsed, consumido: Math.min(pedido, cobrable), alTope };
 }
 
 /**
@@ -275,7 +328,7 @@ export async function debitConversation(
   const now = new Date();
   return withTenant(organizationId, async (tx) => {
     // Serializa los débitos de la org (evita carreras sobre los lotes).
-    await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
+    await lockOrg(tx, organizationId);
     await ensurePeriodAccrued(tx, organizationId, now);
 
     // Lotes FIFO + gracia: mismo núcleo que los Créditos IA (una sola forma de calcular
@@ -288,7 +341,9 @@ export async function debitConversation(
     await tx.conversationCreditLedger.create({
       data: {
         organizationId,
-        delta: -m,
+        // Lo que de verdad se consumió, no lo que se pidió: con el colchón al tope puede
+        // ser menos, y un asiento por más de lo consumido descuadraría el libro.
+        delta: -consumo.consumido,
         reason: "conversation_debit",
         balanceAfter: after.net,
         costUsd: input.costUsd != null ? input.costUsd : undefined,
@@ -315,7 +370,7 @@ export async function getConversationWalletSummary(organizationId: string): Prom
     const included = Number(feats.conversationsIncluded) || 0;
     // Acredita el período ANTES de leer (mismo lock que el débito): sin esto, una org
     // recién contratada vería "used = included / quedan 0" hasta su primer débito.
-    await tx.$executeRaw`SELECT grace_used FROM conversation_wallets WHERE organization_id = ${organizationId} FOR UPDATE`;
+    await lockOrg(tx, organizationId);
     await ensurePeriodAccrued(tx, organizationId, now);
     const bal = await balanceInTx(tx, organizationId, now);
     const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));

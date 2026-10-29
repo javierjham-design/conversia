@@ -96,6 +96,21 @@ export const SELF_SERVE_LEVELS: AiLevel[] = ["standard", "plus", "advanced"];
  * mitad de mes justo al cliente que más paga. Si cambia el precio de la recarga en
  * `seeds/creditos-catalogo.json`, este número tiene que seguirlo; hay un test que lo exige.
  */
+/**
+ * Prefijo del `commerceOrder` de un cobro de RECARGA automática.
+ *
+ * Separa los cobros de recarga de los de la mensualidad, que viven en la misma tabla y van
+ * a la misma tarjeta: el motor de suscripciones los excluye por este prefijo (si los viera,
+ * al confirmarse una recarga le renovaría el mes GRATIS al cliente) y el webhook de la
+ * pasarela los cierra por este prefijo (y solo esos: pisar un intento de suscripción le
+ * robaría al motor la renovación del período).
+ *
+ * Vive acá porque lo necesitan el worker —que emite el cobro— y el api —que recibe la
+ * confirmación—. Mientras estuvo escrito solo en el worker, el api no podía reconocerlos y
+ * por eso ningún intento de recarga se cerraba nunca.
+ */
+export const PREFIJO_ORDEN_RECARGA = "rec-";
+
 export const AUTO_RECARGA_DEFAULTS = {
   /** Dispara cuando quedan menos de estos créditos. */
   umbralCreditos: 50,

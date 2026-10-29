@@ -217,7 +217,7 @@ cambia ninguna decisión, pero el test compara redondeado para no perseguir cent
 `--aplicar` no escribe nada, solo imprime el antes y el después por organización.
 
 - Cada conversación que le quede al cliente pasa a **10 créditos**, con su vencimiento
-  original. Como una conversación consume ~4,2 créditos, todos ganan saldo.
+  original. Como una conversación consume 4,36 créditos medidos (§8.4), todos ganan saldo.
 - La **gracia usada también se multiplica**: si alguien debía 4 conversaciones, debe 40
   créditos. Si no, le perdonaríamos deuda en una unidad y se la cobraríamos en la otra.
 - **Idempotente por organización**: al convertirla queda un sello y la corrida siguiente se
@@ -229,6 +229,19 @@ cambia ninguna decisión, pero el test compara redondeado para no perseguir cent
 - Los lotes vencidos no se tocan. TuBot no se toca.
 
 ### Encender el modelo nuevo
+
+**Antes del go-live hay que sembrar la política**: `node
+packages/database/scripts/seed-ai-credits-policy.mjs` escribe
+`platform_settings.aiCredits`, la tabla de pesos por modelo, el bloque de tokens y la
+gracia. Sin esa fila el cobro igual funciona —el código cae a la semilla calibrada del
+repo, a propósito, para que una fila borrada no deje a nadie sin servicio— pero
+estaríamos cobrando con una tabla que vive solo en un artefacto desplegado: el dueño no
+podría cambiar un peso sin un deploy y en la base no quedaría registro de con qué se
+cobró. Por eso `creditos-golive.mjs` **se niega a encender** si la fila no está
+(`IGNORAR_POLITICA=1` para saltarlo sabiendo lo que implica). El seeder, a su vez, **no
+pisa una política ya afinada**: si la fila existe y es distinta muestra la diferencia y no
+escribe, porque esos pesos son decisiones de precio del dueño y volver a sembrar el
+catálogo no puede revertírselas en silencio (`FORZAR=1` para pisarla).
 
 `node packages/database/scripts/creditos-golive.mjs` (y `OFF=1 …` para volver atrás).
 Activa los planes y packs de créditos, y **deja de vender** los de conversación sin
@@ -385,3 +398,67 @@ no hace falta es mandarlo a un trámite inútil.
 api 603/603, worker 467/467, agents 106/106, notifications 25/25, conversia-web 62/62, builds
 completos. Los cuatro guardianes nuevos se rompieron a propósito para verlos fallar. **Sin
 migraciones.**
+
+---
+
+## Auditoría del contador y prueba de carga (29-oct-2026)
+
+Antes de encender el cobro había que poder demostrar, sobre los datos y no sobre el papel,
+que **cada respuesta del bot queda cobrada, una sola vez y por el monto exacto**. Los tests
+existentes probaban que la fórmula calcula bien; eso es otra cosa. Esto es una propiedad de
+los datos y se rompe por donde la fórmula no mira.
+
+### Las dos piezas nuevas
+
+**`packages/database/scripts/auditar-creditos.mjs`** — solo lectura, corre igual contra el
+sim y contra producción. Compara dos fuentes escritas por caminos distintos: `ai_requests`
+(el HECHO: el bot respondió, con este modelo y estos tokens, lo escribe el orquestador)
+contra `conversation_credit_ledger` (el COBRO). Si el cobrador aplicara mal la política, su
+propio registro en `usage_events` repetiría el error y cuadraría consigo mismo; por eso la
+auditoría parte del hecho. Verifica además las cuatro invariantes del monedero —la que
+importa es que **el libro explique el saldo**—, detecta cobros sin respuesta detrás, lista
+qué packs están activos contra el catálogo, y con `COMO_SI=<cuenta>` aplica la fórmula al
+consumo REAL ya facturado de cualquier cuenta para medir el costo por crédito con plata de
+verdad.
+
+**`tools/sim/carga-creditos.mjs`** — la prueba de carga contra Docker. Ataca los puntos por
+donde se va la plata: la carrera de débitos en una misma cuenta (ráfaga simultánea), el
+webhook que Meta reentrega, el bloque de tokens de las respuestas largas, **matar el worker
+a mitad del trabajo**, y el turno que no cabe en el colchón de gracia. Cierra comparando el
+marcador del panel con la base cuenta por cuenta y corriendo la auditoría del libro.
+
+### El costo real, medido contra producción (jul–oct 2026)
+
+| modelo | peso | costo real por crédito |
+|---|---|---|
+| gpt-4o-mini | 1 | $0,82 – $2,09 |
+| claude-haiku-4-5 | 4 | $1,57 – $2,69 |
+| gpt-4o | 12 | $1,50 |
+| claude-opus-4-8 | 50 | $1,54 |
+
+La calibración del §4 apuntaba a que un crédito costara ~$2 con cualquier modelo: se cumple
+en los cuatro. El catálogo supone $2,1 y el peor caso medido es $2,69 (haiku), que a $59,5
+de venta sigue dejando 2.112% sobre el costo. Septiembre de Digital-Dent reproduce las
+cifras del dueño (3.042 respuestas · 30.765.368 tokens · 3.172 créditos · 727 conversaciones
+= 4,36 por conversación) y **factura $199.920** con los precios aprobados.
+
+### Las cinco fugas que había, y que el go-live abría
+
+1. **Respuestas gratis para siempre.** El gate de antes de responder solo pregunta "¿queda
+   un crédito o colchón?" —no puede saber más, todavía no sabe cuántos tokens va a gastar el
+   turno—, y el consumo era todo-o-nada. Un turno caro que no cabía NO se cobraba y la
+   respuesta ya estaba enviada, dejando el estado idéntico para el siguiente: pasa, rechaza,
+   otra gratis. Indefinidamente, con saldo a la vista y sin asiento que lo delate. Pasa con
+   cualquier peso > 1, o sea con los modelos caros. Ahora se cobra `min(pedido, lotes +
+   colchón)`: la gracia aterriza exactamente en el tope y el gate siguiente corta.
+2. **El cobro se perdía al reiniciar el worker.** Medido: 30 respuestas enviadas, 29
+   cobradas. Hay un pase nuevo (`ai-credits-reconcile.ts`, cada 10 min) que cobra las
+   respuestas sin asiento por el mismo camino del cobro en vivo.
+3. **Arbitraje entre las dos unidades.** `buy-package` no validaba el TIPO de pack contra el
+   plan, y los dos tipos acreditan el mismo bucket de lotes: 420 conversaciones por $24.990
+   en vez de ~$92.000, y tras el go-live era el único pack comprable por API.
+4. **La recarga automática cobraba una vez en la vida.** Nada cerraba un intento `rec-`, así
+   que "hay una recarga en vuelo" era verdad para siempre.
+5. **El cerrojo no agarraba.** Era un `FOR UPDATE` sobre la fila del monedero, y un
+   `FOR UPDATE` que no matchea filas no bloquea nada. Ahora es un cerrojo de aviso por
+   organización, que lo toma también el gate (que acredita el período y no tomaba ninguno).

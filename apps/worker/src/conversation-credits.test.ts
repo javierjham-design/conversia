@@ -193,4 +193,46 @@ describe("V2-1 — débito de crédito-conversación", () => {
     expect(store.wallet.graceUsed).toBe(0);
     expect(store.lots.find((l) => l.source === "purchase")!.remaining).toBe(7);
   });
+
+  it("y el LIBRO sigue explicando el saldo (la suma de asientos = saldo)", async () => {
+    // LA INVARIANTE QUE ESTO PROTEGE: sumar todos los asientos tiene que dar el saldo. Si
+    // no, hay un camino que mueve créditos sin anotarlos, y ese es por donde se va la plata
+    // sin que nadie lo vea.
+    //
+    // Estaba roto justo acá: al pagar gracia se anotaba `grace_repay +pay` Y ADEMÁS el
+    // monto BRUTO de la acreditación, así que el libro sumaba `amount + pay` para un
+    // movimiento real de `amount`. Pasaba en cada renovación de un cliente que terminó el
+    // mes en gracia —el fin de saldo normal— y ponía en rojo la auditoría por un descuadre
+    // que no era una fuga. Ahora el asiento va por lo que entró al lote.
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
+    for (let i = 0; i < 3; i++) await debitConversation("o", { conversationId: `g${i}` });
+    await creditPurchasedConversations("o", 10, { refType: "package", refId: "pay3" });
+
+    const sumaLibro = store.ledger.reduce((a: number, l: any) => a + l.delta, 0);
+    const lotes = store.lots.reduce((a: number, l: any) => a + l.remaining, 0);
+    const saldo = lotes - store.wallet.graceUsed;
+    expect(saldo).toBe(7);
+    expect(sumaLibro).toBe(saldo);
+    // Y las dos filas juntas siguen contando la historia completa de la compra de 10.
+    const repago = store.ledger.find((l: any) => l.reason === "grace_repay");
+    const compra = store.ledger.find((l: any) => l.reason === "package_purchase");
+    expect(repago.delta).toBe(3);
+    expect(compra.delta).toBe(7);
+    expect(repago.delta + compra.delta).toBe(10);
+  });
+
+  it("si la acreditación se va ENTERA a pagar la deuda, el asiento sello se escribe igual", async () => {
+    // El asiento de la acreditación no es solo contabilidad: es el sello de idempotencia
+    // del período. Si se omitiera por tener delta 0, cada turno volvería a acreditar el
+    // plan completo — un plan regalado por respuesta.
+    store.planFeatures = { conversationDebitsWallet: true, aiPlus: false, conversationsIncluded: 0 };
+    for (let i = 0; i < 5; i++) await debitConversation("o", { conversationId: `d${i}` });
+    await creditPurchasedConversations("o", 5, { refType: "package", refId: "pay4" });
+    const compra = store.ledger.filter((l: any) => l.reason === "package_purchase");
+    expect(compra).toHaveLength(1);
+    expect(compra[0].delta).toBe(0);
+    expect(store.wallet.graceUsed).toBe(0);
+    const sumaLibro = store.ledger.reduce((a: number, l: any) => a + l.delta, 0);
+    expect(sumaLibro).toBe(0); // 5 débitos, 5 de repago, 0 de lote
+  });
 });

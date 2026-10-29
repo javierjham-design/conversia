@@ -61,9 +61,16 @@ services:
         pnpm --filter @conversia/database db:seed &&
         node packages/database/scripts/v2-golive.mjs &&
         node packages/database/scripts/seed-wa-rate-schedule.mjs &&
-        echo "db-init OK (migrate+setup+seed+golive+rate)"
+        node packages/database/scripts/seed-ai-credits-policy.mjs &&
+        echo "db-init OK (migrate+setup+seed+golive+rate+politica-creditos)"
 
   api:
+    # OJO: este servicio NO tiene sección `build` (la imagen la construye `db-init`, que usa
+    # el mismo Dockerfile del monorepo). Consecuencia que cuesta caro: `docker compose build
+    # api` NO CONSTRUYE NADA y no avisa — se queda con la imagen vieja, y entonces se
+    # "verifican" arreglos contra código viejo. Para reconstruir la api hay que pedir
+    # `db-init`:  docker compose -f tools/sim/docker-compose.sim.yml build db-init worker
+    # (o `bash tools/sim/up.sh`, que hace `up -d --build` de todo).
     image: conversia-sim-api:latest # construida por db-init (misma imagen del monorepo)
     container_name: conversia-sim-api
     env_file: .env.sim
@@ -79,7 +86,12 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      # 127.0.0.1 y NO localhost: en Alpine `localhost` resuelve ::1 primero (está así en
+      # /etc/hosts) y la API escucha en IPv4, así que el chequeo daba "Connection refused"
+      # SIEMPRE — 465 fallos seguidos cuando lo encontré, con la API respondiendo perfecto
+      # desde el host. Costó dos veces media hora: el `worker` espera a que la api esté
+      # healthy, así que cada `docker compose up` se quedaba colgado sin decir por qué.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -95,6 +107,12 @@ services:
       DATABASE_URL: postgresql://conversia_app:conversia_app_dev_password@postgres:5432/conversia_sim?connection_limit=10
       DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/conversia_sim
       WORKER_CONCURRENCY: "8"
+      # Recuperación de los cobros que se perdieron (un reinicio del worker se lleva el
+      # cargo del turno que estaba en vuelo). En producción pasa cada 10 min y respeta 3
+      # min de gracia; acá se baja para que la prueba de carga pueda VERIFICAR que el
+      # crédito vuelve, en vez de medir el hueco y darlo por bueno.
+      AI_CREDITS_RECONCILE_MS: "20000"
+      AI_CREDITS_RECONCILE_GRACIA_MIN: "1"
     depends_on:
       db-init:
         condition: service_completed_successfully

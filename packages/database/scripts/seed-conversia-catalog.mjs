@@ -195,6 +195,19 @@ async function main() {
   }
   console.log(`✔ ${CREDIT_PACKS.length} packs de Créditos IA (INACTIVOS — opción B del §5, IVA incluido)`);
 
+  // Un pack que YA NO está en el catálogo se apaga. Es la excepción a "un seed no apaga lo
+  // que está vivo": sacar un pack del catálogo es una decisión comercial explícita del
+  // dueño (los de la primera calibración daban descuento por volumen, que premia justo al
+  // cliente que más cuesta), y el catálogo es la única fuente de verdad de qué se vende.
+  // Si no se apagara, seguiría vendiéndose a $12,5–$19 por crédito contra los $59,5
+  // aprobados — hasta 79% de descuento. Lo encontró el ensayo del go-live.
+  const vigentes = CREDIT_PACKS.map((p) => p.code);
+  const apagados = await prisma.messagePackage.updateMany({
+    where: { brand: "conversia", type: "credit", code: { notIn: vigentes }, active: true },
+    data: { active: false },
+  });
+  if (apagados.count > 0) console.log(`✔ ${apagados.count} pack(s) de créditos fuera del catálogo: APAGADOS`);
+
   await prisma.platformSetting.upsert({
     where: { key: "walletWeights:conversia" },
     update: { value: JSON.stringify({ utility: 1, authentication: 1, marketing: 4, service: 1 }) },

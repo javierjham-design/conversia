@@ -2195,6 +2195,11 @@ model ConversationCreditLedger {
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([organizationId, createdAt])
+  // Los dedupes del cobro preguntan por (org, reason, refId); sin este índice recorrían el
+  // histórico entero de la organización con el cerrojo de la cuenta tomado.
+  // El nombre explícito calza con el de la migración (el repo ya nombra así los de esta
+  // tabla: `ccledger_org_created_idx`), para que Prisma no vea drift.
+  @@index([organizationId, reason, refId], map: "ccledger_org_reason_ref_idx")
   @@map("conversation_credit_ledger")
 }
 

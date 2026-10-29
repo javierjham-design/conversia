@@ -1,3 +1,4 @@
+import { PREFIJO_ORDEN_RECARGA } from "@conversia/agents";
 import type { SubscriptionProvider } from "./subscription-billing/provider";
 
 /**
@@ -25,8 +26,12 @@ import type { SubscriptionProvider } from "./subscription-billing/provider";
  * pasarela ni base de datos.
  */
 
-/** Prefijo que distingue un cobro de RECARGA de uno de suscripción. */
-export const RECHARGE_ORDER_PREFIX = "rec-";
+/**
+ * Prefijo que distingue un cobro de RECARGA de uno de suscripción. El valor vive en
+ * `@conversia/agents` porque el api también lo necesita (para cerrar el intento cuando la
+ * pasarela confirma el pago); se re-exporta acá para no tocar a quien ya lo importa.
+ */
+export const RECHARGE_ORDER_PREFIX = PREFIJO_ORDEN_RECARGA;
 
 /**
  * Horas de espera tras un cobro RECHAZADO antes de volver a intentar.
@@ -75,7 +80,11 @@ export type RechargeDecision =
   | "tope_mensual"
   | "en_vuelo"
   | "espera_tras_fallo"
-  | "tarjeta_agotada";
+  | "tarjeta_agotada"
+  /** El cliente acaba de recargar a mano: no se le cobra otra vez por lo mismo. */
+  | "compra_reciente"
+  /** La org no cobra en CLP y el cobro recurrente es en CLP: no se cobra automáticamente. */
+  | "moneda_no_soportada";
 
 /**
  * ¿Hay que cobrar? Pura. El orden de las guardas importa: primero las que son "no, y punto"
@@ -93,17 +102,27 @@ export function decidirRecarga(input: {
   tieneTarjeta: boolean;
   /** ¿Hay un cobro de recarga pendiente de confirmación? */
   enVuelo: boolean;
+  /** ¿El cliente compró una recarga a mano hace muy poco? */
+  compraReciente?: boolean;
   /** Rechazos seguidos. Ausente = ninguno (el caso de todos los días). */
   fallos?: FallosDeRecarga;
   /** Momento de la pasada, para medir la espera tras un rechazo. */
   now?: Date;
+  /** Moneda de la organización. El precio del pack que se cobra está en CLP. */
+  moneda?: string;
 }): RechargeDecision {
   const { cfg } = input;
   if (!cfg.enabled) return "apagada";
   if (!cfg.consentAt) return "sin_consentimiento";
+  // El cobro va con `priceClp` y la moneda de la org, y la pasarela de cobro recurrente es
+  // Flow, que es CLP. Una org en USD habría recibido un cargo de 24.990 DÓLARES (~23
+  // millones de pesos). Mejor no cobrar automáticamente que cobrar en la moneda equivocada:
+  // esa cuenta recarga a mano hasta que haya un cobro recurrente en USD.
+  if ((input.moneda ?? "CLP") !== "CLP") return "moneda_no_soportada";
   if (!cfg.packCode || input.precioClp <= 0) return "sin_pack";
   if (!input.tieneTarjeta) return "sin_tarjeta";
   if (input.enVuelo) return "en_vuelo";
+  if (input.compraReciente) return "compra_reciente";
   if (input.saldo >= cfg.thresholdRemaining) return "saldo_suficiente";
   // Rechazos: primero el que es definitivo (la tarjeta no va a funcionar sola) y después
   // la espera. Van DESPUÉS del saldo para que una cuenta que ya recargó a mano —y por lo
@@ -158,6 +177,13 @@ export interface AutoRechargePort {
   spentThisMonth(organizationId: string, now: Date): Promise<number>;
   /** ¿Hay un cobro de recarga pendiente de confirmación? */
   hasPendingRecharge(organizationId: string): Promise<boolean>;
+  /**
+   * ¿El cliente acaba de recargar A MANO? El aviso de saldo bajo lo manda a comprar al
+   * panel, y el tick corre cada 15 minutos: sin esta pregunta, el cliente compraba su
+   * recarga y un rato después le llegaba OTRO cobro automático por lo mismo. Dos cobros y
+   * el doble de créditos de los que quiso.
+   */
+  compraReciente(organizationId: string, now: Date): Promise<boolean>;
   /** Rechazos SEGUIDOS de recarga (desde el último cobro que no falló) y cuándo fue el último. */
   failedRecharges(organizationId: string): Promise<FallosDeRecarga>;
   createAttempt(input: { organizationId: string; subscriptionId: string | null; commerceOrder: string; amount: number; currency: string }): Promise<void>;
@@ -210,8 +236,10 @@ export async function runAutoRecharge(
       gastadoEsteMesClp: await port.spentThisMonth(c.organizationId, now),
       tieneTarjeta: Boolean(c.customerRef),
       enVuelo: await port.hasPendingRecharge(c.organizationId),
+      compraReciente: await port.compraReciente(c.organizationId, now),
       fallos: await port.failedRecharges(c.organizationId),
       now,
+      moneda: c.currency,
     });
     out.motivos[decision] = (out.motivos[decision] ?? 0) + 1;
 
