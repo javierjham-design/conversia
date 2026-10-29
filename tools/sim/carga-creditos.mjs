@@ -278,9 +278,13 @@ async function enParalelo(tareas, n) {
  * solo existe en el código nuevo.
  */
 function verificarStackAlDia() {
+  // Los símbolos son los del cambio MÁS RECIENTE de cada servicio: un canario viejo pasa
+  // con una imagen a medio actualizar. Al tocar el cobro, mover también estos.
   const canarios = [
     ["api", "packages/database/scripts/seed-ai-credits-policy.mjs", "FORZAR"],
+    ["api", "apps/api/dist/billing/billing.controller.js", "conSello"],
     ["worker", "apps/worker/dist/ai-credits-reconcile.js", "cobrarTurnosSinCobrar"],
+    ["worker", "apps/worker/dist/auto-recharge.js", "compra_reciente"],
   ];
   for (const [servicio, archivo, simbolo] of canarios) {
     let hay = "0";
