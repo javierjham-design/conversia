@@ -1,5 +1,5 @@
 {
-  "_doc": "CRE 2 — catálogo de Créditos IA. PRECIOS VIGENTES: los del 28-oct-2026 (docs/MODELO_COBRO_CREDITOS_IA.md §8.3). Precios CON IVA INCLUIDO. El criterio cambió: antes el precio salía del costo + una regla de ganancia mínima; ahora sale del VALOR PARA EL CLIENTE, calibrado para que una cuenta con el uso real de Digital-Dent en septiembre-2026 (30,8M tokens · 3.042 respuestas · 3.172 créditos) pague ~$200.000 al mes → plan Base ($24.990) + 7 recargas ($24.990 c/u) = $199.920. La regla de ganancia mínima de 300% sigue vigente como PISO y ahora la cumple todo, incluido el plan Base (313%), que antes necesitaba una excepción documentada del 260%. Lo verifica apps/api/test/creditos-catalogo.spec.ts; si se cambia un precio acá y deja de cumplir el piso, ese test se cae.",
+  "_doc": "CRE 2 — catálogo de Créditos IA. PRECIOS VIGENTES: plan Base y prueba del 28-oct-2026; packs con bono del 29-oct-2026 (docs/PROMPT_PACKS_FLOW_TARJETA_CREDITO.md §1). Precios CON IVA INCLUIDO. El criterio del precio es el VALOR PARA EL CLIENTE, calibrado para que una cuenta con el uso real de Digital-Dent en septiembre-2026 (30,8M tokens · 3.042 respuestas · 3.172 créditos) pague ~$200.000 al mes → plan Base ($24.990) + 7 recargas básicas ($24.990 c/u) = $199.920, o con el pack de $149.900 entre $175.000 y $200.000. La regla de ganancia mínima de 300% sigue vigente como PISO y la cumple todo, incluido el plan Base (313%). Lo verifica apps/api/test/creditos-catalogo.spec.ts; si se cambia un precio acá y deja de cumplir el piso, o el bono declarado deja de coincidir con el que dan el precio y los créditos, ese test se cae.",
   "supuestos": {
     "costoPorCreditoClp": 2.1,
     "comisionFlowPct": 3.81,
@@ -31,15 +31,68 @@
     }
   ],
   "packs": [
-    { "code": "conversia-cred-420", "name": "Recarga 420 créditos", "credits": 420, "priceClp": 24990, "priceUsd": 25, "order": 30, "esRecargaBasica": true }
+    {
+      "code": "conversia-cred-420",
+      "name": "Recarga 420 créditos",
+      "credits": 420,
+      "priceClp": 24990,
+      "priceUsd": 25,
+      "order": 30,
+      "bonoPct": 0,
+      "esRecargaBasica": true
+    },
+    {
+      "code": "conversia-cred-880",
+      "name": "Pack 880 créditos",
+      "credits": 880,
+      "priceClp": 49900,
+      "priceUsd": 52,
+      "order": 31,
+      "bonoPct": 5,
+      "masElegido": true
+    },
+    {
+      "code": "conversia-cred-1850",
+      "name": "Pack 1.850 créditos",
+      "credits": 1850,
+      "priceClp": 99900,
+      "priceUsd": 105,
+      "order": 32,
+      "bonoPct": 10
+    },
+    {
+      "code": "conversia-cred-2900",
+      "name": "Pack 2.900 créditos",
+      "credits": 2900,
+      "priceClp": 149900,
+      "priceUsd": 157,
+      "order": 33,
+      "bonoPct": 15,
+      "mejorPrecio": true
+    }
   ],
   "packsEliminados": {
-    "_doc": "Packs que NO se siembran. Los de 1.150/2.500/5.000/11.000/20.000 salieron en la primera calibración por no cumplir el 300%. Los de 1.000/3.000/6.000/8.500/16.000 son los del catálogo del 27-oct: el dueño los eliminó el 28-oct al pasar al criterio de valor, porque un descuento por volumen premia justo al cliente que más cuesta. Por ahora hay UNA sola recarga y no hay descuentos por volumen.",
-    "creditos": [1000, 1150, 2500, 3000, 5000, 6000, 8500, 11000, 16000, 20000]
+    "_doc": "Packs que NO se siembran. Los de 1.150/2.500/5.000/11.000/20.000 salieron en la primera calibración por no cumplir el 300%. Los de 1.000/3.000/6.000/8.500/16.000 son los del catálogo del 27-oct, que el dueño eliminó el 28-oct al pasar al criterio de valor porque su descuento por volumen (hasta 79%) premiaba justo al cliente que más cuesta. El 29-oct los packs VOLVIERON, pero con un bono CHICO (5/10/15%) en vez de un descuento grande: así un cliente del tamaño de Digital-Dent sigue pagando entre $175.000 y $200.000 al mes. Esta lista queda para que los tamaños viejos —los del descuento grande— no puedan reaparecer.",
+    "creditos": [
+      1000,
+      1150,
+      2500,
+      3000,
+      5000,
+      6000,
+      8500,
+      11000,
+      16000,
+      20000
+    ]
   },
   "recargaAutomatica": {
     "_doc": "Default del tope mensual de la recarga automática, editable por el cliente. Son 10 recargas: con el uso de Digital-Dent en septiembre hacían falta 7, así que el tope viejo (3 recargas) habría cortado el servicio a mitad de mes.",
     "topeMensualClp": 249900,
     "recargasEquivalentes": 10
+  },
+  "packsBono": {
+    "_doc": "El bono es el porcentaje de créditos EXTRA respecto de la recarga básica al mismo precio por crédito. No se guarda en la base: se calcula desde el precio y los créditos, así no puede mentir (un bono guardado a mano se desincroniza del precio en la primera edición). El campo `bonoPct` de cada pack es la INTENCIÓN del dueño, y un test exige que coincida con el bono que de verdad dan su precio y sus créditos.",
+    "toleranciaPuntos": 0.6
   }
 }

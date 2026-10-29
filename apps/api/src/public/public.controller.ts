@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
 import { getEnv, brandFromOrigin } from "@conversia/config";
-import { CREDITOS_POR_CONVERSACION_POR_DEFECTO, createAIRouter, fetchWebPageText } from "@conversia/agents";
+import { CREDITOS_POR_CONVERSACION_POR_DEFECTO, bonoDePacks, createAIRouter, fetchWebPageText } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { INDUSTRIES } from "../common/industries";
@@ -63,7 +63,12 @@ export class PublicController {
     // el promedio en el navegador. El número lo manda el servidor, que es el mismo que usa
     // el estimador del panel: así la promesa de la landing y lo que el cliente ve adentro no
     // se contradicen. (Y evita arrastrar `@conversia/agents` al bundle del cliente.)
-    return packs.map((p) => ({
+    // §1 — el BONO viaja calculado desde el precio y los créditos, nunca guardado: un bono
+    // en una columna aparte se desincroniza del precio en la primera edición del super admin,
+    // y entonces la página de precios promete un extra que el pack no da. La referencia es la
+    // recarga básica, que en este listado es el pack más barato (`order` asc, precio asc).
+    const bonos = bonoDePacks(packs.map((p) => ({ credits: p.credits, priceClp: Number(p.priceClp) })));
+    return packs.map((p, i) => ({
       code: p.code,
       name: p.name,
       credits: p.credits,
@@ -71,6 +76,8 @@ export class PublicController {
       priceUsd: Number(p.priceUsd),
       order: p.order,
       unit,
+      /** Créditos extra respecto de la recarga básica, en %. 0 = sin bono que anunciar. */
+      bonoPct: unit === "credit" ? bonos[i] : 0,
       creditosPorConversacion: CREDITOS_POR_CONVERSACION_POR_DEFECTO,
     }));
   }

@@ -48,7 +48,7 @@ type Me = {
   /** Pasarela con la que pagaría hoy esta cuenta ("flow" en Chile). */
   paymentProvider: string;
 };
-type Pkg = { code: string; name: string; credits: number; priceClp: number; priceUsd: number };
+type Pkg = { code: string; name: string; credits: number; priceClp: number; priceUsd: number; bonoPct?: number };
 type Plan = { code: string; name: string; priceClp: number; priceUsd: number; priceClpYearly: number | null; priceUsdYearly: number | null; custom: boolean };
 
 const CAT_LABEL: Record<string, string> = { utility: "Utilidad", authentication: "Autenticación", marketing: "Marketing", service: "Servicio", otro: "Otro" };
@@ -356,7 +356,13 @@ export default function Cobros() {
                 <div key={p.code} className="card" style={{ padding: 18, display: "flex", flexDirection: "column" }}>
                   <p style={{ margin: 0, fontWeight: 700, fontSize: 15 }}>{p.name}</p>
                   <p className="display" style={{ margin: "6px 0 0", fontSize: 24 }}>{p.credits.toLocaleString("es-CL")}</p>
-                  <p className="text-dim" style={{ fontSize: 12, margin: "0 0 12px" }}>créditos · {money(p.priceClp, p.priceUsd)}</p>
+                  {/* §1 — el bono lo manda el servidor YA CALCULADO desde el precio y los
+                      créditos. Es la misma cifra que la página pública, porque sale del mismo
+                      cálculo y no de un número escrito en cada pantalla. */}
+                  {(p.bonoPct ?? 0) > 0 ? (
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "var(--ok)", margin: "2px 0 0" }}>+{p.bonoPct}% de créditos extra</p>
+                  ) : null}
+                  <p className="text-dim" style={{ fontSize: 12, margin: "0 0 12px" }}>créditos · {money(p.priceClp, p.priceUsd)} · IVA incluido</p>
                   <button className="btn-accent" onClick={() => buyPackage(p.code)} disabled={busy === "pkg:" + p.code} style={{ marginTop: "auto", opacity: busy === "pkg:" + p.code ? 0.6 : 1 }}>
                     {busy === "pkg:" + p.code ? "Abriendo pago…" : "Comprar"}
                   </button>
@@ -490,7 +496,9 @@ type AutoRecargaCfg = {
   packCode: string | null;
   monthlyCapClp: number;
   consentAt: string | null;
-  packs: Array<{ code: string; name: string; credits: number; priceClp: number }>;
+  packs: Array<{ code: string; name: string; credits: number; priceClp: number; bonoPct?: number; topeMaximoClp?: number }>;
+  /** Cuántas recargas del pack elegido acepta el servidor como tope mensual. */
+  maxRecargasMes?: number;
 };
 
 /** La recarga automática es solo con Flow, o sea CLP: formateador local y explícito. */
@@ -547,10 +555,14 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Tope que está GUARDADO en el servidor. Subir el tope es autorizar más plata, así que la
+  // pantalla vuelve a pedir la casilla (y el servidor lo exige igual). Sin esto, el
+  // consentimiento dado por $249.900 valía para cualquier cifra que se escribiera después.
+  const [topeGuardado, setTopeGuardado] = useState<number | null>(null);
 
   useEffect(() => {
     api<AutoRecargaCfg>("/billing/auto-recharge")
-      .then((r) => { setCfg(r); setConsent(Boolean(r.consentAt)); })
+      .then((r) => { setCfg(r); setConsent(Boolean(r.consentAt)); setTopeGuardado(r.monthlyCapClp); })
       .catch(() => setCfg(null));
   }, []);
 
@@ -558,6 +570,12 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
   const unidad = cfg.unit === "credit" ? "créditos" : "conversaciones";
   const pack = cfg.packs.find((p) => p.code === cfg.packCode) ?? cfg.packs[0] ?? null;
   const topeVeces = pack && pack.priceClp > 0 ? Math.floor(cfg.monthlyCapClp / pack.priceClp) : 0;
+  const topeMaximo = pack?.topeMaximoClp ?? (pack ? pack.priceClp * (cfg.maxRecargasMes ?? 10) : 0);
+  const subeElTope = topeGuardado != null && cfg.monthlyCapClp > topeGuardado;
+  const sobreElTecho = topeMaximo > 0 && cfg.monthlyCapClp > topeMaximo;
+  // Para guardar hacen falta las tres: la casilla marcada, un tope dentro del techo, y —si
+  // el tope SUBE— la casilla marcada en ESTA edición.
+  const puedeGuardar = consent && !sobreElTecho && !(subeElTope && !consent);
 
   async function guardar(enabled: boolean, cambios: Partial<AutoRecargaCfg> = {}) {
     setBusy(true);
@@ -572,6 +590,7 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
       };
       const r = await api<AutoRecargaCfg & { ok: boolean }>("/billing/auto-recharge", { method: "PUT", body: JSON.stringify(body) });
       setCfg({ ...cfg!, ...r });
+      setTopeGuardado(r.monthlyCapClp ?? body.monthlyCapClp);
       setMsg(enabled ? "Recarga automática activada." : "Recarga automática desactivada.");
     } catch (e) {
       setMsg((e as Error).message);
@@ -605,6 +624,24 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
           </label>
 
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 14 }}>
+            {cfg.packs.length > 1 ? (
+              <label style={{ fontSize: 12.5 }}>
+                <span className="text-dim" style={{ display: "block", marginBottom: 4 }}>Qué recargar</span>
+                <select
+                  value={pack.code}
+                  onChange={(e) => setCfg({ ...cfg, packCode: e.target.value })}
+                  disabled={busy}
+                  style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--surface)", color: "var(--ink)" }}
+                >
+                  {cfg.packs.map((p) => (
+                    <option key={p.code} value={p.code}>
+                      {p.credits.toLocaleString("es-CL")} {unidad} · {clpRec(p.priceClp)}
+                      {(p.bonoPct ?? 0) > 0 ? ` (+${p.bonoPct}% extra)` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label style={{ fontSize: 12.5 }}>
               <span className="text-dim" style={{ display: "block", marginBottom: 4 }}>Avisar y recargar bajo</span>
               <input
@@ -622,19 +659,33 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
                 type="number"
                 min={pack.priceClp}
                 step={pack.priceClp}
+                max={topeMaximo || undefined}
                 value={cfg.monthlyCapClp}
                 onChange={(e) => setCfg({ ...cfg, monthlyCapClp: Math.max(0, Number(e.target.value) || 0) })}
                 disabled={busy}
-                style={{ width: 140, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--surface)", color: "var(--ink)" }}
+                style={{ width: 140, padding: "7px 10px", borderRadius: 8, border: `1px solid ${sobreElTecho ? "var(--danger, #c33)" : "var(--hairline)"}`, background: "var(--surface)", color: "var(--ink)" }}
               />
+              {/* El techo lo manda el servidor (10 recargas del pack elegido) y acá se dice,
+                  para que la pantalla no ofrezca un número que la API va a rechazar. */}
+              <span className="text-dim" style={{ display: "block", fontSize: 11.5, marginTop: 4 }}>
+                {sobreElTecho
+                  ? `Máximo ${clpRec(topeMaximo)} (${cfg.maxRecargasMes ?? 10} recargas de este pack).`
+                  : `Hasta ${clpRec(topeMaximo)}.`}
+              </span>
             </label>
           </div>
+          {subeElTope ? (
+            <p className="text-dim" style={{ fontSize: 12.5, margin: "0 0 12px" }}>
+              Estás <b>subiendo el tope</b>: vuelve a marcar la autorización de arriba, porque autoriza más gasto que el
+              que habías aceptado.
+            </p>
+          ) : null}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {cfg.enabled ? (
               <>
                 <span style={{ fontSize: 13, color: "var(--ok)", fontWeight: 600 }}>● Activada</span>
-                <button onClick={() => void guardar(true)} disabled={busy || !consent} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>
+                <button onClick={() => void guardar(true)} disabled={busy || !puedeGuardar} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>
                   Guardar cambios
                 </button>
                 <button onClick={() => void guardar(false)} disabled={busy} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>
@@ -642,7 +693,7 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
                 </button>
               </>
             ) : (
-              <button onClick={() => void guardar(true)} disabled={busy || !consent} className="btn-accent" style={{ border: "none", cursor: busy || !consent ? "not-allowed" : "pointer", fontSize: 13, padding: "8px 14px", opacity: busy || !consent ? 0.5 : 1 }}>
+              <button onClick={() => void guardar(true)} disabled={busy || !puedeGuardar} className="btn-accent" style={{ border: "none", cursor: busy || !puedeGuardar ? "not-allowed" : "pointer", fontSize: 13, padding: "8px 14px", opacity: busy || !puedeGuardar ? 0.5 : 1 }}>
                 {busy ? "Guardando…" : "Activar recarga automática"}
               </button>
             )}

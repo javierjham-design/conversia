@@ -32,8 +32,9 @@ const catalogo = JSON.parse(
     gananciaMinimaPct: number;
   };
   planes: Array<{ code: string; priceClp: number; creditos: number; esPlanBase?: boolean; trial?: boolean; regaloBienvenida?: number }>;
-  packs: Array<{ code: string; credits: number; priceClp: number; esRecargaBasica?: boolean }>;
+  packs: Array<{ code: string; name: string; credits: number; priceClp: number; priceUsd: number; order: number; bonoPct: number; esRecargaBasica?: boolean; masElegido?: boolean; mejorPrecio?: boolean }>;
   packsEliminados: { creditos: number[] };
+  packsBono: { toleranciaPuntos: number };
   recargaAutomatica: { topeMensualClp: number; recargasEquivalentes: number };
 };
 
@@ -87,11 +88,21 @@ describe("§8.3 — los precios aprobados el 28-oct están sembrados tal cual", 
     expect(trial).toMatchObject({ code: "conversia_creditos_trial", priceClp: 0, creditos: 0, regaloBienvenida: 200 });
   });
 
-  it("hay UNA sola recarga —420 créditos a $24.990— y ningún pack por volumen", () => {
-    // Decisión del dueño: sin descuentos por volumen por ahora. Un pack grande con
-    // descuento premia justo al cliente que más cuesta.
-    expect(catalogo.packs).toHaveLength(1);
-    expect(recarga()).toMatchObject({ code: "conversia-cred-420", credits: 420, priceClp: 24990 });
+  it("los CUATRO packs del 29-oct están sembrados tal cual", () => {
+    expect(catalogo.packs.map((p) => [p.code, p.credits, p.priceClp, p.bonoPct])).toEqual([
+      ["conversia-cred-420", 420, 24_990, 0],
+      ["conversia-cred-880", 880, 49_900, 5],
+      ["conversia-cred-1850", 1850, 99_900, 10],
+      ["conversia-cred-2900", 2900, 149_900, 15],
+    ]);
+  });
+
+  it("la recarga BÁSICA sigue siendo la de 420 a $24.990, y es una sola", () => {
+    // Es la que define el precio por crédito de referencia, el tope de la recarga
+    // automática y la cuenta del mes del cliente de calibración. Si hubiera dos, o si
+    // cambiara, los tres números de arriba se moverían sin que nadie lo decidiera.
+    expect(catalogo.packs.filter((p) => p.esRecargaBasica)).toHaveLength(1);
+    expect(recarga()).toMatchObject({ code: "conversia-cred-420", credits: 420, priceClp: 24_990 });
   });
 
   it("los packs eliminados NO están sembrados", () => {
@@ -220,5 +231,84 @@ describe("§5 — lo que el cliente recibe por su plata", () => {
     // Misma plata, más créditos: el plan carga además el costo fijo del cliente.
     expect(recarga().priceClp).toBe(base().priceClp);
     expect(recarga().credits / base().creditos).toBeCloseTo(1.4, 2);
+  });
+});
+
+/**
+ * EL BONO DE LOS PACKS.
+ *
+ * El bono es lo que el cliente ve ("+10% de créditos extra") y lo que justifica comprar un
+ * pack grande en vez de varias recargas. NO se guarda en la base: se calcula desde el precio
+ * y los créditos, porque un bono guardado a mano se desincroniza del precio en la primera
+ * edición y entonces la página promete un extra que el pack no da. El `bonoPct` del catálogo
+ * es la INTENCIÓN del dueño, y estos tests exigen que el precio y los créditos la cumplan.
+ */
+describe("§1 — el bono declarado es el que de verdad dan el precio y los créditos", () => {
+  /** Precio por crédito de la recarga básica: la referencia de "sin bono". */
+  const porCreditoBase = () => recarga().priceClp / recarga().credits;
+
+  /** Bono REAL de un pack: cuántos créditos extra da respecto de pagar al precio base. */
+  const bonoReal = (pack: { credits: number; priceClp: number }) =>
+    (pack.credits / (pack.priceClp / porCreditoBase()) - 1) * 100;
+
+  it("cada pack entrega el bono que declara", () => {
+    for (const p of catalogo.packs) {
+      expect(
+        Math.abs(bonoReal(p) - p.bonoPct),
+        `${p.code}: declara +${p.bonoPct}% y entrega +${bonoReal(p).toFixed(2)}%`,
+      ).toBeLessThanOrEqual(catalogo.packsBono.toleranciaPuntos);
+    }
+  });
+
+  it("la recarga básica no tiene bono (es la referencia)", () => {
+    expect(recarga().bonoPct).toBe(0);
+    expect(bonoReal(recarga())).toBeCloseTo(0, 6);
+  });
+
+  it("el bono CRECE con el tamaño del pack, sin saltos hacia atrás", () => {
+    const bonos = catalogo.packs.map((p) => p.bonoPct);
+    expect(bonos).toEqual([...bonos].sort((a, b) => a - b));
+  });
+
+  it("un pack más caro nunca da MENOS créditos por peso", () => {
+    // La regla de orden del §3. Si se rompiera, al cliente le convendría comprar el pack
+    // chico varias veces y el "pack grande" sería una trampa.
+    const porPeso = catalogo.packs.map((p) => p.credits / p.priceClp);
+    expect(porPeso).toEqual([...porPeso].sort((a, b) => a - b));
+  });
+
+  it("los packs están ordenados por precio (es el orden en que se muestran)", () => {
+    const precios = catalogo.packs.map((p) => p.priceClp);
+    expect(precios).toEqual([...precios].sort((a, b) => a - b));
+    const orden = catalogo.packs.map((p) => p.order);
+    expect(orden).toEqual([...orden].sort((a, b) => a - b));
+  });
+});
+
+describe("§1 — el piso de 300% de ganancia lo cumplen LOS CUATRO packs", () => {
+  it.each(["conversia-cred-420", "conversia-cred-880", "conversia-cred-1850", "conversia-cred-2900"])(
+    "%s",
+    (code) => {
+      const p = catalogo.packs.find((x) => x.code === code)!;
+      expect(gananciaSobreCosto(p.priceClp, p.credits)).toBeGreaterThanOrEqual(S.gananciaMinimaPct);
+    },
+  );
+
+  it("el pack más grande sigue dejando mucho más que el piso", () => {
+    // El bono del 15% se come una parte del margen; que quede holgura es lo que permite
+    // subir el bono más adelante sin romper la regla.
+    const p = catalogo.packs.find((x) => x.code === "conversia-cred-2900")!;
+    expect(gananciaSobreCosto(p.priceClp, p.credits)).toBeGreaterThan(500);
+  });
+
+  it("un cliente del tamaño de Digital-Dent paga entre $175.000 y $200.000 al mes", () => {
+    // El objetivo del §1: los packs vuelven, pero el cliente grande no se abarata.
+    const grande = catalogo.packs.find((x) => x.code === "conversia-cred-2900")!;
+    const faltan = SEPTIEMBRE_DIGITAL_DENT.creditos - base().creditos; // 2.872
+    expect(grande.credits).toBeGreaterThanOrEqual(faltan); // un solo pack le alcanza
+    const conPackGrande = base().priceClp + grande.priceClp;
+    expect(conPackGrande).toBe(174_890);
+    expect(conPackGrande).toBeGreaterThanOrEqual(175_000 - 200);
+    expect(conPackGrande).toBeLessThanOrEqual(200_000);
   });
 });
