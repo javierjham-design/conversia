@@ -100,6 +100,15 @@ export function createDbRechargeReconcilePort(): RechargeReconcilePort {
       await enqueueNotification({ eventKey, organizationId, data });
     },
 
+    async marcarTarjetaApta(organizationId) {
+      // Solo levanta marcas: nunca pone `false`. Y solo toca las que están en `false`, para
+      // no pisar el `null` de una tarjeta que todavía no se probó con un dato que no tenemos.
+      await admin.paymentMethod.updateMany({
+        where: { organizationId, provider: "flow", autoChargeable: false },
+        data: { autoChargeable: true },
+      });
+    },
+
     async marcarTarjetaNoApta(organizationId) {
       // Se marcan TODAS las tarjetas de Flow de la org, no solo la que está por defecto: si
       // el cliente dejó más de una, ninguna de ellas pasó la prueba del cobro recurrente y

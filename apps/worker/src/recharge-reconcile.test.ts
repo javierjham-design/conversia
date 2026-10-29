@@ -5,7 +5,7 @@ import {
   GRACIA_WEBHOOK_MS,
   necesitaConsulta,
   reconciliarRecargas,
-  VENTANA_ABANDONO_MS,
+  VENTANA_TARJETA_NO_APTA_MS,
   type EstadoPasarela,
   type RecargaPendiente,
   type RechargeReconcilePort,
@@ -53,10 +53,21 @@ describe("la decisión: ¿qué se hace con un cobro de recarga sin cerrar?", () 
     expect(decidirCierre({ pendiente: pendiente(), estado: RECHAZADO, now: AHORA })).toBe("marcar_fallido");
   });
 
-  it("la pasarela sigue procesando → se espera, hasta los dos días", () => {
+  it("la pasarela sigue procesando → se espera, hasta el umbral de tarjeta no apta", () => {
     expect(decidirCierre({ pendiente: pendiente(), estado: EN_CURSO, now: AHORA })).toBe("esperar");
-    const viejo = pendiente({ createdAt: haceMs(VENTANA_ABANDONO_MS) });
+    const viejo = pendiente({ createdAt: haceMs(VENTANA_TARJETA_NO_APTA_MS) });
     expect(decidirCierre({ pendiente: viejo, estado: EN_CURSO, now: AHORA })).toBe("abandonar_alertar");
+  });
+
+  it("el umbral de la tarjeta no apta son DOS HORAS, no dos días", () => {
+    // La evidencia no es un sandbox (no tenemos): el diagnóstico de cobro que ya corre en
+    // producción dice, desde el E2E con tarjeta real del 29-ago, que un cobro "pendiente" en
+    // Flow con tarjeta de débito es que Flow no admite cargo automático en débito. Un collect
+    // legítimo resuelve en segundos. 48 h eran dos días de un cliente creyendo que su
+    // recarga lo cubre — justo el daño que esto evita.
+    expect(VENTANA_TARJETA_NO_APTA_MS).toBe(2 * 60 * 60 * 1000);
+    const casi = pendiente({ createdAt: haceMs(VENTANA_TARJETA_NO_APTA_MS - 1000) });
+    expect(decidirCierre({ pendiente: casi, estado: EN_CURSO, now: AHORA })).toBe("esperar");
   });
 
   it("no se pudo consultar el estado → se espera (no se inventa un resultado)", () => {
@@ -104,6 +115,7 @@ function makePort(
   const excepciones: Array<{ type: string; severity: string; dedupeKey: string }> = [];
   const avisos: Array<{ kind: string; data: Record<string, unknown> }> = [];
   const marcadas: string[] = [];
+  const absueltas: string[] = [];
   const links: Array<{ org: string; monto: number }> = [];
   let acreditado = false;
 
@@ -119,12 +131,13 @@ function makePort(
     notificar: async (_org, kind, data) => void avisos.push({ kind, data }),
     raiseOps: async (_org, i) => void excepciones.push({ type: i.type, severity: i.severity, dedupeKey: i.dedupeKey }),
     marcarTarjetaNoApta: async (org) => void marcadas.push(org),
+    marcarTarjetaApta: async (org) => void absueltas.push(org),
     linkDePago: async (org, monto) => {
       links.push({ org, monto });
       return "https://pago/link";
     },
   };
-  return { port, cierres, replays, excepciones, avisos, marcadas, links };
+  return { port, cierres, replays, excepciones, avisos, marcadas, links, absueltas };
 }
 
 const providerCon = (estado: EstadoPasarela) => {
@@ -135,7 +148,7 @@ const providerCon = (estado: EstadoPasarela) => {
 
 describe("pasada completa", () => {
   it("el webhook perdido se recupera: acredita por el camino normal y cierra el intento", async () => {
-    const { port, cierres, replays } = makePort();
+    const { port, cierres, replays, absueltas } = makePort();
     const r = await reconciliarRecargas(port, providerCon(PAGADO), AHORA);
 
     expect(r.acreditadas).toBe(1);
@@ -144,6 +157,10 @@ describe("pasada completa", () => {
     // créditos es una segunda forma de equivocarse con el dinero.
     expect(replays).toEqual(["tok_1"]);
     expect(cierres).toEqual([{ commerceOrder: "rec-org1-123", status: "succeeded", reason: "reconciliado" }]);
+    // Y LA TARJETA QUEDA ABSUELTA: un cobro automático confirmado es la prueba de que
+    // admite cargos recurrentes. Es lo que hace seguro acusar a las 2 h — un veredicto
+    // equivocado se borra con el primer cobro bueno, sin que nadie tenga que intervenir.
+    expect(absueltas).toEqual(["org1"]);
   });
 
   it("si el webhook devuelve OK pero el libro queda vacío: NO se cierra y se alerta", async () => {
@@ -159,6 +176,12 @@ describe("pasada completa", () => {
     expect(excepciones).toEqual([
       { type: "recarga_pagada_sin_acreditar", severity: "critical", dedupeKey: "pagada_sin_acreditar:rec-org1-123" },
     ]);
+  });
+
+  it("un pago confirmado que NO acreditó no absuelve la tarjeta (nada quedó resuelto)", async () => {
+    const { port, absueltas } = makePort({ acreditaAlReaplicar: false });
+    await reconciliarRecargas(port, providerCon(PAGADO), AHORA);
+    expect(absueltas).toEqual([]);
   });
 
   it("si la reaplicación del webhook revienta, el intento queda pendiente (no se pierde)", async () => {
@@ -209,13 +232,13 @@ describe("pasada completa", () => {
     expect(cierres).toEqual([{ commerceOrder: "rec-org1-123", status: "failed", reason: "sin_respuesta" }]);
   });
 
-  it("dos días sin resolver = TARJETA DE DÉBITO: se marca, se avisa con link y se cierra", async () => {
+  it("pendiente pasado el umbral = TARJETA DE DÉBITO: se marca, se avisa con link y se cierra", async () => {
     // §4 — un cobro que la pasarela nunca cierra es el síntoma documentado de una tarjeta de
     // débito o prepago: no permiten cargos recurrentes. Al registrar no se puede distinguir
     // (la pasarela informa la marca, no el tipo), así que el primer cobro ES la prueba.
     // Lo que importa no es la etiqueta: antes el cobro se colgaba EN SILENCIO, la recarga
     // seguía "activada" y al cliente se le cortaba el bot al agotarse la gracia.
-    const viejo = pendiente({ createdAt: haceMs(VENTANA_ABANDONO_MS + 1000) });
+    const viejo = pendiente({ createdAt: haceMs(VENTANA_TARJETA_NO_APTA_MS + 1000) });
     const { port, cierres, excepciones, avisos, marcadas, links } = makePort({ pendientes: [viejo] });
     const r = await reconciliarRecargas(port, providerCon(EN_CURSO), AHORA);
 
@@ -231,7 +254,7 @@ describe("pasada completa", () => {
   });
 
   it("si no se puede emitir el link, igual se marca y se avisa (no se pierde el caso)", async () => {
-    const viejo = pendiente({ createdAt: haceMs(VENTANA_ABANDONO_MS + 1000) });
+    const viejo = pendiente({ createdAt: haceMs(VENTANA_TARJETA_NO_APTA_MS + 1000) });
     const { port, excepciones, avisos, marcadas } = makePort({ pendientes: [viejo] });
     port.linkDePago = async () => null;
     await reconciliarRecargas(port, providerCon(EN_CURSO), AHORA);

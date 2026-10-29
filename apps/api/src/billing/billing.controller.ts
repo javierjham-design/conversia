@@ -875,6 +875,18 @@ export class BillingController {
             await this.prisma.admin.paymentAttempt
               .updateMany({ where: { commerceOrder: orden, status: "pending" }, data: { status: "succeeded", providerRef: token } })
               .catch(() => undefined);
+            // §4 — Y LA TARJETA QUEDA ABSUELTA. Un cobro AUTOMÁTICO que se confirma es la
+            // prueba de que esa tarjeta admite cargos recurrentes, así que se levanta
+            // cualquier marca de "no apta" puesta antes. Es lo que permite que la detección
+            // acuse temprano (2 h de "pendiente" en la pasarela) sin castigar a nadie: un
+            // veredicto equivocado se borra con el primer cobro bueno.
+            //
+            // Solo en la rama `rec-`: pagar con el LINK no prueba nada sobre la tarjeta
+            // guardada —el link acepta débito justamente porque el pago es único— y marcarla
+            // apta por un pago a mano la dejaría intentando cobros que nunca van a entrar.
+            await this.prisma.admin.paymentMethod
+              .updateMany({ where: { organizationId: meta.organizationId, provider: "flow", autoChargeable: false }, data: { autoChargeable: true } })
+              .catch(() => undefined);
           }
         });
         if (!hecho) return { received: true, deduped: true };
