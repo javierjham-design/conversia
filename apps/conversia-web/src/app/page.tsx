@@ -6,6 +6,14 @@ import {
   ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
 import { api, getToken, getRefreshToken, sessionActive, clearToken } from "@/lib/api";
+import {
+  BASE_RESPALDO,
+  CREDITOS_POR_CONVERSACION_RESPALDO,
+  PACKS_RESPALDO,
+  PACK_MAS_ELEGIDO,
+  PACK_MEJOR_PRECIO,
+  PRUEBA_RESPALDO_CREDITOS,
+} from "@/lib/precios-respaldo";
 
 /**
  * LANDING PÚBLICA de Conversia (apex conversia.cl). La ve quien NO ha iniciado sesión;
@@ -16,7 +24,7 @@ import { api, getToken, getRefreshToken, sessionActive, clearToken } from "@/lib
 const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
 
 type Plan = { code: string; name: string; priceClp: number; features: Record<string, unknown> };
-type Pack = { code: string; name: string; credits: number; priceClp: number; creditosPorConversacion?: number };
+type Pack = { code: string; name: string; credits: number; priceClp: number; bonoPct?: number; creditosPorConversacion?: number };
 
 export default function Landing() {
   const router = useRouter();
@@ -50,11 +58,15 @@ export default function Landing() {
   // sería una promesa falsa en la página de precios.
   const esCreditos = base?.code === "conversia_creditos_base";
   const unidad = esCreditos ? "créditos" : "conversaciones";
-  // Respaldos para cuando la llamada de precios no llegó: siguen al plan Base de
-  // `seeds/creditos-catalogo.json` (28-oct-2026: $24.990 con 300 créditos).
-  const basePrice = base ? clp(base.priceClp) : "$24.990";
-  const baseIncluded = base ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || 300 : 300;
-  const pruebaGratis = esCreditos ? 200 : 30;
+  // Respaldos para cuando la llamada de precios no llegó. Los números NO se escriben acá:
+  // viven en `@/lib/precios-respaldo`, que un test compara contra el catálogo. Un respaldo
+  // solo se ve cuando algo falla —o sea cuando nadie está mirando—, así que si se desincroniza
+  // del catálogo nadie se entera de que la landing anuncia un precio viejo.
+  const basePrice = base ? clp(base.priceClp) : clp(BASE_RESPALDO.priceClp);
+  const baseIncluded = base
+    ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || BASE_RESPALDO.creditos
+    : BASE_RESPALDO.creditos;
+  const pruebaGratis = esCreditos ? PRUEBA_RESPALDO_CREDITOS : 30;
   // CRE 3 — EQUIVALENCIA EN CONVERSACIONES. "100 créditos" no le dice nada a alguien que
   // está decidiendo si contratar: en la página de precios el número tiene que poder
   // compararse con algo que entienda. Es una APROXIMACIÓN y se dice así ("≈", "según cuánto
@@ -63,7 +75,7 @@ export default function Landing() {
   // cifra distinta de la que verá adentro.
   // El promedio lo manda el servidor con los packs (`creditosPorConversacion`), para no
   // hardcodear acá un número que después se desincronice del estimador del panel.
-  const porConversacion = packs.find((p) => p.creditosPorConversacion)?.creditosPorConversacion ?? 9;
+  const porConversacion = packs.find((p) => p.creditosPorConversacion)?.creditosPorConversacion ?? CREDITOS_POR_CONVERSACION_RESPALDO;
   const conv = (creditos: number) => Math.floor(creditos / porConversacion);
   const aprox = (creditos: number) => (esCreditos ? ` (≈ ${conv(creditos).toLocaleString("es-CL")} conversaciones)` : "");
 
@@ -230,12 +242,20 @@ export default function Landing() {
             <span className="lp-price-tag"><Zap size={14} /> Cuando creces</span>
             <h3 className="display">{esCreditos ? "Recarga" : "Packs"}</h3>
             <p className="lp-price-amount display">+ {unidad}</p>
-            <p className="lp-price-note">Suma cuando lo necesites. No vencen pronto.</p>
+            <p className="lp-price-note">Suma cuando lo necesites. No vencen pronto{esCreditos ? " · IVA incluido" : ""}.</p>
             <ul className="lp-check">
-              {/* El respaldo sigue al catálogo (28-oct-2026: una sola recarga de 420 a
-                  $24.990, sin descuentos por volumen). Los de verdad los manda el servidor. */}
-              {(packs.length ? packs : [{ code: "a", name: "Recarga 420", credits: 420, priceClp: 24990 }]).map((p) => (
-                <li key={p.code}><Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad}{aprox(p.credits)} · {clp(p.priceClp)}</li>
+              {/* Los packs los manda el servidor con su bono YA CALCULADO desde el precio y
+                  los créditos: un bono escrito a mano se desincroniza del precio en la primera
+                  edición y la página pasa a prometer un extra que el pack no da. El respaldo
+                  (cuando la llamada no llega) vive en `@/lib/precios-respaldo` y lo compara un
+                  test contra el catálogo. */}
+              {(packs.length ? packs : [...PACKS_RESPALDO]).map((p) => (
+                <li key={p.code}>
+                  <Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad}{aprox(p.credits)} · {clp(p.priceClp)}
+                  {esCreditos && (p.bonoPct ?? 0) > 0 ? <strong className="lp-bono"> +{p.bonoPct}% extra</strong> : null}
+                  {esCreditos && p.code === PACK_MAS_ELEGIDO ? <em className="lp-pack-tag"> Más elegido</em> : null}
+                  {esCreditos && p.code === PACK_MEJOR_PRECIO ? <em className="lp-pack-tag"> Mejor precio por crédito</em> : null}
+                </li>
               ))}
             </ul>
             <a href="/crear" className="lp-ghost lp-ghost-lg lp-full">Empezar gratis</a>
@@ -248,7 +268,7 @@ export default function Landing() {
       <section className="lp-section" id="faq">
         <SectionHead eyebrow="Preguntas frecuentes" title={<>Lo que todos <span className="display-italic lp-accent">se preguntan</span></>} />
         <div className="lp-faq">
-          {FAQS.map((f, i) => (
+          {faqs({ esCreditos, pruebaGratis, conv, unidad }).map((f, i) => (
             <div key={i} className={faq === i ? "lp-faq-item open" : "lp-faq-item"}>
               <button onClick={() => setFaq(faq === i ? null : i)} aria-expanded={faq === i}>
                 <span>{f.q}</span><ChevronDown size={18} />
@@ -353,14 +373,29 @@ function BuilderMock() {
   );
 }
 
-const FAQS = [
-  { q: "¿Qué cuenta como una “conversación”?", a: "Toda la atención a un mismo cliente dentro de una ventana de 24 horas, sin importar cuántos mensajes se intercambien. Es la forma más justa y predecible de cobrar." },
-  { q: "¿Necesito tarjeta para probar?", a: "No. Creas tu asistente y tienes 30 conversaciones gratis para probarlo con clientes reales. Activas un plan solo cuando quieras seguir." },
-  { q: "¿Funciona con mi número de WhatsApp actual?", a: "Conversia usa la plataforma oficial de WhatsApp Business. Te guiamos para conectar tu número y empezar a atender." },
-  { q: "¿La IA puede equivocarse o inventar cosas?", a: "El asistente está diseñado para responder solo con tu información y para no inventar precios ni horarios. Ante dudas o urgencias, deriva a una persona de tu equipo." },
-  { q: "¿Qué pasa cuando se acaban mis conversaciones?", a: "Tu bot nunca queda mudo: entra en modo copiloto (te sugiere respuestas para que apruebes) por unos días antes de pausar, y nada de tu información se borra." },
-  { q: "¿Puedo cancelar cuando quiera?", a: "Sí. Cancelas desde el panel y tu cuenta sigue activa hasta el fin del período pagado. Sin ataduras." },
-];
+/**
+ * Preguntas frecuentes. Es una FUNCIÓN y no una constante porque dos de las respuestas
+ * dicen cifras: los créditos de regalo de la prueba y su equivalencia en conversaciones.
+ * Mientras fue constante decía "30 conversaciones gratis" —el regalo del modelo viejo—
+ * aunque la cuenta nueva reciba 200 créditos: una cifra equivocada en la pregunta que lee
+ * justo quien está decidiendo si probar.
+ */
+function faqs(ctx: { esCreditos: boolean; pruebaGratis: number; conv: (c: number) => number; unidad: string }) {
+  const { esCreditos, pruebaGratis, conv } = ctx;
+  const regalo = esCreditos
+    ? `${pruebaGratis.toLocaleString("es-CL")} créditos gratis (≈ ${conv(pruebaGratis).toLocaleString("es-CL")} conversaciones)`
+    : `${pruebaGratis} conversaciones gratis`;
+  return [
+    { q: "¿Qué cuenta como una “conversación”?", a: "Toda la atención a un mismo cliente dentro de una ventana de 24 horas, sin importar cuántos mensajes se intercambien. Es la forma más justa y predecible de cobrar." },
+    { q: "¿Necesito tarjeta para probar?", a: `No. Creas tu asistente y tienes ${regalo} para probarlo con clientes reales. La tarjeta se pide al activar un plan, no para probar.` },
+    { q: "¿Cómo se paga?", a: "El plan y las recargas se cobran con Flow. Para el cobro automático necesitas una tarjeta de CRÉDITO: las de débito y prepago (incluida Redcompra) no permiten cargos automáticos, y con ellas se paga con un link cada vez." },
+    { q: "¿Qué pasa si se me acaban los créditos?", a: "Te avisamos al 75% y al 90% de tu saldo. Con la recarga automática activada no pasa nada: se cobra tu pack y sigue. Sin ella, tu bot sigue respondiendo con 100 créditos de gracia y después se pausa hasta que recargues — nunca queda mudo de golpe." },
+    { q: "¿Los mensajes de WhatsApp los cobran ustedes?", a: "No. Los cobra Meta directamente a tu tarjeta, con sus propias tarifas. Nosotros te cobramos el asistente; el canal es tuyo." },
+    { q: "¿Funciona con mi número de WhatsApp actual?", a: "Conversia usa la plataforma oficial de WhatsApp Business. Te guiamos para conectar tu número y empezar a atender." },
+    { q: "¿La IA puede equivocarse o inventar cosas?", a: "El asistente está diseñado para responder solo con tu información y para no inventar precios ni horarios. Ante dudas o urgencias, deriva a una persona de tu equipo." },
+    { q: "¿Puedo cancelar cuando quiera?", a: "Sí. Cancelas desde el panel y tu cuenta sigue activa hasta el fin del período pagado. Sin ataduras." },
+  ];
+}
 
 /* ---------------- Estilos de la landing (Nocturna + gráficas) ---------------- */
 function LandingStyles() {
@@ -474,6 +509,10 @@ function LandingStyles() {
 .lp-price-feat { border-color: var(--acc); box-shadow: 0 20px 50px -28px color-mix(in srgb,var(--acc) 80%,transparent); position: relative; }
 .lp-price-tag { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 11.5px; font-weight: 700; color: var(--acc-deep); background: var(--acc-dim); border-radius: 999px; padding: 4px 11px; }
 .lp-price-tag-free { color: var(--ok); background: color-mix(in srgb,var(--ok) 15%,transparent); }
+/* El bono de un pack ("+10% extra") y los carteles de pack destacado. Van dentro del <li>
+   de la lista de recargas, así que se dimensionan en relación al texto de la línea. */
+.lp-bono { color: var(--ok); font-weight: 700; }
+.lp-pack-tag { display: inline-block; margin-left: 6px; font-size: 11px; font-style: normal; font-weight: 700; color: var(--acc-deep); background: var(--acc-dim); border-radius: 999px; padding: 2px 8px; vertical-align: 1px; }
 .lp-price h3 { font-size: 20px; margin: 14px 0 4px; }
 .lp-price-amount { font-size: 34px; margin: 0; font-weight: 600; } .lp-price-amount span { font-size: 15px; color: var(--ink-dim); font-weight: 400; }
 .lp-price-note { margin: 6px 0 4px; font-size: 13px; color: var(--ink-dim); }

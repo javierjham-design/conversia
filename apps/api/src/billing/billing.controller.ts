@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, raiseException, refillMessageWallet } from "@conversia/database";
-import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, MAX_RECARGAS_MES, PREFIJO_ORDEN_RECARGA, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, MAX_RECARGAS_MES, PREFIJO_ORDEN_RECARGA, bonoDePacks, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
@@ -558,7 +558,19 @@ export class BillingController {
       included,
       // % restante sobre el incluido del período (para la barra y los avisos 80/100).
       remainingPct: included > 0 ? Math.max(0, Math.round((balance / included) * 100)) : null,
-      packages: packages.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp, priceUsd: Number(p.priceUsd) })),
+      // §1 — el BONO de cada pack ("+10% de créditos extra") va calculado desde el precio y
+      // los créditos, no guardado: un bono en su propia columna se desincroniza del precio en
+      // la primera edición y el panel termina prometiendo un extra que el pack no da. Solo
+      // tiene sentido en los packs de CRÉDITOS; en los de plantillas no hay bono que anunciar.
+      packages: ((bonos) =>
+        packages.map((p, i) => ({
+          code: p.code,
+          name: p.name,
+          credits: p.credits,
+          priceClp: p.priceClp,
+          priceUsd: Number(p.priceUsd),
+          bonoPct: type === "credit" ? bonos[i] : 0,
+        })))(bonoDePacks(packages.map((p) => ({ credits: p.credits, priceClp: Number(p.priceClp) })))),
     };
   }
 
@@ -1182,7 +1194,19 @@ export class BillingController {
       // Sin consentimiento registrado NO se cobra, aunque `enabled` esté en true: el
       // worker lo exige. La pantalla lo muestra para que se pueda volver a pedir.
       consentAt: typeof ar.consentAt === "string" ? ar.consentAt : null,
-      packs: packs.map((p) => ({ code: p.code, name: p.name, credits: p.credits, priceClp: p.priceClp })),
+      // §1 — con el bono de cada pack (calculado, nunca guardado) para que el cliente elija
+      // con el mismo dato que ve en la página de precios. Y el TECHO del tope, para que la
+      // pantalla no le ofrezca un número que la API va a rechazar.
+      packs: ((bonos) =>
+        packs.map((p, i) => ({
+          code: p.code,
+          name: p.name,
+          credits: p.credits,
+          priceClp: p.priceClp,
+          bonoPct: unit === "credit" ? bonos[i] : 0,
+          topeMaximoClp: techoDelTope(p.priceClp),
+        })))(bonoDePacks(packs.map((p) => ({ credits: p.credits, priceClp: Number(p.priceClp) })))),
+      maxRecargasMes: MAX_RECARGAS_MES,
     };
   }
 
