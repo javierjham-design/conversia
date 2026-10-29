@@ -124,7 +124,17 @@ export async function aiCreditsGate(organizationId: string): Promise<AiCreditsGa
 
 export type AiCreditsDebit =
   | { charged: false; reason: "no_aplica" | "sin_tokens" | "ya_debitado" }
-  | { charged: true; credits: number; balanceAfter: number; inGrace: boolean; graceUsed: number; detail: TurnCredits }
+  | {
+      charged: true;
+      /** Créditos efectivamente debitados. Puede ser MENOS que `detail.credits` si el colchón topeó. */
+      credits: number;
+      balanceAfter: number;
+      inGrace: boolean;
+      graceUsed: number;
+      detail: TurnCredits;
+      /** El colchón de gracia topeó el cobro: se cobró todo lo cobrable y no alcanzó. */
+      alTope: boolean;
+    }
   | { charged: false; reason: "sin_saldo"; credits: number; graceUsed: number };
 
 export interface TurnUsage {
@@ -178,7 +188,7 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
   }
 
   const now = new Date();
-  return withTenant(organizationId, async (tx) => {
+  const resultado = await withTenant(organizationId, async (tx) => {
     // Serializa los débitos de la org: dos turnos a la vez no pueden gastar el mismo lote.
     await lockOrg(tx, organizationId);
 
@@ -241,22 +251,6 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
       },
     });
 
-    // Se llegó al tope del colchón: el turno siguiente ya no se responde (el gate corta
-    // porque la gracia quedó EXACTAMENTE en el límite). El super admin tiene que verlo
-    // ahora, no cuando el cliente llame preguntando por qué su bot dejó de contestar.
-    if (consumo.alTope) {
-      await raiseException(getAdminPrisma(), {
-        organizationId,
-        type: "saldo_gracia_sin_recarga",
-        severity: "warning",
-        title: "Colchón de créditos agotado",
-        detail:
-          `El último turno pedía ${detail.credits} créditos y solo se pudieron cobrar ${consumo.consumido}: ` +
-          `la cuenta llegó al tope de gracia (${policy.graceCredits}). El bot deja de responder hasta que recargue.`,
-        dedupeKey: `tope:${organizationId}`,
-      }).catch(() => undefined);
-    }
-
     return {
       charged: true as const,
       credits: consumo.consumido,
@@ -264,8 +258,30 @@ export async function debitAiCreditsForTurn(organizationId: string, usage: TurnU
       inGrace: consumo.graceUsed > 0,
       graceUsed: consumo.graceUsed,
       detail,
+      alTope: consumo.alTope,
     };
   });
+
+  // SE LLEGÓ AL TOPE DEL COLCHÓN: el turno siguiente ya no se responde (el gate corta
+  // porque la gracia quedó exactamente en el límite). El super admin tiene que verlo ahora,
+  // no cuando el cliente llame preguntando por qué su bot dejó de contestar.
+  //
+  // FUERA de la transacción a propósito: escribir en otra tabla con el cerrojo de la cuenta
+  // tomado alarga el tiempo en que los demás turnos de esa org esperan, y un aviso no puede
+  // frenar un cobro.
+  if (resultado.charged && resultado.alTope) {
+    await raiseException(getAdminPrisma(), {
+      organizationId,
+      type: "saldo_gracia_sin_recarga",
+      severity: "warning",
+      title: "Colchón de créditos agotado",
+      detail:
+        `El último turno pedía ${resultado.detail.credits} créditos y solo se pudieron cobrar ${resultado.credits}: ` +
+        `la cuenta llegó al tope de gracia (${policy.graceCredits}). El bot deja de responder hasta que recargue.`,
+      dedupeKey: `tope:${organizationId}`,
+    }).catch(() => undefined);
+  }
+  return resultado;
 }
 
 /** Medidor de Créditos IA (lo consume el panel en la Etapa 3; acá lo usan los tests y el gate). */
