@@ -75,6 +75,11 @@ describe("GET /onboarding — gate por marca", () => {
     expect(res.total).toBe(7);
     expect(res.completed).toBe(0);
     expect(res.percent).toBe(0);
+    // Y NINGÚN paso de TuBot lleva el aviso del cobro automático de Créditos IA (§5). Es un
+    // concepto que en TuBot no existe: su bolsa es la de plantillas y no tiene recarga
+    // automática. Decirle "activa la recarga automática para que tu asistente no se pause"
+    // sería mandarlo a una pantalla que no tiene, por una plata que no se le cobra así.
+    expect(res.steps.every((s: any) => s.warn === undefined)).toBe(true);
     expect(res.done).toBe(false);
     // La forma del paso tampoco cambia: ni campos nuevos ni campos menos.
     expect(Object.keys(res.steps[0]).sort()).toEqual(["cta", "description", "done", "key", "title"]);
