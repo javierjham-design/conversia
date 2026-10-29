@@ -1,5 +1,5 @@
-import { getAdminPrisma } from "@conversia/database";
-import { weightOfModel } from "@conversia/agents";
+import { getAdminPrisma, leerMuestraConsumoCreditos, leerPromedioDelRubro, withTenant } from "@conversia/database";
+import { estimarAlcance, weightOfModel, type CreditPolicy } from "@conversia/agents";
 import { modelChangeImpact, readAiModelPolicy } from "./model-policy";
 
 /**
@@ -185,8 +185,48 @@ export function decideModelChange(input: {
   return input.force ? "forzar" : "pedir_aceptacion";
 }
 
-/** Impacto en el lenguaje del cliente, con su saldo real. */
+/**
+ * Cuántos créditos le cuesta una conversación a este cliente **medidos al modelo estándar**.
+ *
+ * Sale del MISMO estimador que alimenta el medidor de /inicio y /cobros, los avisos y el
+ * copiloto (`estimarAlcance` + `leerMuestraConsumoCreditos`). Lo que agrega acá es la
+ * normalización: la muestra está cobrada al peso del modelo que el cliente usa HOY, y
+ * `modelChangeImpact` vuelve a multiplicar por el peso de cada lado, así que sin dividir
+ * primero el modelo se contaría dos veces (un cliente en gpt-4o vería su saldo rendir 12
+ * veces menos de lo que rinde).
+ *
+ * Cada lectura accesoria degrada a su valor neutro: si la muestra no se puede leer, el
+ * impacto se calcula con el respaldo del estimador en vez de romper la pantalla.
+ */
+async function creditosPorConversacionAEstandar(organizationId: string, modeloActual: string, policy: CreditPolicy): Promise<number | undefined> {
+  try {
+    const admin = getAdminPrisma();
+    const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { settings: true } }).catch(() => null);
+    const rubro = String((((org?.settings ?? {}) as Record<string, any>).general ?? {}).industry ?? "");
+    const propio = await withTenant(organizationId, (tx) => leerMuestraConsumoCreditos(tx, organizationId)).catch(() => ({
+      conversaciones: 0,
+      creditos: 0,
+      dias: 0,
+    }));
+    const promedioDelRubro = await leerPromedioDelRubro(admin, rubro).catch(() => null);
+    const e = estimarAlcance({ restantes: 0, propio, promedioDelRubro });
+    // Sin datos propios ni del rubro, `estimarAlcance` ya devuelve el respaldo compartido:
+    // devolverlo explícito o no da lo mismo, pero así una sola función decide el número.
+    const peso = Math.max(1, weightOfModel(modeloActual, policy).credits);
+    return Math.max(0.1, e.creditosPorConversacion / peso);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Impacto en el lenguaje del cliente, con su saldo real y su consumo real. */
 export async function buildImpact(organizationId: string, from: string, to: string) {
   const policy = await readAiModelPolicy();
-  return modelChangeImpact({ from, to, remainingCredits: await remainingCredits(organizationId), policy });
+  return modelChangeImpact({
+    from,
+    to,
+    remainingCredits: await remainingCredits(organizationId),
+    policy,
+    creditsPerConversationAtStandard: await creditosPorConversacionAEstandar(organizationId, from, policy),
+  });
 }

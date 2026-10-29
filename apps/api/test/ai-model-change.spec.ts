@@ -16,9 +16,15 @@ const store = {
   grace: 0,
   versions: [] as Array<{ id: string; config: Record<string, unknown> }>,
   policyRow: null as null | { value: string },
+  /** Consumo real del cliente, el que alimenta el medidor de /inicio y /cobros. */
+  muestra: { conversaciones: 0, creditos: 0, dias: 0 },
+  promedioRubro: null as number | null,
 };
 
 vi.mock("@conversia/database", () => ({
+  withTenant: async (_org: string, fn: (tx: unknown) => Promise<unknown>) => fn({}),
+  leerMuestraConsumoCreditos: async () => store.muestra,
+  leerPromedioDelRubro: async () => store.promedioRubro,
   getAdminPrisma: () => ({
     organization: {
       findUnique: async () => ({ settings: store.settings, brand: "conversia" }),
@@ -74,6 +80,8 @@ beforeEach(() => {
     { id: "v2", config: { model: "gpt-4o-mini" } },
   ];
   store.policyRow = null;
+  store.muestra = { conversaciones: 0, creditos: 0, dias: 0 };
+  store.promedioRubro = null;
   resetAiModelPolicyCache();
 });
 
@@ -185,9 +193,35 @@ describe("§4 — el impacto se calcula con el saldo real del cliente", () => {
     store.lots = 500;
     store.grace = 100;
     const i = await buildImpact("o", "gpt-4o-mini", "claude-haiku-4-5");
-    // 400 créditos / (4,2 × 1) ≈ 95 conversaciones antes; / (4,2 × 4) ≈ 23 después.
-    expect(i.from.conversations).toBe(95);
-    expect(i.to.conversations).toBe(23);
+    // 400 créditos / (9 × 1) = 44 conversaciones antes; / (9 × 4) = 11 después. El 9 es el
+    // respaldo del estimador, el mismo que ve el cliente en el medidor.
+    expect(i.from.conversations).toBe(44);
+    expect(i.to.conversations).toBe(11);
+  });
+
+  it("usa el CONSUMO REAL del cliente, no un supuesto, cuando ya tiene historia", async () => {
+    store.lots = 400;
+    store.grace = 0;
+    // 50 conversaciones y 1.000 créditos con el Plus (peso 4) → 20 créditos por
+    // conversación medidos, que es lo que dice el medidor.
+    store.muestra = { conversaciones: 50, creditos: 1_000, dias: 30 };
+    const i = await buildImpact("o", "claude-haiku-4-5", "gpt-4o-mini");
+    // Con su modelo de hoy sigue costando 20 → 400/20 = 20 conversaciones…
+    expect(i.from.conversations).toBe(20);
+    // …y al pasarse al estándar (peso 1, cuatro veces más barato) rinde cuatro veces más.
+    expect(i.to.conversations).toBe(80);
+  });
+
+  it("no cuenta el modelo dos veces: la muestra ya viene cobrada al peso actual", async () => {
+    store.lots = 400;
+    store.grace = 0;
+    store.muestra = { conversaciones: 50, creditos: 1_000, dias: 30 };
+    const i = await buildImpact("o", "claude-haiku-4-5", "claude-haiku-4-5");
+    // Sin normalizar por el peso del modelo actual darían 20×4 = 80 por conversación y
+    // solo 5 conversaciones: al cliente le diríamos que su saldo rinde cuatro veces menos
+    // de lo que realmente rinde, contradiciendo su propio medidor.
+    expect(i.from.conversations).toBe(20);
+    expect(i.from.conversations).not.toBe(5);
   });
 });
 

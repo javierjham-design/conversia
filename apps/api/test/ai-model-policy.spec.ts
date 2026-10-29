@@ -27,6 +27,7 @@ vi.mock("@conversia/database", () => ({
   }),
 }));
 
+import { CREDITOS_POR_CONVERSACION_POR_DEFECTO } from "@conversia/agents";
 import { applyModelLock, defaultAgentModel, modelChangeImpact, resetAiModelPolicyCache } from "../src/agents/model-policy";
 
 beforeEach(() => {
@@ -114,13 +115,28 @@ describe("§4 — el modelo estándar sale de configuración", () => {
 
 describe("§4 — impacto que se le muestra al cliente antes de aceptar", () => {
   it("traduce el cambio a conversaciones, que es lo que el cliente entiende", async () => {
-    // El ejemplo del documento: 1.000 créditos rinden ~240 conversaciones con el estándar
-    // y ~60 con el Plus (peso 4).
+    // Sin dato propio, el respaldo es el MISMO del estimador (9 créditos por conversación
+    // al modelo estándar): 1.000 créditos → 111 conversaciones con el estándar y 27 con el
+    // Plus (peso 4). Antes esta función usaba un 4,2 propio y decía 238 — más del doble de
+    // lo que el medidor le mostraba al mismo cliente en la misma sesión.
     const i = modelChangeImpact({ from: "gpt-4o-mini", to: "claude-haiku-4-5", remainingCredits: 1_000 });
-    expect(i.from.conversations).toBe(238);
-    expect(i.to.conversations).toBe(59);
+    expect(i.from.conversations).toBe(111);
+    expect(i.to.conversations).toBe(27);
     expect(i.to.creditsPerReply).toBe(4);
     expect(i.cheaper).toBe(false);
+  });
+
+  it("el respaldo es el del estimador, no un número propio de esta pantalla", () => {
+    // Un guardián contra la reaparición del problema: si alguien vuelve a poner una
+    // constante acá, el medidor y esta pantalla vuelven a contradecirse.
+    const i = modelChangeImpact({ from: "gpt-4o-mini", to: "gpt-4o-mini", remainingCredits: 1_000 });
+    expect(i.from.conversations).toBe(Math.floor(1_000 / CREDITOS_POR_CONVERSACION_POR_DEFECTO));
+  });
+
+  it("respeta el consumo real del cliente cuando se lo pasan", () => {
+    // 1.000 créditos y un cliente que gasta 20 por conversación → 50, no 111.
+    const i = modelChangeImpact({ from: "gpt-4o-mini", to: "gpt-4o-mini", remainingCredits: 1_000, creditsPerConversationAtStandard: 20 });
+    expect(i.from.conversations).toBe(50);
   });
 
   it("volver al estándar es más barato y no necesita aceptación", async () => {

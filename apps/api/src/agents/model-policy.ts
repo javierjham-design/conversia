@@ -1,4 +1,4 @@
-import { CREDIT_POLICY_SEED, parseCreditPolicy, weightOfModel, type CreditPolicy } from "@conversia/agents";
+import { CREDIT_POLICY_SEED, CREDITOS_POR_CONVERSACION_POR_DEFECTO, parseCreditPolicy, weightOfModel, type CreditPolicy } from "@conversia/agents";
 import { brandOf } from "@conversia/config";
 import { getAdminPrisma } from "@conversia/database";
 
@@ -105,7 +105,13 @@ export function modelChangeImpact(input: {
   to: string;
   remainingCredits: number;
   policy?: CreditPolicy;
-  /** Créditos por conversación del cliente; por defecto el supuesto del §5. */
+  /**
+   * Créditos que le cuesta una conversación a ESTE cliente **con el modelo estándar**
+   * (peso 1), o sea cuántas respuestas da el bot por conversación. Lo calcula
+   * `buildImpact` a partir del consumo real, normalizado por el peso del modelo que el
+   * cliente tiene hoy: la muestra viene cobrada a ese peso y multiplicarla de nuevo acá
+   * contaría el modelo dos veces. Sin dato propio cae al respaldo del estimador.
+   */
   creditsPerConversationAtStandard?: number;
 }): {
   from: { model: string; creditsPerReply: number; level: string; conversations: number };
@@ -113,7 +119,11 @@ export function modelChangeImpact(input: {
   cheaper: boolean;
 } {
   const policy = input.policy ?? CREDIT_POLICY_SEED;
-  const base = Math.max(0.1, input.creditsPerConversationAtStandard ?? 4.2);
+  // El respaldo es el MISMO del estimador, no un número propio. Antes era 4,2 —el supuesto
+  // del §5— mientras el medidor que ve el mismo cliente, en la misma sesión, usa 9: con
+  // 1.000 créditos una pantalla decía "238 conversaciones" y la otra "111". Dos números
+  // para la misma plata hacen que el cliente deje de creerle a los dos.
+  const base = Math.max(0.1, input.creditsPerConversationAtStandard ?? CREDITOS_POR_CONVERSACION_POR_DEFECTO);
   const lado = (model: string) => {
     const w = weightOfModel(model, policy);
     // Una conversación con otro modelo cuesta lo mismo en tokens; lo que cambia es el peso.
