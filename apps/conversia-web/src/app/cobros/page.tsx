@@ -44,7 +44,7 @@ type Me = {
   organization: { currency: string };
   plan: { code: string; name: string; interval: string } | null;
   subscription: { status: string; periodEnd: string | null; interval: string } | null;
-  paymentMethod: { provider: string; brand: string | null; last4: string | null } | null;
+  paymentMethod: { provider: string; brand: string | null; last4: string | null; autoChargeable?: boolean | null } | null;
   /** Pasarela con la que pagaría hoy esta cuenta ("flow" en Chile). */
   paymentProvider: string;
 };
@@ -433,13 +433,26 @@ export default function Cobros() {
             <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Método de pago</h2>
             {me?.paymentMethod ? (
               <>
+                {/* §4 — EL ESTADO DE LA TARJETA, SIEMPRE VISIBLE, y con TRES estados porque
+                    "todavía no sabemos" es distinto de "no sirve". Las de débito y prepago no
+                    permiten cargos automáticos y en la pasarela el cobro queda pendiente para
+                    siempre; hasta ahora el cliente no se enteraba de nada y se le cortaba el
+                    bot. Al registrar no se puede distinguir (la pasarela informa la marca, no
+                    el tipo), así que el primer cobro es la prueba. */}
                 <p style={{ margin: "0 0 4px", fontSize: 14 }}>
-                  <span style={{ color: "var(--ok)", fontWeight: 700 }}>●</span> Tarjeta registrada
+                  <span style={{ color: me.paymentMethod.autoChargeable === false ? "var(--warn, #c90)" : "var(--ok)", fontWeight: 700 }}>●</span>{" "}
+                  {me.paymentMethod.autoChargeable === false ? "Tarjeta no apta para cobro automático" : "Tarjeta registrada"}
                   {me.paymentMethod.brand ? ` · ${me.paymentMethod.brand}` : ""}
                   {me.paymentMethod.last4 ? ` ···· ${me.paymentMethod.last4}` : ""}
+                  {me.paymentMethod.autoChargeable === true ? " — cobro automático activo ✅" : ""}
+                  {me.paymentMethod.autoChargeable === false ? " ⚠️" : ""}
                 </p>
                 <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
-                  Tu plan se renueva solo en cada fecha; no tienes que pagar a mano. Nunca guardamos los datos de tu tarjeta.
+                  {me.paymentMethod.autoChargeable === false
+                    ? "Las tarjetas de débito y prepago (incluida Redcompra) no permiten cobros automáticos: el cargo queda sin procesar. Cámbiala por una de CRÉDITO para que tu plan y tus recargas se cobren solos; mientras tanto te mandamos un link cada vez."
+                    : me.paymentMethod.autoChargeable === true
+                      ? "Tu plan y tus recargas se cobran solos en cada fecha. Nunca guardamos los datos de tu tarjeta."
+                      : "Tu plan se renueva solo en cada fecha; no tienes que pagar a mano. Lo confirmamos con el primer cobro: si tu tarjeta fuera de débito o prepago te avisamos acá mismo. Nunca guardamos los datos de tu tarjeta."}
                 </p>
                 <button
                   className="btn-accent"
@@ -453,9 +466,17 @@ export default function Cobros() {
               </>
             ) : (
               <>
-                <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
+                <p className="text-dim" style={{ fontSize: 13, margin: "0 0 10px" }}>
                   Registra tu tarjeta una sola vez en la página segura de Flow (nunca guardamos sus datos) y tu plan se
                   cobra solo en cada fecha de renovación. Puedes cambiarla o cancelar cuando quieras.
+                </p>
+                {/* §4(a) — EL AVISO VA ANTES, no después. Es el único momento en que el
+                    cliente elige qué tarjeta usar: enterarse al primer cobro fallido ya es
+                    tarde, porque entre eso y que se le corte el bot solo queda la gracia. */}
+                <p style={{ fontSize: 13, margin: "0 0 14px", padding: "10px 12px", borderRadius: 10, background: "var(--acc-dim)", lineHeight: 1.5 }}>
+                  Usa una <b>tarjeta de CRÉDITO</b>. Las de débito y prepago (incluida Redcompra) no permiten cobros
+                  automáticos, y tu asistente podría pausarse al quedarse sin créditos. Si solo tienes de débito, igual
+                  puedes pagar: te mandamos un link cada vez.
                 </p>
                 <button
                   className="btn-accent"

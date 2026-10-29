@@ -3,6 +3,7 @@ import {
   CREDIT_POLICY_SEED,
   creditsForTurnConRespaldo,
   estimarAlcance,
+  queVaAPasarConElSaldo,
   explicarBase,
   frasePorSaldo,
   parseCreditPolicy,
@@ -368,6 +369,40 @@ export async function aiCreditsNotifyDecision(
     if (fire) await tx.conversationWallet.update({ where: { organizationId }, data: { lastNotifiedPct: mark } }).catch(() => undefined);
     return { fire, used: s.used, included: s.included, remaining: s.remaining, graceUsed: s.graceUsed };
   });
+}
+
+/**
+ * §4d — CÓMO ESTÁ EL COBRO de esta organización: si la recarga automática va a funcionar o
+ * no. Lo usan los avisos de saldo bajo, que hasta ahora decían el porcentaje y nada más —y
+ * "te queda el 10%" significa cosas muy distintas según esto.
+ *
+ * Cada lectura cae a su valor más CONSERVADOR si falla: ante una base que no responde, el
+ * aviso dice "no tienes recarga automática, conviene recargar", que es el mensaje que no deja
+ * a nadie confiado de más.
+ */
+export async function estadoDeCobroDeLaOrg(organizationId: string): Promise<{
+  recargaActiva: boolean;
+  tieneTarjeta: boolean;
+  tarjetaApta: boolean | null;
+}> {
+  const admin = getAdminPrisma();
+  const org = await admin.organization
+    .findUnique({ where: { id: organizationId }, select: { settings: true } })
+    .catch(() => null);
+  const ar = (((org?.settings ?? {}) as Record<string, any>).autoRecharge ?? {}) as Record<string, unknown>;
+  // Sin consentimiento NO se cobra, aunque el flag esté encendido: el worker lo exige, así
+  // que el aviso no puede prometer una recarga que no va a salir.
+  const recargaActiva = ar.enabled === true && typeof ar.consentAt === "string" && ar.consentAt.trim() !== "";
+  const pm = await admin.paymentMethod
+    .findFirst({ where: { organizationId, provider: "flow" }, orderBy: { createdAt: "desc" }, select: { autoChargeable: true } })
+    .catch(() => null);
+  return { recargaActiva, tieneTarjeta: Boolean(pm), tarjetaApta: pm?.autoChargeable ?? null };
+}
+
+/** La frase del §4d: qué va a pasar con su saldo, según cómo esté su cobro. */
+export async function fraseDeQueVaAPasar(organizationId: string): Promise<string> {
+  const e = await estadoDeCobroDeLaOrg(organizationId).catch(() => ({ recargaActiva: false, tieneTarjeta: true, tarjetaApta: null as boolean | null }));
+  return queVaAPasarConElSaldo(e);
 }
 
 /**

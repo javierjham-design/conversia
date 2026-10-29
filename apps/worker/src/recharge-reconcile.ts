@@ -107,7 +107,21 @@ export interface RechargeReconcilePort {
   creditoAcreditado(organizationId: string, providerRef: string): Promise<boolean>;
   cerrarIntento(commerceOrder: string, status: "succeeded" | "failed", reason: string | null): Promise<void>;
   /** Avisa al cliente (su tarjeta fue rechazada y todavía no lo sabe). */
-  notificar(organizationId: string, kind: "recharge_failed", data: Record<string, string | number | null>): Promise<void>;
+  notificar(
+    organizationId: string,
+    kind: "recharge_failed" | "tarjeta_no_apta",
+    data: Record<string, string | number | null>,
+  ): Promise<void>;
+  /**
+   * Marca la tarjeta guardada como NO apta para cobros automáticos (§4). Opcional: el cobro
+   * no puede depender de que exista, y los dobles de test que no la necesitan no la traen.
+   */
+  marcarTarjetaNoApta?(organizationId: string): Promise<void>;
+  /**
+   * Link de pago único por el mismo monto, para que el cliente pueda recargar aunque su
+   * tarjeta no sirva para cobros automáticos. Devuelve la URL o null si no se pudo emitir.
+   */
+  linkDePago?(organizationId: string, montoClp: number): Promise<string | null>;
   raiseOps(
     organizationId: string,
     input: { type: string; title: string; detail: string; dedupeKey: string; severity: "warning" | "critical" },
@@ -124,6 +138,8 @@ export interface ResultadoRecargas {
   pagadasSinAcreditar: number;
   /** Cobros sin respuesta o sin resolver que quedaron en manos de una persona. */
   sinResolver: number;
+  /** Tarjetas que se marcaron como no aptas para cobro automático (débito o prepago). */
+  tarjetasNoAptas: number;
   /** Intentos que no se pudieron procesar en este pase (se reintentan en el próximo). */
   errores: number;
 }
@@ -135,7 +151,7 @@ export async function reconciliarRecargas(
   providerFor: (organizationId: string) => Promise<SubscriptionProvider>,
   now: Date,
 ): Promise<ResultadoRecargas> {
-  const out: ResultadoRecargas = { revisadas: 0, acreditadas: 0, rechazadas: 0, pagadasSinAcreditar: 0, sinResolver: 0, errores: 0 };
+  const out: ResultadoRecargas = { revisadas: 0, acreditadas: 0, rechazadas: 0, pagadasSinAcreditar: 0, sinResolver: 0, tarjetasNoAptas: 0, errores: 0 };
   const pendientes = await port.listPendientes(now);
 
   for (const p of pendientes) {
@@ -212,18 +228,36 @@ export async function reconciliarRecargas(
 
         case "abandonar_alertar": {
           out.sinResolver++;
+          // §4 — UN COBRO QUE LA PASARELA NUNCA CIERRA ES EL SÍNTOMA DE UNA TARJETA QUE NO
+          // SIRVE PARA COBROS AUTOMÁTICOS. Las de débito y prepago chilenas (Redcompra
+          // incluida) no permiten cargos recurrentes y en Flow el cobro queda "pendiente"
+          // para siempre. Al registrar no se puede distinguir —Flow informa la marca, no si
+          // es de crédito o de débito—, así que el primer cobro ES la prueba.
+          //
+          // Lo que importa no es la etiqueta: es que hasta ahora el cliente NO SE ENTERABA.
+          // El cobro se colgaba en silencio, la recarga seguía "activada" y el bot se cortaba
+          // al agotarse la gracia. Ahora se marca la tarjeta, se le avisa con un link para
+          // pagar a mano, y el dueño lo ve en la consola.
+          await port.marcarTarjetaNoApta?.(p.organizationId).catch(() => undefined);
+          const link = (await port.linkDePago?.(p.organizationId, p.amountClp).catch(() => null)) ?? null;
+          out.tarjetasNoAptas++;
           await port
             .raiseOps(p.organizationId, {
-              type: "recarga_sin_resolver",
-              severity: "critical",
-              title: "Una recarga lleva dos días sin resolverse en la pasarela",
+              type: "tarjeta_no_apta_cobro_automatico",
+              severity: "warning",
+              title: "La tarjeta del cliente no sirve para cobros automáticos",
               detail:
-                `La orden ${p.commerceOrder} por ${CLP(p.amountClp)} (ref ${p.providerRef}) sigue "pendiente" en la pasarela ` +
-                `48 h después. Hay que revisarla en el panel de Flow y acreditar o descartar a mano.`,
-              dedupeKey: `sin_resolver:${p.commerceOrder}`,
+                `El cobro ${p.commerceOrder} por ${CLP(p.amountClp)} (ref ${p.providerRef}) quedó "pendiente" en la pasarela ` +
+                `48 h: el síntoma de una tarjeta de débito o prepago, que no permite cargos recurrentes. Se marcó la tarjeta ` +
+                `como no apta y se le mandó un link para pagar a mano. Para que la recarga automática le funcione tiene que ` +
+                `registrar una tarjeta de CRÉDITO.`,
+              dedupeKey: `tarjeta_no_apta:${p.organizationId}`,
             })
             .catch(() => undefined);
-          await port.cerrarIntento(p.commerceOrder, "failed", "sin_resolver_48h");
+          await port
+            .notificar(p.organizationId, "tarjeta_no_apta", { amountClp: p.amountClp, link })
+            .catch(() => undefined);
+          await port.cerrarIntento(p.commerceOrder, "failed", "tarjeta_no_apta");
           break;
         }
       }

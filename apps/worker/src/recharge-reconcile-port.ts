@@ -1,8 +1,20 @@
-import { getEnv } from "@conversia/config";
+import { brandOf, getEnv } from "@conversia/config";
 import { getAdminPrisma, raiseException, withTenant } from "@conversia/database";
 import { enqueueNotification } from "./notifications/queue";
 import { RECHARGE_ORDER_PREFIX } from "./auto-recharge";
+import { FlowSubscriptionProvider } from "./subscription-billing/flow-provider";
+import { resolveSubscriptionProvider } from "./subscription-billing/resolve-provider";
 import type { RechargeReconcilePort } from "./recharge-reconcile";
+
+/**
+ * Prefijo del `commerceOrder` de un LINK de pago único (§4).
+ *
+ * Distinto del de recarga automática (`rec-`) y del de suscripción (`sub-`): este cobro no
+ * tiene un intento en `payment_attempts` que cerrar —lo paga el cliente cuando quiere— así
+ * que ni la reconciliación de recargas ni el motor de suscripciones deben verlo como algo
+ * suyo. Lo único que lo procesa es el webhook, que acredita por la metadata.
+ */
+export const PREFIJO_ORDEN_LINK = "lnk-";
 
 /**
  * CRE — implementación real del puerto de reconciliación de recargas. Acá está todo el SQL
@@ -79,8 +91,59 @@ export function createDbRechargeReconcilePort(): RechargeReconcilePort {
       });
     },
 
-    async notificar(organizationId, _kind, data) {
-      await enqueueNotification({ eventKey: "credits.auto_recharge_failed", organizationId, data });
+    async notificar(organizationId, kind, data) {
+      // §4 — el aviso de "tu tarjeta no sirve para cobros automáticos" es OTRO mensaje que
+      // el de "tu tarjeta rechazó el cobro": el primero le pide cambiar de tarjeta o pagar
+      // con el link, el segundo le pide revisar su cupo. Decirle lo segundo cuando pasa lo
+      // primero lo manda a mirar donde no está el problema.
+      const eventKey = kind === "tarjeta_no_apta" ? "credits.tarjeta_no_apta" : "credits.auto_recharge_failed";
+      await enqueueNotification({ eventKey, organizationId, data });
+    },
+
+    async marcarTarjetaNoApta(organizationId) {
+      // Se marcan TODAS las tarjetas de Flow de la org, no solo la que está por defecto: si
+      // el cliente dejó más de una, ninguna de ellas pasó la prueba del cobro recurrente y
+      // marcar una sola dejaría a la recarga automática intentando con la otra.
+      await admin.paymentMethod.updateMany({
+        where: { organizationId, provider: "flow" },
+        data: { autoChargeable: false },
+      });
+    },
+
+    async linkDePago(organizationId, montoClp) {
+      // El plan B: una página de pago que acepta cualquier medio —débito incluido— porque el
+      // pago es único. Lo acredita el MISMO webhook que el cobro automático, por la metadata.
+      const provider = await resolveSubscriptionProvider(organizationId);
+      if (!(provider instanceof FlowSubscriptionProvider)) return null;
+      const org = await admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true, currency: true } });
+      // El pack se elige por MONTO: es el que la recarga automática iba a cobrar, así que el
+      // link tiene que ser por lo mismo (si no, el cliente paga una cifra y recibe otra).
+      const pack = await admin.messagePackage.findFirst({
+        where: { brand: "conversia", type: "credit", priceClp: Math.round(montoClp) },
+        select: { code: true, credits: true, name: true, priceClp: true },
+      });
+      if (!pack) return null;
+      const env = getEnv();
+      const dueno = await admin.organizationUser.findFirst({ where: { organizationId }, orderBy: { createdAt: "asc" }, select: { userId: true } });
+      const user = dueno ? await admin.user.findUnique({ where: { id: dueno.userId }, select: { email: true } }) : null;
+      const r = await provider.crearLinkDePago({
+        commerceOrder: `${PREFIJO_ORDEN_LINK}${organizationId}-${Date.now()}`,
+        subject: `${brandOf(org).paymentSubjectPrefix} · ${pack.credits.toLocaleString("es-CL")} Créditos IA`,
+        amount: pack.priceClp,
+        currency: org?.currency ?? "CLP",
+        email: user?.email ?? `pagos+${organizationId.slice(-8)}@conversia.cl`,
+        urlConfirmation: `${env.API_URL}/billing/webhooks/flow`,
+        urlReturn: `${env.WEB_URL}/cobros?pago=1`,
+        // La misma metadata que el cobro automático: el webhook acredita por el camino de
+        // siempre y con la misma idempotencia.
+        metadata: {
+          organizationId,
+          planCode: `pkg:${pack.code}`,
+          expectedAmount: String(pack.priceClp),
+          linkDePago: "1",
+        },
+      });
+      return r.url;
     },
 
     async raiseOps(organizationId, input) {

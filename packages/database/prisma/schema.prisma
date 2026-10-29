@@ -340,6 +340,18 @@ model PaymentMethod {
   last4          String?
   providerRef    String?  @map("provider_ref")
   isDefault      Boolean  @default(false) @map("is_default")
+  /**
+   * ¿Sirve esta tarjeta para COBROS AUTOMÁTICOS? (§4 del encargo del 29-oct)
+   *
+   * Las tarjetas de débito y prepago chilenas —Redcompra incluida— no permiten cargos
+   * recurrentes: en Flow el cobro queda "pendiente" para siempre. El cliente no se enteraba
+   * de nada: el cobro se quedaba colgado en silencio y después se le cortaba el bot.
+   *
+   * `null` = TODAVÍA NO SE SABE, que es el estado honesto al registrar (Flow informa la
+   * marca de la tarjeta, no si es de crédito o de débito). Se resuelve con el primer cobro:
+   * uno que la pasarela nunca cierra es el síntoma documentado de una tarjeta que no sirve.
+   */
+  autoChargeable Boolean? @map("auto_chargeable")
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@index([organizationId])
