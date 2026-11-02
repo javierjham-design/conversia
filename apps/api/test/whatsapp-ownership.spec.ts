@@ -149,7 +149,12 @@ describe("§4.5 — el webhook de Meta CRM es fail-closed sin secreto", () => {
     expect(jobs.length).toBe(2);
     // El MISMO cuerpo produce el MISMO jobId → BullMQ descarta el reenvío.
     expect(jobs[0].opts.jobId).toBe(jobs[1].opts.jobId);
-    expect(jobs[0].opts.jobId).toMatch(/^meta-crm:[0-9a-f]{32}$/);
+    expect(jobs[0].opts.jobId).toMatch(/^meta-crm-[0-9a-f]{32}$/);
+    // SIN dos puntos, o BullMQ lo rechaza y el lead se pierde. Esta línea afirmaba
+    // `meta-crm:<hash>` —el formato ROTO— porque el doble de cola de acá guarda `opts` y no
+    // valida nada: un doble que no valida como el real vuelve al test cómplice del bug.
+    // La regla completa y el escáner de todo el repo están en `bullmq-jobid.spec.ts`.
+    expect(jobs[0].opts.jobId).not.toContain(":");
     expect(jobs[0].opts.attempts).toBe(5);
     // Y un cuerpo distinto, un jobId distinto (no se pierde un lead real).
     const { jobs: otros, svc: svc2 } = queues();

@@ -62,7 +62,9 @@ export class QueueService implements OnModuleDestroy {
   /** Reintenta una ejecución de flujo fallida desde el paso que falló (efectos reales). */
   async enqueueWorkflowRetry(job: WorkflowRetryJob): Promise<void> {
     await this.workflowRetry.add("retry", job, {
-      jobId: `retry:${job.runId}`, // coalesce doble clic; se remueve al completar
+      // Coalesce doble clic; se remueve al completar. SIN dos puntos: BullMQ los rechaza
+      // (ver `test/bullmq-jobid.spec.ts`) y con `retry:<runId>` reintentar un flujo fallaba.
+      jobId: `retry-${job.runId}`,
       attempts: 1,
       removeOnComplete: true,
       removeOnFail: 500,

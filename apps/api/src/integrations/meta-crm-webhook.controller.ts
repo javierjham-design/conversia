@@ -83,7 +83,10 @@ export class MetaCrmWebhookController {
     // hash del cuerpo crudo identifica el reenvío exacto. `attempts: 5` con backoff: un
     // fallo transitorio del worker ya no pierde el lead, que antes se perdía al primer
     // error porque no había reintentos.
-    const jobId = `meta-crm:${createHash("sha256").update(raw).digest("hex").slice(0, 32)}`;
+    // SIN dos puntos: BullMQ los rechaza salvo que haya exactamente dos (`Custom Id cannot
+    // contain :`). Con `meta-crm:<hash>` esta llamada tiraba excepción y **cada lead de Meta
+    // se perdía** tras haber verificado la firma. Ver `test/bullmq-jobid.spec.ts`.
+    const jobId = `meta-crm-${createHash("sha256").update(raw).digest("hex").slice(0, 32)}`;
     await this.queues.inbound.add(
       "inbound",
       { raw: req.body, receivedAt: new Date().toISOString() },

@@ -1013,7 +1013,12 @@ export class IntegrationsController {
     });
     await this.prisma.withTenant(ctx.organizationId, (tx) => tx.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "catalog.import_csv", entityType: "catalog_item", after: { created, updated } } }));
     // Búsqueda semántica: embebe los ítems importados (si los embeddings están habilitados).
-    await this.queues.sync.add("catalog", { organizationId: ctx.organizationId, kind: "catalog_embed", payload: {} }, { jobId: `catalog_embed:${ctx.organizationId}`, delay: 4000, removeOnComplete: true, removeOnFail: 200 }).catch(() => undefined);
+    // El `catch` es a propósito —que un fallo de cola no tire la importación, que ya está
+    // guardada— pero AVISA: cuando se tragaba el error sin log, el `jobId` con dos puntos
+    // hacía que esto nunca se encolara y nadie se enteraba (ver `test/bullmq-jobid.spec.ts`).
+    await this.queues.sync
+      .add("catalog", { organizationId: ctx.organizationId, kind: "catalog_embed", payload: {} }, { jobId: `catalog_embed-${ctx.organizationId}`, delay: 4000, removeOnComplete: true, removeOnFail: 200 })
+      .catch((e) => console.warn(`⚠ catalog_embed no se pudo encolar para ${ctx.organizationId}: ${(e as Error)?.message?.slice(0, 200)}`));
     return { ok: true, created, updated };
   }
 
