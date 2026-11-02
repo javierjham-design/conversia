@@ -12,6 +12,8 @@ type MiniSite = {
   slug: string;
   name: string;
   rubro: string | null;
+  /** ¿Hay logo subido? Los bytes se piden aparte, a /public/n/:slug/logo. */
+  logo?: boolean;
   tagline: string | null;
   about: string | null;
   whatsapp: { number: string | null; link: string } | null;
@@ -38,6 +40,11 @@ async function fetchSite(slug: string): Promise<MiniSite | null> {
   }
 }
 
+/** URL pública del logo. Misma puerta que la página: si no está publicada, la API devuelve 404. */
+function logoUrl(slug: string): string {
+  return `${apiBase()}/public/n/${encodeURIComponent(slug)}/logo`;
+}
+
 function money(price: number | null, currency: string): string | null {
   if (price == null) return null;
   try {
@@ -57,8 +64,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     title,
     description,
     robots: { index: true, follow: true },
-    openGraph: { title, description, type: "website", siteName: site.name },
-    twitter: { card: "summary", title, description },
+    // Con logo, la vista previa del enlace (WhatsApp, Instagram, Google) muestra la marca del
+    // negocio en vez de un recuadro vacío. Es donde más se ve este sitio: se comparte por chat.
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      siteName: site.name,
+      ...(site.logo ? { images: [{ url: logoUrl(slug), alt: site.name }] } : {}),
+    },
+    twitter: { card: "summary", title, description, ...(site.logo ? { images: [logoUrl(slug)] } : {}) },
   };
 }
 
@@ -74,6 +89,16 @@ export default async function MiniSitePage({ params }: { params: Promise<{ slug:
       <div style={{ width: "100%", maxWidth: 560, padding: "48px 0 32px" }}>
         {/* Hero */}
         <header style={{ textAlign: "center", marginBottom: 28 }}>
+          {site.logo ? (
+            // Sin next/image a propósito: el optimizador exige declarar el host remoto y esta
+            // página ya sirve todo lo demás sin assets externos. Es un logo de ≤512 px.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl(slug)}
+              alt={site.name}
+              style={{ width: 92, height: 92, objectFit: "contain", margin: "0 auto 14px", display: "block", borderRadius: 16 }}
+            />
+          ) : null}
           {site.rubro ? (
             <span style={{ fontSize: 12.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--acc-deep)" }}>{site.rubro}</span>
           ) : null}
