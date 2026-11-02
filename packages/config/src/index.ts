@@ -365,3 +365,5 @@ export * from "./brands.js";
 export * from "./industries.js";
 // OAuth de Google: permisos por función y app por marca (puro; api + worker).
 export * from "./google-oauth.js";
+// Un calendario por profesional: forma de la config y a qué calendario va cada cita.
+export * from "./google-calendars.js";

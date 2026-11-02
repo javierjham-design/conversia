@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BASE_VOCAB, INDUSTRIES, resolvePersonalization } from "@conversia/config";
-import { buildCalendarEvent } from "./google-calendar.js";
+import { BASE_VOCAB, INDUSTRIES, parseGoogleCalendarConfig, resolvePersonalization } from "@conversia/config";
+import { buildCalendarEvent, hayDondeEscribir, planCalendarWrite } from "./google-calendar.js";
 
 /**
  * ETAPA 0 (d) — el texto del evento de Google Calendar.
@@ -104,6 +104,60 @@ describe("buildCalendarEvent — horas y cancelación", () => {
   it("una cita CANCELLED va con status cancelled", () => {
     expect(buildCalendarEvent({ ...base, cancelled: true }).status).toBe("cancelled");
     expect(buildCalendarEvent(base).status).toBeUndefined();
+  });
+});
+
+/**
+ * ETAPA 1 — escribir en el calendario de CADA profesional.
+ *
+ * El caso difícil es cambiarle el profesional a una cita: el evento vive en el calendario del
+ * barbero anterior. Si solo se hiciera PATCH en el calendario nuevo, Google contesta 404 y el
+ * código lo recrea → la cita queda DUPLICADA: viva en el calendario viejo y nueva en el otro.
+ */
+describe("planCalendarWrite", () => {
+  it("sin evento previo: crear", () => {
+    expect(planCalendarWrite({ targetCalendarId: "a@gmail.com" })).toEqual({ accion: "crear", escribirEn: "a@gmail.com" });
+  });
+
+  it("mismo calendario: actualizar en su lugar", () => {
+    expect(planCalendarWrite({ eventId: "ev1", previousCalendarId: "a@gmail.com", targetCalendarId: "a@gmail.com" })).toEqual({
+      accion: "actualizar",
+      escribirEn: "a@gmail.com",
+    });
+  });
+
+  it("cambió de calendario: MOVER, con el borrado del anterior explícito", () => {
+    expect(planCalendarWrite({ eventId: "ev1", previousCalendarId: "barberoA@gmail.com", targetCalendarId: "barberoB@gmail.com" })).toEqual({
+      accion: "mover",
+      escribirEn: "barberoB@gmail.com",
+      borrarDe: "barberoA@gmail.com",
+    });
+  });
+
+  it("una cita espejada ANTES de esta etapa (sin googleCalendarId) se actualiza, no se duplica", () => {
+    // Esas cuentas tenían UN solo calendario, así que asumir que el evento está en el de
+    // destino es correcto. Tratarlo como "mover" borraría un evento que sí hay que conservar.
+    expect(planCalendarWrite({ eventId: "ev1", targetCalendarId: "clinica@gmail.com" })).toEqual({
+      accion: "actualizar",
+      escribirEn: "clinica@gmail.com",
+    });
+  });
+});
+
+describe("hayDondeEscribir", () => {
+  it("con el espejo apagado, no", () => {
+    expect(hayDondeEscribir(parseGoogleCalendarConfig({ calendarId: "a@gmail.com", calendarSync: false }))).toBe(false);
+  });
+  it("config vieja de TuBot: sí (calendario del negocio)", () => {
+    expect(hayDondeEscribir(parseGoogleCalendarConfig({ calendarId: "a@gmail.com", calendarSync: true }))).toBe(true);
+  });
+  it("solo calendarios por profesional, sin uno del negocio: TAMBIÉN sí", () => {
+    // Una barbería puede vincular el calendario de cada barbero y ninguno del negocio. Antes
+    // el guardia exigía `calendarId` y ese caso quedaba sin espejo, en silencio.
+    expect(hayDondeEscribir(parseGoogleCalendarConfig({ calendarSync: true, calendars: { p1: { calendarId: "b@gmail.com" } } }))).toBe(true);
+  });
+  it("sin ningún calendario, no", () => {
+    expect(hayDondeEscribir(parseGoogleCalendarConfig({ calendarSync: true }))).toBe(false);
   });
 });
 
