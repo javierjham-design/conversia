@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { assistantMode, isWebOwner, modeloDeRespaldoDelAsistente, resolveAssistantModel } from "./assistant.service";
+import { assistantMode, isWebOwner, modeloDeRespaldoDelAsistente, modeloIgnorado, resolveAssistantModel } from "./assistant.service";
 
 describe("Asistente Conversia — guardas puras", () => {
   it("modo implementación mientras el checklist no está al 100%", () => {
@@ -60,5 +60,28 @@ describe("modeloDeRespaldoDelAsistente", () => {
 
   it("sin AI_FALLBACK_MODEL configurado no inventa un respaldo", () => {
     expect(modeloDeRespaldoDelAsistente("anthropic", "", "claude-sonnet-4-6")).toBeUndefined();
+  });
+});
+
+/**
+ * La trampa del 1-nov: el dueño pide "dejalo con gpt-4o-mini" y pone
+ * `ASSISTANT_MODEL=gpt-4o-mini`… con `AI_PROVIDER=anthropic`. `resolveAssistantModel` lo
+ * REESCRIBE a `claude-sonnet-4-6` —y hace bien, mandarle un gpt a Anthropic da 404— pero lo
+ * hacía EN SILENCIO: el dueño queda convencido de que cambió el modelo, nada cambia, y a
+ * diagnosticarlo de nuevo desde cero. El guardián no cambia la decisión, solo la hace visible.
+ */
+describe("modeloIgnorado", () => {
+  it("avisa cuando el modelo pedido se reescribe por no ser de la familia del proveedor", () => {
+    expect(modeloIgnorado("gpt-4o-mini", "claude-sonnet-4-6")).toBe(true);
+    expect(modeloIgnorado("claude-sonnet-4-6", "gpt-4o-mini")).toBe(true);
+  });
+
+  it("no avisa cuando el modelo pedido se respeta tal cual", () => {
+    expect(modeloIgnorado("claude-opus-4-8", "claude-opus-4-8")).toBe(false);
+    expect(modeloIgnorado("gpt-4o", "gpt-4o")).toBe(false);
+  });
+
+  it("sin ASSISTANT_MODEL configurado no hay nada que avisar (el default no es una decisión del dueño)", () => {
+    expect(modeloIgnorado("", "claude-sonnet-4-6")).toBe(false);
   });
 });

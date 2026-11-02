@@ -72,6 +72,20 @@ export function modeloDeRespaldoDelAsistente(
   return compatible === modeloPrincipal ? undefined : compatible;
 }
 
+/**
+ * ¿El modelo que pidió el dueño quedó DESCARTADO por no ser de la familia del proveedor?
+ *
+ * `resolveAssistantModel` hace bien en reescribirlo (un `gpt-*` a Anthropic da 404), pero lo
+ * hacía EN SILENCIO. El caso real: poner `ASSISTANT_MODEL=gpt-4o-mini` con
+ * `AI_PROVIDER=anthropic` no cambia nada, y el dueño queda convencido de que sí. Esto no
+ * cambia la decisión —sigue mandando un modelo compatible— solo deja de ocultarla.
+ *
+ * Con `ASSISTANT_MODEL` vacío no hay nada que avisar: el default no es una decisión de nadie.
+ */
+export function modeloIgnorado(configurado: string, resuelto: string): boolean {
+  return Boolean(configurado) && configurado !== resuelto;
+}
+
 type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string };
 
 @Injectable()
@@ -391,6 +405,14 @@ AUTONOMÍA:
     // encadena herramientas —lee el estado, crea, prueba, publica— y con un modelo barato deja
     // el montaje a medias. Si no está configurado, cae en el de siempre.
     const model = resolveAssistantModel(env.AI_PROVIDER, env.ASSISTANT_MODEL || env.AI_DEFAULT_MODEL);
+    // Si el dueño pidió un modelo y el proveedor configurado obliga a otro, que se SEPA. Sin
+    // esto, poner `ASSISTANT_MODEL=gpt-4o-mini` con `AI_PROVIDER=anthropic` no cambia nada y no
+    // hay forma de enterarse: se cambia la variable, se reinicia, y Convi sigue igual.
+    if (modeloIgnorado(env.ASSISTANT_MODEL, model)) {
+      console.error(
+        `🚨 Asistente: ASSISTANT_MODEL=${env.ASSISTANT_MODEL} NO se está usando — AI_PROVIDER=${env.AI_PROVIDER} exige un modelo de su familia, así que Convi va con ${model}. Para usar ${env.ASSISTANT_MODEL} hay que poner AI_PROVIDER acorde y su llave en el servicio api.`,
+      );
+    }
     // Proveedor EXPLÍCITO por AI_PROVIDER (hallazgo prod 26-oct): el router por nombre de modelo
     // mandaba a OpenAI (key inválida → 401 → fallback) pese a AI_PROVIDER=anthropic con llave
     // válida. createAIProvider honra la configuración: anthropic→Anthropic, openai→OpenAI,
