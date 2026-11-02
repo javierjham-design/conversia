@@ -38,6 +38,11 @@ describe("F10 — operatorMayAccess: rutas GLOBALES prohibidas al operador", () 
     "/platform/margins",
     "/platform/infra",
     "/platform/test-ai",
+    // Configurador de Convi: cambiar el proveedor o el modelo del copiloto es configuración
+    // GLOBAL —afecta a todos los clientes a la vez— y la prueba en vivo gasta llamadas pagas
+    // con las llaves de la plataforma. Igual que /platform/test-ai, es del super admin.
+    "/platform/assistant/config",
+    "/platform/assistant/test",
     "/platform/audit",
     "/platform/admins",
     "/platform/admins/op_1",

@@ -15,7 +15,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
-import { CLP_PER_USD_REF, CREDIT_POLICY_SEED, MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, buildCoreTools } from "@conversia/agents";
+import { CLP_PER_USD_REF, CREDIT_POLICY_SEED, MODEL_PRICING, WHATSAPP_PRICING, createAIRouter, createAIProvider, buildCoreTools } from "@conversia/agents";
 import { MARGEN_MINIMO_PCT, calcularMargen, mesRango, recomendarCalibracion } from "./margen";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
@@ -37,6 +37,14 @@ import {
   savePendingModelChange,
 } from "../agents/model-change";
 import { readAiModelPolicy } from "../agents/model-policy";
+// Configurador de Convi: la decisión de proveedor/modelo del copiloto (platform_settings.assistant).
+import {
+  configEfectiva,
+  parseAssistantConfig,
+  proveedoresConLlave,
+  readAssistantConfig,
+  writeAssistantConfig,
+} from "../assistant/assistant-config";
 import { weightOfModel } from "@conversia/agents";
 import { raiseException, messageWalletQuota, refillMessageWallet } from "@conversia/database"; // V2-8 cola de excepciones · §9.3 recarga compartida
 import { AuthService } from "../auth/auth.service";
@@ -46,7 +54,7 @@ import { flowCollect, flowCustomerGet, flowPaymentStatus } from "../billing/flow
 import { createPaymentProvider } from "../billing/payment-provider";
 import { sendEmail } from "../common/email";
 import { signAppToken } from "../auth/jwt";
-import { PlatformGuard, assertTubotBrand, type PlatformRequest } from "./platform.guard";
+import { PlatformGuard, assertConversiaBrand, assertTubotBrand, type PlatformRequest } from "./platform.guard";
 import { isFullPlatformAdmin } from "./platform-policy";
 import { getRailwayInfra } from "./railway-metrics";
 import { randomBytes } from "node:crypto";
@@ -1093,6 +1101,102 @@ export class PlatformController {
   @Get("ai/model-options")
   async aiModelOptions() {
     return { options: await modelOptions() };
+  }
+
+  // =================== Configurador de CONVI (proveedor + modelo del copiloto) ===================
+  // Nace de una caída de días: el proveedor y el modelo de Convi vivían SOLO en variables de
+  // entorno del servicio `api`. No se podían ver desde ninguna pantalla ni cambiar sin entrar a
+  // Railway y reiniciar, así que el dueño —con las llaves cargadas— no tenía ni diagnóstico ni
+  // arreglo. Ahora la decisión es un dato (`platform_settings.assistant`) y el entorno es el
+  // respaldo. Las API KEYS siguen siendo del entorno: un secreto no va a una tabla.
+  // Reservado al super admin (`/platform/assistant` en OPERATOR_DENY_PREFIXES).
+
+  /** Estado del copiloto: lo guardado, lo que REALMENTE se usa, y qué proveedores tienen llave. */
+  @Get("assistant/config")
+  async assistantConfig() {
+    const env = getEnv();
+    const guardada = await readAssistantConfig();
+    return {
+      guardada,
+      efectiva: configEfectiva(guardada, env),
+      proveedoresDisponibles: proveedoresConLlave(env),
+      opciones: await modelOptions(),
+      // Las instancias cachean 60 s (igual que la política de créditos): un cambio puede
+      // tardar hasta un minuto en verse en todas. Lo decimos en vez de que parezca que no guardó.
+      cacheSegundos: 60,
+    };
+  }
+
+  /** Guarda proveedor/modelo/respaldo del copiloto. */
+  @Put("assistant/config")
+  async saveAssistantConfig(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // §6.10 — Convi es el copiloto de Conversia y esto es UNA fila global: sin esta guarda,
+    // un admin de TuBot le cambiaría el proveedor y el modelo al asistente de la otra marca.
+    assertConversiaBrand(req);
+    const parsed = z
+      .object({
+        provider: z.enum(["anthropic", "openai"]).nullable().optional(),
+        model: z.string().max(80).optional(),
+        fallbackModel: z.string().max(80).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const env = getEnv();
+    const disponibles = proveedoresConLlave(env);
+    // No se puede elegir un proveedor sin llave: sería garantizar un 401 y dejar a Convi
+    // caído desde la propia pantalla que existe para evitarlo. El selector ya los oculta;
+    // esta es la guarda de SERVIDOR, porque el selector se puede saltar con curl.
+    if (parsed.data.provider && !disponibles.includes(parsed.data.provider)) {
+      throw new BadRequestException(
+        `El proveedor ${parsed.data.provider} no tiene su API key cargada en el servicio api. Cárgala en Railway y vuelve a intentar.`,
+      );
+    }
+    const config = parseAssistantConfig(parsed.data);
+    await writeAssistantConfig(config);
+    await this.audit(req, "platform.assistant.config", "platform_setting", "assistant", config);
+    return { ok: true, efectiva: configEfectiva(config, env) };
+  }
+
+  /**
+   * Prueba EN VIVO un proveedor+modelo con una llamada mínima, ANTES de guardar.
+   *
+   * Es la pieza que convierte una caída silenciosa de días en una comprobación de segundos:
+   * devuelve el error REAL del proveedor (401 de llave, 404 de modelo retirado) en vez de
+   * dejarlo en un log que nadie mira. Mismo patrón que `billing/flow/test`.
+   */
+  @Post("assistant/test")
+  async testAssistantModel(@Body() body: unknown, @Req() req: PlatformRequest) {
+    // Misma marca que para guardar: la prueba gasta una llamada paga con las llaves de la
+    // plataforma, así que no es una lectura inocua que pueda disparar la otra marca.
+    assertConversiaBrand(req);
+    const parsed = z
+      .object({
+        provider: z.enum(["anthropic", "openai"]).nullable().optional(),
+        model: z.string().max(80).optional(),
+      })
+      .safeParse(body);
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const env = getEnv();
+    // Sin datos en el cuerpo prueba lo que está vigente; con datos, lo que se quiere guardar.
+    const pedida = parseAssistantConfig({ ...parsed.data, fallbackModel: "" });
+    const base = parsed.data.provider || parsed.data.model ? pedida : await readAssistantConfig();
+    const efectiva = configEfectiva(base, env);
+    const ai = createAIProvider({ provider: efectiva.provider, anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
+    const salida = { provider: efectiva.provider, model: efectiva.model, modelPedido: efectiva.modelPedido };
+    if (ai.kind === "mock") {
+      await this.audit(req, "platform.assistant.test", "platform_setting", "assistant", { ...salida, ok: false });
+      return { ...salida, ok: false, detail: `No hay API key de ${efectiva.provider} cargada en el servicio api: Convi respondería con el proveedor de simulación.` };
+    }
+    const t0 = Date.now();
+    try {
+      const r = await ai.chat({ model: efectiva.model, system: "Responde únicamente: ok", messages: [{ role: "user", content: "ok" }], maxTokens: 8 });
+      await this.audit(req, "platform.assistant.test", "platform_setting", "assistant", { ...salida, ok: true });
+      return { ...salida, ok: true, ms: Date.now() - t0, reply: (r.text ?? "").trim().slice(0, 80) };
+    } catch (e) {
+      const detail = (e as Error).message?.slice(0, 300) ?? "error desconocido";
+      await this.audit(req, "platform.assistant.test", "platform_setting", "assistant", { ...salida, ok: false });
+      return { ...salida, ok: false, ms: Date.now() - t0, detail };
+    }
   }
 
   /** Detalle de UN agente del tenant (prompt/tools/estado de la versión vigente) para editar. */

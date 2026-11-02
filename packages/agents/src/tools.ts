@@ -427,6 +427,12 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // entusiasmo. PROHIBIDO decir "solo tengo las 09:15" o "no hay disponibilidad" si esta lista
         // trae horas — nombra todas las que trae. Tu objetivo es ayudar a reservar, nunca cerrar puertas.
         notas.push("Estas son horas REALES disponibles: ofrécelas TODAS al paciente de forma positiva. NUNCA digas 'solo tengo una' ni 'no hay disponibilidad' si esta lista tiene horas; nombra las que aparecen.");
+        // FRESCURA (caso Víctor, 2-nov): las horas NO quedan reservadas al ofrecerlas; se las puede
+        // llevar otra persona mientras el paciente decide. Si el paciente se demora o pregunta otra
+        // cosa entremedio, el modelo re-ofrecía de MEMORIA una hora ya vencida y luego, al confirmar,
+        // tenía que desdecirse ("ya no está disponible"). Regla: ofrecer SOLO las horas de ESTA lista
+        // (la más reciente) y, si pasó un rato, volver a llamar getAvailability ANTES de confirmar.
+        notas.push("IMPORTANTE: estas horas NO quedan reservadas; otra persona puede tomarlas mientras el paciente decide. Ofrece SOLO las horas de ESTA lista (la más reciente que consultaste). Si ya habías ofrecido horas en un mensaje anterior, o el paciente se demoró o preguntó otra cosa entremedio, vuelve a llamar getAvailability ANTES de confirmar y NO repitas horas de un mensaje anterior sin reconsultar.");
         if (hasHora && !tramoRelajado) {
           const cond = minHora != null && maxHora != null ? `entre las ${minHora}:00 y las ${maxHora}:00` : minHora != null ? `desde las ${minHora}:00 en adelante` : `antes de las ${maxHora}:00`;
           notas.push(`Estas horas cumplen lo que pidió el paciente (${cond}): ofrécelas indicando la fecha y hora exactas.`);
@@ -494,7 +500,14 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
         const slot = getSlot(convId, String(input.slotId ?? ""));
         if (!slot) {
-          return { error: "No encuentro ese horario (o la lista ya venció). Llama de nuevo a getAvailability y pasa el `id` exacto del horario que eligió el paciente (ej. h0409-1015)." };
+          // La lista venció (TTL) o el id no calza. Es el caso Víctor: el paciente confirma una hora
+          // que se ofreció hace rato y que ya pudo tomarse otra persona. NO afirmes que esa hora sigue
+          // libre: discúlpate por ESA hora puntual, reconsulta y ofrece SOLO las horas nuevas.
+          return {
+            slotExpired: true,
+            error:
+              "Esa hora ya no está reservada o la lista venció (pudo tomarla otra persona). Discúlpate BREVEMENTE con el paciente SOLO por esa hora puntual, vuelve a llamar getAvailability y ofrécele ÚNICAMENTE las horas nuevas que devuelva. NO repitas ni confirmes las horas de un mensaje anterior sin reconsultar.",
+          };
         }
         // GUARDIA PERSISTENTE anti doble-agendamiento (sobrevive reinicios del worker y
         // ventanas largas, al revés que bookedCache que es memoria por 3 min). Consulta las

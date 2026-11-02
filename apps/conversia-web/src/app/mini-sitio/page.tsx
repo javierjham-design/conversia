@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, Globe, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { SubirLogo } from "@/components/SubirLogo";
 import { api } from "@/lib/api";
 
 /* PELDAÑO 3 — editor del mini-sitio público (conversia.cl/n/<slug>). El dueño publica una
@@ -102,6 +103,11 @@ export default function MiniSitio() {
 
             {/* Campos */}
             <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 15 }}>
+              {/* El logo se guarda al instante (sube su propio archivo), no con "Guardar
+                  cambios": por eso va arriba y no dentro del bloque de textos. */}
+              <Field label="Logo del negocio" hint="PNG, JPG o WebP · máx 2 MB · se ajusta a 512 px. Se guarda al subirlo.">
+                <SubirLogo />
+              </Field>
               <Field label="Nombre del negocio" hint="Se toma de tu cuenta.">
                 <input value={cfg.derived.name} disabled style={inp(true)} />
               </Field>

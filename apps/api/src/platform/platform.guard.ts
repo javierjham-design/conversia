@@ -27,6 +27,23 @@ export function assertTubotBrand(req: PlatformRequest): void {
 }
 
 /**
+ * §6.10 — Bloquea una escritura de configuración propia de CONVERSIA si el admin no es de
+ * esa marca. El caso concreto es Convi: el asistente del panel está gateado a `conversia`,
+ * pero su configuración es UNA fila global (`platform_settings.assistant`), así que sin esta
+ * guarda un admin de TuBot podría cambiarle el proveedor y el modelo al copiloto de la otra
+ * marca. Es el cruce exacto que §6.10 existe para evitar, con los papeles invertidos
+ * respecto de `assertTubotBrand`.
+ *
+ * Falla cerrado: `platformReqBrand` cae a "tubot" si el token no trae marca, así que un
+ * token viejo o raro no pasa.
+ */
+export function assertConversiaBrand(req: PlatformRequest): void {
+  if (platformReqBrand(req) !== "conversia") {
+    throw new ForbiddenException("Convi es el copiloto de Conversia: esta configuración la administra el super admin de Conversia");
+  }
+}
+
+/**
  * §3.7 — IP real del cliente, vía `req.ip` (Express la deriva con `trust proxy`, ver
  * main.ts). Antes se leía el PRIMER valor de `X-Forwarded-For` a mano: ese valor lo
  * escribe quien hace la petición, así que la allowlist de IP del super admin se saltaba

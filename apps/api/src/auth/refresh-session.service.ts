@@ -20,6 +20,30 @@ export interface RefreshSessionData {
   userId: string;
   orgId: string;
   createdAt: number;
+  /**
+   * TECHO ABSOLUTO (ms epoch): cuándo muere esta sesión pase lo que pase. Se fija en el LOGIN y
+   * viaja intacto por cada rotación — por eso está en el dato guardado y no se recalcula.
+   * Las sesiones creadas antes de que existiera el techo no lo traen (ver `techoDeLaSesion`).
+   */
+  absoluteExpiresAt?: number;
+}
+
+/**
+ * Momento en que la sesión muere aunque se siga usando. Una sesión vieja (de antes del techo)
+ * no lo trae guardado: se le cuenta desde su `createdAt`, que sí está. Usar `Date.now()` para
+ * esas la volvería eterna otra vez, que es justo lo que el techo viene a cortar.
+ */
+export function techoDeLaSesion(data: Pick<RefreshSessionData, "createdAt" | "absoluteExpiresAt">, maxMs: number): number {
+  return typeof data.absoluteExpiresAt === "number" ? data.absoluteExpiresAt : data.createdAt + maxMs;
+}
+
+/**
+ * TTL (segundos) de la clave en Redis: la ventana deslizante, pero NUNCA más allá del techo.
+ * Sin el recorte, la última renovación antes del techo dejaría la clave viva 30 días más.
+ * Mínimo 1 porque Redis rechaza un `EX 0`.
+ */
+export function ttlHastaElTecho(techoMs: number, nowMs: number, deslizanteSeg: number): number {
+  return Math.max(1, Math.min(deslizanteSeg, Math.ceil((techoMs - nowMs) / 1000)));
 }
 
 /**
@@ -42,6 +66,7 @@ export function parseDurationSeconds(raw: string | undefined, fallback = 30 * 24
 export class RefreshSessionService implements OnModuleDestroy {
   private redis = new IORedis(getEnv().REDIS_URL, { maxRetriesPerRequest: 1, enableOfflineQueue: false, lazyConnect: true });
   private ttl = parseDurationSeconds(getEnv().JWT_REFRESH_EXPIRES_IN);
+  private absoluteMaxMs = parseDurationSeconds(getEnv().JWT_REFRESH_ABSOLUTE_MAX, 90 * 86400) * 1000;
 
   constructor() {
     this.redis.on("error", () => undefined);
@@ -62,14 +87,24 @@ export class RefreshSessionService implements OnModuleDestroy {
     return `csess:user:${userId}`;
   }
 
-  /** Crea una sesión de refresh y devuelve el token EN CLARO (solo se ve aquí; en Redis va su hash). */
-  async create(userId: string, orgId: string): Promise<string> {
+  /**
+   * Crea una sesión de refresh y devuelve el token EN CLARO (solo se ve aquí; en Redis va su hash).
+   * `heredaTecho` es el techo absoluto de la sesión que se está rotando: al renovar NO se estrena
+   * uno nuevo, porque entonces el techo se correría en cada uso y no sería un techo.
+   */
+  async create(userId: string, orgId: string, heredaTecho?: number): Promise<string> {
     const token = this.mint();
     const h = this.hash(token);
-    const data: RefreshSessionData = { userId, orgId, createdAt: Date.now() };
+    const now = Date.now();
+    const absoluteExpiresAt = heredaTecho ?? now + this.absoluteMaxMs;
+    const data: RefreshSessionData = { userId, orgId, createdAt: now, absoluteExpiresAt };
+    const ttl = ttlHastaElTecho(absoluteExpiresAt, now, this.ttl);
     try {
-      await this.redis.set(this.key(h), JSON.stringify(data), "EX", this.ttl);
+      await this.redis.set(this.key(h), JSON.stringify(data), "EX", ttl);
       await this.redis.sadd(this.userKey(userId), h);
+      // El set del usuario vive la ventana deslizante COMPLETA, no el `ttl` recortado: es el
+      // índice de "cerrar todas las sesiones" y si se acortara por una sesión que está por
+      // llegar a su techo, dejaría fuera del barrido a las otras sesiones del mismo usuario.
       await this.redis.expire(this.userKey(userId), this.ttl);
     } catch {
       // fail-open: si Redis no está, el login igual sale (el access token tiene su propia expiración);
@@ -83,10 +118,29 @@ export class RefreshSessionService implements OnModuleDestroy {
     if (!token || !token.startsWith("rt_")) return null;
     try {
       const raw = await this.redis.get(this.key(this.hash(token)));
-      return raw ? (JSON.parse(raw) as RefreshSessionData) : null;
+      if (!raw) return null;
+      const data = JSON.parse(raw) as RefreshSessionData;
+      // TECHO: el TTL de Redis ya la mataría, pero una sesión GRANDFATHEREADA (creada antes de
+      // que el techo existiera) tiene en Redis un TTL de 30 d que no lo conoce. Comprobarlo
+      // acá es lo que hace que el techo también alcance a las sesiones que ya estaban abiertas.
+      if (Date.now() >= techoDeLaSesion(data, this.absoluteMaxMs)) {
+        await this.redis.del(this.key(this.hash(token))).catch(() => undefined);
+        return null;
+      }
+      return data;
     } catch {
       return null; // fail-closed: no podemos probar validez → se trata como inválido
     }
+  }
+
+  /**
+   * Rota el refresh token: revoca el usado y entrega uno nuevo CONSERVANDO el techo absoluto.
+   * Existe como un solo método (en vez de revoke + create por separado en el llamador) porque
+   * el techo se pierde con solo olvidarse de pasarlo, y perderlo devuelve la sesión eterna.
+   */
+  async rotate(tokenUsado: string, data: RefreshSessionData): Promise<string> {
+    await this.revoke(tokenUsado);
+    return this.create(data.userId, data.orgId, techoDeLaSesion(data, this.absoluteMaxMs));
   }
 
   /** Revoca un refresh token puntual (logout). Best-effort. */

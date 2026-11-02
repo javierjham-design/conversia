@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Check, CreditCard, ExternalLink, MessageCircle, Send, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { contactoDeSoporte } from "@/lib/assistant";
 import { COPILOT_ACTION_CSS, celebrar, renderMarkdown, resaltar, type AssistantAction } from "@/lib/copilot-actions";
 import { ConviAvatar } from "@/components/ConviAvatar";
 import {
@@ -71,6 +72,8 @@ export function SupportWidget() {
   const [pulse, setPulse] = useState(false);
   const [celebrando, setCelebrando] = useState(false);
   const [falloAlgo, setFalloAlgo] = useState(false);
+  /** Convi no pudo: se ofrece una persona de verdad, con un botón que lleva a algún lado. */
+  const [ofrecerSoporte, setOfrecerSoporte] = useState(false);
   const [avisoVisto, setAvisoVisto] = useState<string | null>(null);
   /** Hoja inferior COMPACTA (solo móvil): Convi se presenta sin tapar el panel. */
   const [compacto, setCompacto] = useState(false);
@@ -171,11 +174,15 @@ export function SupportWidget() {
     setText("");
     setBusy(true);
     setFalloAlgo(false);
+    setOfrecerSoporte(false);
     try {
-      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[] }>("/assistant/message", {
+      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean }>("/assistant/message", {
         method: "POST",
         body: JSON.stringify({ message: body, route: pathname, history }),
       });
+      // 200 con respuesta de respaldo: el proveedor de IA falló. Para el dueño esto es "Convi
+      // está caído", así que ofrecemos una persona igual que en un error de red.
+      if (r.degradado) setOfrecerSoporte(true);
       let reply = r.reply;
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
       const actions = r.actions ?? [];
@@ -189,12 +196,15 @@ export function SupportWidget() {
       // fallo del asistente → no mostramos nada (evita el falso "No pude responder" del hallazgo 26-oct).
       if (status === 401) return;
       setFalloAlgo(true);
+      // Nada de "escríbele a soporte" dentro del soporte: salvo el 429 (que se resuelve solo
+      // esperando), todo fallo ofrece el botón con el canal real.
+      if (status !== 429) setOfrecerSoporte(true);
       const human =
         status === 429
           ? "Vamos un poco rápido 🙏. Espera unos segundos y escríbeme de nuevo."
           : status === 404 || status === 403
-            ? "El asistente no está disponible en esta cuenta." + (SUPPORT_WA ? " Escríbele a soporte por WhatsApp y te ayudamos 💬." : " Escríbele a soporte y te ayudamos 💬.")
-            : "No pude responder en este momento 🙏. Reintenta en unos segundos; si sigue, escríbele a soporte y lo vemos contigo.";
+            ? "El asistente no está disponible en esta cuenta."
+            : "No pude responder en este momento 🙏. Reintenta en unos segundos; si sigue, acá abajo te dejo cómo hablar con una persona del equipo.";
       setMsgs((m) => [...m, { role: "assistant", content: human }]);
     } finally {
       setBusy(false);
@@ -440,6 +450,21 @@ export function SupportWidget() {
               );
             })}
             {busy ? <div className="text-dim" style={{ fontSize: 12, alignSelf: "flex-start" }}>{CONVI_NAME} está pensando…</div> : null}
+            {/* SALIDA REAL cuando Convi no puede. Antes el mensaje decía "escríbele a soporte"
+                dentro de la ventana que ES el soporte: un callejón sin salida justo cuando algo
+                ya había fallado. `contactoDeSoporte` siempre devuelve un canal (WhatsApp si está
+                configurado, correo si no), así que este botón nunca queda sin destino. */}
+            {ofrecerSoporte && !busy ? (
+              <a
+                href={contactoDeSoporte(`Convi no responde (estaba en ${pathname})`).url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-accent"
+                style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, padding: "8px 13px", borderRadius: 10, textDecoration: "none", marginTop: 2 }}
+              >
+                <MessageCircle size={14} /> {contactoDeSoporte().etiqueta}
+              </a>
+            ) : null}
             <div ref={bottomRef} />
           </div>
 

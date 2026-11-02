@@ -176,8 +176,14 @@ export async function handleAppointmentResponse(
     if (appt!.externalId) {
       try {
         const provider = await getSchedulingProviderFor(orgId);
-        await provider.cancelAppointment(appt!.externalId);
-        await logAgenda(orgId, "ok", `Cita ${appt!.externalId} cancelada por el paciente (write-back OK)`);
+        // Pasamos el MOTIVO ("patient_reschedule" | "patient_cancel") a la agenda externa.
+        // El contrato de cancelación ya lo acepta (POST /appointments/:id/cancel { reason }),
+        // pero antes no se enviaba → Cláriva veía la cita "cancelada" sin saber que fue por un
+        // reagendamiento pedido por el paciente. Con el motivo, Cláriva puede armar su propia
+        // lista nativa de "pendientes de reagendar" (cancelada con reason=patient_reschedule y
+        // sin hora futura) sin depender de ninguna API extra de Conversia.
+        await provider.cancelAppointment(appt!.externalId, reason);
+        await logAgenda(orgId, "ok", `Cita ${appt!.externalId} cancelada por el paciente (${reason}, write-back OK)`);
       } catch (err) {
         await logAgenda(orgId, "error", `No se pudo cancelar en la agenda externa: ${(err as Error).message}`);
       }

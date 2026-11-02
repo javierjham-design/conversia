@@ -802,7 +802,9 @@ export class AuthService {
   /**
    * Bloque 3 — renueva la sesión a partir de un refresh token válido: valida que siga vivo en
    * Redis, RE-RESUELVE la membresía (si fue revocada, 401), emite un access token nuevo y ROTA el
-   * refresh (revoca el usado, entrega uno nuevo). Cada uso corre 30 d la ventana. 401 = re-login.
+   * refresh (revoca el usado, entrega uno nuevo). Cada uso corre la ventana deslizante, pero NO el
+   * techo absoluto (`JWT_REFRESH_ABSOLUTE_MAX`): pasado el techo hay que volver a entrar con la
+   * contraseña, por muy seguido que se use el panel. 401 = re-login.
    */
   async refresh(refreshToken: string) {
     const session = await this.refreshSessions.resolve(refreshToken);
@@ -817,9 +819,10 @@ export class AuthService {
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     const token = signAppToken({ sub: session.userId, orgId: session.orgId, role: role?.code ?? "viewer", perms });
-    // Rotación: el token usado deja de valer y entregamos uno nuevo (anti-replay).
-    await this.refreshSessions.revoke(refreshToken);
-    const nextRefresh = await this.refreshSessions.create(session.userId, session.orgId);
+    // Rotación: el token usado deja de valer y entregamos uno nuevo (anti-replay). `rotate`
+    // conserva el TECHO ABSOLUTO de la sesión: renovar corre la ventana deslizante, nunca el
+    // techo, o la sesión no caducaría jamás mientras se la siga usando.
+    const nextRefresh = await this.refreshSessions.rotate(refreshToken, session);
     return { token, refreshToken: nextRefresh, organizationId: session.orgId, role: role?.code ?? "viewer" };
   }
 

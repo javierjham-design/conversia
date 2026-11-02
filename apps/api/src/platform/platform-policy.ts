@@ -43,6 +43,7 @@ export const OPERATOR_DENY_PREFIXES = [
   "/platform/margins", // P&L por tenant (dato sensible de negocio)
   "/platform/infra", // monitoreo de infraestructura
   "/platform/test-ai", // probar llaves/modelos globales
+  "/platform/assistant", // proveedor y modelo de Convi (config global del copiloto + prueba en vivo)
   "/platform/audit", // bitácora de cumplimiento (solo super admin)
   "/platform/admins", // gestionar otros administradores/operadores (defensivo, exista o no hoy)
 ];
