@@ -17,6 +17,7 @@ import { emitPlatformEvent } from "./platform-events";
 import { notifyHumanAttendedMessage } from "./notifications/human-message";
 import { cancelTimersOnReply, dispatchEvent, handlePendingObjective, handleWaitReply } from "./workflow-runtime";
 import { handleAppointmentResponse } from "./appointment-responses";
+import { observeSendFailure, observeSendSuccess } from "./sending-health";
 import { resolveAdContext } from "./meta-ads-sync";
 
 // Ventana para REABRIR una conversación cerrada cuando el paciente vuelve a escribir, en vez de
@@ -234,6 +235,16 @@ export async function processInbound(job: InboundJob): Promise<void> {
           },
         }),
       ).catch(() => undefined);
+    }
+
+    // Alerta al titular/usuarios cuando el envío se bloquea a NIVEL DE CUENTA (pago #131042 /
+    // cuenta restringida #131031 en Meta) — el fallo que hoy se escapaba por llegar async por
+    // webhook, sin avisar a nadie. Y aviso de recuperación cuando un mensaje se vuelve a
+    // entregar. Deduplicado por incidente en Redis; best-effort, nunca rompe el webhook.
+    if (failed && status.error) {
+      await observeSendFailure(tenant.organizationId, status.error).catch(() => undefined);
+    } else if (status.status === "delivered" || status.status === "read") {
+      await observeSendSuccess(tenant.organizationId).catch(() => undefined);
     }
 
     // W-2 asíncrono: si el mensaje que REBOTÓ era una PLANTILLA, devuelve la bolsa.
