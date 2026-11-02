@@ -25,6 +25,7 @@ const PLATFORM_DIR = join(__dirname, "..", "src", "platform");
 const GUARDS = [
   "assertOrgBrand", // valida la org dueña de la fila
   "assertTubotBrand", // declarada global: solo TuBot
+  "assertConversiaBrand", // declarada global de CONVERSIA (Convi, el copiloto de esa marca)
   "assertPackageBrand",
   "assertDemoLeadBrand",
   "assertExceptionBrand",

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { assistantMode, isWebOwner, modeloDeRespaldoDelAsistente, modeloIgnorado, resolveAssistantModel } from "./assistant.service";
+import { assistantMode, isWebOwner } from "./assistant.service";
+// Las decisiones de proveedor/modelo se mudaron a assistant-config.ts (configurador del Super
+// Admin). Sus tests propios viven en assistant-config.spec.ts; acá quedan los del servicio.
+import { modeloDeRespaldoDelAsistente, modeloIgnorado, resolveAssistantModel } from "./assistant-config";
 
 describe("Asistente Conversia — guardas puras", () => {
   it("modo implementación mientras el checklist no está al 100%", () => {
