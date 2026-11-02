@@ -6,6 +6,7 @@ import { PrismaService } from "../prisma.service";
 import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { selectPendingReschedule, type PendingApptLite } from "./pending-reschedule";
 
 const STATUS_MAP: Record<string, string> = { pending: "PENDING", confirmed: "CONFIRMED", cancelled: "CANCELLED", rescheduled: "RESCHEDULED", completed: "COMPLETED", no_show: "NO_SHOW" };
 
@@ -296,6 +297,75 @@ export class AgendaController {
       notes: a.notes ?? null,
       contact: { name, phone: a.patient?.phone ?? null },
     };
+  }
+
+  /**
+   * Pacientes PENDIENTES DE REAGENDAR: pidieron reagendar (su hora se liberó) y NO
+   * volvieron a tener una hora. Se deriva de señales que YA existen (la etiqueta
+   * "Reagenda solicitada" + sus citas), sin tocar el bot. Apenas reagendan, salen solos.
+   * Separado del CRM de leads a propósito: son pacientes a gestionar, no leads.
+   */
+  @Get("pending-reschedule")
+  async pendingReschedule(@Query("days") daysRaw?: string) {
+    const ctx = requireContext();
+    const days = Math.min(365, Math.max(1, Number(daysRaw) || 120));
+    const now = new Date();
+    const since = new Date(now.getTime() - days * 86_400_000);
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const tag = await tx.tag.findUnique({
+        where: { organizationId_name: { organizationId: ctx.organizationId, name: "Reagenda solicitada" } },
+      });
+      if (!tag) return { total: 0, rows: [] };
+      const assigns = await tx.tagAssignment.findMany({
+        where: { tagId: tag.id, entityType: "conversation", createdAt: { gte: since } },
+        select: { entityId: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 1000,
+      });
+      if (!assigns.length) return { total: 0, rows: [] };
+
+      const convIds = [...new Set(assigns.map((a) => a.entityId))];
+      const convs = await tx.conversation.findMany({ where: { id: { in: convIds } }, select: { id: true, contactId: true } });
+      const contactByConv = new Map(convs.map((c) => [c.id, c.contactId]));
+      const requests = assigns
+        .map((a) => ({ contactId: contactByConv.get(a.entityId) ?? null, conversationId: a.entityId, requestedAt: a.createdAt }))
+        .filter((r): r is { contactId: string; conversationId: string; requestedAt: Date } => !!r.contactId);
+      const contactIds = [...new Set(requests.map((r) => r.contactId))];
+      if (!contactIds.length) return { total: 0, rows: [] };
+
+      const [appts, contacts] = await Promise.all([
+        tx.appointment.findMany({
+          where: { contactId: { in: contactIds } },
+          select: { contactId: true, status: true, startsAt: true, professionalId: true, meta: true },
+        }),
+        tx.contact.findMany({
+          where: { id: { in: contactIds }, deletedAt: null },
+          select: { id: true, firstName: true, lastName: true, profileName: true, phone: true },
+        }),
+      ]);
+
+      const proIds = [...new Set(appts.map((a) => a.professionalId).filter(Boolean))] as string[];
+      const proRows = proIds.length ? await tx.professional.findMany({ where: { id: { in: proIds } }, select: { id: true, name: true } }) : [];
+      const proName = new Map(proRows.map((p) => [p.id, p.name]));
+
+      const apptsByContact = new Map<string, PendingApptLite[]>();
+      for (const a of appts) {
+        const meta = (a.meta as Record<string, any> | null) ?? {};
+        const list = apptsByContact.get(a.contactId) ?? [];
+        list.push({
+          status: a.status,
+          startsAt: a.startsAt,
+          professionalName: (a.professionalId ? proName.get(a.professionalId) : undefined) ?? (meta.professionalName as string | undefined) ?? null,
+        });
+        apptsByContact.set(a.contactId, list);
+      }
+      const contactMap = new Map(
+        contacts.map((c) => [c.id, { name: [c.firstName, c.lastName].filter(Boolean).join(" ") || c.profileName || c.phone || "Sin nombre", phone: c.phone }]),
+      );
+
+      const rows = selectPendingReschedule({ now, requests, apptsByContact, contacts: contactMap });
+      return { total: rows.length, rows };
+    });
   }
 
   // ------------------------------ Citas ------------------------------

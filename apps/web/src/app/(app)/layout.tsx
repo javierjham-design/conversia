@@ -8,6 +8,7 @@ import {
   Bell,
   Bot,
   Building2,
+  CalendarClock,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -246,6 +247,7 @@ const NAV_GROUPS: Array<{
       },
       { href: "/catalog", label: "Catálogo", icon: ShoppingBag, perm: "integrations:read" },
       { href: "/agenda", label: "Agenda", icon: CalendarDays, moduleKey: "agenda" },
+      { href: "/reagendar", label: "Por reagendar", icon: CalendarClock, moduleKey: "agenda" },
     ],
   },
   {
@@ -278,6 +280,7 @@ const BREADCRUMBS: Record<string, string[]> = {
   "/inbox": ["Operación", "Bandeja"],
   "/contacts": ["Operación", "Clientes"],
   "/crm": ["Operación", "Clientes"],
+  "/reagendar": ["Operación", "Por reagendar"],
   "/agents": ["Automatización", "Agentes IA"],
   "/workflows": ["Automatización", "Flujos"],
   "/reports": ["Análisis", "Reportes"],
