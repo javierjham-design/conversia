@@ -237,7 +237,10 @@ export class BroadcastsController {
     await this.queues.broadcast.add(
       "send",
       { organizationId: ctx.organizationId, broadcastId: result.id } satisfies BroadcastJob,
-      { jobId: `broadcast:${result.id}`, removeOnComplete: { age: 86400 }, removeOnFail: { age: 86400 } },
+      // jobId SIN dos puntos (BullMQ los rechaza; ver `test/bullmq-jobid.spec.ts`): con
+      // `broadcast:<id>` la difusión quedaba creada en la BD y el encolado reventaba, así que
+      // no se enviaba nunca.
+      { jobId: `broadcast-${result.id}`, removeOnComplete: { age: 86400 }, removeOnFail: { age: 86400 } },
     );
     return {
       ok: true,
