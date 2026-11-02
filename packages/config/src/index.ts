@@ -50,6 +50,11 @@ const envSchema = z.object({
   // (opaco, revocable, en Redis) es de larga vida y se rota en cada uso. Pensado para el cliente
   // móvil (no re-login cada 12 h). Formato de duración "Nd"/"Nh"/"Nm"/"Ns" o segundos a secas.
   JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
+  // TECHO ABSOLUTO de la sesión deslizante. Sin esto la ventana de 30 d se renueva ENTERA en
+  // cada uso: quien abre el panel una vez al mes no vuelve a escribir su contraseña NUNCA, y
+  // "la sesión expira a los 30 días" pasa a ser mentira. El techo se cuenta desde el login y
+  // sobrevive a las rotaciones, así que pone un máximo real a la vida de una sesión.
+  JWT_REFRESH_ABSOLUTE_MAX: z.string().default("90d"),
   JWT_ISSUER: z.string().default("conversia"),
   JWT_AUDIENCE: z.string().default("conversia-api"),
   CREDENTIALS_ENCRYPTION_KEY: z.string().length(64).default("0".repeat(64)),

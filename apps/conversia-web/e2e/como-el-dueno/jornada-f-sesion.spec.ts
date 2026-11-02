@@ -73,4 +73,26 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
     const token = await page.evaluate(() => { try { return localStorage.getItem("conversia_token"); } catch { return null; } });
     expect(token).toBeNull(); // sesión borrada
   });
+
+  test("con sesión iniciada, conversia.cl muestra la PÁGINA PÚBLICA y no salta al panel", async ({ page, request }) => {
+    // Hallazgo del dueño: entrar al apex con sesión te metía directo a /inicio, así que la web
+    // pública —precios, cómo funciona, preguntas— era inalcanzable para quien tenía cuenta.
+    const cuenta = await registerAccount(request, { brand: "conversia", vertical: "barberia" });
+    await useSession(page, cuenta.token); // sesión REAL y válida
+    await page.addInitScript(() => { try { localStorage.setItem("conversia_pwa_install_dismissed", "1"); } catch { /* noop */ } });
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Se queda en la landing: contenido público visible y la URL sin moverse.
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/las 24 horas/i);
+    await expect(page).toHaveURL(/\/$/);
+    // Y sigue sin redirigir un rato después (el salto vivía en un useEffect, no en el primer paint).
+    await page.waitForTimeout(1500);
+    await expect(page).toHaveURL(/\/$/);
+
+    // Desde ahí se entra al panel con un clic. En móvil el menú está detrás de la hamburguesa.
+    const vp = page.viewportSize();
+    if (vp && vp.width <= 680) await page.getByRole("button", { name: "Menú" }).click();
+    await page.getByRole("link", { name: /Ir a mi panel/i }).first().click();
+    await page.waitForURL(/\/inicio/, { timeout: 20_000 });
+  });
 });

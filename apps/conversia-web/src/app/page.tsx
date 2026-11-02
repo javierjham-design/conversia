@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, Menu, MessageSquare,
+  ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, LayoutDashboard, Menu, MessageSquare,
   ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
-import { api, getToken, getRefreshToken, sessionActive, clearToken } from "@/lib/api";
+import { api, getToken, getRefreshToken, clearToken } from "@/lib/api";
+import { estadoDelVisitante } from "@/lib/sesion";
 import {
   BASE_RESPALDO,
   CREDITOS_POR_CONVERSACION_RESPALDO,
@@ -16,9 +16,13 @@ import {
 } from "@/lib/precios-respaldo";
 
 /**
- * LANDING PÚBLICA de Conversia (apex conversia.cl). La ve quien NO ha iniciado sesión;
- * los usuarios con sesión activa se redirigen a su panel (/inicio). Diseño Nocturna
- * (tokens de globals.css). Gráficas 100% CSS/SVG — sin assets externos (evita CSP/peso).
+ * LANDING PÚBLICA de Conversia (apex conversia.cl). La ve CUALQUIERA, con sesión o sin ella.
+ * Diseño Nocturna (tokens de globals.css). Gráficas 100% CSS/SVG — sin assets externos
+ * (evita CSP/peso).
+ *
+ * NO REDIRIGE AL PANEL. Antes sí: con cualquier cosa en localStorage mandaba a /inicio, así que
+ * quien tenía cuenta no podía ver la página pública de su propio producto —precios, cómo
+ * funciona, preguntas— sin cerrar sesión. La sesión solo cambia el botón del menú.
  */
 
 const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
@@ -27,22 +31,25 @@ type Plan = { code: string; name: string; priceClp: number; features: Record<str
 type Pack = { code: string; name: string; credits: number; priceClp: number; bonoPct?: number; creditosPorConversacion?: number };
 
 export default function Landing() {
-  const router = useRouter();
+  // Arranca SIEMPRE en "anónimo" y solo cambia en el efecto: leer localStorage para el primer
+  // render rompería la hidratación (el servidor no lo tiene) — es el React #418 que ya nos costó
+  // una pantalla. Como consecuencia, el botón del panel aparece un instante después del paint.
+  const [visitante, setVisitante] = useState<"anonimo" | "con-sesion">("anonimo");
   const [base, setBase] = useState<Plan | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [menu, setMenu] = useState(false);
   const [faq, setFaq] = useState<number | null>(0);
 
-  // La landing SIEMPRE se renderiza (SSR → SEO + primer paint). Si el visitante YA tiene una
-  // sesión REANUDABLE, lo llevamos a su panel (no bloquea el render del servidor). Validamos el
-  // token client-side (sin red): si venció Y no hay refresh con qué renovar, limpiamos la sesión
-  // muerta y mostramos la landing — nunca lo metemos a un panel con sesión caída (hallazgo 26-oct).
+  // La landing se renderiza siempre (SSR → SEO + primer paint) y se queda. Lo único que decide
+  // la sesión es el botón: "Ir a mi panel" en vez de "Entrar". Una sesión MUERTA (access vencido
+  // y sin refresh con qué renovarla) se limpia acá mismo, para no dejar basura que después
+  // mande al login con un aviso de expiración que el visitante no pidió.
   useEffect(() => {
-    const t = getToken();
-    if (!t) return;
-    if (sessionActive(t) || getRefreshToken()) router.replace("/inicio");
-    else clearToken();
-  }, [router]);
+    const estado = estadoDelVisitante(getToken(), getRefreshToken());
+    if (estado === "muerta") clearToken();
+    setVisitante(estado === "con-sesion" ? "con-sesion" : "anonimo");
+  }, []);
+  const conSesion = visitante === "con-sesion";
 
   // Precios reales del catálogo público V2 (si el go-live está encendido).
   useEffect(() => {
@@ -91,8 +98,14 @@ export default function Landing() {
           <a href="#faq">Preguntas</a>
         </nav>
         <div className="lp-nav-cta">
-          <a href="/login" className="lp-ghost">Entrar</a>
-          <a href="/crear" className="lp-btn">Crear gratis</a>
+          {conSesion ? (
+            <a href="/inicio" className="lp-btn"><LayoutDashboard size={16} /> Ir a mi panel</a>
+          ) : (
+            <>
+              <a href="/login" className="lp-ghost">Entrar</a>
+              <a href="/crear" className="lp-btn">Crear gratis</a>
+            </>
+          )}
         </div>
         <button className="lp-burger" aria-label="Menú" onClick={() => setMenu((v) => !v)}>{menu ? <X size={22} /> : <Menu size={22} />}</button>
       </header>
@@ -102,8 +115,14 @@ export default function Landing() {
           <a href="#funciones" onClick={() => setMenu(false)}>Funciones</a>
           <a href="#precios" onClick={() => setMenu(false)}>Precios</a>
           <a href="#faq" onClick={() => setMenu(false)}>Preguntas</a>
-          <a href="/login" onClick={() => setMenu(false)}>Entrar</a>
-          <a href="/crear" className="lp-btn" onClick={() => setMenu(false)}>Crear mi asistente gratis</a>
+          {conSesion ? (
+            <a href="/inicio" className="lp-btn" onClick={() => setMenu(false)}>Ir a mi panel</a>
+          ) : (
+            <>
+              <a href="/login" onClick={() => setMenu(false)}>Entrar</a>
+              <a href="/crear" className="lp-btn" onClick={() => setMenu(false)}>Crear mi asistente gratis</a>
+            </>
+          )}
         </div>
       ) : null}
 
@@ -300,7 +319,7 @@ export default function Landing() {
             <a href="/crear">Crear asistente</a>
             <a href="#funciones">Funciones</a>
             <a href="#precios">Precios</a>
-            <a href="/login">Entrar</a>
+            {conSesion ? <a href="/inicio">Ir a mi panel</a> : <a href="/login">Entrar</a>}
           </div>
           <div>
             <p className="lp-foot-h">Legal</p>
