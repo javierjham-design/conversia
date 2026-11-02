@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec, AssistantAction } from "@conversia/types";
 import { getEnv } from "@conversia/config";
-import { computeCostUsd, createAIProvider, estimarAlcance, frasePorSaldo } from "@conversia/agents";
+import { ResilientAIProvider, computeCostUsd, createAIProvider, estimarAlcance, frasePorSaldo } from "@conversia/agents";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
 import { runQaBattery } from "../agents/agent-qa";
@@ -44,6 +44,46 @@ export function resolveAssistantModel(provider: string, configuredModel: string)
   if (provider === "anthropic") return isClaude ? configuredModel : "claude-sonnet-4-6";
   if (provider === "openai") return isOpenai ? configuredModel : "gpt-4o-mini";
   return configuredModel; // mock u otro: el MockAIProvider ignora el modelo
+}
+
+/**
+ * Modelo de RESPALDO del copiloto (pura, testeable).
+ *
+ * Hallazgo 1-nov: Convi caído con las llaves habilitadas y los bots de los clientes
+ * respondiendo normal. La diferencia no estaba en las llaves sino en el camino: los bots
+ * pasan por `ResilientAIProvider` (reintentos + modelo de respaldo + timeout) y Convi
+ * llamaba al proveedor A PELO, un intento y nada más. Así, un 429 pasajero lo tumbaba, y un
+ * `ASSISTANT_MODEL` que el proveedor dejó de servir lo tumbaba SIEMPRE, sin reintento ni
+ * respaldo, con las llaves perfectas.
+ *
+ * El respaldo pasa por `resolveAssistantModel` a propósito: `AI_FALLBACK_MODEL` trae un
+ * `claude-*` por default y mandárselo a OpenAI es exactamente el bug del 26-oct, solo que
+ * esta vez en el camino de respaldo, que es el que nadie prueba. `undefined` cuando no hay a
+ * dónde caer: reintentar el MISMO modelo no es un respaldo, y decirle lo contrario a la capa
+ * resiliente solo gasta intentos.
+ */
+export function modeloDeRespaldoDelAsistente(
+  provider: string,
+  fallbackModel: string,
+  modeloPrincipal: string,
+): string | undefined {
+  if (!fallbackModel) return undefined;
+  const compatible = resolveAssistantModel(provider, fallbackModel);
+  return compatible === modeloPrincipal ? undefined : compatible;
+}
+
+/**
+ * ¿El modelo que pidió el dueño quedó DESCARTADO por no ser de la familia del proveedor?
+ *
+ * `resolveAssistantModel` hace bien en reescribirlo (un `gpt-*` a Anthropic da 404), pero lo
+ * hacía EN SILENCIO. El caso real: poner `ASSISTANT_MODEL=gpt-4o-mini` con
+ * `AI_PROVIDER=anthropic` no cambia nada, y el dueño queda convencido de que sí. Esto no
+ * cambia la decisión —sigue mandando un modelo compatible— solo deja de ocultarla.
+ *
+ * Con `ASSISTANT_MODEL` vacío no hay nada que avisar: el default no es una decisión de nadie.
+ */
+export function modeloIgnorado(configurado: string, resuelto: string): boolean {
+  return Boolean(configurado) && configurado !== resuelto;
 }
 
 type ThreadMsg = { author: "user" | "team" | "agent"; body: string; at: string };
@@ -347,7 +387,7 @@ AUTONOMÍA:
     userMessage: string,
     history: AIChatMessage[],
     route?: string,
-  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[] }> {
+  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[]; degradado: boolean }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
     // ROBUSTEZ (Bloque 3): el contexto se arma FUERA del loop de IA, pero un fallo suyo no debe
@@ -360,20 +400,52 @@ AUTONOMÍA:
       console.error(`✖ Asistente: contexto no disponible (${(e as Error).message?.slice(0, 120)})`);
       context = this.minimalContext();
     }
-    // Proveedor EXPLÍCITO por AI_PROVIDER (hallazgo prod 26-oct): el router por nombre de modelo
-    // mandaba a OpenAI (key inválida → 401 → fallback) pese a AI_PROVIDER=anthropic con llave
-    // válida. createAIProvider honra la configuración: anthropic→Anthropic, openai→OpenAI,
-    // mock→Mock (sim). Así el asistente usa SIEMPRE el proveedor que el dueño configuró.
-    const ai = createAIProvider({ provider: env.AI_PROVIDER, anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
-    const specs = this.toolSpecs(owner);
-    const messages: AIChatMessage[] = [...history.slice(-12), { role: "user", content: userMessage }];
-    const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
     // Modelo COMPATIBLE con el proveedor (ver resolveAssistantModel). COP 1: el copiloto tiene
     // su PROPIO modelo (`ASSISTANT_MODEL`), separado del de los bots de los clientes, porque
     // encadena herramientas —lee el estado, crea, prueba, publica— y con un modelo barato deja
     // el montaje a medias. Si no está configurado, cae en el de siempre.
     const model = resolveAssistantModel(env.AI_PROVIDER, env.ASSISTANT_MODEL || env.AI_DEFAULT_MODEL);
+    // Si el dueño pidió un modelo y el proveedor configurado obliga a otro, que se SEPA. Sin
+    // esto, poner `ASSISTANT_MODEL=gpt-4o-mini` con `AI_PROVIDER=anthropic` no cambia nada y no
+    // hay forma de enterarse: se cambia la variable, se reinicia, y Convi sigue igual.
+    if (modeloIgnorado(env.ASSISTANT_MODEL, model)) {
+      console.error(
+        `🚨 Asistente: ASSISTANT_MODEL=${env.ASSISTANT_MODEL} NO se está usando — AI_PROVIDER=${env.AI_PROVIDER} exige un modelo de su familia, así que Convi va con ${model}. Para usar ${env.ASSISTANT_MODEL} hay que poner AI_PROVIDER acorde y su llave en el servicio api.`,
+      );
+    }
+    // Proveedor EXPLÍCITO por AI_PROVIDER (hallazgo prod 26-oct): el router por nombre de modelo
+    // mandaba a OpenAI (key inválida → 401 → fallback) pese a AI_PROVIDER=anthropic con llave
+    // válida. createAIProvider honra la configuración: anthropic→Anthropic, openai→OpenAI,
+    // mock→Mock (sim). Así el asistente usa SIEMPRE el proveedor que el dueño configuró.
+    const proveedorBase = createAIProvider({ provider: env.AI_PROVIDER, anthropicApiKey: env.ANTHROPIC_API_KEY, openaiApiKey: env.OPENAI_API_KEY });
+    // `createAIProvider` cae a Mock EN SILENCIO cuando el proveedor configurado no tiene su
+    // llave (p. ej. AI_PROVIDER=openai sin OPENAI_API_KEY). En producción eso no es un modo
+    // válido: Convi contestaría frases de simulación como si fueran reales y el dueño no
+    // tendría forma de saberlo. No lo rompemos —seguir con Mock es mejor que un 500— pero
+    // deja de ser invisible.
+    if (proveedorBase.kind === "mock" && env.NODE_ENV === "production") {
+      console.error(`🚨 Asistente: AI_PROVIDER=${env.AI_PROVIDER} sin su llave → Convi está respondiendo con el proveedor MOCK (revisa ANTHROPIC_API_KEY / OPENAI_API_KEY en Railway).`);
+    }
+    // RESILIENCIA (hallazgo 1-nov): los bots de los clientes pasan por esta misma capa desde
+    // siempre (agent-turn.ts) y Convi llamaba al proveedor A PELO: un intento, sin timeout y
+    // sin modelo de respaldo. Por eso Convi aparecía caído mientras los bots respondían
+    // normal y las llaves estaban habilitadas — no era un problema de llaves, era que acá no
+    // había segunda oportunidad. Mismos parámetros que el worker para no tener dos políticas.
+    const ai = new ResilientAIProvider(proveedorBase, {
+      maxAttempts: env.AI_MAX_ATTEMPTS,
+      timeoutMs: env.AI_CALL_TIMEOUT_MS,
+      fallbackModel: modeloDeRespaldoDelAsistente(env.AI_PROVIDER, env.AI_FALLBACK_MODEL, model),
+      onRetry: ({ model: m, attempt, error }) =>
+        console.warn(`⟳ Asistente: reintento ${attempt} con ${m} (${error?.slice(0, 160)})`),
+    });
+    const specs = this.toolSpecs(owner);
+    const messages: AIChatMessage[] = [...history.slice(-12), { role: "user", content: userMessage }];
+    const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
     let reply = "";
+    // ¿Esta respuesta es la de respaldo porque el proveedor de IA falló? La UI lo necesita para
+    // ofrecer una persona de verdad; detectarlo comparando el texto sería frágil y se rompería
+    // a la primera vez que alguien reescriba el mensaje.
+    let degradado = false;
     let wrote = false;
     let publicoAgente = false;
     const acciones: AssistantAction[] = [];
@@ -404,12 +476,22 @@ AUTONOMÍA:
         toolTranscript.push({ kind: "tool_results", results });
       }
     } catch (e) {
-      console.error(`✖ Asistente: proveedor de IA no disponible (${(e as Error).message?.slice(0, 120)})`);
+      // El PROVEEDOR y el MODELO van en el log a propósito: con "proveedor de IA no disponible"
+      // a secas y el mensaje cortado a 120 caracteres, diagnosticar esto desde producción era
+      // adivinar — no se distinguía una llave muerta de un modelo que el proveedor ya no sirve,
+      // que es justo la diferencia entre reponer una credencial y cambiar ASSISTANT_MODEL.
+      console.error(
+        `✖ Asistente: proveedor de IA no disponible [${env.AI_PROVIDER}/${model}] (${(e as Error).message?.slice(0, 300)})`,
+      );
+      degradado = true;
       if (!reply) {
+        // NO decir "escríbele a soporte": esto se lee DENTRO de la ventana que es el soporte, y
+        // mandar ahí a quien ya está ahí es dejarlo sin salida. El canal real (WhatsApp o correo)
+        // lo pone la UI como un botón, que es la única capa que sabe cuál hay configurado.
         reply =
           "Estoy teniendo un problema para responder en este momento 🙏. Reintenta en unos segundos, por favor. " +
           (context.nextStep ? `Mientras tanto, tu siguiente paso es: ${context.nextStep.label}. ` : "") +
-          "Si sigue sin funcionar, escríbele a soporte y lo vemos.";
+          "Si sigue sin funcionar, acá abajo te dejo cómo hablar con una persona del equipo.";
       }
     }
 
@@ -451,6 +533,9 @@ AUTONOMÍA:
       mode: context.mode,
       wrote,
       qa,
+      // La UI ofrece una persona de verdad cuando esto viene en true. Es un campo y no una
+      // frase dentro de `reply` porque el canal de soporte lo sabe el front, no la API.
+      degradado,
       // Lo que sale hacia la UI pasa SIEMPRE por la lista blanca (rutas que existen,
       // `data-copilot` conocidos, enlaces https): la UI no vuelve a validar nada.
       actions: sanitizeActions(acciones),

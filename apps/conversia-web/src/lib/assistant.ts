@@ -19,16 +19,33 @@ export function openAssistant(detail?: { topic?: string; context?: string }): vo
   if (handled) return;
 
   // Fallback: no hay asistente disponible en esta cuenta → enlace de soporte humano.
-  const wa = process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP;
-  const msg = detail?.context
-    ? `Hola, necesito ayuda: ${detail.context}`
-    : "Hola, vengo del panel de Conversia y necesito ayuda";
-  const url = wa
-    ? `https://wa.me/${wa}?text=${encodeURIComponent(msg)}`
-    : `mailto:soporte@conversia.cl?subject=${encodeURIComponent("Ayuda · panel Conversia")}&body=${encodeURIComponent(msg)}`;
+  const { url } = contactoDeSoporte(detail?.context);
   try {
     window.open(url, "_blank", "noopener");
   } catch {
     /* noop */
   }
+}
+
+/**
+ * CÓMO ALCANZAR A UNA PERSONA cuando Convi no puede responder.
+ *
+ * Existe porque el mensaje de respaldo decía "escríbele a soporte"… dentro de la ventana que ES
+ * el soporte. Quien lo leía quedaba sin ninguna salida: ni un número, ni un correo, ni un botón.
+ * Un callejón sin salida justo en el momento en que algo ya falló.
+ *
+ * SIEMPRE devuelve un canal: WhatsApp si está configurado, y si no, correo. Nunca `null`, porque
+ * un "no hay canal" en este punto deja al dueño exactamente donde estaba.
+ */
+export function contactoDeSoporte(contexto?: string): { url: string; etiqueta: string; canal: "whatsapp" | "correo" } {
+  const wa = process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP;
+  const msg = contexto ? `Hola, necesito ayuda: ${contexto}` : "Hola, vengo del panel de Conversia y necesito ayuda";
+  if (wa) {
+    return { url: `https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, etiqueta: "Escribir a soporte por WhatsApp", canal: "whatsapp" };
+  }
+  return {
+    url: `mailto:soporte@conversia.cl?subject=${encodeURIComponent("Ayuda · panel Conversia")}&body=${encodeURIComponent(msg)}`,
+    etiqueta: "Escribir a soporte por correo",
+    canal: "correo",
+  };
 }

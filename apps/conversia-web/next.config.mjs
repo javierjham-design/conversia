@@ -15,7 +15,11 @@ const csp = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  "img-src 'self' data: blob: https://graph.facebook.com https://*.fbcdn.net https://*.cdninstagram.com",
+  // El host de la API va en img-src porque el LOGO del mini-sitio público se sirve desde ahí
+  // (/public/n/:slug/logo). Sin esto el <img> lo bloquea la CSP y la página sale sin la marca
+  // del cliente, en silencio y solo en producción. `blob:` cubre la vista previa del panel,
+  // que pide la imagen con el token y la convierte en blob local.
+  `img-src 'self' data: blob: ${api} ${prodApiFallback} https://graph.facebook.com https://*.fbcdn.net https://*.cdninstagram.com`,
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   // 'unsafe-eval' SOLO en dev: el runtime de react-refresh de Next lo exige y sin él

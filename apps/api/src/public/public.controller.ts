@@ -1,5 +1,5 @@
-import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, NotFoundException, Param, Post, Query, Req } from "@nestjs/common";
-import type { Request } from "express";
+import { BadRequestException, Body, Controller, Get, HttpException, HttpStatus, NotFoundException, Param, Post, Query, Req, Res } from "@nestjs/common";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
 import { getEnv, brandFromOrigin } from "@conversia/config";
@@ -8,6 +8,18 @@ import { PrismaService } from "../prisma.service";
 import { RateLimitService } from "../common/rate-limit";
 import { INDUSTRIES } from "../common/industries";
 import { packUnitForBrand } from "../billing/pack-unit";
+
+/**
+ * ¿Este negocio tiene mini-sitio VISIBLE para cualquiera? Es la única puerta que separa los datos
+ * de una organización de internet, así que vive en una función y NO repetida en cada ruta: el
+ * día que alguien agregue otra ruta pública del mini-sitio y copie mal la condición, publica sin
+ * querer el negocio de un cliente. El logo entra por acá igual que la página.
+ */
+export function miniSitioPublicado(org: { brand?: string | null; settings?: unknown } | null): boolean {
+  if (!org || org.brand !== "conversia") return false;
+  const ms = (((org.settings ?? {}) as Record<string, unknown>).miniSite ?? {}) as Record<string, unknown>;
+  return ms.enabled === true;
+}
 
 /**
  * API PÚBLICA para la web (www.tubot.cl). Sin auth. Precios públicos + captura de
@@ -155,7 +167,7 @@ export class PublicController {
     const settings = (org?.settings ?? {}) as Record<string, any>;
     const ms = (settings.miniSite ?? {}) as Record<string, any>;
     // 404 si no existe, no es de Conversia, o el dueño no la publicó.
-    if (!org || org.brand !== "conversia" || ms.enabled !== true) {
+    if (!org || !miniSitioPublicado(org)) {
       throw new NotFoundException("Esta página no existe o no está publicada.");
     }
     const general = (settings.general ?? {}) as Record<string, any>;
@@ -179,10 +191,19 @@ export class PublicController {
       services = rows.map((r) => ({ name: r.name, price: r.price != null ? Number(r.price) : null, currency: r.currency, description: r.description ?? null }));
     }
 
+    // ¿Hay logo que mostrar? Se responde SOLO el sí/no: los bytes van por su propia ruta, para
+    // no inflar este JSON (que es cacheable y lo pide cada visita) con una imagen en base64.
+    // `content` no se selecciona acá — la regla del repo es que esa columna se lee únicamente
+    // en el endpoint que sirve la imagen.
+    const logo = await admin.file
+      .findFirst({ where: { organizationId: org.id, key: `${org.id}/branding/logo` }, select: { id: true } })
+      .catch(() => null);
+
     return {
       slug,
       name: org.name,
       rubro,
+      logo: Boolean(logo),
       tagline: ms.tagline ? String(ms.tagline) : null,
       about: ms.about ? String(ms.about) : null,
       whatsapp: waLink ? { number: waNumber, link: waLink } : null,
@@ -196,6 +217,37 @@ export class PublicController {
       },
       accent: general.accent ? String(general.accent) : null,
     };
+  }
+
+  /**
+   * Logo del negocio para su mini-sitio público. Sin auth, igual que la página — y con EXACTAMENTE
+   * la misma puerta (`miniSitioPublicado`): si el dueño no publicó, esto es un 404. Servir el logo
+   * de un sitio despublicado filtraría la marca de un cliente que todavía no salió al aire.
+   *
+   * Los bytes viven en `files.content` (base64). La consulta va SIEMPRE acotada por
+   * `organizationId` además de por la clave: la clave la arma el servidor, pero el día que eso
+   * cambie, el filtro por organización es lo que impide servir el archivo de otro tenant.
+   */
+  @Get("n/:slug/logo")
+  async miniSiteLogo(@Param("slug") slug: string, @Res() res: Response) {
+    const admin = this.prisma.admin;
+    const org = await admin.organization.findUnique({ where: { slug }, select: { id: true, brand: true, settings: true } });
+    if (!org || !miniSitioPublicado(org)) {
+      res.status(404).json({ message: "Esta página no existe o no está publicada." });
+      return;
+    }
+    const file = await admin.file
+      .findFirst({ where: { organizationId: org.id, key: `${org.id}/branding/logo` }, select: { mime: true, content: true } })
+      .catch(() => null);
+    if (!file?.content) {
+      res.status(404).json({ message: "Sin logo" });
+      return;
+    }
+    res.setHeader("content-type", file.mime ?? "image/png");
+    // Pública y cacheable: es una imagen de una página pública. El `serveImage` del panel usa
+    // `private` porque ahí la misma ruta devuelve cosas distintas según quién pregunte.
+    res.setHeader("cache-control", "public, max-age=300, stale-while-revalidate=86400");
+    res.send(Buffer.from(file.content, "base64"));
   }
 
   /** Solicitud de demo desde la web ("Empezar"/"Solicitar demo"). Rate-limited. */
