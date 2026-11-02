@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolRegistry, buildCoreTools } from "./index.js";
 
 // Reproduce el caso Margarita (23-oct-2026): el bot agendó 09:15, y un "ok" ~13 min después
@@ -127,5 +127,43 @@ describe("createAppointment — guardia anti doble-agendamiento", () => {
     expect(JSON.parse(r.content).ok).toBe(true);
     expect(scheduling.appts).toHaveLength(1);
     expect(scheduling.appts[0].start).toBe(`${DAY}T12:15:00.000Z`);
+  });
+});
+
+// Caso Víctor (2-nov-2026): el bot ofreció horas, el paciente demoró ~40 min en elegir y la hora
+// ya se había tomado → el bot se desdijo ("no disponible"). Fijamos (1) que confirmar una hora
+// vencida NO agende a ciegas y pida reconsultar, y (2) que getAvailability advierta que las horas
+// no quedan reservadas y que no se repitan de memoria.
+describe("horas que vencen entre la oferta y la confirmación (caso Víctor)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("getAvailability avisa que las horas NO quedan reservadas y que hay que reconsultar antes de confirmar", async () => {
+    const reg = new ToolRegistry();
+    for (const t of buildCoreTools()) reg.register(t);
+    const ctx = makeCtx(makeScheduling(), "conv-fresh");
+    const r = await reg.execute("getAvailability", { professionalId: "p1", fromDate: DAY, toDate: DAY }, ctx);
+    const out = JSON.parse(r.content);
+    expect(out.nota).toContain("NO quedan reservadas");
+    expect(out.nota).toMatch(/vuelve a llamar getAvailability ANTES de confirmar/i);
+  });
+
+  it("confirmar una hora cuya lista YA venció (TTL 10 min) no agenda: pide reconsultar (slotExpired)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-02T12:00:00-03:00")); // la oferta
+    const scheduling = makeScheduling();
+    const reg = new ToolRegistry();
+    for (const t of buildCoreTools()) reg.register(t);
+    const ctx = makeCtx(scheduling, "conv-victor");
+    const horas = await offerAndGetIds(reg, ctx);
+    const elegida = horas[0]!; // la hora que el paciente elegirá
+
+    // El paciente responde 11 minutos después (> TTL de 10 min): la lista venció.
+    vi.setSystemTime(new Date("2026-11-02T12:11:00-03:00"));
+    const r = await reg.execute("createAppointment", { slotId: elegida.id }, ctx);
+    const out = JSON.parse(r.content);
+
+    expect(out.slotExpired).toBe(true);
+    expect(out.error).toMatch(/vuelve a llamar getAvailability/i);
+    expect(scheduling.appts).toHaveLength(0); // NO se agendó a ciegas una hora vencida
   });
 });
