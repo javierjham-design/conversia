@@ -1,4 +1,5 @@
 import { withTenant } from "@conversia/database";
+import { brandOf, resolvePersonalization } from "@conversia/config";
 import { getFreshOAuthToken, NoConnectionError, ReauthorizeError } from "./oauth-tokens.js";
 
 /**
@@ -14,6 +15,50 @@ const GCAL = "https://www.googleapis.com/calendar/v3";
 interface CalendarConfig {
   calendarId: string;
   calendarSync: boolean;
+}
+
+/** Lo que hace falta para armar el evento. Pura a propósito: se prueba sin red ni BD. */
+export interface CalendarEventInput {
+  appointmentId: string;
+  contactName: string | null;
+  serviceName: string | null;
+  notes: string | null;
+  phone: string | null;
+  /** Términos del rubro: `contact` ("Paciente"/"Cliente"…) y `appointment` ("Cita"/"Reserva"…). */
+  vocabulary: { contact?: string; appointment?: string };
+  /** Nombre de la MARCA de la org (TuBot / Conversia), no un literal. */
+  brandName: string;
+  startsAt: Date;
+  endsAt: Date;
+  timezone: string;
+  cancelled: boolean;
+}
+
+/**
+ * Texto del evento de Google Calendar.
+ *
+ * Antes estaba fijo: "Cita: {nombre}", con "Paciente" cuando no había nombre y "Creada por
+ * TuBot" en la descripción. En una barbería no corresponde "Paciente" y en Conversia no
+ * corresponde "TuBot" — el cliente final lee esto en su teléfono.
+ *
+ * `extendedProperties.private.conversiaAppointmentId` marca los eventos que creamos
+ * nosotros. Es la pieza que habilita las etapas siguientes: permite NO contar nuestra propia
+ * cita como hora ocupada (si no, al reagendar se bloquearía a sí misma) y distinguir, en el
+ * sondeo de cambios, lo nuestro de los eventos personales del dueño.
+ */
+export function buildCalendarEvent(i: CalendarEventInput): Record<string, unknown> {
+  const termCliente = (i.vocabulary.contact || "Cliente").trim();
+  const termCita = (i.vocabulary.appointment || "Cita").trim();
+  const nombre = (i.contactName || "").trim() || termCliente;
+  const servicio = (i.serviceName || "").trim();
+  return {
+    summary: `${servicio || termCita} · ${nombre}`,
+    description: [i.notes, i.phone ? `Tel: ${i.phone}` : null, `Agendada por ${i.brandName}`].filter(Boolean).join("\n"),
+    start: { dateTime: i.startsAt.toISOString(), timeZone: i.timezone },
+    end: { dateTime: i.endsAt.toISOString(), timeZone: i.timezone },
+    extendedProperties: { private: { conversiaAppointmentId: i.appointmentId } },
+    ...(i.cancelled ? { status: "cancelled" } : {}),
+  };
 }
 
 async function getCalendarConfig(organizationId: string): Promise<CalendarConfig | null> {
@@ -58,9 +103,15 @@ export async function syncAppointmentToGoogle(
     throw err;
   }
 
-  const appt = await withTenant(organizationId, (tx) =>
-    tx.appointment.findUnique({ where: { id: payload.appointmentId }, include: { contact: true } }),
-  );
+  const { appt, org, serviceName } = await withTenant(organizationId, async (tx) => {
+    const appt = await tx.appointment.findUnique({ where: { id: payload.appointmentId }, include: { contact: true } });
+    if (!appt) return { appt: null, org: null, serviceName: null };
+    const [org, service] = await Promise.all([
+      tx.organization.findUnique({ where: { id: organizationId }, select: { brand: true, settings: true } }),
+      appt.serviceId ? tx.service.findUnique({ where: { id: appt.serviceId }, select: { name: true } }) : Promise.resolve(null),
+    ]);
+    return { appt, org, serviceName: service?.name ?? null };
+  });
   if (!appt) return;
   const meta = (appt.meta as Record<string, any>) ?? {};
   const eventId: string | undefined = meta.googleEventId;
@@ -86,14 +137,24 @@ export async function syncAppointmentToGoogle(
     return;
   }
 
-  const contactName = [appt.contact?.firstName, appt.contact?.lastName].filter(Boolean).join(" ") || "Paciente";
-  const body = JSON.stringify({
-    summary: `Cita: ${contactName}`,
-    description: [appt.notes, appt.contact?.phone ? `Tel: ${appt.contact.phone}` : null, "Creada por TuBot"].filter(Boolean).join("\n"),
-    start: { dateTime: appt.startsAt.toISOString(), timeZone: appt.timezone },
-    end: { dateTime: appt.endsAt.toISOString(), timeZone: appt.timezone },
-    ...(appt.status === "CANCELLED" ? { status: "cancelled" } : {}),
-  });
+  const { vocabulary } = resolvePersonalization((org?.settings as Record<string, any> | null) ?? null);
+  const body = JSON.stringify(
+    buildCalendarEvent({
+      appointmentId: appt.id,
+      contactName: [appt.contact?.firstName, appt.contact?.lastName].filter(Boolean).join(" ") || null,
+      // El nombre del servicio sale de la tabla y, si la cita no lo tiene vinculado, de meta
+      // (el bot y los webhooks no siempre escriben `serviceId`).
+      serviceName: serviceName ?? ((meta.serviceName as string | undefined) ?? null),
+      notes: appt.notes,
+      phone: appt.contact?.phone ?? null,
+      vocabulary,
+      brandName: brandOf(org).name,
+      startsAt: appt.startsAt,
+      endsAt: appt.endsAt,
+      timezone: appt.timezone,
+      cancelled: appt.status === "CANCELLED",
+    }),
+  );
 
   const res = eventId
     ? await fetch(`${calendarBase}/${encodeURIComponent(eventId)}`, { method: "PATCH", headers, body, signal: AbortSignal.timeout(10_000) })

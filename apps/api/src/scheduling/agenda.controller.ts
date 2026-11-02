@@ -3,9 +3,11 @@ import { z } from "zod";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, computeNativeSlots } from "@conversia/scheduling";
 import { PrismaService } from "../prisma.service";
+import { QueueService } from "../queues";
 import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
+import { enqueueCalendarMirror, mirrorActionForStatus } from "./calendar-mirror";
 
 const STATUS_MAP: Record<string, string> = { pending: "PENDING", confirmed: "CONFIRMED", cancelled: "CANCELLED", rescheduled: "RESCHEDULED", completed: "COMPLETED", no_show: "NO_SHOW" };
 
@@ -41,7 +43,10 @@ function startOfLocalDay(offset: string): Date {
  */
 @Controller("agenda")
 export class AgendaController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private queues: QueueService,
+  ) {}
 
   /** Qué proveedor de agenda está activo (nativo por defecto; externo si hay conexión). */
   @Get("status")
@@ -366,7 +371,7 @@ export class AgendaController {
       .object({ contactId: z.string().min(1), professionalId: z.string().optional(), serviceId: z.string().optional(), startsAt: z.string(), endsAt: z.string(), notes: z.string().max(1000).optional() })
       .safeParse(body);
     if (!p.success) throw new BadRequestException("Datos de cita inválidos");
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+    const appt = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       // N1 — guarda los nombres en meta al crear (ficha del cliente y otros consumidores de meta).
       const [pro, svc] = await Promise.all([
         p.data.professionalId ? tx.professional.findUnique({ where: { id: p.data.professionalId }, select: { name: true } }) : Promise.resolve(null),
@@ -390,6 +395,10 @@ export class AgendaController {
         },
       });
     });
+    // Espejo a Google: hasta ahora solo lo encolaba el bot, así que una cita creada desde
+    // el panel no aparecía nunca en el calendario del dueño.
+    await enqueueCalendarMirror(this.prisma, this.queues, ctx.organizationId, appt.id, "upsert");
+    return appt;
   }
 
   @Patch("appointments/:id")
@@ -399,7 +408,7 @@ export class AgendaController {
       .object({ startsAt: z.string().optional(), endsAt: z.string().optional(), status: z.enum(["PENDING", "CONFIRMED", "CANCELLED", "RESCHEDULED", "COMPLETED", "NO_SHOW"]).optional(), notes: z.string().max(1000).optional() })
       .safeParse(body);
     if (!p.success) throw new BadRequestException("Datos inválidos");
-    return this.prisma.withTenant(ctx.organizationId, (tx) =>
+    const updated = await this.prisma.withTenant(ctx.organizationId, (tx) =>
       tx.appointment.update({
         where: { id },
         data: {
@@ -408,7 +417,12 @@ export class AgendaController {
           ...(p.data.status ? { status: p.data.status } : {}),
           ...(p.data.notes !== undefined ? { notes: p.data.notes } : {}),
         },
-      }).then(() => ({ ok: true })),
+        select: { id: true, status: true },
+      }),
     );
+    // Mover, cancelar o editar desde el panel también va a Google. La acción sale del estado
+    // en que QUEDÓ la cita (no del que vino en el body: puede no traer `status`).
+    await enqueueCalendarMirror(this.prisma, this.queues, ctx.organizationId, updated.id, mirrorActionForStatus(updated.status));
+    return { ok: true };
   }
 }

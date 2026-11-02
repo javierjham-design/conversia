@@ -1,4 +1,4 @@
-import { getEnv } from "@conversia/config";
+import { getEnv, googleOAuthAppOfConnection, googleOAuthCredentials } from "@conversia/config";
 import { withTenant } from "@conversia/database";
 import { decryptCredential, encryptCredential } from "./credentials.js";
 
@@ -17,10 +17,17 @@ interface StoredTokens {
 
 type OAuthProvider = "google" | "hubspot";
 
-function tokenEndpoint(provider: OAuthProvider): { url: string; clientId: string; clientSecret: string } {
+/**
+ * Credenciales con las que refrescar. Para Google salen de la CONEXIÓN (`config.oauthApp`),
+ * no de la marca: un token emitido con la app de siempre se tiene que refrescar con esa
+ * misma app, o al cargar las credenciales de Conversia se caerían las conexiones vivas.
+ * Una conexión sin `oauthApp` es anterior al cambio → app por defecto.
+ */
+function tokenEndpoint(provider: OAuthProvider, connConfig?: unknown): { url: string; clientId: string; clientSecret: string } {
   const env = getEnv();
   if (provider === "google") {
-    return { url: "https://oauth2.googleapis.com/token", clientId: env.GOOGLE_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET };
+    const creds = googleOAuthCredentials(googleOAuthAppOfConnection(connConfig), env);
+    return { url: "https://oauth2.googleapis.com/token", clientId: creds.clientId, clientSecret: creds.clientSecret };
   }
   return { url: "https://api.hubapi.com/oauth/v1/token", clientId: env.HUBSPOT_CLIENT_ID, clientSecret: env.HUBSPOT_CLIENT_SECRET };
 }
@@ -46,7 +53,7 @@ export async function getFreshOAuthToken(organizationId: string, provider: OAuth
     await markReauthorize(organizationId, provider, "Sin refresh_token: vuelve a conectar la cuenta");
     throw new ReauthorizeError(provider);
   }
-  const ep = tokenEndpoint(provider);
+  const ep = tokenEndpoint(provider, conn.config);
   const res = await fetch(ep.url, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },

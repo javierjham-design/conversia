@@ -20,7 +20,15 @@ import { decryptSecret, encryptSecret, maskSecret } from "../common/crypto";
 import { sendEmail as sendPlatformEmail } from "../common/email";
 import { hashApiKey } from "./developers.controller";
 import { validateOutboundUrl } from "../common/url-guard";
-import { getEnv } from "@conversia/config";
+import {
+  getEnv,
+  canUseFeature,
+  googleOAuthAppForBrand,
+  googleOAuthAppOfConnection,
+  googleOAuthCredentials,
+  grantedScopes,
+  missingScopesForFeature,
+} from "@conversia/config";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 
@@ -119,7 +127,11 @@ export class IntegrationsController {
       const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
       const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
-      const platformGoogleReady = Boolean(getEnv().GOOGLE_OAUTH_CLIENT_ID && getEnv().GOOGLE_OAUTH_CLIENT_SECRET);
+      // Qué app de Google corresponde a esta org (Conversia tiene la suya si está cargada) y
+      // si esas credenciales están realmente puestas en el servicio.
+      const googleOrg = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } });
+      const googleApp = googleConn ? googleOAuthAppOfConnection(googleConn.config) : googleOAuthAppForBrand(googleOrg?.brand, getEnv());
+      const platformGoogleReady = !googleOAuthCredentials(googleApp, getEnv()).missing;
       const hubspotConn = await tx.integrationConnection.findFirst({ where: { provider: "hubspot" } });
       const platformHubspotReady = Boolean(getEnv().HUBSPOT_CLIENT_ID && getEnv().HUBSPOT_CLIENT_SECRET);
 
@@ -241,6 +253,18 @@ export class IntegrationsController {
               calendarSync: Boolean((googleConn.config as any)?.calendarSync),
               lastSyncAt: googleConn.lastSyncAt,
               lastError: googleConn.lastError,
+              // Permisos REALMENTE otorgados, para que la UI pueda decir "Reconectar para dar
+              // permiso" en vez de dejar que la llamada falle con un 403 de Google. Una conexión
+              // anterior a este registro se asume con los 3 permisos viejos (ver google-oauth.ts),
+              // así que las cuentas de TuBot que ya andan no ven ningún aviso.
+              scopes: grantedScopes(googleConn.config),
+              app: googleApp,
+              permisos: {
+                calendar: canUseFeature(googleConn.config, "calendar"),
+                sheets: canUseFeature(googleConn.config, "sheets"),
+                faltanParaCalendar: missingScopesForFeature(googleConn.config, "calendar"),
+                faltanParaSheets: missingScopesForFeature(googleConn.config, "sheets"),
+              },
             }
           : null,
         automations: {
