@@ -347,7 +347,7 @@ AUTONOMÍA:
     userMessage: string,
     history: AIChatMessage[],
     route?: string,
-  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[] }> {
+  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[]; degradado: boolean }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
     // ROBUSTEZ (Bloque 3): el contexto se arma FUERA del loop de IA, pero un fallo suyo no debe
@@ -374,6 +374,10 @@ AUTONOMÍA:
     // el montaje a medias. Si no está configurado, cae en el de siempre.
     const model = resolveAssistantModel(env.AI_PROVIDER, env.ASSISTANT_MODEL || env.AI_DEFAULT_MODEL);
     let reply = "";
+    // ¿Esta respuesta es la de respaldo porque el proveedor de IA falló? La UI lo necesita para
+    // ofrecer una persona de verdad; detectarlo comparando el texto sería frágil y se rompería
+    // a la primera vez que alguien reescriba el mensaje.
+    let degradado = false;
     let wrote = false;
     let publicoAgente = false;
     const acciones: AssistantAction[] = [];
@@ -405,11 +409,15 @@ AUTONOMÍA:
       }
     } catch (e) {
       console.error(`✖ Asistente: proveedor de IA no disponible (${(e as Error).message?.slice(0, 120)})`);
+      degradado = true;
       if (!reply) {
+        // NO decir "escríbele a soporte": esto se lee DENTRO de la ventana que es el soporte, y
+        // mandar ahí a quien ya está ahí es dejarlo sin salida. El canal real (WhatsApp o correo)
+        // lo pone la UI como un botón, que es la única capa que sabe cuál hay configurado.
         reply =
           "Estoy teniendo un problema para responder en este momento 🙏. Reintenta en unos segundos, por favor. " +
           (context.nextStep ? `Mientras tanto, tu siguiente paso es: ${context.nextStep.label}. ` : "") +
-          "Si sigue sin funcionar, escríbele a soporte y lo vemos.";
+          "Si sigue sin funcionar, acá abajo te dejo cómo hablar con una persona del equipo.";
       }
     }
 
@@ -451,6 +459,9 @@ AUTONOMÍA:
       mode: context.mode,
       wrote,
       qa,
+      // La UI ofrece una persona de verdad cuando esto viene en true. Es un campo y no una
+      // frase dentro de `reply` porque el canal de soporte lo sabe el front, no la API.
+      degradado,
       // Lo que sale hacia la UI pasa SIEMPRE por la lista blanca (rutas que existen,
       // `data-copilot` conocidos, enlaces https): la UI no vuelve a validar nada.
       actions: sanitizeActions(acciones),
