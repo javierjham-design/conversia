@@ -24,6 +24,30 @@ export class GoogleBusyService {
     private tokens: OAuthTokenService,
   ) {}
 
+  /**
+   * Borra la caché de horas ocupadas de una organización. La usa el botón "sincronizar
+   * ahora": apretarlo tiene que mostrar el estado de Google REAL, no el de hasta 90 s atrás.
+   *
+   * Va con SCAN (no KEYS) para no bloquear Redis, y acotado: el botón está limitado a una
+   * vez por minuto, así que el costo es irrelevante.
+   */
+  async invalidate(organizationId: string): Promise<number> {
+    const patron = `conversia:gcal:busy:${organizationId}:*`;
+    let cursor = "0";
+    let borradas = 0;
+    try {
+      for (let i = 0; i < 50; i++) {
+        const [next, keys] = await this.redis.scan(cursor, "MATCH", patron, "COUNT", 200);
+        if (keys.length) borradas += await this.redis.del(...keys);
+        cursor = next;
+        if (cursor === "0") break;
+      }
+    } catch {
+      /* si Redis no responde, la caché caduca sola en 90 s */
+    }
+    return borradas;
+  }
+
   private cache(): NonNullable<GoogleBusyDeps["cache"]> {
     return {
       get: (k) => this.redis.get(k),

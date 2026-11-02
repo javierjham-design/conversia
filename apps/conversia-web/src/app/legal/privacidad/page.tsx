@@ -45,27 +45,55 @@ export default function Privacidad() {
         asegurarse de contar con base legal y consentimiento para contactar a sus clientes finales.
       </p>
 
-      <h2>5. Proveedores (encargados)</h2>
+      {/* Sección exigida por Google para verificar la app que pide permisos de Calendar:
+          qué datos se leen, para qué, y la declaración de Limited Use. Debe quedar en una
+          URL pública y estable, porque es la que se declara en la consola de Google. */}
+      <h2 id="google">5. Google Calendar (uso de datos de Google)</h2>
+      <p>
+        Si usted conecta su cuenta de Google Calendar, pedimos los permisos mínimos para que su agenda funcione:{" "}
+        <em>ver</em> y <em>administrar eventos</em> de los calendarios que usted elija. La conexión es voluntaria y se puede
+        desconectar en cualquier momento desde la Agenda, lo que revoca nuestro acceso.
+      </p>
+      <p><strong>Qué leemos:</strong> los eventos y las horas ocupadas únicamente de los calendarios que usted selecciona.</p>
+      <p>
+        <strong>Para qué:</strong> solo para agendar sin choques. Las horas que usted ya tiene ocupadas en Google dejan de
+        ofrecerse a sus clientes, y las citas tomadas en Conversia aparecen en su calendario. No leemos ningún otro calendario
+        ni otro servicio de Google.
+      </p>
+      <p>
+        <strong>Qué NO hacemos:</strong> no usamos los datos de Google para publicidad ni para perfilar personas, no los
+        vendemos ni los cedemos a terceros con fines comerciales, y no los usamos para entrenar modelos de inteligencia
+        artificial. El contenido de sus eventos personales no se muestra en el panel: solo el bloque de tiempo ocupado.
+      </p>
+      <p>
+        El uso y la transferencia de la información recibida de las API de Google se ajusta a la{" "}
+        <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">
+          Google API Services User Data Policy
+        </a>
+        , incluidos los requisitos de uso limitado (<em>Limited Use requirements</em>).
+      </p>
+
+      <h2>6. Proveedores (encargados)</h2>
       <p>
         Nos apoyamos en proveedores que tratan datos por nuestra cuenta bajo obligaciones de confidencialidad y seguridad, entre
         ellos: alojamiento e infraestructura en la nube, pasarelas de pago, proveedores de modelos de inteligencia artificial y
         servicio de correo transaccional. Solo acceden a lo necesario para su función.
       </p>
 
-      <h2>6. Inteligencia artificial</h2>
+      <h2>7. Inteligencia artificial</h2>
       <p>
         El contenido de las conversaciones puede enviarse a proveedores de IA para generar respuestas. Seleccionamos proveedores
         con compromisos de confidencialidad y, cuando está disponible, de no uso de los datos para entrenar sus modelos. No
         vendemos datos personales.
       </p>
 
-      <h2>7. Transferencias internacionales</h2>
+      <h2>8. Transferencias internacionales</h2>
       <p>
         Algunos proveedores pueden alojar o procesar datos fuera de Chile. En esos casos adoptamos resguardos razonables para
         proteger la información conforme a la normativa aplicable.
       </p>
 
-      <h2>8. Conservación</h2>
+      <h2>9. Conservación</h2>
       <p>
         Conservamos los datos mientras exista la cuenta y por los plazos necesarios para cumplir obligaciones legales, contables
         y de seguridad. Los datos de las conversaciones se conservan según la configuración del Cliente y los plazos de retención
@@ -73,14 +101,14 @@ export default function Privacidad() {
         conservarlos.
       </p>
 
-      <h2>9. Seguridad</h2>
+      <h2>10. Seguridad</h2>
       <p>
         Aplicamos medidas técnicas y organizativas razonables: cifrado de credenciales, control de acceso por organización
         (aislamiento multiinquilino), verificación en dos pasos para administradores y registros de auditoría. Ningún sistema es
         100% infalible; ante un incidente relevante actuaremos conforme a la ley.
       </p>
 
-      <h2>10. Sus derechos</h2>
+      <h2>11. Sus derechos</h2>
       <p>
         Usted puede ejercer los derechos de acceso, rectificación, cancelación (eliminación) y oposición respecto de sus datos,
         así como solicitar información sobre su tratamiento, escribiendo a{" "}
@@ -89,22 +117,22 @@ export default function Privacidad() {
         solicitud hacia él.
       </p>
 
-      <h2>11. Cookies</h2>
+      <h2>12. Cookies</h2>
       <p>
         Usamos almacenamiento local y cookies estrictamente necesarias para iniciar sesión y mantener su preferencia de tema e
         idioma. No usamos cookies de publicidad de terceros en el panel.
       </p>
 
-      <h2>12. Menores</h2>
+      <h2>13. Menores</h2>
       <p>El Servicio está dirigido a negocios y no a menores de edad. No recopilamos conscientemente datos de menores.</p>
 
-      <h2>13. Cambios</h2>
+      <h2>14. Cambios</h2>
       <p>
         Podemos actualizar esta Política. Los cambios relevantes se comunicarán por el Servicio o por correo. La fecha de última
         actualización figura al inicio.
       </p>
 
-      <h2>14. Contacto</h2>
+      <h2>15. Contacto</h2>
       <p>
         Responsable de datos: {LEGAL.razonSocial}. Consultas y ejercicio de derechos:{" "}
         <a href={`mailto:${LEGAL.emailPrivacidad}`}>{LEGAL.emailPrivacidad}</a>.

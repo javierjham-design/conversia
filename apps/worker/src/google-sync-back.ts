@@ -285,11 +285,23 @@ export async function pullOrgCalendars(organizationId: string, overrides?: { fet
     resultados.push(r);
   }
 
-  // Guardar los tokens nuevos (los que fallaron conservan el anterior).
+  // Guardar los tokens nuevos (los que fallaron conservan el anterior) y el RESUMEN del
+  // sondeo: es lo que el botón "sincronizado hace X min" de la Agenda muestra al apretarlo
+  // ("3 cambios traídos de Google"). Sin guardarlo, la api no tendría de dónde sacar el dato.
   const siguientes = { ...guardados };
   for (const r of resultados) if (r.nextSyncToken) siguientes[r.calendarId] = r.nextSyncToken;
+  const lastPull = {
+    at: new Date().toISOString(),
+    movidas: resultados.reduce((a, r) => a + r.movidas, 0),
+    eliminadas: resultados.reduce((a, r) => a + r.eliminadas, 0),
+    calendarios: resultados.length,
+    errores: resultados.filter((r) => r.error).map((r) => `${r.calendarId}: ${r.error}`).slice(0, 3),
+  };
   await withTenant(organizationId, (tx) =>
-    tx.integrationConnection.update({ where: { id: conn.id }, data: { config: { ...((conn.config as object) ?? {}), syncTokens: siguientes } as object, lastSyncAt: new Date() } }),
+    tx.integrationConnection.update({
+      where: { id: conn.id },
+      data: { config: { ...((conn.config as object) ?? {}), syncTokens: siguientes, lastPull } as object, lastSyncAt: new Date() },
+    }),
   ).catch(() => undefined);
 
   const conCambios = resultados.filter((r) => r.movidas || r.eliminadas);
