@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode, type ComponentType } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity, AlertTriangle, BarChart3, Building2, CreditCard, LifeBuoy, LogOut, MessageSquare,
+  Activity, AlertTriangle, BarChart3, Bot, Building2, CreditCard, LifeBuoy, LogOut, MessageSquare,
   Package, PackagePlus, Rocket, ScrollText, ShieldCheck, Ticket, UserCog, Users2,
 } from "lucide-react";
 import { clearPlatformToken, getPlatformToken, padmin } from "@/lib/platform-api";
@@ -33,6 +33,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/plans", label: "Planes", Icon: Package },
       { href: "/admin/mensajeria", label: "Mensajería y costos", Icon: MessageSquare },
+      { href: "/admin/asistente", label: "Convi (copiloto)", Icon: Bot },
       { href: "/admin/packages", label: "Paquetes", Icon: PackagePlus },
       { href: "/admin/coupons", label: "Cupones", Icon: Ticket },
       { href: "/admin/billing", label: "Facturación", Icon: CreditCard },
