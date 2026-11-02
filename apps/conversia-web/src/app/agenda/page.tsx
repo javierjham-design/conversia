@@ -14,6 +14,10 @@ type Appt = {
   endsAt: string;
   notes: string | null;
   contact: { name: string; phone: string | null };
+  /** Etapa 3: el evento se borró en Google y la cita quedó para revisar (NO se canceló). */
+  googleChange?: { tipo?: string; cuando?: string } | null;
+  /** La cita está espejada en Google Calendar. */
+  enGoogle?: boolean;
 };
 type Pro = { id: string; name: string; workingHours?: { day: number; start: string; end: string }[] };
 type Svc = { id: string; name: string; durationMin: number };
@@ -219,10 +223,19 @@ function ListView({ appts, onAppt }: { appts: Appt[]; onAppt: (a: Appt) => void 
                   </div>
                   <div style={{ width: 3, alignSelf: "stretch", borderRadius: 3, background: STATUS_COLOR[a.status] ?? "var(--acc)" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{a.contact.name}</p>
+                    <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>
+                      {a.contact.name}
+                      {a.enGoogle ? <span className="text-dim" style={{ fontSize: 11, fontWeight: 400 }} title="Sincronizada con Google Calendar"> · 📅</span> : null}
+                    </p>
                     <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12 }}>
                       {[a.serviceName, a.professionalName].filter(Boolean).join(" · ") || "Cita"}{cancelled ? " · cancelada" : ""}
                     </p>
+                    {/* Etapa 3: el evento se borró en Google. La cita NO se canceló a propósito
+                        —un borrado por error dejaría a un cliente sin hora y sin aviso—, así que
+                        queda marcada para que una persona decida. */}
+                    {a.googleChange?.tipo === "eliminada_en_google" ? (
+                      <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--warn, #c90)", fontWeight: 600 }}>⚠ Eliminada en Google Calendar — revisar</p>
+                    ) : null}
                   </div>
                 </button>
               );
@@ -351,6 +364,19 @@ function ApptActions({ appt, onClose, onDone }: { appt: Appt; onClose: () => voi
     await patch({ startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), status: "RESCHEDULED" });
   }
 
+  /** Etapa 3 — resolver una cita cuyo evento se borró en Google. */
+  async function resolverGoogle(accion: "cancelar" | "recrear") {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api(`/agenda/appointments/${appt.id}/google-revision`, { method: "POST", body: JSON.stringify({ accion }) });
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  }
+
   const field: React.CSSProperties = { width: "100%", padding: "10px 12px", marginTop: 5, borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 };
   const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid var(--line)", background: "transparent", color: "var(--ink)", cursor: "pointer", fontSize: 14, marginTop: 8 };
 
@@ -365,6 +391,22 @@ function ApptActions({ appt, onClose, onDone }: { appt: Appt; onClose: () => voi
           {new Date(appt.startsAt).toLocaleString("es-CL", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} · {[appt.serviceName, appt.professionalName].filter(Boolean).join(" · ") || "Cita"}
         </p>
         {err ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{err}</p> : null}
+
+        {/* Etapa 3 — el evento se borró en Google y la cita quedó para revisar. Las dos
+            acciones son explícitas a propósito: un borrado por error en Google no puede
+            cancelarle la hora a un cliente sin que nadie lo decida. */}
+        {appt.googleChange?.tipo === "eliminada_en_google" ? (
+          <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: "1px solid var(--warn, #c90)" }}>
+            <p style={{ margin: "0 0 4px", fontSize: 13, fontWeight: 600 }}>Se eliminó en Google Calendar</p>
+            <p className="text-dim" style={{ margin: "0 0 10px", fontSize: 12, lineHeight: 1.5 }}>
+              La cita <strong>no se canceló</strong>. Si de verdad se canceló, cancélala acá; si fue un error, vuelve a crear el evento en Google.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => resolverGoogle("recrear")} disabled={busy} className="btn-accent" style={{ fontSize: 13, opacity: busy ? 0.6 : 1 }}>Volver a crear en Google</button>
+              <button onClick={() => resolverGoogle("cancelar")} disabled={busy} style={{ fontSize: 13, border: "1px solid var(--line)", background: "transparent", color: "var(--danger)", borderRadius: 10, padding: "8px 12px", cursor: "pointer" }}>Cancelar cita</button>
+            </div>
+          </div>
+        ) : null}
 
         {mode === "menu" ? (
           <>

@@ -366,6 +366,10 @@ export class AgendaController {
           endsAt: a.endsAt.toISOString(),
           notes: a.notes,
           contact: { name: [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(" ") || a.contact?.phone || "Sin nombre", phone: a.contact?.phone ?? null },
+          // Etapa 3 — si el evento se borró en Google, la cita NO se cancela: queda marcada
+          // para que una persona decida. El panel muestra el aviso y las dos acciones.
+          googleChange: (meta(a).googleChange as { tipo?: string; cuando?: string } | null) ?? null,
+          enGoogle: Boolean(meta(a).googleEventId),
         })),
       };
     });
@@ -449,5 +453,47 @@ export class AgendaController {
     // en que QUEDÓ la cita (no del que vino en el body: puede no traer `status`).
     await enqueueCalendarMirror(this.prisma, this.queues, ctx.organizationId, updated.id, mirrorActionForStatus(updated.status));
     return { ok: true };
+  }
+
+  /**
+   * ETAPA 3 — resolver una cita marcada "eliminada en Google".
+   *
+   * Borrar el evento en Google NO cancela la cita: un borrado por error dejaría a un cliente
+   * sin su hora y sin aviso. La cita queda marcada y acá el dueño elige qué pasó de verdad:
+   * - `cancelar`: sí, se canceló → se cancela en Conversia (y se avisa por los flujos de
+   *   siempre, igual que cualquier cancelación desde el panel).
+   * - `recrear`: fue un error → se vuelve a crear el evento en Google. El espejo hace PATCH,
+   *   recibe 404 porque el evento ya no existe y lo recrea solo.
+   */
+  @Post("appointments/:id/google-revision")
+  async resolverRevisionGoogle(@Param("id") id: string, @Body() body: unknown) {
+    const ctx = requireContext();
+    const p = z.object({ accion: z.enum(["cancelar", "recrear"]) }).safeParse(body);
+    if (!p.success) throw new BadRequestException("Acción inválida (cancelar | recrear)");
+
+    const cita = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.appointment.findUnique({ where: { id }, select: { id: true, meta: true } }));
+    if (!cita) throw new NotFoundException("Cita no encontrada");
+    const meta = ((cita.meta as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+
+    if (p.data.accion === "cancelar") {
+      await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+        await tx.appointment.update({ where: { id }, data: { status: "CANCELLED", meta: { ...meta, googleChange: null } as object } });
+        await tx.auditLog.create({
+          data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "appointment.cancel_after_google_delete", entityType: "appointment", entityId: id },
+        });
+      });
+      // El evento ya no está en Google, pero se encola igual: es idempotente (404 = hecho).
+      await enqueueCalendarMirror(this.prisma, this.queues, ctx.organizationId, id, "cancel");
+      return { ok: true, estado: "cancelada" };
+    }
+
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.appointment.update({ where: { id }, data: { meta: { ...meta, googleChange: null } as object } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "appointment.recreate_in_google", entityType: "appointment", entityId: id },
+      });
+    });
+    await enqueueCalendarMirror(this.prisma, this.queues, ctx.organizationId, id, "upsert");
+    return { ok: true, estado: "recreando" };
   }
 }

@@ -14,6 +14,17 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
       const { syncAppointmentToGoogle } = await import("./google-calendar.js");
       return syncAppointmentToGoogle(job.organizationId, job.payload as { appointmentId: string; action: "upsert" | "cancel" });
     }
+    case "calendar_pull": {
+      // Etapa 3 — trae a Conversia los cambios hechos EN Google. Con {all:true} abanica por
+      // organización (job repetible cada 5 min); si no, sondea una sola.
+      const { fanOutGoogleSyncBack, pullOrgCalendars } = await import("./google-sync-back.js");
+      if ((job.payload as { all?: boolean } | undefined)?.all) {
+        await fanOutGoogleSyncBack();
+        return;
+      }
+      await pullOrgCalendars(job.organizationId);
+      return;
+    }
     case "sheets_append": {
       const { appendSheetRow } = await import("./google-sheets.js");
       return appendSheetRow(job.organizationId, job.payload as { spreadsheetId: string; sheetName: string; values: string[] });

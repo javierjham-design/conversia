@@ -48,3 +48,33 @@ Formato corto: contexto → decisión → consecuencias. Fecha 2026-07-25 salvo 
 
 ## ADR-12 — Digital Dent y Clínica Demo como seeds JSON
 **Decisión**: `packages/database/seeds/*.json` cargados por `seed.ts` genérico. Cualquier cliente nuevo = un JSON más (o el onboarding UI de fase 7). Cero lógica condicionada por tenant en el código (verificable con grep).
+
+## ADR-13 — Google Calendar en dos sentidos: sondeo con `syncToken`, no `events.watch`
+**Contexto**: para traer a Conversia los cambios que el dueño hace en su Google Calendar (mover
+o borrar una cita) Google ofrece dos caminos: `events.watch` (Google nos avisa por webhook) o
+sondeo periódico con `events.list` + `syncToken`.
+
+**Decisión**: **sondeo cada 5 minutos por calendario vinculado**, con `syncToken` guardado en
+`integration_connections.config.syncTokens`; si Google responde 410 (token caducado) se reinicia
+con una ventana de ayer a +60 días.
+
+**Por qué no watch**: exige verificar el dominio del webhook ante Google y **renovar los canales
+antes de que caduquen**. Un canal vencido deja de avisar **en silencio** — nadie se entera hasta
+que un cliente reclama por una hora que ya no era. El sondeo se arregla solo si se cae, no
+depende de que Google pueda alcanzarnos y su retraso máximo (5 min) es irrelevante para una
+agenda. Costo: unas pocas llamadas por calendario cada 5 min, acotadas por `syncToken` (solo
+trae lo que cambió).
+
+**Decisión acompañante: borrar el evento en Google NO cancela la cita.** Queda marcada
+("eliminada en Google, revisar") con dos acciones explícitas en el panel: *Cancelar cita* y
+*Volver a crear en Google*. Un borrado por error —o un dedo torpe en el teléfono— no puede
+cancelarle la hora a un cliente sin que una persona lo decida. Mover sí se aplica solo: es una
+acción inequívoca y el riesgo de no aplicarla (recordatorio con la hora vieja) es peor.
+
+**Anti-bucle**: al escribir en Google se guarda el `updated` que devuelve la API en
+`appointment.meta.googleUpdated`; el sondeo descarta los eventos cuyo `updated` coincide. Sin
+eso: escribimos → el sondeo lo ve como cambio → actualiza la cita → el espejo escribe otra vez.
+
+**Alcance**: el sondeo está gateado a la marca **conversia**. Las cuentas de TuBot que hoy
+espejan a Google siguen funcionando igual: traerles cambios desde Google sería un comportamiento
+nuevo que nadie pidió.
