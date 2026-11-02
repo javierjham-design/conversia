@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { assistantMode, isWebOwner, resolveAssistantModel } from "./assistant.service";
+import { assistantMode, isWebOwner, modeloDeRespaldoDelAsistente, resolveAssistantModel } from "./assistant.service";
 
 describe("Asistente Conversia — guardas puras", () => {
   it("modo implementación mientras el checklist no está al 100%", () => {
@@ -28,5 +28,37 @@ describe("Asistente Conversia — guardas puras", () => {
     expect(resolveAssistantModel("openai", "claude-sonnet-4-6")).toBe("gpt-4o-mini");
     // mock: da igual (el MockAIProvider ignora el modelo).
     expect(resolveAssistantModel("mock", "lo-que-sea")).toBe("lo-que-sea");
+  });
+});
+
+/**
+ * HALLAZGO 1-nov: Convi caído con las llaves de IA habilitadas y los bots de los clientes
+ * respondiendo normal. La causa no eran las llaves: los bots pasan por `ResilientAIProvider`
+ * (3 intentos + modelo de respaldo + timeout) y Convi llamaba al proveedor A PELO. Un 429
+ * pasajero, una sobrecarga o —lo peor— un `ASSISTANT_MODEL` que el proveedor ya no sirve
+ * dejaban a Convi caído el 100% de las veces, para siempre, sin que nada lo notara.
+ *
+ * El respaldo tiene que respetar la familia del proveedor o volvemos al bug del 26-oct
+ * (mandarle un `claude-*` a OpenAI): `AI_FALLBACK_MODEL` trae `claude-haiku-4-5` por default,
+ * así que con AI_PROVIDER=openai hay que traducirlo, no pasarlo tal cual.
+ */
+describe("modeloDeRespaldoDelAsistente", () => {
+  it("con Anthropic usa el haiku de respaldo tal cual", () => {
+    expect(modeloDeRespaldoDelAsistente("anthropic", "claude-haiku-4-5", "claude-sonnet-4-6")).toBe("claude-haiku-4-5");
+  });
+
+  it("con OpenAI NO le manda el claude de respaldo (bug del 26-oct)", () => {
+    expect(modeloDeRespaldoDelAsistente("openai", "claude-haiku-4-5", "gpt-4o")).toBe("gpt-4o-mini");
+  });
+
+  it("si el respaldo coincide con el principal, no hay respaldo (reintentar el mismo modelo no es respaldo)", () => {
+    expect(modeloDeRespaldoDelAsistente("anthropic", "claude-sonnet-4-6", "claude-sonnet-4-6")).toBeUndefined();
+    // El caso real: provider openai, principal ya resuelto a gpt-4o-mini y respaldo claude-*
+    // que se traduce al MISMO gpt-4o-mini → no hay a dónde caer, solo reintentos.
+    expect(modeloDeRespaldoDelAsistente("openai", "claude-haiku-4-5", "gpt-4o-mini")).toBeUndefined();
+  });
+
+  it("sin AI_FALLBACK_MODEL configurado no inventa un respaldo", () => {
+    expect(modeloDeRespaldoDelAsistente("anthropic", "", "claude-sonnet-4-6")).toBeUndefined();
   });
 });
