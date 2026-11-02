@@ -27,6 +27,7 @@ import { MetaCrmWebhookController } from "./integrations/meta-crm-webhook.contro
 import { IntegrationsController } from "./integrations/integrations.controller";
 import { MetaController } from "./integrations/meta.controller";
 import { OAuthController } from "./integrations/oauth.controller";
+import { OAuthTokenService } from "./integrations/oauth-token.service";
 import { PublicApiController } from "./integrations/public-api.controller";
 import { OrganizationsController } from "./organizations/organizations.controller";
 import { OnboardingController } from "./organizations/onboarding.controller";
@@ -53,6 +54,7 @@ import { ChargingController, ChargingWebhookController } from "./charging/chargi
 import { CashController } from "./charging/cash.controller";
 import { ClarivaWebhookController } from "./scheduling/clariva-webhook.controller";
 import { AgendaController } from "./scheduling/agenda.controller";
+import { GoogleBusyService } from "./scheduling/google-busy.service";
 import { McpController } from "./mcp/mcp.controller";
 import { TenancyMiddleware } from "./tenancy/tenancy.middleware";
 import { UsersController } from "./users/users.controller";
@@ -106,7 +108,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
+  providers: [PrismaService, OAuthTokenService, GoogleBusyService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
