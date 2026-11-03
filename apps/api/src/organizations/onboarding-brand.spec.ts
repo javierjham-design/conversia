@@ -44,6 +44,7 @@ function fakePrisma(org: { brand?: string; name?: string; settings?: unknown } |
     // Dobles para el camino Conversia (checklist único): org vacía.
     service: { count: async () => 0 },
     professional: { findMany: async () => [] },
+    integrationConnection: { findFirst: async () => null },
     agentVersion: { count: async () => 0 },
     channelConnection: { count: async () => 0 },
     whatsappPhoneNumber: { count: async () => 0 },
@@ -104,6 +105,10 @@ describe("GET /onboarding — gate por marca", () => {
       "negocio",
       "servicios",
       "agenda",
+      // Etapa 4 de Google Calendar: paso RECOMENDADO (no bloqueante), por eso el total de
+      // bloqueantes sigue en 7. Esta lista exacta es a propósito: agregar un paso al montaje
+      // tiene que ser una decisión consciente, no un efecto colateral.
+      "google_calendar",
       "asistente",
       "whatsapp",
       "prueba",

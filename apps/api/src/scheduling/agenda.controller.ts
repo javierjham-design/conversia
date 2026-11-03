@@ -159,6 +159,36 @@ export class AgendaController {
     return { source: "native", slots, googleBusy: Boolean(externalBusy) };
   }
 
+  /**
+   * ETAPA 4 — horas OCUPADAS en Google, para pintarlas en gris en la agenda.
+   *
+   * Sin esto el dueño ve un hueco vacío donde el bot no ofrece nada y concluye que la
+   * agenda está rota. Mostrar el bloque explica por qué esa hora no se ofrece.
+   *
+   * **Nunca devuelve el título del evento**, solo el intervalo: lo que el dueño tenga
+   * anotado en su calendario personal es suyo, y el panel lo pueden ver otros usuarios de
+   * la cuenta (recepción, por ejemplo).
+   */
+  @Get("google-busy")
+  async googleBusyBlocks(@Query("from") from?: string, @Query("to") to?: string) {
+    const ctx = requireContext();
+    const gte = from ? new Date(from) : new Date();
+    const lte = to ? new Date(to) : new Date(Date.now() + 8 * 24 * 3600 * 1000);
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { timezone: true } });
+    const externalBusy = await this.googleBusy.forOrg(ctx.organizationId, org?.timezone ?? "America/Santiago").catch(() => undefined);
+    if (!externalBusy) return { busy: [] as Array<{ professionalId: string; start: string; end: string }> };
+
+    const pros = await this.prisma.withTenant(ctx.organizationId, (tx) => tx.professional.findMany({ where: { active: true }, select: { id: true } }));
+    const fromDate = gte.toISOString().slice(0, 10);
+    const toDate = lte.toISOString().slice(0, 10);
+    const busy: Array<{ professionalId: string; start: string; end: string }> = [];
+    for (const p of pros) {
+      const suyas = await externalBusy({ professionalId: p.id, from: fromDate, to: toDate });
+      for (const b of suyas) busy.push({ professionalId: p.id, start: b.start, end: b.end });
+    }
+    return { busy };
+  }
+
   // ------------------------------ Config ------------------------------
   @Get("config")
   async getConfig() {

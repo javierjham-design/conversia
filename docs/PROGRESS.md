@@ -433,8 +433,35 @@ Rama `feature/contacts` (PR aparte). Objetivo: capturar el **máximo** de datos 
 - `apps/mock-clariva`: servidor Express del contrato (slots, citas, 409 doble reserva).
 - `apps/web` (Next 15 + Tailwind 4): login + bandeja funcional (chat, IA/humano).
 - `scripts/simulate-inbound.mjs`: simulador de mensajes formato Meta.
-- `docs/`: ARCHITECTURE (diagramas mermaid + flujos), MULTITENANCY, DECISIONS (12 ADRs), DATA_MODEL, SECURITY, AGENTS, WORKFLOWS, WHATSAPP, SCHEDULING, CLARIVA (contrato), ROADMAP (fases+backlog), TESTING, DEPLOYMENT (+costos), API, INTEGRATIONS, BILLING, CHANGELOG.
+- `docs/`: ARCHITECTURE (diagramas mermaid + flujos), MULTITENANCY, DECISIONS (13 ADRs), DATA_MODEL, SECURITY, AGENTS, WORKFLOWS, WHATSAPP, SCHEDULING, CLARIVA (contrato), ROADMAP (fases+backlog), TESTING, DEPLOYMENT (+costos), API, INTEGRATIONS, BILLING, CHANGELOG.
 
 **Validación**: pnpm install OK; prisma validate/generate y typecheck/test ejecutados al cierre de la sesión (ver resultado en el informe).
 
 **Deuda/pendientes inmediatos**: ver "Próximos 10 tickets" en ROADMAP.md. No hay BD levantada aún en esta máquina (sin Docker): primer paso de la próxima sesión = levantar Postgres/Redis y correr migrate+setup+seed+simulador.
+
+
+## Google Calendar en dos sentidos (5 etapas, 2026-11-02)
+
+Sincronización bidireccional de la agenda nativa con Google Calendar, pensada para los
+clientes de Conversia (barberías, estética, kinesiología, dental). **TuBot no cambia**: las
+cuentas que hoy espejan a Google con `calendarId` + `calendarSync` siguen funcionando igual,
+sin reconectar, y el sondeo de cambios está gateado a la marca `conversia`.
+
+| Etapa | PR | Qué trae |
+| --- | --- | --- |
+| 0 — Base | #602 | Permisos por función (Calendar sin pedir planillas) + app de Google por marca + espejo también desde el panel + texto del evento con el vocabulario del rubro y `conversiaAppointmentId` |
+| 1 — Por profesional | #603 | `config.calendars[proId]`, validación en el servidor, el worker escribe en el calendario de cada persona y mueve el evento al cambiar de profesional |
+| 2 — Horas ocupadas | #604 | El bot y el panel no ofrecen horas ocupadas en Google; caché 90 s compartida; re-verificación sin caché antes de confirmar |
+| 3 — Vuelta de Google | #605 | Sondeo cada 5 min con `syncToken` (ADR-13); mover se aplica, borrar marca para revisar; anti-bucle por `updated` |
+| 4 — Activación | #606 | Botón de 3 estados en la Agenda + asistente de 1 paso + `sync-now` + bloques "Ocupado (Google)" + privacidad y guion del video |
+
+**Pendiente del dueño:**
+
+- Cargar (opcional) `GOOGLE_OAUTH_CONVERSIA_CLIENT_ID` / `GOOGLE_OAUTH_CONVERSIA_CLIENT_SECRET`
+  en api y worker, para que el cliente vea "Conversia" en la pantalla de Google.
+- Verificar la app ante Google: política de privacidad (ya publicada), dominio verificado y el
+  video de `docs/GUION_VIDEO_GOOGLE.md`.
+- **Decidir el arreglo de la zona horaria** (informe en el PR #602): la agenda nativa usa un
+  offset fijo `-04:00` y Chile está en `-03:00` desde septiembre, así que las horas ofrecidas
+  están corridas una hora. Hoy no afecta a ninguna cuenta con citas reales de agenda nativa;
+  el helper que hace falta (`offsetForZoneOnDate`) ya quedó en el PR #604.

@@ -78,6 +78,12 @@ export interface SetupFacts {
   agendaModule: boolean;
   /** Profesionales activos con horario semanal cargado (`meta.workingHours`). */
   professionalsWithHours: number;
+  /**
+   * Etapa 4 de Google Calendar — ¿tiene el calendario conectado y con el espejo encendido?
+   * Solo aplica a quien usa la agenda NATIVA: con Cláriva o Dentalink manda su proveedor y
+   * Google es apenas un reflejo, así que sugerirlo sería ruido.
+   */
+  googleCalendarConnected: boolean;
   /** Agentes con una versión PUBLICADA (un borrador NO cuenta). */
   publishedAgents: number;
   /** Hay un canal/número de WhatsApp activo. */
@@ -117,6 +123,7 @@ export const EMPTY_SETUP_FACTS: SetupFacts = {
   servicesPriced: 0,
   agendaModule: true,
   professionalsWithHours: 0,
+  googleCalendarConnected: false,
   publishedAgents: 0,
   whatsappConnected: false,
   channelsWithAgent: 0,
@@ -205,6 +212,21 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
         done: facts.professionalsWithHours > 0,
         minutes: 3,
         blocking: true,
+      }),
+    );
+    // RECOMENDADO, no obligatorio (Etapa 4): conectar Google Calendar. El bot funciona sin
+    // esto; con esto el dueño maneja su agenda desde el teléfono y el bot deja de ofrecer
+    // horas que ya tiene ocupadas. El botón lleva a la Agenda, donde está el flujo de 1 paso.
+    steps.push(
+      step({
+        key: "google_calendar",
+        label: "Conecta tu Google Calendar (recomendado)",
+        description: "Tus citas aparecen solas en Google y el asistente deja de ofrecer las horas que ya tienes ocupadas ahí. Se activa con un botón desde la Agenda.",
+        ctaLabel: "Conectar desde la Agenda",
+        href: "/agenda",
+        done: facts.googleCalendarConnected,
+        minutes: 2,
+        blocking: false,
       }),
     );
   }
@@ -418,6 +440,7 @@ export async function readSetupFacts(
     pwaEvent,
     pushDevices,
     verifiedUsers,
+    googleConn,
   ] = await Promise.all([
     // Servicio "cargado" = activo, CON precio y CON duración (el nombre solo no sirve al bot).
     admin.service.count({ where: { organizationId, active: true, price: { not: null }, durationMin: { gt: 0 } } }).catch(() => 0),
@@ -457,6 +480,10 @@ export async function readSetupFacts(
         },
       })
       .catch(() => 0),
+    // Etapa 4 — conexión de Google con el espejo encendido (paso RECOMENDADO del checklist).
+    admin.integrationConnection
+      .findFirst({ where: { organizationId, provider: "google" }, select: { config: true, status: true } })
+      .catch(() => null),
   ]);
 
   return {
@@ -467,6 +494,7 @@ export async function readSetupFacts(
     servicesPriced,
     agendaModule: resolvePersonalization(settings).modules.agenda !== false,
     professionalsWithHours,
+    googleCalendarConnected: Boolean(googleConn && googleConn.status !== "reauthorize" && (googleConn.config as Record<string, unknown> | null)?.calendarSync),
     publishedAgents,
     whatsappConnected: activeChannels > 0 || waNumbers > 0,
     channelsWithAgent,

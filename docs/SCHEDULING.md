@@ -20,6 +20,31 @@ Implementaciones (`packages/scheduling`):
 3. Tras reservar: `appointments` local (proyección con `external_id`), auditoría, y evento para workflows (confirmaciones/recordatorios).
 4. Datos mínimos del paciente: nombre + teléfono (ya presentes por WhatsApp); el prompt exige confirmar servicio/fecha/hora/sede antes de reservar.
 
+## Google Calendar en dos sentidos (agenda NATIVA)
+
+Para las cuentas con agenda nativa, Google Calendar funciona en los dos sentidos. Las que
+tienen agenda externa (Cláriva/Dentalink) conservan su proveedor como fuente de verdad y
+Google queda solo como espejo.
+
+| Pieza | Dónde |
+| --- | --- |
+| Forma de la config (`calendarId`, `calendarSync`, `calendarReadBusy`, `calendars[proId]`) | `packages/config/src/google-calendars.ts` |
+| Espejo Conversia → Google (y a qué calendario va cada cita) | `apps/worker/src/google-calendar.ts` |
+| Horas ocupadas Google → disponibilidad | `packages/scheduling/src/google-busy.ts` (gancho `externalBusy` del proveedor nativo) |
+| Cambios Google → Conversia (sondeo + `syncToken`) | `apps/worker/src/google-sync-back.ts` |
+| Pantallas | `apps/conversia-web`: botón en `/agenda`, configuración en `/agenda/configurar` |
+
+Reglas que conviene no olvidar:
+
+- Los eventos que creamos llevan `extendedProperties.private.conversiaAppointmentId`. Eso es
+  lo que evita que una cita **se bloquee a sí misma** al reagendar y lo que distingue lo
+  nuestro de los eventos personales del dueño.
+- `appointment.meta` guarda `googleEventId` (qué evento), `googleCalendarId` (en qué
+  calendario) y `googleUpdated` (anti-bucle del sondeo).
+- Si Google falla, la disponibilidad se calcula solo con la agenda nativa. El bot nunca se
+  queda mudo por un problema de Google.
+- **Borrar el evento en Google no cancela la cita** (ADR-13): la marca para revisar.
+
 ## Pendiente
 
 Trigger `appointment_upcoming` (crear scheduled_job al crear cita) · reagendamiento conversacional completo (updateAppointment tool) · zonas horarias por sede en slots del mock (hoy offset fijo -04:00) · webhooks entrantes de proveedores → estados de cita.

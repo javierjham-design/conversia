@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Post, Put, Query, Res } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, HttpStatus, Post, Put, Query, Res } from "@nestjs/common";
 import { z } from "zod";
 import type { Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -22,7 +22,10 @@ import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requirePermission } from "../tenancy/permissions";
+import { hasPermission } from "@conversia/types";
 import { OAuthTokenService, type OAuthTokens } from "./oauth-token.service";
+import { RateLimitService } from "../common/rate-limit";
+import { GoogleBusyService } from "../scheduling/google-busy.service";
 
 /**
  * Framework OAuth por tenant (Google y HubSpot). Las credenciales de la APP
@@ -101,6 +104,8 @@ export class OAuthController {
     private prisma: PrismaService,
     private queues: QueueService,
     private tokens: OAuthTokenService,
+    private rateLimit: RateLimitService,
+    private googleBusy: GoogleBusyService,
   ) {}
 
   // ------------------------------- Google -------------------------------
@@ -344,9 +349,10 @@ export class OAuthController {
     }));
     const { app } = await this.googleAppFor(ctx.organizationId);
     const plataformaLista = !googleOAuthCredentials(app, env).missing;
+    const puedeConfigurar = hasPermission(ctx.permissions, "integrations:write");
 
     if (!conn) {
-      return { connected: false, plataformaLista, app, professionals, config: GOOGLE_CALENDAR_CONFIG_VACIA, calendarOptions: null, permisos: null, status: null, lastError: null, accountEmail: null, lastSyncAt: null };
+      return { connected: false, plataformaLista, puedeConfigurar, app, professionals, config: GOOGLE_CALENDAR_CONFIG_VACIA, calendarOptions: null, permisos: null, status: null, lastError: null, accountEmail: null, lastSyncAt: null };
     }
     const cfg = parseGoogleCalendarConfig(conn.config);
     // La lista de calendarios es una llamada a Google: si falla (token revocado, caída) NO se
@@ -361,6 +367,9 @@ export class OAuthController {
     return {
       connected: true,
       plataformaLista,
+      // Quien no puede configurar integraciones ve el ESTADO pero no las acciones (los
+      // endpoints ya lo bloquean; esto evita ofrecerle un botón que le va a dar 403).
+      puedeConfigurar,
       app,
       professionals,
       config: cfg,
@@ -370,7 +379,108 @@ export class OAuthController {
       lastError: listError ?? conn.lastError,
       accountEmail: (conn.config as Record<string, unknown> | null)?.accountEmail ?? null,
       lastSyncAt: conn.lastSyncAt,
+      // Resumen del último sondeo (lo escribe el worker): "3 cambios traídos de Google".
+      lastPull: ((conn.config as Record<string, unknown> | null)?.lastPull as Record<string, unknown> | undefined) ?? null,
     };
+  }
+
+  /**
+   * ETAPA 4 — "Activar sincronización": el ÚNICO botón del asistente de la Agenda.
+   *
+   * Guarda la configuración y, de una, sube a Google las citas FUTURAS que ya existen. Sin
+   * esa carga inicial el dueño activa la sincronización, mira su calendario y no ve nada:
+   * las citas de la semana que viene se quedarían afuera para siempre, porque el espejo solo
+   * reacciona a cambios NUEVOS.
+   *
+   * No duplica: una cita que ya tiene `googleEventId` se actualiza (el espejo hace PATCH).
+   */
+  @Post("integrations/google/activate")
+  async googleActivate(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    // Reutiliza la validación del PUT (profesional de la cuenta + calendario con permiso de
+    // escritura): es la MISMA regla y no puede divergir.
+    await this.googleConfig({ ...(body as object), calendarSync: true });
+
+    const futuras = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.appointment.findMany({
+        where: { startsAt: { gte: new Date() }, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+        select: { id: true },
+        orderBy: { startsAt: "asc" },
+        take: 500,
+      }),
+    );
+    if (futuras.length) {
+      // Escalonado para no golpear la cuota de Google con 500 escrituras de golpe.
+      await this.queues.sync.addBulk(
+        futuras.map((a, i) => ({
+          name: "calendar",
+          data: { organizationId: ctx.organizationId, kind: "calendar_sync" as const, payload: { appointmentId: a.id, action: "upsert" as const } },
+          opts: { delay: i * 300, attempts: 5, backoff: { type: "exponential" as const, delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+        })),
+      );
+    }
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "google", type: "calendar.activated", status: "ok", message: `Sincronización activada · ${futuras.length} cita(s) futura(s) enviadas` },
+      }),
+    ).catch(() => undefined);
+    return { ok: true, citasEnviadas: futuras.length };
+  }
+
+  /**
+   * ETAPA 4 — "sincronizar ahora": adelanta lo que ya corre solo.
+   *
+   * La sincronización automática (sondeo cada 5 min + espejo por cada cita) no cambia; esto
+   * solo la apura cuando el dueño no quiere esperar. Hace tres cosas: borra la caché de horas
+   * ocupadas, encola el sondeo de cambios y reintenta las citas que quedaron sin espejar.
+   *
+   * Límite de 1 por minuto y por cuenta: el botón invita a apretarlo varias veces, y cada
+   * apretón son llamadas pagas a Google.
+   */
+  @Post("integrations/google/sync-now")
+  async googleSyncNow() {
+    const ctx = requirePermission("integrations:write");
+    const rl = await this.rateLimit.custom(`rl:gcal:sync-now:${ctx.organizationId}`, 1, 60);
+    if (!rl.allowed) throw new HttpException("Recién sincronizamos. Espera un momento antes de volver a intentar.", HttpStatus.TOO_MANY_REQUESTS);
+
+    const conn = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "google" }, select: { config: true } }),
+    );
+    if (!conn) throw new BadRequestException("Conecta tu cuenta de Google primero");
+
+    const borradas = await this.googleBusy.invalidate(ctx.organizationId);
+    // El sondeo corre en el worker (es quien tiene el token y la lógica): se encola y el
+    // panel lee el resumen de `lastPull` al refrescar el estado.
+    await this.queues.sync.add(
+      "calendar_pull",
+      { organizationId: ctx.organizationId, kind: "calendar_pull" as const, payload: {} },
+      { attempts: 2, removeOnComplete: 50, removeOnFail: 100 },
+    );
+
+    // Reintento de lo que quedó sin espejar: citas futuras sin evento en Google, o marcadas
+    // para revisar. No se re-envía todo: eso gastaría cuota por nada.
+    const pendientes = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.appointment.findMany({
+        where: { startsAt: { gte: new Date() }, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+        select: { id: true, meta: true },
+        orderBy: { startsAt: "asc" },
+        take: 300,
+      }),
+    );
+    const aEnviar = pendientes.filter((a) => {
+      const m = (a.meta as Record<string, unknown> | null) ?? {};
+      return !m.googleEventId || m.googleChange;
+    });
+    if (aEnviar.length) {
+      await this.queues.sync.addBulk(
+        aEnviar.map((a, i) => ({
+          name: "calendar",
+          data: { organizationId: ctx.organizationId, kind: "calendar_sync" as const, payload: { appointmentId: a.id, action: "upsert" as const } },
+          opts: { delay: i * 300, attempts: 5, backoff: { type: "exponential" as const, delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+        })),
+      );
+    }
+    return { ok: true, cacheBorrada: borradas, sondeoEncolado: true, citasEnviadas: aEnviar.length };
   }
 
   /**

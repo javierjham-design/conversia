@@ -32,6 +32,7 @@ function prismaCon(opts: { features?: Record<string, unknown>; lotes?: number; g
     // Lo que consulta el checklist; todo en su valor neutro.
     service: { count: async () => 0 },
     professional: { findMany: async () => [] },
+    integrationConnection: { findFirst: async () => null },
     agentVersion: { count: async () => 0 },
     channelConnection: { count: async () => 0 },
     whatsappPhoneNumber: { count: async () => 0 },

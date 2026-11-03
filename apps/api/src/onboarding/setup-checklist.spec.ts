@@ -205,6 +205,8 @@ interface Seed {
   verifiedMembers?: number;
   pwaInstalled?: boolean;
   pushDevices?: number;
+  /** Etapa 4 — Google Calendar conectado con el espejo encendido (paso recomendado). */
+  googleSync?: boolean;
 }
 
 function fakePrisma(seed: Seed) {
@@ -219,6 +221,8 @@ function fakePrisma(seed: Seed) {
     organization: { findUnique: async () => seed.org ?? null },
     service: { count: async () => services.filter((x) => x.active && x.priced).length },
     professional: { findMany: async () => professionals },
+    // Etapa 4 de Google Calendar: el checklist lee la conexión para el paso RECOMENDADO.
+    integrationConnection: { findFirst: async () => (seed.googleSync ? { config: { calendarSync: true }, status: "active" } : null) },
     // El servicio DEBE pedir status PUBLISHED: si pidiera otra cosa, este doble lo delata.
     agentVersion: { count: async ({ where }: any) => agentVersions.filter((v) => v.status === where.status).length },
     channelConnection: {
@@ -310,6 +314,34 @@ describe("readSetupFacts — lee el estado REAL del tenant", () => {
     const prisma = fakePrisma({ org: { name: "Tienda", settings: { general: { industry: "comercio" } } } });
     expect((await readSetupFacts(prisma, "org1")).agendaModule).toBe(false);
     expect((await getSetupChecklist(prisma, "org1")).steps.some((s) => s.key === "agenda")).toBe(false);
+  });
+
+  /**
+   * ETAPA 4 de Google Calendar — paso RECOMENDADO, no obligatorio.
+   *
+   * Convi lo usa para sugerir conectar el calendario. Tiene que ser `blocking: false`: el bot
+   * funciona perfecto sin Google, y marcarlo como bloqueante le diría al dueño que no puede
+   * lanzar hasta conectarlo, que es falso.
+   */
+  it("sugiere conectar Google Calendar, pero NO bloquea el lanzamiento", async () => {
+    const prisma = fakePrisma({ org: { name: "Barbería", settings: { general: { industry: "barberia" } } } });
+    const paso = (await getSetupChecklist(prisma, "org1")).steps.find((s) => s.key === "google_calendar");
+    expect(paso).toBeTruthy();
+    expect(paso?.blocking).toBe(false);
+    expect(paso?.done).toBe(false);
+    expect(paso?.href).toBe("/agenda"); // el flujo de 1 paso vive en la Agenda, no en Integraciones
+  });
+
+  it("con el espejo encendido, el paso queda hecho", async () => {
+    const prisma = fakePrisma({ org: { name: "Barbería", settings: { general: { industry: "barberia" } } }, googleSync: true });
+    expect((await readSetupFacts(prisma, "org1")).googleCalendarConnected).toBe(true);
+    expect((await getSetupChecklist(prisma, "org1")).steps.find((s) => s.key === "google_calendar")?.done).toBe(true);
+  });
+
+  it("un rubro sin agenda no ve el paso de Google", async () => {
+    // Un comercio no agenda citas: ofrecerle Google Calendar es ruido.
+    const prisma = fakePrisma({ org: { name: "Tienda", settings: { general: { industry: "comercio" } } }, googleSync: true });
+    expect((await getSetupChecklist(prisma, "org1")).steps.some((s) => s.key === "google_calendar")).toBe(false);
   });
 
   it("horario vacío no cuenta como horario cargado", async () => {

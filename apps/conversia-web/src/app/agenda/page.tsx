@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock, List, Plus, Settings2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { GoogleSyncButton } from "@/components/GoogleSyncButton";
 import { api } from "@/lib/api";
 
 type Appt = {
@@ -61,6 +62,8 @@ export default function Agenda() {
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [actionAppt, setActionAppt] = useState<Appt | null>(null);
   const [narrow, setNarrow] = useState(false);
+  /** Etapa 4 — horas ocupadas en Google, para pintarlas en gris ("Ocupado (Google)"). */
+  const [gBusy, setGBusy] = useState<Array<{ professionalId: string; start: string; end: string }>>([]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 700px)");
@@ -86,6 +89,12 @@ export default function Agenda() {
       .then((r) => setAppts(r.appointments))
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
+    // Los bloques de Google son secundarios: si fallan, la agenda se muestra igual.
+    api<{ busy: Array<{ professionalId: string; start: string; end: string }> }>(
+      `/agenda/google-busy?from=${encodeURIComponent(range.from.toISOString())}&to=${encodeURIComponent(range.to.toISOString())}`,
+    )
+      .then((r) => setGBusy(r.busy))
+      .catch(() => setGBusy([]));
   }, [range]);
   useEffect(() => { load(); }, [load]);
 
@@ -131,13 +140,16 @@ export default function Agenda() {
           </button>
         </div>
 
-        {/* Selector de vista + navegación */}
+        {/* Selector de vista + navegación. El botón de Google va acá, junto a los controles
+            de fecha y vista: la sincronización se activa desde la Agenda, sin pasar por
+            Integraciones (que en este panel no existe). */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 6 }}>
             {tabBtn("day", "Día", <CalendarDays size={14} />)}
             {tabBtn("week", "Semana", <CalendarDays size={14} />)}
             {tabBtn("list", "Próximas", <List size={14} />)}
           </div>
+          <GoogleSyncButton onChanged={load} />
           {view !== "list" ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
               <button onClick={() => setCursor((c) => addDays(c, -step))} aria-label="Anterior" style={navBtn}><ChevronLeft size={16} /></button>
@@ -161,6 +173,7 @@ export default function Agenda() {
             columns={cols.map((p) => ({ key: p.id, label: p.name }))}
             dayForColumn={() => cursor}
             eventsForColumn={(colKey) => appts.filter((a) => sameDay(new Date(a.startsAt), cursor) && (colKey === "" ? true : a.professionalId === colKey))}
+            busyForColumn={(colKey) => gBusy.filter((b) => sameDay(new Date(b.start), cursor) && (colKey === "" || b.professionalId === colKey))}
             startH={startH}
             endH={endH}
             showNow={sameDay(cursor, today)}
@@ -173,6 +186,14 @@ export default function Agenda() {
             columns={Array.from({ length: 7 }, (_, i) => { const d = addDays(startOfWeek(cursor), i); return { key: String(i), label: DOW[i], sublabel: String(d.getDate()), isToday: sameDay(d, today) }; })}
             dayForColumn={(colKey) => addDays(startOfWeek(cursor), Number(colKey))}
             eventsForColumn={(colKey) => { const d = addDays(startOfWeek(cursor), Number(colKey)); return appts.filter((a) => sameDay(new Date(a.startsAt), d)); }}
+            busyForColumn={(colKey) => {
+              const d = addDays(startOfWeek(cursor), Number(colKey));
+              const delDia = gBusy.filter((b) => sameDay(new Date(b.start), d));
+              // Sin repetir: el calendario del negocio bloquea a TODOS los profesionales, así
+              // que el mismo rango viene una vez por persona y se pintaría encimado.
+              const vistos = new Set<string>();
+              return delDia.filter((b) => { const k = `${b.start}|${b.end}`; if (vistos.has(k)) return false; vistos.add(k); return true; });
+            }}
             startH={startH}
             endH={endH}
             showNow={true}
@@ -250,11 +271,13 @@ function ListView({ appts, onAppt }: { appts: Appt[]; onAppt: (a: Appt) => void 
 // ------------------------- B4: rejilla día/semana -------------------------
 type GridColumn = { key: string; label: string; sublabel?: string; isToday?: boolean };
 function CalendarGrid({
-  columns, eventsForColumn, startH, endH, showNow, nowColumnKey, onSlot, onAppt, narrow,
+  columns, eventsForColumn, busyForColumn, startH, endH, showNow, nowColumnKey, onSlot, onAppt, narrow,
 }: {
   columns: GridColumn[];
   dayForColumn: (key: string) => Date;
   eventsForColumn: (key: string) => Appt[];
+  /** Etapa 4 — horas ocupadas en Google de esa columna (sin título: son eventos personales). */
+  busyForColumn: (key: string) => Array<{ start: string; end: string }>;
   startH: number;
   endH: number;
   showNow: boolean;
@@ -304,6 +327,26 @@ function CalendarGrid({
                       <span style={{ position: "absolute", left: 0, top: -4, width: 7, height: 7, borderRadius: "50%", background: "var(--acc)" }} />
                     </div>
                   ) : null}
+                  {/* Etapa 4 — "Ocupado (Google)": explica por qué esa hora no se ofrece.
+                      Va DEBAJO de las citas y sin interceptar el clic (se puede agendar
+                      encima si el dueño quiere), y NUNCA muestra el título del evento. */}
+                  {busyForColumn(col.key).map((b, i) => {
+                    const top = (minsOf(b.start) - startH * 60) / 60 * HOUR_PX;
+                    const alto = Math.max(14, (minsOf(b.end) - minsOf(b.start)) / 60 * HOUR_PX - 2);
+                    return (
+                      <div
+                        key={`g${i}`}
+                        title="Ocupado en Google Calendar"
+                        style={{
+                          position: "absolute", top, left: 3, right: 3, height: alto, zIndex: 1, pointerEvents: "none",
+                          borderRadius: 8, background: "repeating-linear-gradient(45deg, color-mix(in srgb, var(--ink) 9%, transparent) 0 6px, transparent 6px 12px)",
+                          border: "1px solid color-mix(in srgb, var(--ink) 14%, transparent)", overflow: "hidden",
+                        }}
+                      >
+                        <span className="text-dim" style={{ display: "block", fontSize: 10, padding: "2px 5px", whiteSpace: "nowrap" }}>Ocupado (Google)</span>
+                      </div>
+                    );
+                  })}
                   {/* Citas */}
                   {events.map((a) => {
                     const top = (minsOf(a.startsAt) - startH * 60) / 60 * HOUR_PX;
