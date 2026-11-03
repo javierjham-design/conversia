@@ -1,4 +1,5 @@
 import { withTenant } from "@conversia/database";
+import { canUseFeature } from "@conversia/config";
 import { getFreshOAuthToken, NoConnectionError, ReauthorizeError } from "./oauth-tokens.js";
 
 /**
@@ -11,6 +12,24 @@ export async function appendSheetRow(
   organizationId: string,
   payload: { spreadsheetId: string; sheetName: string; values: string[] },
 ): Promise<void> {
+  const log = (status: "ok" | "error", message: string) =>
+    withTenant(organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: { organizationId, provider: "google", type: status === "ok" ? "sheets.appended" : "sheets.error", status, message },
+      }),
+    ).catch(() => undefined);
+
+  // Desde que los permisos se piden por separado, una cuenta puede tener Calendar y NO
+  // Sheets. Sin esto Google contesta 403 "insufficient scope" y en el panel se leía como
+  // "sin permiso sobre la planilla" — mandando al dueño a revisar la planilla equivocada.
+  const conn = await withTenant(organizationId, (tx) =>
+    tx.integrationConnection.findFirst({ where: { organizationId, provider: "google" }, select: { config: true } }),
+  );
+  if (conn && !canUseFeature(conn.config, "sheets")) {
+    await log("error", "Google Sheets: la cuenta conectada no dio permiso de planillas. Entra a Integraciones › Google Sheets y vuelve a conectar para autorizarlo.");
+    return; // reintentar no agrega permisos
+  }
+
   let token: string;
   try {
     token = await getFreshOAuthToken(organizationId, "google");
@@ -18,13 +37,6 @@ export async function appendSheetRow(
     if (err instanceof NoConnectionError || err instanceof ReauthorizeError) return; // reintento inútil
     throw err;
   }
-
-  const log = (status: "ok" | "error", message: string) =>
-    withTenant(organizationId, (tx) =>
-      tx.integrationEvent.create({
-        data: { organizationId, provider: "google", type: status === "ok" ? "sheets.appended" : "sheets.error", status, message },
-      }),
-    ).catch(() => undefined);
 
   const range = encodeURIComponent(`${payload.sheetName || "Hoja 1"}!A1`);
   const res = await fetch(

@@ -2,7 +2,17 @@ import { BadRequestException, Body, Controller, Delete, Get, Post, Put, Query, R
 import { z } from "zod";
 import type { Response } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getEnv, brandOf } from "@conversia/config";
+import {
+  getEnv,
+  brandOf,
+  googleOAuthAppForBrand,
+  googleOAuthAppOfConnection,
+  googleOAuthCredentials,
+  parseGrantedScopes,
+  scopesForFeature,
+  type GoogleFeature,
+  type GoogleOAuthApp,
+} from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
@@ -16,7 +26,6 @@ import { requirePermission } from "../tenancy/permissions";
  * vencimiento de 10 minutos — anti CSRF.
  */
 
-export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/spreadsheets"];
 export const HUBSPOT_SCOPES = ["crm.objects.contacts.read", "crm.objects.contacts.write"];
 
 export function signState(orgId: string, ts = String(Math.floor(Date.now() / 1000))): string {
@@ -96,24 +105,59 @@ export class OAuthController {
 
   // ------------------------------- Google -------------------------------
 
-  /** URL de autorización (el navegador del tenant la abre en una pestaña). */
+  /**
+   * URL de autorización (el navegador del tenant la abre en un popup).
+   *
+   * `feature` decide QUÉ permisos se piden: `calendar` (por defecto) pide solo los de
+   * Calendar, `sheets` pide solo `spreadsheets`. Antes se pedían los tres juntos y el
+   * cliente veía en la pantalla de Google que la app quería entrar a sus planillas.
+   *
+   * `include_granted_scopes` (autorización incremental) se manda cuando ya hay conexión o
+   * cuando se suma Sheets: así el token nuevo conserva los permisos que ya estaban y
+   * conectar Sheets no deja a Calendar sin permiso.
+   */
   @Get("integrations/oauth/google/authorize")
-  googleAuthorize() {
+  async googleAuthorize(@Query("feature") feature?: string) {
     const ctx = requirePermission("integrations:write");
     const env = getEnv();
-    if (!env.GOOGLE_OAUTH_CLIENT_ID || !env.GOOGLE_OAUTH_CLIENT_SECRET) {
-      throw new BadRequestException("Configuración de plataforma pendiente: faltan GOOGLE_OAUTH_CLIENT_ID/SECRET (ver docs/GUIA_OAUTH_GOOGLE.md)");
+    const parsed = z.enum(["calendar", "sheets"]).default("calendar").safeParse(feature ?? "calendar");
+    if (!parsed.success) throw new BadRequestException("Función inválida (calendar | sheets)");
+    const which: GoogleFeature = parsed.data;
+
+    const { app, hasConnection } = await this.googleAppFor(ctx.organizationId);
+    const creds = googleOAuthCredentials(app, env);
+    if (creds.missing) {
+      throw new BadRequestException(
+        app === "conversia"
+          ? "Configuración de plataforma pendiente: faltan GOOGLE_OAUTH_CONVERSIA_CLIENT_ID/SECRET (ver docs/GUIA_OAUTH_GOOGLE.md)"
+          : "Configuración de plataforma pendiente: faltan GOOGLE_OAUTH_CLIENT_ID/SECRET (ver docs/GUIA_OAUTH_GOOGLE.md)",
+      );
     }
     const params = new URLSearchParams({
-      client_id: env.GOOGLE_OAUTH_CLIENT_ID,
+      client_id: creds.clientId,
       redirect_uri: googleRedirectUri(),
       response_type: "code",
-      scope: GOOGLE_SCOPES.join(" "),
+      scope: scopesForFeature(which).join(" "),
       access_type: "offline",
       prompt: "consent", // fuerza refresh_token también en reconexiones
       state: signState(ctx.organizationId),
     });
-    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` };
+    if (which === "sheets" || hasConnection) params.set("include_granted_scopes", "true");
+    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, feature: which, app };
+  }
+
+  /**
+   * Qué app de Google corresponde a esta org. Si YA hay conexión manda la app con la que se
+   * emitió el token (una conexión vieja no tiene `oauthApp` → la de siempre): refrescar con
+   * credenciales distintas de las que emitieron el token falla, y eso rompería a los tenants
+   * que ya están andando.
+   */
+  private async googleAppFor(orgId: string): Promise<{ app: GoogleOAuthApp; hasConnection: boolean }> {
+    const env = getEnv();
+    const conn = await this.prisma.withTenant(orgId, (tx) => tx.integrationConnection.findFirst({ where: { organizationId: orgId, provider: "google" } }));
+    if (conn) return { app: googleOAuthAppOfConnection(conn.config), hasConnection: true };
+    const org = await this.prisma.admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } });
+    return { app: googleOAuthAppForBrand(org?.brand, env), hasConnection: false };
   }
 
   /** Callback público (Google redirige el navegador; no hay JWT). */
@@ -126,13 +170,19 @@ export class OAuthController {
     if (error) return back("denied");
     if (!orgId || !code) return back("invalid");
     try {
+      // Las MISMAS credenciales que usó authorize: canjear el código con otra app da
+      // invalid_grant. La elección es determinista (conexión existente → su app; si no, la
+      // marca), así que acá se recalcula sin necesidad de guardarla en el state.
+      const { app } = await this.googleAppFor(orgId);
+      const creds = googleOAuthCredentials(app, env);
+      if (creds.missing) return back("error");
       const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
           code,
-          client_id: env.GOOGLE_OAUTH_CLIENT_ID,
-          client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+          client_id: creds.clientId,
+          client_secret: creds.clientSecret,
           redirect_uri: googleRedirectUri(),
           grant_type: "authorization_code",
         }),
@@ -143,7 +193,9 @@ export class OAuthController {
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token ?? null,
         expiry: Date.now() + Number(tokens.expires_in ?? 3600) * 1000,
-      }, { scopes: GOOGLE_SCOPES });
+        // Los permisos que Google OTORGÓ (no los que pedimos): el cliente puede desmarcar
+        // alguno en la pantalla de permisos y hasta ahora guardábamos la lista pedida.
+      }, { scopes: parseGrantedScopes(tokens.scope), oauthApp: app });
       // Con qué cuenta quedó conectado: el id del calendario primario ES el email.
       await this.captureAccount(orgId, "google", tokens.access_token).catch(() => undefined);
       return back("connected");
@@ -416,7 +468,17 @@ export class OAuthController {
       const credential = await tx.integrationCredential.create({
         data: { organizationId: orgId, provider, label: `OAuth ${provider}`, ciphertext: encryptSecret(JSON.stringify(tokens)) },
       });
-      const config = { ...((existing?.config as object) ?? {}), ...extra } as object;
+      // Autorización incremental: conectar Sheets no puede BORRAR el permiso de Calendar de
+      // la lista. Se unen los otorgados ahora con los que ya estaban guardados EXPLÍCITAMENTE
+      // (no con los heredados que asume `grantedScopes`: eso afirmaría un permiso que el
+      // cliente pudo haber quitado).
+      const extraOut = { ...extra };
+      if (Array.isArray(extra.scopes)) {
+        const prev = (existing?.config as Record<string, unknown> | null)?.scopes;
+        const before = Array.isArray(prev) ? prev.map((s) => String(s)) : [];
+        extraOut.scopes = [...new Set([...before, ...(extra.scopes as unknown[]).map((s) => String(s))])];
+      }
+      const config = { ...((existing?.config as object) ?? {}), ...extraOut } as object;
       if (existing) {
         await tx.integrationConnection.update({
           where: { id: existing.id },
@@ -442,7 +504,7 @@ export class OAuthController {
       const cred = await tx.integrationCredential.findFirst({ where: { id: conn.credentialId, organizationId: orgId } });
       if (!cred) return null;
       try {
-        return { connId: conn.id, credId: cred.id, tokens: JSON.parse(decryptSecret(cred.ciphertext)) as OAuthTokens };
+        return { connId: conn.id, credId: cred.id, config: conn.config, tokens: JSON.parse(decryptSecret(cred.ciphertext)) as OAuthTokens };
       } catch {
         return null;
       }
@@ -451,9 +513,13 @@ export class OAuthController {
     if (stored.tokens.expiry - Date.now() > 60_000) return stored.tokens.access_token;
     if (!stored.tokens.refresh_token) throw new BadRequestException("La sesión expiró: vuelve a conectar la cuenta");
 
+    // El refresh va con las credenciales que EMITIERON el token (lo dice la config de la
+    // conexión), no con las que correspondan hoy a la marca: si no, al cargar la app de
+    // Conversia se romperían las conexiones ya emitidas con la app de siempre.
+    const google = googleOAuthCredentials(googleOAuthAppOfConnection(stored.config), env);
     const ep =
       provider === "google"
-        ? { url: "https://oauth2.googleapis.com/token", clientId: env.GOOGLE_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET }
+        ? { url: "https://oauth2.googleapis.com/token", clientId: google.clientId, clientSecret: google.clientSecret }
         : { url: "https://api.hubapi.com/oauth/v1/token", clientId: env.HUBSPOT_CLIENT_ID, clientSecret: env.HUBSPOT_CLIENT_SECRET };
     const res = await fetch(ep.url, {
       method: "POST",

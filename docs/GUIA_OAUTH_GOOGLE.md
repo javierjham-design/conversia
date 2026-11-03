@@ -26,10 +26,19 @@ sus tokens quedan cifrados por organización.
    - Nombre de la app: `TuBot` (es lo que ve el tenant al autorizar).
    - Correo de asistencia y datos de contacto del desarrollador.
    - Dominio autorizado: `tubot.cl`.
-4. **Permisos (scopes)** — agrega exactamente estos tres:
+4. **Permisos (scopes)** — declara estos tres en la pantalla de consentimiento:
    - `https://www.googleapis.com/auth/calendar.events`
    - `https://www.googleapis.com/auth/calendar.readonly`
    - `https://www.googleapis.com/auth/spreadsheets`
+
+   > **Se declaran los tres, pero NO se piden los tres juntos.** Desde la Etapa 0 de la
+   > sincronización con Google Calendar, conectar **Calendar** pide solo los dos de
+   > calendario y **Sheets** pide `spreadsheets` aparte, con autorización incremental
+   > (`include_granted_scopes=true`). Antes se pedían los tres de una: el cliente veía que
+   > la app quería entrar a sus planillas para poder agendar, y eso espanta y complica la
+   > verificación. Los permisos que el cliente realmente otorga quedan guardados en
+   > `integration_connections.config.scopes`; si falta uno, el panel pide reconectar en vez
+   > de dejar que Google conteste 403. Ver `packages/config/src/google-oauth.ts`.
 5. Usuarios de prueba: agrega tu propio correo para probar antes de publicar.
 6. Cuando todo funcione, pulsa **Publicar aplicación** (estado *En producción*).
    Con scopes sensibles Google puede pedir verificación; mientras tanto la app
@@ -57,6 +66,27 @@ En Railway (servicio de la **API** y también el **worker**) agrega:
 GOOGLE_OAUTH_CLIENT_ID=<ID de cliente>.apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=<Secreto de cliente>
 ```
+
+### App propia de Conversia (opcional, recomendado)
+
+Un cliente de Conversia no debería ver "TuBot" en la pantalla de permisos de Google. Para
+eso se crea un **segundo proyecto de Google** con su propia pantalla de consentimiento
+(nombre de la app `Conversia`, dominio `conversia.cl`) y sus propias credenciales, con el
+MISMO URI de redirección, y se cargan en la api y el worker:
+
+```
+GOOGLE_OAUTH_CONVERSIA_CLIENT_ID=<ID de cliente>.apps.googleusercontent.com
+GOOGLE_OAUTH_CONVERSIA_CLIENT_SECRET=<Secreto de cliente>
+```
+
+Reglas:
+
+- Si **no** están cargadas, las orgs de Conversia siguen usando las credenciales de arriba.
+  No hay paso previo obligatorio para desplegar.
+- Cada conexión guarda con qué app se emitió su token (`config.oauthApp`) y se refresca
+  **siempre con esa misma app**. Una conexión creada antes de este cambio no tiene el campo
+  y se refresca con las credenciales de siempre: cargar las de Conversia **no** rompe
+  ninguna conexión viva.
 
 Redeploy. Listo: las tarjetas **Google Calendar** y **Google Sheets** pasan a
 «Disponible» automáticamente.

@@ -155,6 +155,11 @@ const envSchema = z.object({
   // OAuth por tenant para Google Calendar/Sheets (app de plataforma; ver docs/GUIA_OAUTH_GOOGLE.md)
   GOOGLE_OAUTH_CLIENT_ID: z.string().optional().default(""),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional().default(""),
+  // App de Google PROPIA de Conversia: así el cliente de Conversia ve "Conversia" en la
+  // pantalla de permisos y no "TuBot". Si faltan, se usan las de arriba (sin paso previo
+  // obligatorio para desplegar). Ver packages/config/src/google-oauth.ts.
+  GOOGLE_OAUTH_CONVERSIA_CLIENT_ID: z.string().optional().default(""),
+  GOOGLE_OAUTH_CONVERSIA_CLIENT_SECRET: z.string().optional().default(""),
   // OAuth por tenant para HubSpot (ver docs/GUIA_OAUTH_HUBSPOT.md)
   HUBSPOT_CLIENT_ID: z.string().optional().default(""),
   HUBSPOT_CLIENT_SECRET: z.string().optional().default(""),
@@ -356,3 +361,7 @@ export async function fetchGraphWithProof(rawUrl: string, accessToken: string, i
 
 // Mapa de marcas (F1): brandOf(org) resuelve textos/links/remitentes por marca.
 export * from "./brands.js";
+// Rubros + vocabulario del tenant (lo usan la api y el worker; ver industries.ts).
+export * from "./industries.js";
+// OAuth de Google: permisos por función y app por marca (puro; api + worker).
+export * from "./google-oauth.js";
