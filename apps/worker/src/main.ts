@@ -193,6 +193,16 @@ async function main() {
       { repeat: { pattern: "0 5 * * *" }, jobId: "meta_ads_daily", removeOnComplete: true, removeOnFail: 50 },
     )
     .catch((e) => console.error("No se pudo registrar el sync diario de anuncios:", (e as Error).message));
+  // Etapa 3 de Google Calendar: cada 5 minutos trae los cambios hechos EN Google (mover o
+  // borrar una cita nuestra). Sondeo en vez de `events.watch` porque watch exige verificar
+  // el dominio del webhook y renovar canales, y un canal vencido deja de avisar en silencio.
+  void getSyncQueue()
+    .add(
+      "calendar_pull_all",
+      { organizationId: "__all__", kind: "calendar_pull", payload: { all: true } },
+      { repeat: { pattern: "*/5 * * * *" }, jobId: "calendar_pull_all", removeOnComplete: true, removeOnFail: 50 },
+    )
+    .catch((e) => console.error("No se pudo registrar el sondeo de Google Calendar:", (e as Error).message));
   // Eventos emitidos por la API (p.ej. conversation.closed desde el panel):
   // 1) fan-out a webhooks/CAPI; 2) si el tipo mapea a un disparador de
   // workflow (conversation.closed → conversation_closed), inicia los flujos.

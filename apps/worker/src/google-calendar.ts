@@ -234,7 +234,7 @@ export async function syncAppointmentToGoogle(
       throw new Error(`gcal recreate ${retry.status}`);
     }
     const created: any = await retry.json();
-    await saveEventRef(organizationId, appt.id, meta, created.id, plan.escribirEn);
+    await saveEventRef(organizationId, appt.id, meta, created.id, plan.escribirEn, created.updated);
     await log("ok", "Cita recreada en Google Calendar");
     return;
   }
@@ -246,7 +246,7 @@ export async function syncAppointmentToGoogle(
   // Se guarda SIEMPRE la referencia (id + calendario), no solo al crear: una cita espejada
   // antes de la Etapa 1 no tiene `googleCalendarId` y sin esto nunca lo tendría, así que un
   // cambio de profesional posterior no sabría de dónde borrarla.
-  if (event?.id) await saveEventRef(organizationId, appt.id, meta, event.id, plan.escribirEn);
+  if (event?.id) await saveEventRef(organizationId, appt.id, meta, event.id, plan.escribirEn, event.updated);
   await withTenant(organizationId, (tx) =>
     tx.integrationConnection.updateMany({ where: { organizationId, provider: "google" }, data: { lastSyncAt: new Date() } }),
   ).catch(() => undefined);
@@ -260,16 +260,27 @@ export async function syncAppointmentToGoogle(
   );
 }
 
-/** Guarda DÓNDE quedó el evento: su id y su calendario. */
+/**
+ * Guarda DÓNDE quedó el evento: su id, su calendario y el `updated` que devolvió Google.
+ *
+ * `googleUpdated` es el ANTI-BUCLE de la Etapa 3: el sondeo compara ese valor con el del
+ * evento que trae y, si coinciden, sabe que el "cambio" es el rebote de nuestra propia
+ * escritura. Sin esto: escribimos → el sondeo lo ve como cambio → actualiza la cita → el
+ * espejo vuelve a escribir → y así sin parar.
+ */
 async function saveEventRef(
   organizationId: string,
   appointmentId: string,
   meta: Record<string, any>,
   googleEventId: string,
   googleCalendarId: string,
+  googleUpdated?: string,
 ): Promise<void> {
-  if (meta.googleEventId === googleEventId && meta.googleCalendarId === googleCalendarId) return; // nada que escribir
+  if (meta.googleEventId === googleEventId && meta.googleCalendarId === googleCalendarId && meta.googleUpdated === (googleUpdated ?? meta.googleUpdated)) return;
   await withTenant(organizationId, (tx) =>
-    tx.appointment.update({ where: { id: appointmentId }, data: { meta: { ...meta, googleEventId, googleCalendarId } as object } }),
+    tx.appointment.update({
+      where: { id: appointmentId },
+      data: { meta: { ...meta, googleEventId, googleCalendarId, ...(googleUpdated ? { googleUpdated } : {}) } as object },
+    }),
   );
 }
