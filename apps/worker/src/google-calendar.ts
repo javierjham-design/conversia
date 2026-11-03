@@ -1,20 +1,45 @@
 import { withTenant } from "@conversia/database";
-import { brandOf, resolvePersonalization } from "@conversia/config";
+import {
+  brandOf,
+  calendarForProfessional,
+  parseGoogleCalendarConfig,
+  resolvePersonalization,
+  type GoogleCalendarConfig,
+} from "@conversia/config";
 import { getFreshOAuthToken, NoConnectionError, ReauthorizeError } from "./oauth-tokens.js";
 
 /**
- * Google Calendar v1: espejo Conversia → Google. Cada cita creada/actualizada
- * en Conversia se refleja como evento en el calendario elegido por el tenant
- * (config.calendarId). El id del evento se guarda en appointment.meta.googleEventId
- * para actualizar/cancelar sin duplicar. La dirección Google → Conversia queda
- * detrás de un flag (config.bidirectional) aún sin implementación.
+ * Espejo Conversia → Google. Cada cita creada/actualizada en Conversia se refleja como evento
+ * en Google, **en el calendario de SU profesional** (Etapa 1) o, si no tiene uno propio, en el
+ * calendario del negocio — que es el comportamiento de siempre.
+ *
+ * En `appointment.meta` se guardan DOS cosas: `googleEventId` (para actualizar y cancelar sin
+ * duplicar) y `googleCalendarId` (DÓNDE quedó). Sin lo segundo, cambiarle el profesional a una
+ * cita dejaba el evento vivo en el calendario del barbero anterior.
  */
 
 const GCAL = "https://www.googleapis.com/calendar/v3";
 
-interface CalendarConfig {
-  calendarId: string;
-  calendarSync: boolean;
+/**
+ * Plan de escritura de UN evento (puro, testeable).
+ *
+ * El caso difícil es CAMBIAR el profesional de una cita: el evento vive en el calendario del
+ * barbero anterior y hay que borrarlo de ahí y crearlo en el del nuevo. Si solo se hiciera
+ * PATCH en el calendario nuevo, Google contestaría 404 (el evento no existe ahí) y la cita
+ * quedaría duplicada: viva en el calendario viejo y recreada en el nuevo.
+ */
+export function planCalendarWrite(input: {
+  eventId?: string;
+  /** Calendario donde quedó el evento la última vez (meta.googleCalendarId). */
+  previousCalendarId?: string;
+  targetCalendarId: string;
+}): { accion: "crear" | "actualizar" | "mover"; escribirEn: string; borrarDe?: string } {
+  if (!input.eventId) return { accion: "crear", escribirEn: input.targetCalendarId };
+  // Sin `previousCalendarId` (citas espejadas antes de la Etapa 1) se asume que está en el
+  // calendario de destino: para esas cuentas había UN solo calendario, así que es cierto.
+  const anterior = input.previousCalendarId || input.targetCalendarId;
+  if (anterior === input.targetCalendarId) return { accion: "actualizar", escribirEn: input.targetCalendarId };
+  return { accion: "mover", escribirEn: input.targetCalendarId, borrarDe: anterior };
 }
 
 /** Lo que hace falta para armar el evento. Pura a propósito: se prueba sin red ni BD. */
@@ -61,13 +86,21 @@ export function buildCalendarEvent(i: CalendarEventInput): Record<string, unknow
   };
 }
 
-async function getCalendarConfig(organizationId: string): Promise<CalendarConfig | null> {
+/**
+ * ¿Hay espejo que hacer? Sigue exigiendo `calendarSync`, pero ahora alcanza con tener ALGÚN
+ * calendario: el del negocio (como siempre) o al menos uno por profesional. Una barbería
+ * puede vincular el calendario de cada barbero y ninguno del negocio.
+ */
+export function hayDondeEscribir(cfg: GoogleCalendarConfig): boolean {
+  return cfg.calendarSync && Boolean(cfg.businessCalendarId || Object.keys(cfg.calendars).length);
+}
+
+async function getCalendarConfig(organizationId: string): Promise<GoogleCalendarConfig | null> {
   return withTenant(organizationId, async (tx) => {
     const conn = await tx.integrationConnection.findFirst({ where: { organizationId, provider: "google" } });
     if (!conn) return null;
-    const cfg = (conn.config as Record<string, any>) ?? {};
-    if (!cfg.calendarSync || !cfg.calendarId) return null;
-    return { calendarId: String(cfg.calendarId), calendarSync: true };
+    const cfg = parseGoogleCalendarConfig(conn.config);
+    return hayDondeEscribir(cfg) ? cfg : null;
   });
 }
 
@@ -115,8 +148,9 @@ export async function syncAppointmentToGoogle(
   if (!appt) return;
   const meta = (appt.meta as Record<string, any>) ?? {};
   const eventId: string | undefined = meta.googleEventId;
-  const calendarBase = `${GCAL}/calendars/${encodeURIComponent(config.calendarId)}/events`;
+  const previousCalendarId: string | undefined = meta.googleCalendarId;
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const eventsUrl = (calendarId: string) => `${GCAL}/calendars/${encodeURIComponent(calendarId)}/events`;
 
   const log = (status: "ok" | "error", message: string) =>
     withTenant(organizationId, (tx) =>
@@ -125,17 +159,36 @@ export async function syncAppointmentToGoogle(
       }),
     ).catch(() => undefined);
 
+  /** DELETE de un evento. 404/410 = ya no está: objetivo cumplido. Devuelve si hay que reintentar. */
+  const borrarEvento = async (calendarId: string, id: string): Promise<{ ok: boolean; status: number }> => {
+    const res = await fetch(`${eventsUrl(calendarId)}/${encodeURIComponent(id)}`, { method: "DELETE", headers, signal: AbortSignal.timeout(10_000) });
+    return { ok: res.ok || res.status === 404 || res.status === 410, status: res.status };
+  };
+
   if (payload.action === "cancel") {
     if (!eventId) return; // nunca llegó a Google
-    const res = await fetch(`${calendarBase}/${encodeURIComponent(eventId)}`, { method: "DELETE", headers, signal: AbortSignal.timeout(10_000) });
-    // 404/410: ya no existe en Google — objetivo cumplido.
-    if (!res.ok && res.status !== 404 && res.status !== 410) {
-      await log("error", `Google Calendar respondió ${res.status} al cancelar`);
-      throw new Error(`gcal delete ${res.status}`);
+    // Se borra DONDE QUEDÓ, no donde iría hoy: si le cambiaron el profesional y después la
+    // cancelaron, el evento vive en el calendario anterior.
+    const donde = previousCalendarId || calendarForProfessional(config, appt.professionalId).calendarId;
+    if (!donde) return;
+    const r = await borrarEvento(donde, eventId);
+    if (!r.ok) {
+      await log("error", `Google Calendar respondió ${r.status} al cancelar`);
+      throw new Error(`gcal delete ${r.status}`);
     }
     await log("ok", "Cita cancelada en Google Calendar");
     return;
   }
+
+  // A qué calendario va esta cita: el de SU profesional o el del negocio.
+  const destino = calendarForProfessional(config, appt.professionalId);
+  if (!destino.calendarId) {
+    // El profesional pidió que no le creemos citas (writeEvents: false) o no hay calendario
+    // del negocio donde caer. No es un error: es la configuración del tenant.
+    return;
+  }
+  const plan = planCalendarWrite({ eventId, previousCalendarId, targetCalendarId: destino.calendarId });
+  const calendarBase = eventsUrl(plan.escribirEn);
 
   const { vocabulary } = resolvePersonalization((org?.settings as Record<string, any> | null) ?? null);
   const body = JSON.stringify(
@@ -156,11 +209,24 @@ export async function syncAppointmentToGoogle(
     }),
   );
 
-  const res = eventId
-    ? await fetch(`${calendarBase}/${encodeURIComponent(eventId)}`, { method: "PATCH", headers, body, signal: AbortSignal.timeout(10_000) })
+  // MOVER: le cambiaron el profesional, así que el evento vive en otro calendario. Se borra
+  // de allá ANTES de crearlo acá; si el borrado falla de verdad (no 404/410) se corta y
+  // BullMQ reintenta, porque crear primero dejaría la cita duplicada en dos calendarios.
+  if (plan.accion === "mover" && plan.borrarDe && eventId) {
+    const r = await borrarEvento(plan.borrarDe, eventId);
+    if (!r.ok) {
+      await log("error", `Google Calendar respondió ${r.status} al mover la cita de calendario`);
+      throw new Error(`gcal move-delete ${r.status}`);
+    }
+  }
+
+  // Tras un "mover" ya no hay evento que actualizar: se crea en el calendario nuevo.
+  const idParaActualizar = plan.accion === "actualizar" ? eventId : undefined;
+  const res = idParaActualizar
+    ? await fetch(`${calendarBase}/${encodeURIComponent(idParaActualizar)}`, { method: "PATCH", headers, body, signal: AbortSignal.timeout(10_000) })
     : await fetch(calendarBase, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
 
-  if (res.status === 404 && eventId) {
+  if (res.status === 404 && idParaActualizar) {
     // El evento fue borrado a mano en Google: recrear.
     const retry = await fetch(calendarBase, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
     if (!retry.ok) {
@@ -168,7 +234,7 @@ export async function syncAppointmentToGoogle(
       throw new Error(`gcal recreate ${retry.status}`);
     }
     const created: any = await retry.json();
-    await saveEventId(organizationId, appt.id, meta, created.id);
+    await saveEventRef(organizationId, appt.id, meta, created.id, plan.escribirEn);
     await log("ok", "Cita recreada en Google Calendar");
     return;
   }
@@ -177,15 +243,33 @@ export async function syncAppointmentToGoogle(
     throw new Error(`gcal ${res.status}`);
   }
   const event: any = await res.json();
-  if (!eventId && event?.id) await saveEventId(organizationId, appt.id, meta, event.id);
+  // Se guarda SIEMPRE la referencia (id + calendario), no solo al crear: una cita espejada
+  // antes de la Etapa 1 no tiene `googleCalendarId` y sin esto nunca lo tendría, así que un
+  // cambio de profesional posterior no sabría de dónde borrarla.
+  if (event?.id) await saveEventRef(organizationId, appt.id, meta, event.id, plan.escribirEn);
   await withTenant(organizationId, (tx) =>
     tx.integrationConnection.updateMany({ where: { organizationId, provider: "google" }, data: { lastSyncAt: new Date() } }),
   ).catch(() => undefined);
-  await log("ok", eventId ? "Cita actualizada en Google Calendar" : "Cita creada en Google Calendar");
+  await log(
+    "ok",
+    plan.accion === "mover"
+      ? `Cita movida al calendario ${destino.origen === "profesional" ? "del profesional" : "del negocio"}`
+      : plan.accion === "actualizar"
+        ? "Cita actualizada en Google Calendar"
+        : "Cita creada en Google Calendar",
+  );
 }
 
-async function saveEventId(organizationId: string, appointmentId: string, meta: Record<string, any>, googleEventId: string): Promise<void> {
+/** Guarda DÓNDE quedó el evento: su id y su calendario. */
+async function saveEventRef(
+  organizationId: string,
+  appointmentId: string,
+  meta: Record<string, any>,
+  googleEventId: string,
+  googleCalendarId: string,
+): Promise<void> {
+  if (meta.googleEventId === googleEventId && meta.googleCalendarId === googleCalendarId) return; // nada que escribir
   await withTenant(organizationId, (tx) =>
-    tx.appointment.update({ where: { id: appointmentId }, data: { meta: { ...meta, googleEventId } as object } }),
+    tx.appointment.update({ where: { id: appointmentId }, data: { meta: { ...meta, googleEventId, googleCalendarId } as object } }),
   );
 }

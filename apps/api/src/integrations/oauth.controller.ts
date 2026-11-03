@@ -5,11 +5,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   getEnv,
   brandOf,
+  canUseFeature,
   googleOAuthAppForBrand,
   googleOAuthAppOfConnection,
   googleOAuthCredentials,
+  linkedCalendarIds,
+  missingScopesForFeature,
+  parseGoogleCalendarConfig,
   parseGrantedScopes,
   scopesForFeature,
+  GOOGLE_CALENDAR_CONFIG_VACIA,
   type GoogleFeature,
   type GoogleOAuthApp,
 } from "@conversia/config";
@@ -237,20 +242,190 @@ export class OAuthController {
     };
   }
 
-  /** Configuración del espejo de citas (calendario destino + on/off). */
+  /**
+   * Configuración del espejo de citas: calendario del NEGOCIO + interruptor + un calendario
+   * POR PROFESIONAL (Etapa 1).
+   *
+   * Valida en el SERVIDOR las dos cosas que la UI no puede garantizar: que el profesional
+   * sea de esta cuenta y que el calendario esté entre los que la cuenta conectada puede
+   * escribir. Sin lo segundo se podía guardar el calendario de cualquiera —incluido uno de
+   * otra empresa— y el error recién aparecía después, en el worker, como un 403 suelto.
+   */
   @Put("integrations/google/config")
   async googleConfig(@Body() body: unknown) {
     const ctx = requirePermission("integrations:write");
     const parsed = z
-      .object({ calendarId: z.string().max(300).optional(), calendarSync: z.boolean().optional() })
-      .parse(body ?? {});
+      .object({
+        calendarId: z.string().max(300).optional(),
+        calendarSync: z.boolean().optional(),
+        calendarReadBusy: z.boolean().optional(),
+        calendars: z
+          .record(
+            z.object({
+              calendarId: z.string().max(300),
+              readBusy: z.boolean().optional(),
+              writeEvents: z.boolean().optional(),
+            }),
+          )
+          .refine((o) => Object.keys(o).length <= 50, "Demasiados calendarios")
+          .optional(),
+      })
+      .safeParse(body ?? {});
+    if (!parsed.success) throw new BadRequestException("Datos inválidos");
+    const datos = parsed.data;
+
+    // Un calendarId vacío significa "desvincular": se quita la fila en vez de guardar basura.
+    const entradas = Object.entries(datos.calendars ?? {}).filter(([, v]) => v.calendarId.trim().length > 0);
+    const quitados = Object.keys(datos.calendars ?? {}).length - entradas.length;
+
+    // 1) Los profesionales tienen que ser de ESTA cuenta (nunca confiar en el id del cliente).
+    if (datos.calendars) {
+      const ids = Object.keys(datos.calendars);
+      const propios = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+        tx.professional.findMany({ where: { id: { in: ids } }, select: { id: true } }),
+      );
+      const ajenos = ids.filter((id) => !propios.some((p) => p.id === id));
+      if (ajenos.length) throw new BadRequestException("Hay profesionales que no son de esta cuenta");
+    }
+
+    // 2) Cada calendario tiene que estar entre los que la cuenta conectada puede ESCRIBIR.
+    const aValidar = [...new Set([...(datos.calendarId?.trim() ? [datos.calendarId.trim()] : []), ...entradas.map(([, v]) => v.calendarId.trim())])];
+    if (aValidar.length) {
+      const { calendars: disponibles } = await this.googleCalendars();
+      const faltan = aValidar.filter((id) => !disponibles.some((c) => c.id === id));
+      if (faltan.length) {
+        throw new BadRequestException(
+          `La cuenta conectada no puede escribir en ${faltan.join(", ")}. Pide que compartan ese calendario con permiso "Hacer cambios en eventos" y vuelve a intentar.`,
+        );
+      }
+    }
+
     return this.prisma.withTenant(ctx.organizationId, async (tx) => {
       const conn = await tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "google" } });
       if (!conn) throw new BadRequestException("Conecta tu cuenta de Google primero");
-      const config = { ...((conn.config as object) ?? {}), ...parsed } as object;
-      await tx.integrationConnection.update({ where: { id: conn.id }, data: { config } });
-      return { ok: true, config: parsed };
+      const previo = (conn.config as Record<string, unknown> | null) ?? {};
+      const config: Record<string, unknown> = { ...previo };
+      if (datos.calendarId !== undefined) config.calendarId = datos.calendarId.trim();
+      if (datos.calendarSync !== undefined) config.calendarSync = datos.calendarSync;
+      if (datos.calendarReadBusy !== undefined) config.calendarReadBusy = datos.calendarReadBusy;
+      // Solo se reemplaza el mapa si vino en el body: un PUT parcial (apagar el espejo, p. ej.)
+      // no puede borrar los calendarios ya vinculados.
+      if (datos.calendars !== undefined) {
+        config.calendars = Object.fromEntries(
+          entradas.map(([proId, v]) => [proId, { calendarId: v.calendarId.trim(), readBusy: v.readBusy !== false, writeEvents: v.writeEvents !== false }]),
+        );
+      }
+      await tx.integrationConnection.update({ where: { id: conn.id }, data: { config: config as object } });
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "integration.google_calendars",
+          entityType: "integration_connection",
+          entityId: conn.id,
+          after: { calendarSync: config.calendarSync ?? null, vinculados: Object.keys((config.calendars as object) ?? {}).length, desvinculados: quitados } as object,
+        },
+      });
+      return { ok: true, config: parseGoogleCalendarConfig(config) };
     });
+  }
+
+  /**
+   * Estado de Google para la pantalla de Agenda (Etapa 1).
+   *
+   * Existe porque el panel de Conversia NO tiene pantalla de Integraciones: la configuración
+   * de calendarios vive en la Agenda, y necesita en UNA llamada el estado de la conexión, la
+   * config vigente, los profesionales y los calendarios disponibles. El overview de
+   * integraciones trae media plataforma y es de otro panel.
+   */
+  @Get("integrations/google/status")
+  async googleStatus() {
+    const ctx = requirePermission("integrations:read");
+    const env = getEnv();
+    const { conn, professionals } = await this.prisma.withTenant(ctx.organizationId, async (tx) => ({
+      conn: await tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "google" } }),
+      professionals: await tx.professional.findMany({ where: { active: true }, select: { id: true, name: true, specialty: true }, orderBy: { name: "asc" } }),
+    }));
+    const { app } = await this.googleAppFor(ctx.organizationId);
+    const plataformaLista = !googleOAuthCredentials(app, env).missing;
+
+    if (!conn) {
+      return { connected: false, plataformaLista, app, professionals, config: GOOGLE_CALENDAR_CONFIG_VACIA, calendarOptions: null, permisos: null, status: null, lastError: null, accountEmail: null, lastSyncAt: null };
+    }
+    const cfg = parseGoogleCalendarConfig(conn.config);
+    // La lista de calendarios es una llamada a Google: si falla (token revocado, caída) NO se
+    // cae toda la pantalla — se muestra la config guardada y el error.
+    let calendarOptions: Array<{ id: string; name: string; primary: boolean }> | null = null;
+    let listError: string | null = null;
+    try {
+      calendarOptions = (await this.googleCalendars()).calendars;
+    } catch (err) {
+      listError = (err as Error).message;
+    }
+    return {
+      connected: true,
+      plataformaLista,
+      app,
+      professionals,
+      config: cfg,
+      calendarOptions,
+      permisos: { calendar: canUseFeature(conn.config, "calendar"), faltanParaCalendar: missingScopesForFeature(conn.config, "calendar") },
+      status: conn.status,
+      lastError: listError ?? conn.lastError,
+      accountEmail: (conn.config as Record<string, unknown> | null)?.accountEmail ?? null,
+      lastSyncAt: conn.lastSyncAt,
+    };
+  }
+
+  /**
+   * "Probar": cuántos eventos tiene HOY cada calendario vinculado. Es la comprobación que le
+   * dice al dueño "sí, estoy viendo el calendario correcto" sin mostrar los títulos de los
+   * eventos personales (eso no nos corresponde mostrarlo en el panel).
+   */
+  @Post("integrations/google/calendars/test")
+  async googleCalendarsTest() {
+    const ctx = requirePermission("integrations:write");
+    const conn = await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationConnection.findFirst({ where: { organizationId: ctx.organizationId, provider: "google" } }),
+    );
+    if (!conn) throw new BadRequestException("Conecta tu cuenta de Google primero");
+    const cfg = parseGoogleCalendarConfig(conn.config);
+    const ids = linkedCalendarIds(cfg);
+    if (!ids.length) return { ok: false, detail: "Todavía no hay ningún calendario vinculado.", calendars: [] };
+
+    const token = await this.freshToken(ctx.organizationId, "google");
+    const desde = new Date();
+    desde.setUTCHours(0, 0, 0, 0);
+    const hasta = new Date(desde.getTime() + 24 * 3600 * 1000);
+    const resultados = await Promise.all(
+      ids.map(async (calendarId) => {
+        const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?singleEvents=true&timeMin=${desde.toISOString()}&timeMax=${hasta.toISOString()}&maxResults=50`;
+        try {
+          const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8_000) });
+          if (!res.ok) return { calendarId, ok: false, eventos: 0, detail: `Google respondió ${res.status}` };
+          const data: any = await res.json();
+          const eventos = ((data.items ?? []) as any[]).filter((e) => e.status !== "cancelled");
+          const nuestros = eventos.filter((e) => e.extendedProperties?.private?.conversiaAppointmentId).length;
+          return { calendarId, ok: true, eventos: eventos.length, nuestros, detail: null };
+        } catch (err) {
+          return { calendarId, ok: false, eventos: 0, detail: (err as Error).message?.slice(0, 120) ?? "error" };
+        }
+      }),
+    );
+    const fallidos = resultados.filter((r) => !r.ok);
+    await this.prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationEvent.create({
+        data: {
+          organizationId: ctx.organizationId,
+          provider: "google",
+          type: "calendar.test",
+          status: fallidos.length ? "error" : "ok",
+          message: fallidos.length ? `Prueba de calendarios: ${fallidos.length} con error` : `Prueba de calendarios OK: ${resultados.length} calendario(s)`,
+        },
+      }),
+    ).catch(() => undefined);
+    return { ok: fallidos.length === 0, calendars: resultados };
   }
 
   /** Prueba real: lista calendarios (valida token + refresh) y reporta. */

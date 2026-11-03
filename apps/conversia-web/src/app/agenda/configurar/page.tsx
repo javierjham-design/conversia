@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { GoogleCalendarCard, type GoogleStatus } from "@/components/GoogleCalendarCard";
 import { api } from "@/lib/api";
 
 type Block = { day: number; start: string; end: string };
@@ -17,6 +18,7 @@ export default function ConfigurarAgenda() {
   const [pros, setPros] = useState<Pro[]>([]);
   const [svcs, setSvcs] = useState<Svc[]>([]);
   const [cfg, setCfg] = useState<Config | null>(null);
+  const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [editingPro, setEditingPro] = useState<Pro | "new" | null>(null);
   const [editingSvc, setEditingSvc] = useState<Svc | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +30,9 @@ export default function ConfigurarAgenda() {
       api<Pro[]>("/agenda/professionals").then(setPros),
       api<Svc[]>("/agenda/services").then(setSvcs),
       api<Config>("/agenda/config").then(setCfg),
+      // Google Calendar: si falla (sin permiso de integraciones, api vieja) la pantalla sigue
+      // funcionando — la tarjeta simplemente no se muestra.
+      api<GoogleStatus>("/integrations/google/status").then(setGoogle).catch(() => setGoogle(null)),
     ]).then(([p]) => {
       if (p.status === "rejected") setError(String((p.reason as Error)?.message ?? "No se pudo cargar"));
       setLoaded(true);
@@ -103,6 +108,17 @@ export default function ConfigurarAgenda() {
                   <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12 }}>
                     {p.workingHours.length ? p.workingHours.map((b) => `${DAYS[b.day]} ${b.start}-${b.end}`).join(" · ") : "Sin horario definido"}
                   </p>
+                  {/* Indicador del calendario vinculado: desde acá se ve de un vistazo quién
+                      tiene su propio Google Calendar y quién cae en el del negocio. */}
+                  {google?.connected ? (
+                    <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 11 }}>
+                      {google.config.calendars[p.id]
+                        ? `📅 ${google.calendarOptions?.find((c) => c.id === google.config.calendars[p.id].calendarId)?.name ?? google.config.calendars[p.id].calendarId}`
+                        : google.config.businessCalendarId
+                          ? "📅 calendario del negocio"
+                          : "📅 sin calendario vinculado"}
+                    </p>
+                  ) : null}
                 </div>
                 <button onClick={() => setEditingPro(p)} className="text-accent" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 13 }}>Editar</button>
                 <button onClick={() => deletePro(p.id)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }} aria-label="Desactivar"><Trash2 size={16} /></button>
@@ -132,6 +148,14 @@ export default function ConfigurarAgenda() {
             ))}
           </div>
         )}
+
+        {/* Google Calendar: va acá y no en Integraciones porque este panel no tiene esa
+            pantalla — el dueño configura sus calendarios donde está su agenda. */}
+        {google ? (
+          <div style={{ marginTop: 28 }}>
+            <GoogleCalendarCard google={google} onSaved={loadAll} />
+          </div>
+        ) : null}
       </main>
 
       {editingPro ? <ProForm pro={editingPro === "new" ? null : editingPro} onClose={() => setEditingPro(null)} onSaved={() => { setEditingPro(null); loadAll(); }} /> : null}
