@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   borrarCookiesDeMedicion,
@@ -28,6 +28,7 @@ export default function AvisoCookies() {
   const pathname = usePathname();
   const [montado, setMontado] = useState(false);
   const [visible, setVisible] = useState(false);
+  const caja = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setMontado(true);
@@ -39,8 +40,52 @@ export default function AvisoCookies() {
     if (montado) setVisible(estadoConsentimiento() === "sin-respuesta");
   }, [pathname, montado]);
 
-  if (!montado || !visible) return null;
-  if (!pathname || !esRutaDeMarketing(pathname)) return null;
+  const enRuta = Boolean(pathname && esRutaDeMarketing(pathname));
+  const mostrar = montado && visible && enRuta;
+
+  /**
+   * RESERVA EL ESPACIO QUE OCUPA, o tapa lo que hay debajo.
+   *
+   * Esto no es un detalle estético: al ser `position: fixed` abajo, el aviso **se comía el
+   * botón de crear la cuenta en pantallas de celular** —el último clic de todo el embudo, en
+   * el dispositivo del que viene casi todo el tráfico de los anuncios—. No se veía en
+   * desktop, donde el formulario no llega tan abajo; lo cazó la suite `dueno` en el proyecto
+   * `iphone`, con "intercepts pointer events" sobre `/registro`.
+   *
+   * Se mide el alto REAL con un `ResizeObserver` en vez de restar una altura fija, porque en
+   * celular el texto envuelve y los botones pasan a ocupar su propia línea: la altura cambia
+   * con el ancho y con el tamaño de letra del visitante.
+   */
+  useEffect(() => {
+    const raiz = document.documentElement;
+    const limpiar = () => {
+      raiz.removeAttribute("data-aviso-cookies");
+      raiz.style.removeProperty("--cv-aviso-h");
+    };
+    if (!mostrar) {
+      limpiar();
+      return;
+    }
+    const el = caja.current;
+    if (!el) return;
+    const aplicar = () => {
+      // +24: los 16 del margen inferior del propio aviso y 8 de aire, para que el botón no
+      // quede pegado al borde del recuadro.
+      raiz.style.setProperty("--cv-aviso-h", `${Math.ceil(el.getBoundingClientRect().height) + 24}px`);
+      raiz.setAttribute("data-aviso-cookies", "1");
+    };
+    aplicar();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(aplicar) : null;
+    ro?.observe(el);
+    window.addEventListener("resize", aplicar);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", aplicar);
+      limpiar();
+    };
+  }, [mostrar]);
+
+  if (!mostrar) return null;
 
   const decidir = (valor: "aceptado" | "solo-necesarias") => {
     guardarConsentimiento(valor);
@@ -52,11 +97,13 @@ export default function AvisoCookies() {
 
   return (
     <>
-      <div className="cv-cookies" role="dialog" aria-live="polite" aria-label="Preferencias de cookies">
+      <div ref={caja} className="cv-cookies" role="dialog" aria-live="polite" aria-label="Preferencias de cookies" data-testid="aviso-cookies">
+        {/* Texto CORTO a propósito. La primera versión medía 184px de alto en un iPhone —28%
+            de la pantalla— y se comía el botón del generador. Lo imprescindible es qué se
+            instala y para qué; el detalle está en la política, a un toque. */}
         <div className="cv-cookies-txt">
-          <strong>Cookies para medir nuestra publicidad.</strong> Las necesarias para que el sitio funcione van siempre. Las de
-          medición (Pixel de Meta) solo si las aceptas, y sirven para saber qué anuncio te trajo.{" "}
-          <a href="/legal/privacidad#cookies">Cómo las usamos</a>.
+          Usamos cookies de medición (Pixel de Meta) para saber qué anuncio te trajo. Las necesarias van siempre.{" "}
+          <a href="/legal/privacidad#cookies">Más info</a>.
         </div>
         <div className="cv-cookies-btns">
           <button type="button" className="cv-cookies-ghost" onClick={() => decidir("solo-necesarias")}>
@@ -68,7 +115,9 @@ export default function AvisoCookies() {
         </div>
       </div>
       <style>{`
-.cv-cookies { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: 16px; margin: 0 auto; max-width: 720px;
+/* El borde inferior suma el área segura de iOS: sin eso el aviso queda bajo el indicador de
+   inicio del iPhone y sus botones son difíciles de apretar. */
+.cv-cookies { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); margin: 0 auto; max-width: 720px;
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px;
   border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); color: var(--ink);
   box-shadow: 0 10px 34px rgba(0,0,0,.26); font-size: 13.5px; line-height: 1.5; }
@@ -79,11 +128,15 @@ export default function AvisoCookies() {
 .cv-cookies-ghost { background: transparent; color: var(--ink-dim); border: 1px solid var(--line); }
 .cv-cookies-ok { background: var(--acc); color: var(--acc-ink); border: 1px solid transparent; }
 /* En celular —de donde llega casi todo el tráfico de Meta— los botones ocupan el ancho y
-   quedan al alcance del pulgar, en vez de apretados contra el texto. */
+   quedan al alcance del pulgar, en vez de apretados contra el texto.
+   Y el aviso se APRIETA: cada píxel de alto acá es un píxel que le tapa la pantalla a alguien
+   que está decidiendo si crear la cuenta. */
 @media (max-width: 560px) {
-  .cv-cookies { gap: 12px; }
+  .cv-cookies { gap: 10px; padding: 11px 13px; font-size: 12.5px; line-height: 1.4; left: 10px; right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  .cv-cookies-txt { flex: 1 1 100%; }
   .cv-cookies-btns { width: 100%; }
-  .cv-cookies button { flex: 1; }
+  .cv-cookies button { flex: 1; padding: 10px 12px; }
 }
       `}</style>
     </>

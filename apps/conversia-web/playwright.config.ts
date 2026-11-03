@@ -6,9 +6,39 @@ import { defineConfig, devices } from "@playwright/test";
 
 const BASE = process.env.BASE || "http://localhost:3002";
 
+/**
+ * M0 — el aviso de cookies arranca YA CONTESTADO en todas las suites.
+ *
+ * Es `position: fixed` abajo, así que mientras está arriba cubre la franja inferior de la
+ * ventana. Las jornadas prueban el PRODUCTO (registrarse, montar, cobrar), no el aviso, y
+ * Playwright solo desplaza un elemento si no está "a la vista" — un botón TAPADO sí está a la
+ * vista, así que el clic fallaba por actionability sin que nada estuviera mal en el producto.
+ *
+ * Esto no esconde el problema: `e2e/aviso-cookies.spec.ts` limpia las cookies a propósito
+ * para que el aviso aparezca, y verifica en los 5 proyectos que no tape los botones del
+ * embudo ni ocupe más del 22% de una pantalla de celular. Ese spec es el dueño de esa
+ * garantía; las jornadas modelan a quien ya contestó, que es el visitante que vuelve.
+ *
+ * `solo-necesarias` y no `aceptado`: así ninguna suite carga el Pixel ni escribe cookies de
+ * medición, que es el estado limpio para probar el producto.
+ */
+const CONSENTIMIENTO_RESPONDIDO = {
+  name: "cv_consent",
+  value: "solo-necesarias",
+  domain: new URL(BASE).hostname,
+  path: "/",
+  expires: -1 as number,
+  httpOnly: false,
+  secure: false,
+  sameSite: "Lax" as const,
+};
+
 // Fija el tema (el bootstrap del layout lee localStorage) antes de cargar la página.
 const themeInit = (theme: "dark" | "light") => ({
-  storageState: { cookies: [], origins: [{ origin: BASE, localStorage: [{ name: "conversia_theme", value: theme }] }] },
+  storageState: {
+    cookies: [CONSENTIMIENTO_RESPONDIDO],
+    origins: [{ origin: BASE, localStorage: [{ name: "conversia_theme", value: theme }] }],
+  },
 });
 
 export default defineConfig({
