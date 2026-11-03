@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, computeNativeSlots } from "@conversia/scheduling";
@@ -8,6 +8,7 @@ import { decryptSecret } from "../common/crypto";
 import { requireContext } from "../tenancy/context";
 import { requirePermission } from "../tenancy/permissions";
 import { enqueueCalendarMirror, mirrorActionForStatus } from "./calendar-mirror";
+import { GoogleBusyService } from "./google-busy.service";
 
 const STATUS_MAP: Record<string, string> = { pending: "PENDING", confirmed: "CONFIRMED", cancelled: "CANCELLED", rescheduled: "RESCHEDULED", completed: "COMPLETED", no_show: "NO_SHOW" };
 
@@ -46,6 +47,7 @@ export class AgendaController {
   constructor(
     private prisma: PrismaService,
     private queues: QueueService,
+    private googleBusy: GoogleBusyService,
   ) {}
 
   /** Qué proveedor de agenda está activo (nativo por defecto; externo si hay conexión). */
@@ -119,37 +121,42 @@ export class AgendaController {
     }
 
     // Nativo: computa por recurso con su horario y duración.
-    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
-      const [org, pros, appts] = await Promise.all([
-        this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
-        tx.professional.findMany({ where: { active: true } }),
-        tx.appointment.findMany({ where: { startsAt: { gte, lte }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }, select: { professionalId: true, startsAt: true, endsAt: true } }),
-      ]);
-      const cfg = ((org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as { slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string };
-      const fromDate = gte.toISOString().slice(0, 10);
-      const toDate = lte.toISOString().slice(0, 10);
-      const slots: Array<{ professionalId: string; start: string; end: string }> = [];
-      for (const p of pros) {
-        const m = (p.meta as any) ?? {};
-        const workBlocks = Array.isArray(m.workingHours) ? m.workingHours : [];
-        if (!workBlocks.length) continue;
-        const durationMin = typeof m.durationMin === "number" ? m.durationMin : cfg.slotStepMin ?? 30;
-        const free = computeNativeSlots({
-          fromDate,
-          toDate,
-          workBlocks,
-          busy: appts.filter((a) => a.professionalId === p.id).map((a) => ({ start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
-          durationMin,
-          slotStepMin: cfg.slotStepMin,
-          bufferMin: cfg.bufferMin,
-          minAdvanceMin: cfg.minAdvanceMin,
-          offset: cfg.offset ?? "-04:00",
-          maxSlots: 500,
-        });
-        for (const s of free) slots.push({ professionalId: p.id, start: s.start, end: s.end });
-      }
-      return { source: "native", slots };
-    });
+    const datos = await this.prisma.withTenant(ctx.organizationId, async (tx) => ({
+      org: await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true, timezone: true } }),
+      pros: await tx.professional.findMany({ where: { active: true } }),
+      appts: await tx.appointment.findMany({ where: { startsAt: { gte, lte }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }, select: { professionalId: true, startsAt: true, endsAt: true } }),
+    }));
+    const cfg = ((datos.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as { slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string };
+    const fromDate = gte.toISOString().slice(0, 10);
+    const toDate = lte.toISOString().slice(0, 10);
+    // Etapa 2 — el panel resta las MISMAS horas ocupadas de Google que resta el bot. Si no,
+    // el dueño vería libre una hora que el bot ya no ofrece.
+    const externalBusy = await this.googleBusy.forOrg(ctx.organizationId, datos.org?.timezone ?? "America/Santiago").catch(() => undefined);
+    const slots: Array<{ professionalId: string; start: string; end: string }> = [];
+    for (const p of datos.pros) {
+      const m = (p.meta as any) ?? {};
+      const workBlocks = Array.isArray(m.workingHours) ? m.workingHours : [];
+      if (!workBlocks.length) continue;
+      const durationMin = typeof m.durationMin === "number" ? m.durationMin : cfg.slotStepMin ?? 30;
+      const externas = externalBusy ? await externalBusy({ professionalId: p.id, from: fromDate, to: toDate }) : [];
+      const free = computeNativeSlots({
+        fromDate,
+        toDate,
+        workBlocks,
+        busy: [
+          ...datos.appts.filter((a) => a.professionalId === p.id).map((a) => ({ start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
+          ...externas,
+        ],
+        durationMin,
+        slotStepMin: cfg.slotStepMin,
+        bufferMin: cfg.bufferMin,
+        minAdvanceMin: cfg.minAdvanceMin,
+        offset: cfg.offset ?? "-04:00",
+        maxSlots: 500,
+      });
+      for (const s of free) slots.push({ professionalId: p.id, start: s.start, end: s.end });
+    }
+    return { source: "native", slots, googleBusy: Boolean(externalBusy) };
   }
 
   // ------------------------------ Config ------------------------------
@@ -371,6 +378,24 @@ export class AgendaController {
       .object({ contactId: z.string().min(1), professionalId: z.string().optional(), serviceId: z.string().optional(), startsAt: z.string(), endsAt: z.string(), notes: z.string().max(1000).optional() })
       .safeParse(body);
     if (!p.success) throw new BadRequestException("Datos de cita inválidos");
+
+    // Etapa 2 — antes de guardar, mirar Google DE NUEVO y sin caché. El dueño pudo ocupar esa
+    // hora desde su teléfono mientras tenía esta pantalla abierta. Solo bloquea si la hora
+    // está tomada de verdad: si Google falla, `externalBusy` devuelve vacío y se agenda igual
+    // (perder una hora ocupada es molesto; no poder agendar es peor).
+    if (p.data.professionalId) {
+      const org = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { timezone: true } });
+      const externalBusy = await this.googleBusy.forOrg(ctx.organizationId, org?.timezone ?? "America/Santiago").catch(() => undefined);
+      if (externalBusy) {
+        const s = new Date(p.data.startsAt).getTime();
+        const e = new Date(p.data.endsAt).getTime();
+        const ocupadas = await externalBusy({ professionalId: p.data.professionalId, from: p.data.startsAt.slice(0, 10), to: p.data.endsAt.slice(0, 10), noCache: true });
+        if (ocupadas.some((b) => s < new Date(b.end).getTime() && e > new Date(b.start).getTime())) {
+          throw new ConflictException("Esa hora ya está ocupada en Google Calendar. Elige otra.");
+        }
+      }
+    }
+
     const appt = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
       // N1 — guarda los nombres en meta al crear (ficha del cliente y otros consumidores de meta).
       const [pro, svc] = await Promise.all([

@@ -119,6 +119,13 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
   const agenda = ((data.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as {
     slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string;
   };
+  // ETAPA 2 — horas ocupadas del Google Calendar de cada profesional. `undefined` si el
+  // tenant no lo usa: así el turno del bot no paga nada por una función que no tiene activa.
+  const { buildExternalBusy } = await import("./google-busy-source.js");
+  const externalBusy = await buildExternalBusy(orgId, data.org?.timezone ?? "America/Santiago").catch((err) => {
+    console.warn("⚠ [gcal] no se pudo preparar la lectura de horas ocupadas:", (err as Error).message);
+    return undefined;
+  });
   return new NativeSchedulingProvider({
     clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
     professionals: data.professionals.map((p) => {
@@ -137,6 +144,7 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
       .filter((a) => a.professionalId)
       .map((a) => ({ professionalId: a.professionalId as string, start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
     config: { slotStepMin: agenda.slotStepMin, bufferMin: agenda.bufferMin, minAdvanceMin: agenda.minAdvanceMin, offset: agenda.offset ?? "-04:00" },
+    externalBusy,
   });
 }
 

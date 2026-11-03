@@ -4,7 +4,8 @@
  * La IA solo ve la interfaz SchedulingProvider; nunca el proveedor real.
  */
 export * from "./availability";
-import { computeNativeSlots, type WorkBlock } from "./availability";
+export * from "./google-busy";
+import { computeNativeSlots, type BusyInterval, type WorkBlock } from "./availability";
 import { createHmac, randomUUID } from "node:crypto";
 import type {
   AvailabilityQuery,
@@ -208,6 +209,20 @@ export interface NativeSchedulingData {
   services: SchedService[];
   busy: { professionalId: string; start: string; end: string }[]; // citas ocupadas (futuras)
   config?: NativeAgendaConfig;
+  /**
+   * ETAPA 2 — horas ocupadas en calendarios EXTERNOS (Google) del profesional.
+   *
+   * Es un gancho y no una lista porque depende del RANGO que se consulte, y acá no se sabe
+   * cuál va a pedir el agente. Lo inyectan el worker y la api; el paquete se queda sin red
+   * ni Redis, así que todo esto se prueba con un doble.
+   *
+   * `noCache` lo usa `createAppointment`: antes de confirmar hay que mirar Google de nuevo,
+   * porque la hora pudo ocuparse en los segundos que el cliente tardó en contestar.
+   *
+   * Si devuelve lista vacía (Google caído, sin permiso) la disponibilidad se calcula solo
+   * con la agenda nativa: el bot nunca se queda mudo por un problema de Google.
+   */
+  externalBusy?: (q: { professionalId: string; from: string; to: string; noCache?: boolean }) => Promise<BusyInterval[]>;
 }
 
 export class NativeSchedulingProvider implements SchedulingProvider {
@@ -240,11 +255,16 @@ export class NativeSchedulingProvider implements SchedulingProvider {
       if (!prof.workingHours?.length) continue;
       // Duración: la del servicio pedido, o la propia del recurso (tipo servicio), o 30.
       const durationMin = svc?.durationMin ?? prof.defaultDurationMin ?? 30;
+      // Etapa 2: a las citas de la BD se suman las horas ocupadas en el Google Calendar del
+      // profesional. Si Google falla, `externalBusy` devuelve vacío y se sigue sin él.
+      const externas = this.data.externalBusy
+        ? await this.data.externalBusy({ professionalId: prof.id, from: query.from, to: query.to })
+        : [];
       const slots = computeNativeSlots({
         fromDate: query.from,
         toDate: query.to,
         workBlocks: prof.workingHours,
-        busy: this.data.busy.filter((b) => b.professionalId === prof.id),
+        busy: [...this.data.busy.filter((b) => b.professionalId === prof.id), ...externas],
         durationMin,
         slotStepMin: cfg.slotStepMin,
         bufferMin: cfg.bufferMin,
@@ -266,6 +286,18 @@ export class NativeSchedulingProvider implements SchedulingProvider {
       .filter((b) => b.professionalId === input.professionalId)
       .some((b) => s < new Date(b.end).getTime() + buf && e + buf > new Date(b.start).getTime());
     if (clash) throw new Error("El horario ya no está disponible (doble reserva evitada)");
+
+    // Etapa 2 — RE-VERIFICACIÓN contra Google, SIN caché, justo antes de confirmar.
+    //
+    // Entre que el bot ofrece una hora y el cliente contesta pasan minutos, y en esos
+    // minutos el dueño pudo ocuparla desde su teléfono. Con datos de caché se confirmaría
+    // una hora ya tomada y el cliente llegaría a la puerta cerrada.
+    if (this.data.externalBusy && input.professionalId) {
+      const dia = input.start.slice(0, 10);
+      const externas = await this.data.externalBusy({ professionalId: input.professionalId, from: dia, to: input.end.slice(0, 10) || dia, noCache: true });
+      const choque = externas.some((b) => s < new Date(b.end).getTime() + buf && e + buf > new Date(b.start).getTime());
+      if (choque) throw new Error("Esa hora ya no está disponible (se ocupó en Google Calendar); ofrece otra");
+    }
     return {
       id: randomUUID(),
       clinicId: input.clinicId,
