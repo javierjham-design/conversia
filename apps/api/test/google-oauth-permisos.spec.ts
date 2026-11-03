@@ -11,6 +11,7 @@ import {
   hasConversiaGoogleApp,
   missingScopesForFeature,
   parseGrantedScopes,
+  scopesForAuthorize,
   scopesForFeature,
 } from "@conversia/config";
 
@@ -123,6 +124,39 @@ describe("REGRESIÓN TuBot — las conexiones que ya existen siguen igual, sin r
   it("conserva su calendarId y su espejo: nada de la config vieja se reinterpreta", () => {
     expect(vieja.calendarId).toBe("clinica@gmail.com");
     expect(vieja.calendarSync).toBe(true);
+  });
+
+  /**
+   * El drawer de Google de TuBot (`apps/web`) es UNA tarjeta para Calendar **y** Sheets, y
+   * llama a `authorize` SIN declarar función. Si eso cae al default `calendar`, un tenant de
+   * TuBot que conecte de cero obtiene Calendar y NO `spreadsheets`, y desde su panel no tiene
+   * ninguna forma de pedirlo: el paso "Añadir fila a Google Sheets" de Workflows queda muerto.
+   *
+   * Alcanzable hoy con el botón "Desconectar" del propio drawer: borra la conexión, así que
+   * `include_granted_scopes` ya no tiene nada que conservar.
+   *
+   * Por eso "no declaró función" ≠ "calendar": significa los permisos de siempre.
+   */
+  it("pedir permisos SIN declarar función pide los 3 de siempre (el drawer de TuBot)", () => {
+    expect(scopesForAuthorize(undefined)).toEqual(GOOGLE_LEGACY_SCOPES);
+    expect(scopesForAuthorize(null)).toEqual(GOOGLE_LEGACY_SCOPES);
+    expect(scopesForAuthorize("")).toEqual(GOOGLE_LEGACY_SCOPES);
+    expect(scopesForAuthorize("   ")).toEqual(GOOGLE_LEGACY_SCOPES);
+    expect(scopesForAuthorize(undefined)).toContain(SPREADSHEETS);
+  });
+
+  it("declarar función sigue pidiendo SOLO lo de esa función (Conversia no ve planillas)", () => {
+    expect(scopesForAuthorize("calendar")).toEqual([CAL_EVENTS, CAL_READONLY]);
+    expect(scopesForAuthorize("calendar")).not.toContain(SPREADSHEETS);
+    expect(scopesForAuthorize("sheets")).toEqual([SPREADSHEETS]);
+    expect(scopesForAuthorize(" calendar ")).toEqual([CAL_EVENTS, CAL_READONLY]);
+  });
+
+  it("una función inventada NO se degrada a los 3 permisos: se rechaza", () => {
+    // Degradar sería peor que fallar: un `?feature=calendario` mal escrito pediría
+    // planillas sin que nadie lo pida.
+    expect(() => scopesForAuthorize("planillas")).toThrow();
+    expect(() => scopesForAuthorize("CALENDAR")).toThrow();
   });
 });
 
