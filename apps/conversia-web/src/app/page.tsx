@@ -4,16 +4,10 @@ import {
   ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, LayoutDashboard, Menu, MessageSquare,
   ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
-import { api, getToken, getRefreshToken, getSessionDeadline, clearToken } from "@/lib/api";
+import { getToken, getRefreshToken, getSessionDeadline, clearToken } from "@/lib/api";
 import { estadoDelVisitante } from "@/lib/sesion";
-import {
-  BASE_RESPALDO,
-  CREDITOS_POR_CONVERSACION_RESPALDO,
-  PACKS_RESPALDO,
-  PACK_MAS_ELEGIDO,
-  PACK_MEJOR_PRECIO,
-  PRUEBA_RESPALDO_CREDITOS,
-} from "@/lib/precios-respaldo";
+import { PACK_MAS_ELEGIDO, PACK_MEJOR_PRECIO } from "@/lib/precios-respaldo";
+import { clp, usarPrecios } from "@/lib/usar-precios";
 
 /**
  * LANDING PÚBLICA de Conversia (apex conversia.cl). La ve CUALQUIERA, con sesión o sin ella.
@@ -25,18 +19,11 @@ import {
  * funciona, preguntas— sin cerrar sesión. La sesión solo cambia el botón del menú.
  */
 
-const clp = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
-
-type Plan = { code: string; name: string; priceClp: number; features: Record<string, unknown> };
-type Pack = { code: string; name: string; credits: number; priceClp: number; bonoPct?: number; creditosPorConversacion?: number };
-
 export default function Landing() {
   // Arranca SIEMPRE en "anónimo" y solo cambia en el efecto: leer localStorage para el primer
   // render rompería la hidratación (el servidor no lo tiene) — es el React #418 que ya nos costó
   // una pantalla. Como consecuencia, el botón del panel aparece un instante después del paint.
   const [visitante, setVisitante] = useState<"anonimo" | "con-sesion">("anonimo");
-  const [base, setBase] = useState<Plan | null>(null);
-  const [packs, setPacks] = useState<Pack[]>([]);
   const [menu, setMenu] = useState(false);
   const [faq, setFaq] = useState<number | null>(0);
 
@@ -51,40 +38,12 @@ export default function Landing() {
   }, []);
   const conSesion = visitante === "con-sesion";
 
-  // Precios reales del catálogo público V2 (si el go-live está encendido).
-  useEffect(() => {
-    api<Plan[]>("/public/plans?brand=conversia")
-      .then((p) => setBase(p.find((x) => x.code === "conversia_creditos_base") ?? p.find((x) => x.code === "conversia_v2_base") ?? null))
-      .catch(() => {});
-    api<Pack[]>("/public/conversation-packs?brand=conversia").then(setPacks).catch(() => {});
-  }, []);
-
-  // CRE 2 — la sección de precios sigue al catálogo que está ACTIVO. Si el dueño enciende
-  // los Créditos IA, el plan que llega es el de créditos y la unidad cambia de nombre: decir
-  // "100 conversaciones incluidas" cuando lo que trae son 100 CRÉDITOS (≈24 conversaciones)
-  // sería una promesa falsa en la página de precios.
-  const esCreditos = base?.code === "conversia_creditos_base";
-  const unidad = esCreditos ? "créditos" : "conversaciones";
-  // Respaldos para cuando la llamada de precios no llegó. Los números NO se escriben acá:
-  // viven en `@/lib/precios-respaldo`, que un test compara contra el catálogo. Un respaldo
-  // solo se ve cuando algo falla —o sea cuando nadie está mirando—, así que si se desincroniza
-  // del catálogo nadie se entera de que la landing anuncia un precio viejo.
-  const basePrice = base ? clp(base.priceClp) : clp(BASE_RESPALDO.priceClp);
-  const baseIncluded = base
-    ? Number(base.features?.aiCreditsIncluded ?? base.features?.conversationsIncluded) || BASE_RESPALDO.creditos
-    : BASE_RESPALDO.creditos;
-  const pruebaGratis = esCreditos ? PRUEBA_RESPALDO_CREDITOS : 30;
-  // CRE 3 — EQUIVALENCIA EN CONVERSACIONES. "100 créditos" no le dice nada a alguien que
-  // está decidiendo si contratar: en la página de precios el número tiene que poder
-  // compararse con algo que entienda. Es una APROXIMACIÓN y se dice así ("≈", "según cuánto
-  // conversen tus clientes"), porque el consumo real depende del largo de cada conversación.
-  // El promedio de referencia es el MISMO del estimador del panel, para no prometer acá una
-  // cifra distinta de la que verá adentro.
-  // El promedio lo manda el servidor con los packs (`creditosPorConversacion`), para no
-  // hardcodear acá un número que después se desincronice del estimador del panel.
-  const porConversacion = packs.find((p) => p.creditosPorConversacion)?.creditosPorConversacion ?? CREDITOS_POR_CONVERSACION_RESPALDO;
-  const conv = (creditos: number) => Math.floor(creditos / porConversacion);
-  const aprox = (creditos: number) => (esCreditos ? ` (≈ ${conv(creditos).toLocaleString("es-CL")} conversaciones)` : "");
+  // M0 — precios y prueba salen de `usarPrecios()`, la fuente ÚNICA para todas las páginas
+  // públicas. Antes esto vivía acá y `/crear` tenía "30 conversaciones" escrito a mano: dos
+  // lugares decidiendo lo mismo, a dos clics de distancia en el mismo embudo. Lo que decidía
+  // este bloque —seguir al catálogo ACTIVO, con respaldos atados al catálogo por un test— se
+  // conserva intacto dentro del hook; ver su comentario de cabecera.
+  const { esCreditos, unidad, basePrice, baseIncluded, pruebaGratis, porConversacion, packs, conv, aprox } = usarPrecios();
 
   return (
     <div className="lp">
@@ -134,7 +93,16 @@ export default function Landing() {
           <div className="lp-hero-copy lp-fade">
             <span className="lp-eyebrow"><Sparkles size={14} /> Atención por WhatsApp con IA</span>
             <h1 className="display">Tu negocio, atendido en WhatsApp <span className="display-italic lp-accent">las 24 horas</span>. Sin que muevas un dedo.</h1>
-            <p className="lp-sub">Conversia responde, agenda y cotiza por ti con un asistente que <strong>se arma solo</strong> en minutos. Pruébalo con <strong>{pruebaGratis} {unidad} gratis</strong>, sin tarjeta.</p>
+            <p className="lp-sub">Conversia responde, agenda y cotiza por ti con un asistente que <strong>se arma solo</strong> en minutos.</p>
+            {/* M0 — MISMO MENSAJE QUE LOS ANUNCIOS. Quien hace clic en "Desde $24.990 al mes,
+                sin contrato · 200 créditos de prueba, sin tarjeta" tiene que leer exactamente
+                eso al aterrizar, o siente que llegó al lugar equivocado y se va.
+                Los números NO se escriben acá: salen del catálogo ACTIVO (`basePrice`,
+                `pruebaGratis`, `unidad`), así que mientras los Créditos IA estén apagados dice
+                la verdad del modelo viejo y cambia solo el día que el dueño los encienda. */}
+            <p className="lp-claim">
+              Desde <strong>{basePrice} al mes</strong>, sin contrato · <strong>{pruebaGratis} {unidad} de prueba</strong>, sin tarjeta
+            </p>
             <div className="lp-hero-ctas">
               <a href="/crear" className="lp-btn lp-btn-lg">Crear mi asistente gratis <ArrowRight size={18} /></a>
               <a href="#como" className="lp-ghost lp-ghost-lg">Ver cómo funciona</a>
@@ -155,7 +123,8 @@ export default function Landing() {
       <section className="lp-strip">
         {[
           { Icon: Zap, t: "Responde en segundos", d: "Nunca dejas a un cliente esperando." },
-          { Icon: ShieldCheck, t: "No inventa precios", d: "Responde con tu info; si no sabe, deriva." },
+          // M0 — era "No inventa precios", un absoluto. Lo comprobable es de dónde saca la info.
+          { Icon: ShieldCheck, t: "Usa tus precios", d: "Responde con la info que tú le das; si no la tiene, deriva." },
           { Icon: UserCheck, t: "Sabe cuándo pasar a un humano", d: "Urgencias y casos sensibles a tu equipo." },
           { Icon: CalendarCheck, t: "Agenda y confirma solo", d: "Citas y recordatorios automáticos." },
         ].map(({ Icon, t, d }) => (
@@ -193,8 +162,14 @@ export default function Landing() {
           {[
             { Icon: CalendarCheck, t: "Agenda automática", d: "Toma horas, confirma, reagenda y envía recordatorios sin que intervengas." },
             { Icon: MessageSquare, t: "Bandeja con copiloto", d: "Ves todas las conversaciones y, si quieres, apruebas las respuestas antes de enviarlas." },
-            { Icon: ShieldCheck, t: "IA que no inventa", d: "Responde con tu información real. Ante dudas o urgencias, deriva a tu equipo." },
-            { Icon: Globe, t: "Multicanal", d: "WhatsApp, Instagram y Messenger en una sola bandeja, con un solo asistente." },
+            // M0 — "IA que no inventa" era un absoluto que no podemos sostener. Lo que SÍ es
+            // comprobable es de dónde saca lo que dice y qué hace cuando no lo sabe.
+            { Icon: ShieldCheck, t: "Responde con la información que tú le das", d: "Tus servicios, precios y horarios, los que tú cargas. Cuando no lo sabe o la cosa es urgente, deriva a tu equipo." },
+            // M0 — se cayó la tarjeta "Multicanal (WhatsApp, Instagram y Messenger)": el panel
+            // de Conversia conecta SOLO WhatsApp (su /canales es Embedded Signup y nada más), y
+            // los únicos canales de IG/Messenger conectados en producción son de marca TuBot.
+            // Para un cliente de Conversia era una promesa que no puede cumplir solo.
+            { Icon: Globe, t: "Atiende cuando tú no puedes", d: "De noche, el fin de semana y mientras estás con otro cliente. El que escribe recibe respuesta al instante." },
             { Icon: CreditCard, t: "Cobra por WhatsApp", d: "Envía links de pago y cierra ventas sin salir del chat." },
             { Icon: Users, t: "Clientes ordenados", d: "Cada contacto con su historial, etiquetas y notas. Tu CRM, sin complicarte." },
           ].map(({ Icon, t, d }) => (
@@ -227,7 +202,18 @@ export default function Landing() {
 
       {/* ===================== PRECIOS ===================== */}
       <section className="lp-section lp-section-alt" id="precios">
-        <SectionHead eyebrow="Precios simples" title={<>Pagas por <span className="display-italic lp-accent">conversación</span>, no por mensaje</>} sub="Una conversación es toda la atención a un cliente dentro de 24 horas — da igual cuántos mensajes se envíen." />
+        {/* M0 — el encabezado describe el MODELO DE COBRO, así que también tiene que seguir al
+            catálogo activo. Con los Créditos IA apagados, "pagas por conversación" es LITERAL;
+            encendidos, pasa a ser falso. Un texto fijo mentiría en uno de los dos momentos. */}
+        <SectionHead
+          eyebrow="Precios simples"
+          title={esCreditos
+            ? <>Pagas por lo que tu asistente <span className="display-italic lp-accent">responde</span></>
+            : <>Pagas por <span className="display-italic lp-accent">conversación</span>, no por mensaje</>}
+          sub={esCreditos
+            ? "Una respuesta normal de tu asistente es 1 crédito. Las más largas, o las que tienen que buscar en tu información, cuestan algo más."
+            : "Una conversación es toda la atención a un cliente dentro de 24 horas — da igual cuántos mensajes se envíen."}
+        />
         <div className="lp-price-grid">
           <div className="lp-price card">
             <span className="lp-price-tag lp-price-tag-free"><Gift size={14} /> Para empezar</span>
@@ -244,13 +230,16 @@ export default function Landing() {
           </div>
 
           <div className="lp-price card lp-price-feat">
-            <span className="lp-price-tag"><Sparkles size={14} /> El más elegido</span>
+            {/* M0 — era "El más elegido": no tenemos con qué sostenerlo y el dueño lo prohibió.
+                "El plan principal" es un hecho del catálogo (`esPlanBase: true`). */}
+            <span className="lp-price-tag"><Sparkles size={14} /> El plan principal</span>
             <h3 className="display">Base</h3>
             <p className="lp-price-amount display">{basePrice}<span>/mes</span></p>
             <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} incluidos al mes{aprox(baseIncluded)}{esCreditos ? " · IVA incluido" : ""}.</p>
             <ul className="lp-check">
               <li><Check size={15} /> Todo lo de la prueba</li>
-              <li><Check size={15} /> Multicanal (WhatsApp, IG, Messenger)</li>
+              {/* M0 — se cayó "Multicanal (WhatsApp, IG, Messenger)": Conversia conecta solo
+                  WhatsApp en autoservicio. Ver la tarjeta de Funciones. */}
               <li><Check size={15} /> Plantillas y cobros por WhatsApp</li>
               <li><Check size={15} /> El bot nunca queda mudo por saldo</li>
             </ul>
@@ -268,11 +257,15 @@ export default function Landing() {
                   edición y la página pasa a prometer un extra que el pack no da. El respaldo
                   (cuando la llamada no llega) vive en `@/lib/precios-respaldo` y lo compara un
                   test contra el catálogo. */}
-              {(packs.length ? packs : [...PACKS_RESPALDO]).map((p) => (
+              {packs.map((p) => (
                 <li key={p.code}>
                   <Check size={15} /> {p.credits.toLocaleString("es-CL")} {unidad}{aprox(p.credits)} · {clp(p.priceClp)}
                   {esCreditos && (p.bonoPct ?? 0) > 0 ? <strong className="lp-bono"> +{p.bonoPct}% extra</strong> : null}
-                  {esCreditos && p.code === PACK_MAS_ELEGIDO ? <em className="lp-pack-tag"> Más elegido</em> : null}
+                  {/* M0 — "Más elegido" era una afirmación de popularidad sin dato detrás: pasa
+                      a "Recomendado", que es una recomendación NUESTRA y no un hecho sobre el
+                      mundo. "Mejor precio por crédito" SE QUEDA: es comprobable y hay un test
+                      en `precios-respaldo.test.ts` que verifica que de verdad lo sea. */}
+                  {esCreditos && p.code === PACK_MAS_ELEGIDO ? <em className="lp-pack-tag"> Recomendado</em> : null}
                   {esCreditos && p.code === PACK_MEJOR_PRECIO ? <em className="lp-pack-tag"> Mejor precio por crédito</em> : null}
                 </li>
               ))}
@@ -287,7 +280,7 @@ export default function Landing() {
       <section className="lp-section" id="faq">
         <SectionHead eyebrow="Preguntas frecuentes" title={<>Lo que todos <span className="display-italic lp-accent">se preguntan</span></>} />
         <div className="lp-faq">
-          {faqs({ esCreditos, pruebaGratis, conv, unidad }).map((f, i) => (
+          {faqs({ esCreditos, pruebaGratis, conv, unidad, porConversacion }).map((f, i) => (
             <div key={i} className={faq === i ? "lp-faq-item open" : "lp-faq-item"}>
               <button onClick={() => setFaq(faq === i ? null : i)} aria-expanded={faq === i}>
                 <span>{f.q}</span><ChevronDown size={18} />
@@ -399,20 +392,32 @@ function BuilderMock() {
  * aunque la cuenta nueva reciba 200 créditos: una cifra equivocada en la pregunta que lee
  * justo quien está decidiendo si probar.
  */
-function faqs(ctx: { esCreditos: boolean; pruebaGratis: number; conv: (c: number) => number; unidad: string }) {
+function faqs(ctx: { esCreditos: boolean; pruebaGratis: number; conv: (c: number) => number; unidad: string; porConversacion: number }) {
   const { esCreditos, pruebaGratis, conv } = ctx;
   const regalo = esCreditos
     ? `${pruebaGratis.toLocaleString("es-CL")} créditos gratis (≈ ${conv(pruebaGratis).toLocaleString("es-CL")} conversaciones)`
     : `${pruebaGratis} conversaciones gratis`;
   return [
-    { q: "¿Qué cuenta como una “conversación”?", a: "Toda la atención a un mismo cliente dentro de una ventana de 24 horas, sin importar cuántos mensajes se intercambien. Es la forma más justa y predecible de cobrar." },
+    // M0 — se cayó "es la forma más justa y predecible de cobrar" (opinión disfrazada de
+    // hecho) y la respuesta sigue al modelo activo: con Créditos IA la unidad de cobro ya no
+    // es la conversación, así que explicarla como la unidad sería falso.
+    esCreditos
+      ? { q: "¿Qué me cuesta atender a un cliente?", a: `Se cobra por respuesta de tu asistente: una respuesta normal es 1 crédito. Medimos que una conversación completa sale en promedio ${ctx.porConversacion} créditos, así que ${pruebaGratis.toLocaleString("es-CL")} créditos alcanzan para unas ${conv(pruebaGratis).toLocaleString("es-CL")} conversaciones. Depende de cuánto conversen tus clientes.` }
+      : { q: "¿Qué cuenta como una “conversación”?", a: "Toda la atención a un mismo cliente dentro de una ventana de 24 horas, sin importar cuántos mensajes se intercambien." },
     { q: "¿Necesito tarjeta para probar?", a: `No. Creas tu asistente y tienes ${regalo} para probarlo con clientes reales. La tarjeta se pide al activar un plan, no para probar.` },
     { q: "¿Cómo se paga?", a: "El plan y las recargas se cobran con Flow. Para el cobro automático necesitas una tarjeta de CRÉDITO: las de débito y prepago (incluida Redcompra) no permiten cargos automáticos, y con ellas se paga con un link cada vez." },
     { q: "¿Qué pasa si se me acaban los créditos?", a: "Te avisamos al 75% y al 90% de tu saldo. Con la recarga automática activada no pasa nada: se cobra tu pack y sigue. Sin ella, tu bot sigue respondiendo con 100 créditos de gracia y después se pausa hasta que recargues — nunca queda mudo de golpe." },
     { q: "¿Los mensajes de WhatsApp los cobran ustedes?", a: "No. Los cobra Meta directamente a tu tarjeta, con sus propias tarifas. Nosotros te cobramos el asistente; el canal es tuyo." },
     { q: "¿Funciona con mi número de WhatsApp actual?", a: "Conversia usa la plataforma oficial de WhatsApp Business. Te guiamos para conectar tu número y empezar a atender." },
-    { q: "¿La IA puede equivocarse o inventar cosas?", a: "El asistente está diseñado para responder solo con tu información y para no inventar precios ni horarios. Ante dudas o urgencias, deriva a una persona de tu equipo." },
-    { q: "¿Puedo cancelar cuando quiera?", a: "Sí. Cancelas desde el panel y tu cuenta sigue activa hasta el fin del período pagado. Sin ataduras." },
+    // M0 — antes afirmaba que el asistente "no inventa", en absoluto. Ninguna IA puede
+    // garantizar eso: lo que sí podemos decir es de dónde saca lo que responde, qué hace
+    // cuando no lo sabe y que el dueño puede revisar cada respuesta en la bandeja.
+    { q: "¿La IA puede equivocarse?", a: "Puede, como cualquier IA. Por eso responde con la información que tú le cargas —servicios, precios, horarios— y está instruido para derivar a tu equipo cuando no la tiene o cuando el caso es urgente. En la bandeja ves todas las conversaciones y puedes corregir o tomar el control en cualquier momento." },
+    // M0 — ⚠️ decía "Cancelas desde el panel", y ese botón NO EXISTE en conversia-web (el
+    // endpoint sí está en la api, pero ninguna pantalla lo llama). Era una promesa falsa en
+    // la pregunta que lee justo quien duda de atarse. Cuando M3 publique el botón, acá vuelve
+    // "cancelas desde el panel" y se puede sumar "cancelas cuando quieras" a los anuncios.
+    { q: "¿Puedo cancelar cuando quiera?", a: "Sí, no hay contrato ni plazo mínimo. Nos escribes y damos de baja tu plan: tu cuenta sigue activa hasta el fin del período que ya pagaste y no se cobra nada más. Estamos dejando la baja disponible también desde el panel." },
   ];
 }
 
@@ -452,6 +457,10 @@ function LandingStyles() {
 .lp-hero-copy h1 { font-size: clamp(32px,5.2vw,54px); line-height: 1.05; margin: 16px 0 0; font-weight: 600; letter-spacing: -0.5px; }
 .lp-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--acc-deep); background: var(--acc-dim); border-radius: 999px; padding: 6px 13px; }
 .lp-sub { font-size: clamp(15px,1.6vw,18px); color: var(--ink-dim); line-height: 1.6; margin: 18px 0 0; max-width: 46ch; }
+/* M0 — el mensaje de los anuncios, repetido tal cual al aterrizar. Se lee como una línea
+   sola en desktop y envuelve en celular (de donde viene casi todo el tráfico de Meta). */
+.lp-claim { display: inline-block; font-size: clamp(14px,1.5vw,16.5px); color: var(--ink); line-height: 1.55; margin: 16px 0 0; padding: 10px 15px; border: 1px solid var(--acc-dim); border-radius: 12px; background: var(--acc-dim); max-width: 46ch; }
+.lp-claim strong { color: var(--acc-deep); font-weight: 650; }
 .lp-hero-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 0; }
 .lp-trust { display: flex; flex-wrap: wrap; gap: 16px; list-style: none; padding: 0; margin: 22px 0 0; }
 .lp-trust li { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-dim); }

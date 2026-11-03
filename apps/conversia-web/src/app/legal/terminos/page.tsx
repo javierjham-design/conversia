@@ -39,11 +39,25 @@ export default function Terminos() {
         Política de Privacidad y a los plazos de retención vigentes.
       </p>
 
-      <h2>4. Planes, cobro por conversación y pagos</h2>
+      {/* M0 — esto afirmaba que el cobro es "por conversación atendida", en singular y como si
+          fuera el único modelo. Es cierto hoy, pero el día que se active el catálogo de
+          Créditos IA la unidad pasa a ser la RESPUESTA y estos Términos quedarían describiendo
+          un cobro que el cliente ya no tiene. Un documento legal no puede reaccionar al
+          catálogo como la landing, así que se redacta cubriendo las DOS unidades y remitiendo
+          al plan contratado, que es lo que el cliente ve antes de pagar. */}
+      <h2>4. Planes, unidad de cobro y pagos</h2>
       <ul>
-        <li>El modelo de cobro principal es <strong>por conversación atendida</strong>: una conversación equivale a la atención del asistente dentro de la ventana de 24 horas definida por el canal de mensajería. El plan incluye una cantidad de conversaciones por período y usted puede adquirir packs o recargas adicionales.</li>
+        <li>
+          El Servicio se cobra mediante un <strong>plan con una cantidad incluida por período</strong>, más{" "}
+          <strong>packs o recargas</strong> opcionales. La <strong>unidad de cobro depende del plan que usted
+          contrate</strong> y se informa en el Servicio antes de contratar. Según el plan, esa unidad puede ser:
+          <ul>
+            <li>la <strong>conversación atendida</strong>: toda la atención del asistente a un mismo cliente final dentro de la ventana de 24 horas que define el canal de mensajería; o</li>
+            <li>el <strong>crédito</strong>: unidad de consumo que se descuenta por cada respuesta que genera el asistente, según el tamaño y la complejidad de esa respuesta, conforme a la tabla de consumo vigente publicada en el Servicio.</li>
+          </ul>
+        </li>
         <li>Los precios se muestran en el Servicio antes de contratar, en pesos chilenos (CLP) o dólares (USD) según corresponda, e incluyen o excluyen impuestos según se indique. Los pagos se procesan mediante proveedores de pago externos.</li>
-        <li>Las conversaciones compradas y las incluidas tienen reglas de vigencia y expiración que se informan en el Servicio. El Prestador puede ajustar precios a futuro; los cambios no afectan períodos ya pagados.</li>
+        <li>Las unidades compradas y las incluidas en el plan tienen reglas de vigencia y expiración que se informan en el Servicio. El Prestador puede ajustar precios y la tabla de consumo a futuro; los cambios no afectan períodos ya pagados.</li>
         <li>Salvo que la ley obligue a lo contrario, los montos pagados no son reembolsables una vez prestado el Servicio del período.</li>
       </ul>
 

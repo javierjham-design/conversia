@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import localFont from "next/font/local";
 import { PROD_API_FALLBACK } from "@/lib/api-base";
+import AvisoCookies from "@/components/AvisoCookies";
 
 // M3 — origen de la API (cross-origin) para preconectar y acelerar el primer fetch.
 const API_ORIGIN = (() => {
@@ -89,7 +90,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: bootstrap }} />
         <script dangerouslySetInnerHTML={{ __html: swRegister }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* M0 — el aviso de cookies. Va en el layout raíz pero se dibuja SOLO en las rutas de
+            marketing (él mismo consulta la lista blanca de `consentimiento.ts`): el panel, el
+            mini-sitio de cada cliente y el super admin no tienen medición publicitaria, así
+            que ahí preguntar sería pedir permiso para algo que no se hace. */}
+        <AvisoCookies />
+      </body>
     </html>
   );
 }

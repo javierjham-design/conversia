@@ -44,6 +44,17 @@ export default function Privacidad() {
         número y contenido del mensaje). El tratamiento por parte de Meta se rige además por sus propias políticas. Usted debe
         asegurarse de contar con base legal y consentimiento para contactar a sus clientes finales.
       </p>
+      {/* M0 — el registro va a pedir el WhatsApp del dueño como obligatorio (M3), con un check
+          de consentimiento. Lo que se promete en ese check tiene que estar explicado acá. */}
+      <p>
+        <strong>Su WhatsApp, el del registro.</strong> Al crear su cuenta le pedimos su número de celular. Lo usamos para
+        <strong> ayudarle a dejar su asistente andando</strong> (por ejemplo, escribirle si quedó a medio camino conectando su
+        WhatsApp o si su prueba está por terminar) y para soporte. Es un consentimiento <strong>separado y explícito</strong>:
+        usted lo acepta con una casilla al registrarse, y guardamos la fecha y el texto exacto que aceptó. Puede revocarlo en
+        cualquier momento respondiendo <em>&ldquo;no&rdquo;</em> o <em>&ldquo;basta&rdquo;</em> a cualquiera de esos mensajes, o
+        escribiendo a <a href={`mailto:${LEGAL.emailPrivacidad}`}>{LEGAL.emailPrivacidad}</a>; dejaremos de escribirle y eso no
+        afecta su servicio. Nunca cedemos su número a terceros con fines publicitarios.
+      </p>
 
       {/* Sección exigida por Google para verificar la app que pide permisos de Calendar:
           qué datos se leen, para qué, y la declaración de Limited Use. Debe quedar en una
@@ -117,10 +128,41 @@ export default function Privacidad() {
         solicitud hacia él.
       </p>
 
-      <h2>12. Cookies</h2>
+      {/* M0 — esta sección decía solo "cookies necesarias" y aclaraba "no usamos cookies de
+          publicidad de terceros EN EL PANEL". Con las campañas de Meta entran al sitio público
+          el Pixel y la Conversions API, así que acá se declara qué se instala, para qué, cuánto
+          dura y cómo oponerse. Redactado para la Ley 21.719 (vigente desde diciembre de 2026),
+          que exige consentimiento previo e informado para lo no esencial. */}
+      <h2 id="cookies">12. Cookies y medición publicitaria</h2>
       <p>
-        Usamos almacenamiento local y cookies estrictamente necesarias para iniciar sesión y mantener su preferencia de tema e
-        idioma. No usamos cookies de publicidad de terceros en el panel.
+        <strong>Cookies necesarias (siempre activas).</strong> Almacenamiento local y cookies estrictamente necesarias para
+        iniciar sesión, mantener su sesión y recordar sus preferencias de tema e idioma. Sin ellas el Servicio no funciona, por
+        lo que no requieren consentimiento. <strong>En el panel y en el asistente no instalamos cookies publicitarias.</strong>
+      </p>
+      <p>
+        <strong>Cookies de medición (solo si usted las acepta).</strong> En las páginas públicas de {LEGAL.marca} —portada,
+        páginas por rubro, precios y el generador— podemos instalar el <strong>Pixel de Meta</strong> para medir el resultado de
+        nuestra publicidad: saber cuántas personas que vieron un anuncio terminan creando una cuenta. Esto instala las cookies
+        <strong> <code>_fbp</code></strong> (identificador del navegador, duración 90 días) y <strong><code>_fbc</code></strong>{" "}
+        (guarda el identificador <code>fbclid</code> del anuncio por el que llegó, duración 90 días), y nuestra propia cookie{" "}
+        <strong><code>cv_attr</code></strong> (duración 90 días), que conserva de qué anuncio o campaña vino la visita para
+        atribuir el registro.
+      </p>
+      <p>
+        <strong>Al aterrizar le preguntamos.</strong> Con <em>&ldquo;Solo necesarias&rdquo;</em> el Pixel <strong>no se
+        carga</strong> y no se instala ninguna de esas cookies. Puede cambiar de opinión cuando quiera desde el mismo aviso, y
+        borrar las cookies ya instaladas desde su navegador. Rechazar no limita en nada el uso del Servicio.
+      </p>
+      <p>
+        <strong>Medición desde nuestro servidor (Conversions API).</strong> Además enviamos a Meta, desde nuestros servidores,
+        los hitos de nuestro propio embudo comercial (por ejemplo, que se creó una cuenta o que se activó un plan), para medir el
+        rendimiento de la publicidad. Cuando esto ocurre, los datos de contacto que se envían van <strong>cifrados con una
+        función de hash irreversible</strong> (su correo y su teléfono nunca viajan legibles). Si usted eligió{" "}
+        <em>&ldquo;Solo necesarias&rdquo;</em>, este envío igual puede ocurrir —porque no depende de cookies— pero{" "}
+        <strong>sin</strong> los identificadores <code>_fbp</code> y <code>_fbc</code>. Estos envíos se refieren a{" "}
+        <strong>usted como cliente de {LEGAL.marca}</strong>; nunca enviamos datos de los clientes finales que conversan con su
+        asistente. Puede oponerse escribiendo a{" "}
+        <a href={`mailto:${LEGAL.emailPrivacidad}`}>{LEGAL.emailPrivacidad}</a>.
       </p>
 
       <h2>13. Menores</h2>

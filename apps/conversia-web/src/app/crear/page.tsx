@@ -7,12 +7,17 @@ import { ArrowRight, Send, Sparkles } from "lucide-react";
 // Público (sin auth): habla directo a la API con fetch.
 
 import { apiBase } from "@/lib/api-base";
+import { usarPrecios } from "@/lib/usar-precios";
 const API = apiBase();
 
 type Vertical = { key: string; name: string; emoji: string; tagline: string };
 type Msg = { role: "user" | "assistant"; content: string };
 
 export default function Crear() {
+  // M0 — el botón decía "30 conversaciones de regalo" ESCRITO A MANO: el día que el dueño
+  // encienda los Créditos IA, la landing diría 200 créditos y este botón —el último clic
+  // antes de registrarse— seguiría prometiendo 30 conversaciones. Sale del catálogo activo.
+  const { pruebaGratis, unidad } = usarPrecios();
   const [stage, setStage] = useState<"form" | "building" | "sim">("form");
   const [verticals, setVerticals] = useState<Vertical[]>([]);
   const [vertical, setVertical] = useState("");
@@ -209,7 +214,7 @@ export default function Crear() {
             </div>
             <p className="text-dim" style={{ textAlign: "center", fontSize: 12, margin: "10px 0 14px" }}>Demo — crea tu cuenta para guardarlo ({used}/{limit} mensajes de prueba)</p>
             <a href={registerHref} className="btn-accent" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "14px", fontSize: 15, textDecoration: "none" }}>
-              Crear mi cuenta gratis — 30 conversaciones de regalo <ArrowRight size={18} />
+              Crear mi cuenta gratis — {pruebaGratis} {unidad} de regalo <ArrowRight size={18} />
             </a>
           </div>
         ) : null}
