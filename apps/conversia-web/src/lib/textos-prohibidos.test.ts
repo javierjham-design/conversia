@@ -20,6 +20,10 @@ const RAIZ = resolve(__dirname, "..");
 /** Páginas que ve alguien que llegó por un anuncio. */
 const PUBLICAS = [
   "app/page.tsx",
+  // El TEXTO de la portada vive acá: `app/page.tsx` quedó como componente de servidor (lee el
+  // catálogo para que el precio salga ya en el HTML) y no tiene una sola frase. Sin esta línea
+  // el escáner seguiría "verde" vigilando un cascarón de seis líneas.
+  "app/landing.tsx",
   "app/crear/page.tsx",
   "app/registro/page.tsx",
   "app/legal/page.tsx",
@@ -70,6 +74,11 @@ describe("las páginas públicas no usan las frases prohibidas", () => {
   it("hay páginas que escanear (si esto falla, el escáner quedó apuntando a la nada)", () => {
     expect(paginas.length).toBeGreaterThan(0);
     expect(paginas.map((p) => p.rel)).toContain("app/page.tsx");
+    // La portada es la página del embudo: si su texto se mudó de archivo y nadie actualizó
+    // esta lista, el escáner deja de vigilar justo lo que más se edita.
+    expect(paginas.map((p) => p.rel)).toContain("app/landing.tsx");
+    const portada = paginas.find((p) => p.rel === "app/landing.tsx")!.texto;
+    expect(portada.length, "el texto de la portada no puede haber quedado vacío").toBeGreaterThan(5_000);
   });
 
   for (const regla of PROHIBIDAS) {
