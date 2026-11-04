@@ -11,7 +11,8 @@ export default function LegalIndex() {
     <LegalShell title="Legal">
       <p>Documentos que regulan el uso de {LEGAL.marca}.</p>
       <ul>
-        <li><a href="/legal/terminos">Términos y Condiciones</a> — condiciones de uso del servicio, planes y cobro por conversación.</li>
+        {/* M0 — decía "cobro por conversación", que deja de ser cierto al activar los Créditos IA. */}
+        <li><a href="/legal/terminos">Términos y Condiciones</a> — condiciones de uso del servicio, planes y unidad de cobro.</li>
         <li><a href="/legal/privacidad">Política de Privacidad</a> — cómo tratamos los datos personales (Ley N° 19.628).</li>
       </ul>
       <p className="text-dim" style={{ fontSize: 13 }}>

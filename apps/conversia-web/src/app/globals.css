@@ -107,6 +107,28 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
 }
+/*
+ * M0 — ESPACIO RESERVADO PARA EL AVISO DE COOKIES.
+ *
+ * El aviso es `position: fixed` abajo, así que mientras está arriba TAPA lo que haya debajo.
+ * Eso se comió el botón de crear la cuenta en pantallas de celular —el último clic de todo el
+ * embudo, en el dispositivo del que viene casi todo el tráfico de los anuncios—. Lo cazó la
+ * suite `dueno` en el proyecto `iphone` ("intercepts pointer events" sobre /registro).
+ *
+ * Va en `main` y no solo en `body`: las pantallas del embudo (`/registro`, `/crear`) usan
+ * `min-height: 100dvh` con el contenido CENTRADO, así que agrandar el body no mueve nada —el
+ * contenido sigue centrado en la altura completa de la ventana y el aviso lo sigue tapando—.
+ * Reservando el espacio DENTRO del main, el centrado ocurre en la altura que queda libre.
+ *
+ * `!important` porque esas pantallas fijan su `padding` en un estilo en línea; una declaración
+ * `!important` de la hoja de estilos sí le gana a un estilo en línea normal.
+ *
+ * El alto real lo mide el componente con un ResizeObserver y lo publica en `--cv-aviso-h`: en
+ * celular el texto envuelve y los botones pasan a su propia línea, así que restar una altura
+ * fija dejaría el botón tapado igual en el caso que importa.
+ */
+:root[data-aviso-cookies="1"] body { padding-bottom: var(--cv-aviso-h, 96px); }
+:root[data-aviso-cookies="1"] main { padding-bottom: var(--cv-aviso-h, 96px) !important; }
 /* C3 — luz ambiental: 2 blobs del acento con deriva lenta (solo decorativa, detrás de todo). */
 body::before,
 body::after {

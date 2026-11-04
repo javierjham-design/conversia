@@ -52,14 +52,43 @@ export function startV2TrialLifecycle(): () => void {
       const { getAdminPrisma, withTenant, raiseException } = await import("@conversia/database");
       const prisma = getAdminPrisma();
       const now = new Date();
-      const trialPlan = await prisma.plan.findUnique({ where: { code: "conversia_v2_trial" }, select: { id: true } });
-      if (!trialPlan) return; // catálogo V2 no sembrado → nada que hacer
-      // Orgs conversia con suscripción vigente al plan de PRUEBA V2.
+      // M0 — LOS DOS PLANES DE PRUEBA. Este tick miraba SOLO `conversia_v2_trial`, así que el
+      // día que el dueño encienda los Créditos IA las cuentas nuevas (que nacen en
+      // `conversia_creditos_trial`) se quedaban sin ciclo de vida: nunca entraban en copiloto
+      // ni en pausa. O sea prueba infinita y gratis, en silencio y justo con los clientes que
+      // traigan las campañas.
+      const trialPlans = await prisma.plan.findMany({
+        where: { code: { in: ["conversia_v2_trial", "conversia_creditos_trial"] } },
+        select: { id: true, code: true, features: true },
+      });
+      if (!trialPlans.length) return; // catálogo no sembrado → nada que hacer
+      // El precio y el regalo de los avisos salen del CATÁLOGO, no escritos a mano: con el
+      // mensaje fijo, una cuenta de créditos recibía "tus 30 conversaciones / Base $18.900",
+      // que es el modelo que ya no tiene.
+      const basePlans = await prisma.plan.findMany({
+        where: { code: { in: ["conversia_v2_base", "conversia_creditos_base"] } },
+        select: { code: true, priceClp: true },
+      });
+      const infoPorPlan = new Map(
+        trialPlans.map((p) => {
+          const esCreditos = p.code === "conversia_creditos_trial";
+          const regaloRaw = Number(((p.features ?? {}) as Record<string, unknown>).signupGiftCredits);
+          const base = basePlans.find((b) => b.code === (esCreditos ? "conversia_creditos_base" : "conversia_v2_base"));
+          return [p.id, {
+            unidad: esCreditos ? "créditos" : "conversaciones",
+            regalo: Number.isFinite(regaloRaw) && regaloRaw > 0 ? Math.floor(regaloRaw) : null,
+            // `priceClp` llega como Decimal de Prisma, no como number.
+            basePrecio: base ? `$${Math.round(Number(base.priceClp)).toLocaleString("es-CL")}` : null,
+          }];
+        }),
+      );
+      // Orgs conversia con suscripción vigente a CUALQUIERA de los dos planes de prueba.
       const subs = await prisma.subscription.findMany({
-        where: { planId: trialPlan.id, status: { in: ["ACTIVE", "TRIALING"] } },
-        select: { organizationId: true },
+        where: { planId: { in: trialPlans.map((p) => p.id) }, status: { in: ["ACTIVE", "TRIALING"] } },
+        select: { organizationId: true, planId: true },
       });
       if (!subs.length) return;
+      const planPorOrg = new Map(subs.map((s) => [s.organizationId, s.planId]));
       const orgs = await prisma.organization.findMany({
         where: { id: { in: subs.map((s) => s.organizationId) }, brand: "conversia", deletedAt: null },
         select: { id: true, name: true, settings: true },
@@ -86,14 +115,22 @@ export function startV2TrialLifecycle(): () => void {
           conversia.graceStartedAt = now.toISOString();
           conversia.aiMode = "suggest";
           settings.conversia = conversia;
-          const handled = Math.max(0, 30 - Math.max(0, remaining)); // conversaciones atendidas con las gratis
+          // M0 — regalo, unidad y precio del catálogo. El `30` y el `$18.900` estaban escritos
+          // a mano acá: con los Créditos IA encendidos el aviso le hablaba a la cuenta del
+          // modelo que no tiene, y nombraba un precio que ya no existe.
+          const info = infoPorPlan.get(planPorOrg.get(org.id) ?? "");
+          const regalo = info?.regalo ?? null;
+          const unidad = info?.unidad ?? "conversaciones";
+          const handled = regalo !== null ? Math.max(0, regalo - Math.max(0, remaining)) : null;
+          const cuanto = regalo !== null ? `tus ${regalo.toLocaleString("es-CL")} ${unidad} de prueba` : `tu prueba`;
+          const activar = info?.basePrecio ? ` (Base ${info.basePrecio}/mes)` : "";
           await withTenant(org.id, async (tx) => {
             await tx.organization.update({ where: { id: org.id }, data: { settings: settings as object } });
             await tx.integrationEvent.create({
-              data: { organizationId: org.id, provider: "funnel", type: "trial_exhausted", status: "warning", message: `Tu asistente atendió tus 30 conversaciones de prueba. Actívalo (Base $18.900/mes) para seguir atendiendo sin cortes. Estos 7 días queda en modo copiloto: te sugiere las respuestas y tú apruebas.` },
+              data: { organizationId: org.id, provider: "funnel", type: "trial_exhausted", status: "warning", message: `Tu asistente usó ${cuanto}. Actívalo${activar} para seguir atendiendo sin cortes. Estos 7 días queda en modo copiloto: te sugiere las respuestas y tú apruebas.` },
             });
           });
-          await raiseException(prisma, { organizationId: org.id, type: "v2_trial_agotado", title: `Prueba agotada — ${org.name}`, severity: "info", detail: `Atendió ~${handled} conversaciones gratis. En copiloto 7 días; luego pausa si no activa.`, dedupeKey: org.id });
+          await raiseException(prisma, { organizationId: org.id, type: "v2_trial_agotado", title: `Prueba agotada — ${org.name}`, severity: "info", detail: `${handled !== null ? `Usó ~${handled} ${unidad} gratis.` : "Prueba agotada."} En copiloto 7 días; luego pausa si no activa.`, dedupeKey: org.id });
         } else if (action === "pause") {
           // Pausa reversible: IA detenida (aiKillSwitch). NADA se borra. Se revierte al activar.
           conversia.paused = true;
