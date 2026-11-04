@@ -75,7 +75,10 @@ describe("la landing y el shell consultan el plazo", () => {
   const leer = (rel: string) => readFileSync(join(__dirname, "..", rel), "utf8");
 
   it("la landing pasa el plazo a estadoDelVisitante", () => {
-    const src = leer("app/page.tsx");
+    // `app/page.tsx` quedó como componente de servidor (lee el catálogo de precios); la
+    // portada que decide el botón vive en `app/landing.tsx`. Este test se cayó solo cuando se
+    // hizo esa mudanza, que es exactamente para lo que está.
+    const src = leer("app/landing.tsx");
     expect(src).toContain("getSessionDeadline()");
     expect(src).toMatch(/estadoDelVisitante\(\s*getToken\(\),\s*getRefreshToken\(\),\s*getSessionDeadline\(\)\s*\)/);
   });
