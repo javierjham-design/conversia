@@ -38,7 +38,7 @@ function makeAuth(opts: { user?: { id: string; email: string; passwordHash: stri
   };
   const prisma: any = { admin };
   const refreshSessions: any = {
-    create: async () => "r",
+    create: async () => ({ token: "r", absoluteExpiresAt: Date.now() + 86_400_000 }),
     revokeAllForUser: async (uid: string) => void revocados.push(uid),
   };
   const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);

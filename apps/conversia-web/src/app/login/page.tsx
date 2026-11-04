@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setSession } from "@/lib/api";
+import { api, setSession, type SesionDelServidor } from "@/lib/api";
 
 /** Solo acepta rutas internas ("/algo"), nunca absolutas ("//host") → anti open-redirect. */
 function safeVolver(raw: string | null): string | null {
@@ -55,7 +55,7 @@ export default function Login() {
           callback: async (resp: { credential?: string }) => {
             setError(null);
             try {
-              const r = await api<{ token: string; refreshToken?: string }>("/auth/google", {
+              const r = await api<SesionDelServidor>("/auth/google", {
                 method: "POST",
                 body: JSON.stringify({ credential: resp.credential }),
               });
@@ -87,7 +87,7 @@ export default function Login() {
     setLoading(true);
     try {
       // Identidad ÚNICA de plataforma: el MISMO login que TuBot (misma API, mismo JWT).
-      const res = await api<{ token: string; refreshToken?: string }>("/auth/login", {
+      const res = await api<SesionDelServidor>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setSession } from "@/lib/api";
+import { api, setSession, type SesionDelServidor } from "@/lib/api";
 
 // Acento por país (espejo de accentForCountry en @conversia/config): da un preview
 // inmediato al elegir país. El default real del acento lo fija el servidor por país.
@@ -93,7 +93,7 @@ export default function Register() {
     setError(null);
     setLoading(true);
     try {
-      const res = await api<{ token: string; refreshToken?: string }>("/auth/register", {
+      const res = await api<SesionDelServidor>("/auth/register", {
         method: "POST",
         body: JSON.stringify({ name, organizationName, email, password, country, vertical, ...(draftTokenRef.current ? { draftToken: draftTokenRef.current } : {}) }),
       });

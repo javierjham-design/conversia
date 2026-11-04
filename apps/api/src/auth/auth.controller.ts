@@ -439,7 +439,10 @@ export class AuthController {
     assertNotImpersonating(ctx, "cambiar de organización");
     const parsed = z.object({ organizationId: z.string().min(1) }).safeParse(body);
     if (!parsed.success) throw new BadRequestException("organizationId requerido");
-    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId, sessionMode(req));
+    // El techo de la sesión en curso viaja al token nuevo: cambiar de organización CONTINÚA
+    // la sesión. Si estrenara techo, cambiarse de org (aun a la misma) cada 23 h daría una
+    // sesión eterna y el máximo de 24 h sería de mentira.
+    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId, sessionMode(req), ctx.sessionExpiresAt);
   }
 
   @Get("me")

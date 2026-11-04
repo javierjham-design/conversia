@@ -42,10 +42,14 @@ Regla cumplida: nada marcado verde que un test o el navegador no haya visto func
 - **`app/ajustes/page.tsx`** + **`AppShell`**: botón Cerrar sesión. **`app/registro/page.tsx`**: `setSession`.
 
 ## Duraciones elegidas
-- **Access token:** `JWT_EXPIRES_IN` = **12 h** (sin cambios; sigue siendo el techo stateless).
-- **Refresh token:** `JWT_REFRESH_EXPIRES_IN` = **30 d**, rotativo (cada uso corre la ventana 30 d
-  desde ahora) y revocable. Pensado para el cliente móvil: no re-login cada 12 h, sí tras 30 d de
-  inactividad o al cerrar sesión / cambiar contraseña. Ambas por env, sin hardcodear.
+> ⚠️ **ACTUALIZADO 3-nov-2026: la sesión dura 24 H COMO MÁXIMO.** Lo de abajo (30 d de ventana,
+> techo de 90 d) es la política ORIGINAL de octubre y ya no rige. La política vigente, por qué
+> cambió y las tres piezas que la sostienen están en `docs/RUNBOOK_GOLIVE_V2.md` §15.
+
+- **Access token:** `JWT_EXPIRES_IN` = **12 h**, recortado al techo de la sesión cuando el techo
+  está más cerca (si no, lo sobreviviría: es stateless y no hay denylist).
+- **Refresh token:** `JWT_REFRESH_EXPIRES_IN` = **24 h**, rotativo y revocable, con techo
+  absoluto `JWT_REFRESH_ABSOLUTE_MAX` = **24 h** desde el login. Todas por env, sin hardcodear.
 
 ## Acciones sensibles (anotado, sin compuerta dura)
 Dónde aplicaría exigir re-login aunque la sesión deslizante esté viva: **cambio de contraseña**

@@ -13,6 +13,13 @@ export interface RequestContext {
    * tomar posesión de su cuenta. Lo usa `assertNotImpersonating`.
    */
   impersonatedBy?: string;
+  /**
+   * Techo de la sesión en curso (ms epoch, claim `sxp` del JWT). Lo usa `switchOrg` para
+   * HEREDARLO: cambiar de organización emite una sesión nueva, y si estrenara techo bastaría
+   * con cambiarse de org cada 23 h para tener una sesión eterna. Ausente en los tokens sin
+   * sesión deslizante (TuBot, token MCP).
+   */
+  sessionExpiresAt?: number;
 }
 
 /**

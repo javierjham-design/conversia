@@ -2,14 +2,14 @@ import { BadRequestException, ConflictException, Injectable, UnauthorizedExcepti
 import { randomBytes } from "node:crypto";
 import * as bcryptMod from "bcryptjs";
 import { DEFAULT_LEAD_STATUSES, DEFAULT_ROLES } from "@conversia/types";
-import { brandOf, accentForCountry } from "@conversia/config";
+import { brandOf, accentForCountry, getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
 import { VerticalService } from "../organizations/vertical.service";
 import { applyDraftToOrganization, type ApplyDraftTx } from "./apply-draft";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken, signPasswordResetToken, verifyPasswordResetToken, passwordFingerprint } from "./jwt";
-import { RefreshSessionService } from "./refresh-session.service";
+import { RefreshSessionService, vidaDelAccessToken } from "./refresh-session.service";
 import { sendEmail } from "../common/email";
 import { encryptSecret, decryptSecret } from "../common/crypto";
 import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
@@ -56,6 +56,12 @@ export interface SessionHint {
   brand?: string | null;
   /** Cabecera `x-session-mode` del request (`sliding` = quiero sesión deslizante). */
   sessionMode?: string | null;
+  /**
+   * Techo de la sesión EN CURSO (ms epoch), cuando esta emisión continúa una sesión que ya
+   * existía en vez de empezar una. Hoy solo `switchOrg`: cambiar de organización emite tokens
+   * nuevos, y si estrenara techo bastaría cambiarse de org cada 23 h para no caducar nunca.
+   */
+  techoHeredado?: number | null;
 }
 
 /**
@@ -765,8 +771,13 @@ export class AuthService {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** Cambia la organización activa: valida la membresía y emite un token nuevo. */
-  async switchOrg(userId: string, organizationId: string, sessionMode?: string | null) {
+  /**
+   * Cambia la organización activa: valida la membresía y emite un token nuevo.
+   *
+   * `techoHeredado` es el techo de la sesión con la que viene (el claim `sxp` de su token).
+   * Se hereda a propósito: esta emisión CONTINÚA la sesión, no empieza otra.
+   */
+  async switchOrg(userId: string, organizationId: string, sessionMode?: string | null, techoHeredado?: number | null) {
     const membership = await this.prisma.admin.organizationUser.findUnique({
       where: { organizationId_userId: { organizationId, userId } },
     });
@@ -777,7 +788,7 @@ export class AuthService {
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     // La marca sale de la CUENTA (no del org destino): define si la sesión es deslizante (§10.2).
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, select: { brand: true } });
-    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms, { brand: user?.brand, sessionMode });
+    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms, { brand: user?.brand, sessionMode, techoHeredado });
   }
 
   /** Marca la última conexión — best-effort, jamás bloquea el login. */
@@ -790,13 +801,24 @@ export class AuthService {
   }
 
   private async issueTokens(userId: string, orgId: string, roleCode: string, perms: string[], session?: SessionHint) {
-    const token = signAppToken({ sub: userId, orgId, role: roleCode, perms });
     // §10.2 — el refresh token solo se EMITE a quien lo usa. Antes se creaba una sesión
     // deslizante de 30 días en Redis en cada login de cualquier marca: el panel de TuBot
     // nunca la lee, así que eran credenciales de larga vida acumulándose sin dueño.
-    if (!wantsSlidingSession(session)) return { token, organizationId: orgId, role: roleCode };
-    const refreshToken = await this.refreshSessions.create(userId, orgId);
-    return { token, refreshToken, organizationId: orgId, role: roleCode };
+    // Sin sesión deslizante no hay techo que recortar: el token sale como siempre (TuBot).
+    if (!wantsSlidingSession(session)) {
+      return { token: signAppToken({ sub: userId, orgId, role: roleCode, perms }), organizationId: orgId, role: roleCode };
+    }
+    // `techoHeredado` llega desde switchOrg: cambiar de organización no estrena sesión.
+    const refresh = await this.refreshSessions.create(userId, orgId, session?.techoHeredado ?? undefined);
+    const techo = refresh.absoluteExpiresAt;
+    const token = signAppToken(
+      { sub: userId, orgId, role: roleCode, perms, sxp: Math.floor(techo / 1000) },
+      { expiresIn: vidaDelAccessToken(getEnv().JWT_EXPIRES_IN, techo) },
+    );
+    // `sessionExpiresAt` va al cliente para que el panel sepa cuándo deja de servir la sesión
+    // sin tener que descubrirlo con un 401 (y para no ofrecer "Ir a mi panel" en la landing a
+    // quien ya no entra). Es informativo: quien manda es el servidor.
+    return { token, refreshToken: refresh.token, sessionExpiresAt: new Date(techo).toISOString(), organizationId: orgId, role: roleCode };
   }
 
   /**
@@ -818,12 +840,25 @@ export class AuthService {
     }
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
-    const token = signAppToken({ sub: session.userId, orgId: session.orgId, role: role?.code ?? "viewer", perms });
     // Rotación: el token usado deja de valer y entregamos uno nuevo (anti-replay). `rotate`
     // conserva el TECHO ABSOLUTO de la sesión: renovar corre la ventana deslizante, nunca el
     // techo, o la sesión no caducaría jamás mientras se la siga usando.
     const nextRefresh = await this.refreshSessions.rotate(refreshToken, session);
-    return { token, refreshToken: nextRefresh, organizationId: session.orgId, role: role?.code ?? "viewer" };
+    const techo = nextRefresh.absoluteExpiresAt;
+    // Y el access token se RECORTA al techo. Sin esto el techo era de mentira: un refresh
+    // pedido 10 minutos antes del techo entregaba un token de 12 h, y el access no se puede
+    // revocar (es stateless, sin denylist) → la sesión real llegaba a 36 h con techo de 24.
+    const token = signAppToken(
+      { sub: session.userId, orgId: session.orgId, role: role?.code ?? "viewer", perms, sxp: Math.floor(techo / 1000) },
+      { expiresIn: vidaDelAccessToken(getEnv().JWT_EXPIRES_IN, techo) },
+    );
+    return {
+      token,
+      refreshToken: nextRefresh.token,
+      sessionExpiresAt: new Date(techo).toISOString(),
+      organizationId: session.orgId,
+      role: role?.code ?? "viewer",
+    };
   }
 
   /** Bloque 2 — cierra la sesión revocando el refresh token (best-effort; el logout del cliente igual sale). */
