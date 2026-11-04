@@ -114,6 +114,12 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
 
     // 1) La landing no ofrece el panel: el botón vuelve a ser "Entrar".
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Primero se espera a que el efecto HAYA CORRIDO, y se prueba por su efecto secundario:
+    // limpiar la sesión muerta. Sin esta espera, "Ir a mi panel" no existe todavía por falta
+    // de hidratación y la aserción de abajo pasaría en verde sin probar nada.
+    await expect
+      .poll(async () => page.evaluate(() => { try { return localStorage.getItem("conversia_token"); } catch { return "?"; } }), { timeout: 10_000 })
+      .toBeNull();
     const vp = page.viewportSize();
     if (vp && vp.width <= 680) await page.getByRole("button", { name: "Menú" }).click();
     await expect(page.getByRole("link", { name: /Entrar/i }).first()).toBeVisible();
