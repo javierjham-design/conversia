@@ -38,6 +38,14 @@ export class TenancyMiddleware implements NestMiddleware {
     } catch {
       throw new UnauthorizedException("Token inválido o expirado");
     }
+    // TECHO DE LA SESIÓN (claim `sxp`): un token cuya sesión ya murió no sirve, aunque su
+    // propio `exp` siga en el futuro. En teoría no puede existir —`vidaDelAccessToken` le
+    // recorta el `exp` al techo— y justamente por eso se revisa acá: si mañana aparece otro
+    // camino que emita sesiones y se olvide del recorte, el techo se sigue cumpliendo. Los
+    // tokens sin `sxp` (TuBot, token MCP) no cambian en nada.
+    if (typeof payload.sxp === "number" && payload.sxp * 1000 <= Date.now()) {
+      throw new UnauthorizedException("Sesión expirada");
+    }
     const ctx: RequestContext = {
       userId: payload.sub,
       organizationId: payload.orgId,
@@ -45,6 +53,8 @@ export class TenancyMiddleware implements NestMiddleware {
       permissions: payload.perms ?? [],
       // §3.2 — sesión de impersonación: el contexto recuerda QUIÉN la pidió.
       ...(payload.imp ? { impersonatedBy: payload.imp } : {}),
+      // Techo de la sesión en curso: `switchOrg` lo hereda para no estrenar uno nuevo.
+      ...(typeof payload.sxp === "number" ? { sessionExpiresAt: payload.sxp * 1000 } : {}),
     };
     // El contexto envuelve TODO el manejo del request (controllers incluidos)
     runWithContext(ctx, () => next());

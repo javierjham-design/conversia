@@ -308,18 +308,43 @@ Desde ahí, al abrir /canales esa org recibe el `preVerifiedPhoneId` y el popup 
 ## 15. Política de sesión del panel (sesión deslizante + passkeys Fase 2)
 
 Desde el encargo `docs/PROMPT_SESION_LOGOUT.md` (26-oct-2026) el panel de **conversia-web** usa
-**sesión deslizante**: access token corto (`JWT_EXPIRES_IN`, 12 h) + **refresh token** opaco de
-larga vida en Redis (`JWT_REFRESH_EXPIRES_IN`, 30 d, rotativo y revocable). El cliente ya no
-re-loguea cada 12 h; sí tras 30 d de inactividad, al cerrar sesión o al cambiar la contraseña
-(que revoca todas sus sesiones). Detalle en `docs/SESION_RESULTADOS.md`.
+**sesión deslizante**: access token corto (`JWT_EXPIRES_IN`, 12 h) + **refresh token** opaco en
+Redis (`JWT_REFRESH_EXPIRES_IN`, rotativo y revocable). El cliente no re-loguea cada 12 h.
+Detalle en `docs/SESION_RESULTADOS.md`.
 
+**LA SESIÓN DURA 24 H COMO MÁXIMO (decisión del dueño, 3-nov-2026).** Antes la ventana era de
+30 d con techo de 90 d, así que se entraba a conversia.cl días después y "Ir a mi panel" pasaba
+directo a la plataforma. Hoy `JWT_REFRESH_ABSOLUTE_MAX` = **24 h** contadas desde el LOGIN: la
+sesión muere ahí por mucho que se use el panel, y hay que escribir la contraseña de nuevo. Tres
+piezas lo sostienen, y las tres hacen falta:
+
+1. el techo se guarda al nacer la sesión y se CONSERVA en cada rotación del refresh;
+2. el **access token se recorta** al techo (`vidaDelAccessToken`) y lo lleva firmado en el claim
+   `sxp`, que el middleware revisa. Sin el recorte el techo era de mentira: el access es un JWT
+   stateless sin lista de revocación, así que uno emitido 10 min antes del techo vivía 12 h más;
+3. `/auth/switch-org` **hereda** el techo en vez de estrenarlo (si no, cambiar de organización
+   cada 23 h daba una sesión eterna).
+
+Bajar el techo **acorta también las sesiones que ya están abiertas**: `techoDeLaSesion` toma el
+mínimo entre el techo guardado y el que toca con la política de hoy, así que apretar la política
+cierra sesiones vivas. Lo único que no se puede acortar es el access token ya emitido (sin
+denylist): tras el despliegue queda una cola de hasta 12 h para quien tenga uno vigente. Cerrar
+sesión en el panel, o cambiar la contraseña, corta al instante.
+
+- **TuBot (`apps/web`) no cambia:** nunca recibió refresh token (§10.2), su sesión siempre fue el
+  access de 12 h y sus tokens no llevan `sxp`. Tampoco cambia el **token MCP** de 365 días
+  (`POST /settings/mcp-token`): es una llave de API a propósito, no una sesión de panel.
 - **Env (Railway, servicio api):** `JWT_EXPIRES_IN` (default `12h`), `JWT_REFRESH_EXPIRES_IN`
-  (default `30d`). Ambas opcionales; con los defaults funciona. Cambiarlas NO requiere migración.
+  (default `24h`) y `JWT_REFRESH_ABSOLUTE_MAX` (default `24h`). Las tres opcionales; con los
+  defaults funciona. Cambiarlas NO requiere migración. ⚠️ Si alguna está **seteada a mano en
+  Railway** con un valor viejo (`30d`/`90d`), el default no manda: hay que borrarla o corregirla,
+  porque el techo lo decide el valor efectivo del servicio.
 - **Dependencia de Redis:** los refresh viven en Redis (claves `csess:*`), igual que las sesiones
   de super admin (`psess:*`). Si Redis se reinicia, los refresh se pierden → los clientes re-logean
   (molestia menor, no brecha: el access token caduca igual). No hay migración ni tabla nueva.
 - **Revocar la sesión de un usuario a mano** (soporte): borrar sus claves de refresh en Redis —
-  `DEL` de `csess:user:<userId>` y de cada `csess:<hash>` del set. El access vigente caduca solo.
+  `DEL` de `csess:user:<userId>` y de cada `csess:<hash>` del set. El access vigente caduca solo
+  (hasta 12 h). Para cortar de verdad al instante: cambiarle la contraseña (revoca todas).
 - **Acciones sensibles:** hoy el cambio de contraseña revoca todas las sesiones. Una compuerta de
   re-auth reciente para `/cobros`/datos de pago queda apuntada (patrón `reauthAt` del super admin).
 

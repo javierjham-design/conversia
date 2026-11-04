@@ -4,6 +4,8 @@ const API = apiBase();
 
 const TOKEN_KEY = "conversia_token";
 const REFRESH_KEY = "conversia_refresh";
+/** Plazo MÁXIMO de la sesión (ms epoch). Lo manda el servidor; acá solo se refleja. */
+const PLAZO_KEY = "conversia_session_until";
 
 // localStorage puede lanzar (modo privado, cookies bloqueadas) → todo acceso va envuelto.
 function lsGet(k: string): string | null {
@@ -32,21 +34,62 @@ function lsDel(k: string): void {
 export function getToken(): string | null {
   return lsGet(TOKEN_KEY);
 }
+/**
+ * Reemplaza SOLO el access token, de una sesión cuyo plazo no conocemos: el borrador de
+ * `/crear` y el token de soporte (impersonación, 30 min). Por eso borra el plazo guardado —
+ * si quedara el de la sesión anterior, esa pestaña se creería vencida de entrada.
+ */
 export function setToken(t: string): void {
   lsSet(TOKEN_KEY, t);
+  lsDel(PLAZO_KEY);
 }
 export function getRefreshToken(): string | null {
   return lsGet(REFRESH_KEY);
 }
-/** Guarda la sesión completa (access + refresh). El refresh es opcional (TuBot no lo emite/usa). */
-export function setSession(s: { token: string; refreshToken?: string | null }): void {
+
+/** Lo que devuelve la API al abrir o renovar una sesión. */
+export interface SesionDelServidor {
+  token: string;
+  refreshToken?: string | null;
+  /** Techo absoluto de la sesión en ISO (24 h desde el login). Ausente = no lo sabemos. */
+  sessionExpiresAt?: string | null;
+}
+
+/** Guarda la sesión completa (access + refresh + plazo). El refresh es opcional (TuBot no lo usa). */
+export function setSession(s: SesionDelServidor): void {
   lsSet(TOKEN_KEY, s.token);
   if (s.refreshToken) lsSet(REFRESH_KEY, s.refreshToken);
+  const plazo = s.sessionExpiresAt ? Date.parse(s.sessionExpiresAt) : NaN;
+  if (Number.isFinite(plazo)) lsSet(PLAZO_KEY, String(plazo));
+  else lsDel(PLAZO_KEY);
 }
-/** Cerrar sesión = borrar AMBOS tokens (access y refresh). */
+/** Cerrar sesión = borrar los TRES datos (access, refresh y plazo). */
 export function clearToken(): void {
   lsDel(TOKEN_KEY);
   lsDel(REFRESH_KEY);
+  lsDel(PLAZO_KEY);
+}
+
+/**
+ * Plazo máximo de la sesión en ms epoch, o null si no lo sabemos (sesión guardada antes de
+ * que esto existiera, o api anterior al cambio: conversia-web se despliega sola al mergear,
+ * así que puede ir por delante de la api). Un valor ilegible se trata como ausente.
+ */
+export function getSessionDeadline(): number | null {
+  const raw = lsGet(PLAZO_KEY);
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * ¿Se pasó el plazo? Solo true con un plazo CONOCIDO y ya vencido: no saber nunca puede
+ * significar "vencida", o sacaríamos al login a gente con sesión válida. Quien manda es el
+ * servidor (el techo va firmado en el token, claim `sxp`); esto evita el viaje perdido y el
+ * parpadeo de panel.
+ */
+export function plazoVencido(plazo: number | null, nowMs: number = Date.now()): boolean {
+  return plazo !== null && plazo <= nowMs;
 }
 
 // ───────────────────────────── Sesión / expiración ─────────────────────────────
@@ -109,6 +152,9 @@ let refreshInFlight: Promise<boolean> | null = null;
 async function tryRefresh(): Promise<boolean> {
   const rt = getRefreshToken();
   if (!rt) return false;
+  // Pasado el plazo máximo, el servidor ya no renueva (el techo viaja en la sesión de Redis):
+  // pedirlo igual es un viaje perdido y, en la landing, un parpadeo de panel antes de la patada.
+  if (plazoVencido(getSessionDeadline())) return false;
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
@@ -118,9 +164,11 @@ async function tryRefresh(): Promise<boolean> {
         body: JSON.stringify({ refreshToken: rt }),
       });
       if (!res.ok) return false;
-      const data = (await res.json()) as { token?: string; refreshToken?: string };
+      const data = (await res.json()) as Partial<SesionDelServidor>;
       if (!data?.token) return false;
-      setSession({ token: data.token, refreshToken: data.refreshToken });
+      // El plazo se vuelve a guardar en cada renovación: el servidor manda SIEMPRE el mismo
+      // (el del login), porque renovar corre la ventana deslizante pero nunca el techo.
+      setSession({ token: data.token, refreshToken: data.refreshToken, sessionExpiresAt: data.sessionExpiresAt });
       return true;
     } catch {
       return false;

@@ -1,4 +1,4 @@
-import { sessionActive } from "./api";
+import { plazoVencido, sessionActive } from "./api";
 
 /**
  * Qué hacer con la sesión de quien llega a la LANDING PÚBLICA (conversia.cl).
@@ -9,7 +9,8 @@ import { sessionActive } from "./api";
  * sea inalcanzable para quien ya tiene cuenta es un defecto, no una comodidad.
  *
  * Ahora la landing no redirige nunca: solo cambia el botón del menú. "Entrar" para quien no tiene
- * sesión, "Ir a mi panel" para quien sí.
+ * sesión, "Ir a mi panel" para quien sí — y para "sí" ahora también cuenta el plazo máximo de
+ * 24 h, no solo que haya algo guardado (ver `estadoDelVisitante`).
  */
 export type EstadoVisitante =
   /** Sin sesión. El menú ofrece Entrar / Crear gratis. */
@@ -20,13 +21,20 @@ export type EstadoVisitante =
   | "muerta";
 
 /**
- * Decide SIN red, leyendo solo el `exp` del JWT. Que el refresh exista no prueba que siga vivo en
- * Redis —pudo ser revocado—, y por eso esto no es una autorización: solo elige qué botón mostrar.
- * Si el refresh ya no sirve, el panel lo descubre en su primera llamada y manda al login con el
- * aviso de siempre. El coste de equivocarse es un botón de más, no una pantalla rota.
+ * Decide SIN red, leyendo solo el `exp` del JWT y el plazo máximo que guardó el servidor. Que
+ * el refresh exista no prueba que siga vivo en Redis —pudo ser revocado—, y por eso esto no es
+ * una autorización: solo elige qué botón mostrar. Si el refresh ya no sirve, el panel lo
+ * descubre en su primera llamada y manda al login con el aviso de siempre.
+ *
+ * `plazo` es el techo de 24 h (ms epoch, `getSessionDeadline()`), y es OBLIGATORIO a propósito.
+ * El defecto que cierra: la landing ofrecía "Ir a mi panel" con solo encontrar un refresh token
+ * guardado, sin mirar de cuándo era, así que el dueño volvía días después y el botón lo metía
+ * derecho a la plataforma. Con el parámetro opcional, un llamador nuevo se lo olvidaría y el
+ * agujero volvería sin que nada se pusiera rojo. `null` = plazo desconocido, no vencido.
  */
-export function estadoDelVisitante(token: string | null, refreshToken: string | null): EstadoVisitante {
+export function estadoDelVisitante(token: string | null, refreshToken: string | null, plazo: number | null): EstadoVisitante {
   if (!token) return "anonimo";
+  if (plazoVencido(plazo)) return "muerta";
   if (sessionActive(token) || refreshToken) return "con-sesion";
   return "muerta";
 }

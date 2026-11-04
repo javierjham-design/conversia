@@ -4,7 +4,7 @@ import {
   ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, LayoutDashboard, Menu, MessageSquare,
   ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
-import { api, getToken, getRefreshToken, clearToken } from "@/lib/api";
+import { api, getToken, getRefreshToken, getSessionDeadline, clearToken } from "@/lib/api";
 import { estadoDelVisitante } from "@/lib/sesion";
 import {
   BASE_RESPALDO,
@@ -45,7 +45,7 @@ export default function Landing() {
   // y sin refresh con qué renovarla) se limpia acá mismo, para no dejar basura que después
   // mande al login con un aviso de expiración que el visitante no pidió.
   useEffect(() => {
-    const estado = estadoDelVisitante(getToken(), getRefreshToken());
+    const estado = estadoDelVisitante(getToken(), getRefreshToken(), getSessionDeadline());
     if (estado === "muerta") clearToken();
     setVisitante(estado === "con-sesion" ? "con-sesion" : "anonimo");
   }, []);

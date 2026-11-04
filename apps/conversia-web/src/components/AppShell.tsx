@@ -2,7 +2,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { CalendarDays, CreditCard, Globe, Home, LogOut, MailWarning, MessageCircle, MoreHorizontal, Radio, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
-import { api, getToken, getRefreshToken, sessionActive, clearToken, logout } from "@/lib/api";
+import { api, getToken, getRefreshToken, getSessionDeadline, plazoVencido, sessionActive, clearToken, logout } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
 import { openAssistant } from "@/lib/assistant";
@@ -84,6 +84,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Guard de sesión (toda pantalla con shell es privada):
   //  - Sin token NI refresh → al login.
+  //  - Pasado el PLAZO MÁXIMO de la sesión (24 h) → al login con aviso, sin intentar nada: el
+  //    servidor ya no la renueva, así que dejar pasar solo mostraría un panel que no carga.
   //  - Access vencido y SIN refresh con que renovar → al login con aviso de "sesión expiró"
   //    (sin flash de panel muerto). Si hay refresh, dejamos pasar: la 1.ª llamada a la API lo
   //    renueva sola (lib/api) y el usuario ni se entera.
@@ -92,7 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     const rt = getRefreshToken();
     if (!t && !rt) {
       router.replace("/login");
-    } else if (t && !sessionActive(t) && !rt) {
+    } else if (plazoVencido(getSessionDeadline()) || (t && !sessionActive(t) && !rt)) {
       clearToken();
       router.replace(`/login?expirada=1&volver=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     }

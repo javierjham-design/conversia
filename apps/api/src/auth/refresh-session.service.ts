@@ -29,12 +29,42 @@ export interface RefreshSessionData {
 }
 
 /**
- * Momento en que la sesión muere aunque se siga usando. Una sesión vieja (de antes del techo)
- * no lo trae guardado: se le cuenta desde su `createdAt`, que sí está. Usar `Date.now()` para
- * esas la volvería eterna otra vez, que es justo lo que el techo viene a cortar.
+ * Momento en que la sesión muere aunque se siga usando: el MÍNIMO entre el techo que se le
+ * guardó al nacer y el que le tocaría con la política de HOY (`maxMs` desde su login).
+ *
+ * El mínimo —y no el dato guardado a secas— es lo que hace que apretar la política alcance a
+ * las sesiones que YA están abiertas. Cuando el techo bajó de 90 d a 24 h, las sesiones vivas
+ * tenían `absoluteExpiresAt = login + 90 d` escrito en Redis: respetarlo habría dejado fuera
+ * justo a las sesiones que había que cerrar. Una política nueva solo puede ACORTAR.
+ *
+ * Una sesión vieja (de antes de que el techo existiera) no lo trae guardado: se le cuenta
+ * desde su `createdAt`, que sí está. Usar `Date.now()` para esas la volvería eterna otra vez.
  */
 export function techoDeLaSesion(data: Pick<RefreshSessionData, "createdAt" | "absoluteExpiresAt">, maxMs: number): number {
-  return typeof data.absoluteExpiresAt === "number" ? data.absoluteExpiresAt : data.createdAt + maxMs;
+  const porPolitica = data.createdAt + maxMs;
+  return typeof data.absoluteExpiresAt === "number" ? Math.min(data.absoluteExpiresAt, porPolitica) : porPolitica;
+}
+
+/**
+ * Segundos de vida del ACCESS token: el configurado, pero recortado al techo de la sesión.
+ *
+ * El agujero que cierra: el access es un JWT stateless y no hay lista de revocación, así que
+ * un refresh pedido 10 minutos antes del techo entregaba un token de 12 h y la sesión llegaba
+ * a 36 h con un techo de 24. Recortar el `exp` es lo que hace que el techo sea un techo —
+ * mirar solo el refresh token no alcanza, porque el access vive solo.
+ *
+ * Mínimo 1: `jsonwebtoken` rechaza un `expiresIn` de 0 o negativo.
+ */
+export function vidaDelAccessToken(accessRaw: string | undefined, techoMs: number, nowMs = Date.now()): number {
+  const configurado = parseDurationSeconds(accessRaw, 12 * 3600);
+  return Math.max(1, Math.min(configurado, Math.ceil((techoMs - nowMs) / 1000)));
+}
+
+/** Una sesión de refresh recién creada: su token EN CLARO y el techo que le quedó fijado. */
+export interface SesionDeRefresh {
+  token: string;
+  /** Techo absoluto (ms epoch). Lo necesita quien firma el access token, para recortarlo. */
+  absoluteExpiresAt: number;
 }
 
 /**
@@ -92,11 +122,13 @@ export class RefreshSessionService implements OnModuleDestroy {
    * `heredaTecho` es el techo absoluto de la sesión que se está rotando: al renovar NO se estrena
    * uno nuevo, porque entonces el techo se correría en cada uso y no sería un techo.
    */
-  async create(userId: string, orgId: string, heredaTecho?: number): Promise<string> {
+  async create(userId: string, orgId: string, heredaTecho?: number): Promise<SesionDeRefresh> {
     const token = this.mint();
     const h = this.hash(token);
     const now = Date.now();
-    const absoluteExpiresAt = heredaTecho ?? now + this.absoluteMaxMs;
+    // El techo heredado también se recorta a la política de hoy: si viene de un token viejo
+    // (p. ej. el `sxp` de una sesión de 90 d), heredarlo tal cual reviviría la vida vieja.
+    const absoluteExpiresAt = heredaTecho ? Math.min(heredaTecho, now + this.absoluteMaxMs) : now + this.absoluteMaxMs;
     const data: RefreshSessionData = { userId, orgId, createdAt: now, absoluteExpiresAt };
     const ttl = ttlHastaElTecho(absoluteExpiresAt, now, this.ttl);
     try {
@@ -110,7 +142,7 @@ export class RefreshSessionService implements OnModuleDestroy {
       // fail-open: si Redis no está, el login igual sale (el access token tiene su propia expiración);
       // simplemente no habrá sesión deslizante hasta que Redis vuelva.
     }
-    return token;
+    return { token, absoluteExpiresAt };
   }
 
   /** Resuelve un refresh token a su sesión. null = inválido/expirado/revocado (o Redis caído). */
@@ -138,7 +170,7 @@ export class RefreshSessionService implements OnModuleDestroy {
    * Existe como un solo método (en vez de revoke + create por separado en el llamador) porque
    * el techo se pierde con solo olvidarse de pasarlo, y perderlo devuelve la sesión eterna.
    */
-  async rotate(tokenUsado: string, data: RefreshSessionData): Promise<string> {
+  async rotate(tokenUsado: string, data: RefreshSessionData): Promise<SesionDeRefresh> {
     await this.revoke(tokenUsado);
     return this.create(data.userId, data.orgId, techoDeLaSesion(data, this.absoluteMaxMs));
   }

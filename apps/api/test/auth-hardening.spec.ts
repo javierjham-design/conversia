@@ -161,9 +161,11 @@ function makeAuth(opts: {
   };
   const prisma: any = { admin };
   const refreshSessions: any = {
+    // `create` devuelve el token Y el techo absoluto de la sesión (24 h): quien firma el
+    // access token necesita el techo para recortarle el `exp`. Ver sesion-maximo-24h.spec.ts.
     create: async (uid: string) => {
       refrescos.push(uid);
-      return "refresh-token";
+      return { token: "refresh-token", absoluteExpiresAt: Date.now() + 86_400_000 };
     },
   };
   const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);

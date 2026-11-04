@@ -22,6 +22,19 @@ export interface AppTokenClaims {
    * VER y operar la ficha, no a apropiarse de la cuenta del cliente.
    */
   imp?: string;
+  /**
+   * TECHO de la sesión (segundos UNIX): cuándo muere la sesión a la que pertenece este token,
+   * pase lo que pase. Lo llevan solo los tokens de sesión deslizante (Conversia); el
+   * middleware lo hace valer y `switchOrg` lo HEREDA en vez de estrenar uno.
+   *
+   * Está firmado como cualquier otro claim, así que el cliente no lo puede mover. El `exp`
+   * del token ya viene recortado a esta fecha (`vidaDelAccessToken`): `sxp` es el cinturón
+   * para el día en que un camino nuevo emita una sesión y se olvide del recorte.
+   *
+   * Ausente = sin techo de sesión: TuBot (que nunca usó refresh token) y el token MCP de
+   * 365 días, que es una llave de API a propósito y no una sesión de panel.
+   */
+  sxp?: number;
 }
 
 const ALGO: jwt.Algorithm = "HS256";
@@ -179,5 +192,7 @@ export function verifyAppToken(token: string): AppTokenClaims {
     perms: Array.isArray(decoded.perms) ? (decoded.perms as string[]) : [],
     // §3.2: el claim `imp` se propaga tal cual; sin él, sesión normal del cliente.
     ...(decoded.imp ? { imp: String(decoded.imp) } : {}),
+    // Techo de la sesión: se propaga para que el middleware lo revise y `switchOrg` lo herede.
+    ...(typeof decoded.sxp === "number" ? { sxp: decoded.sxp } : {}),
   };
 }

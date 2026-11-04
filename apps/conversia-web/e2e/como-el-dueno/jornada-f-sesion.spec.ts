@@ -95,4 +95,39 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
     await page.getByRole("link", { name: /Ir a mi panel/i }).first().click();
     await page.waitForURL(/\/inicio/, { timeout: 20_000 });
   });
+
+  test("pasado el plazo de 24 h: la landing ofrece Entrar y el panel echa al login", async ({ page, request }) => {
+    // Hallazgo del dueño (3-nov): volvía a conversia.cl días después, apretaba "Ir a mi panel"
+    // y entraba. El techo de la sesión ahora son 24 h; acá se simula una sesión FUERA DE PLAZO
+    // (token válido + plazo vencido, que es lo que vería alguien al día siguiente) en un
+    // navegador real. Esperar 24 h no es un test: el plazo lo guarda el cliente y se siembra.
+    const cuenta = await registerAccount(request, { brand: "conversia", vertical: "barberia" });
+    await useSession(page, cuenta.token);
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem("conversia_session_until", String(Date.now() - 60_000));
+        localStorage.setItem("conversia_pwa_install_dismissed", "1");
+      } catch {
+        /* private mode */
+      }
+    });
+
+    // 1) La landing no ofrece el panel: el botón vuelve a ser "Entrar".
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Primero se espera a que el efecto HAYA CORRIDO, y se prueba por su efecto secundario:
+    // limpiar la sesión muerta. Sin esta espera, "Ir a mi panel" no existe todavía por falta
+    // de hidratación y la aserción de abajo pasaría en verde sin probar nada.
+    await expect
+      .poll(async () => page.evaluate(() => { try { return localStorage.getItem("conversia_token"); } catch { return "?"; } }), { timeout: 10_000 })
+      .toBeNull();
+    const vp = page.viewportSize();
+    if (vp && vp.width <= 680) await page.getByRole("button", { name: "Menú" }).click();
+    await expect(page.getByRole("link", { name: /Entrar/i }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /Ir a mi panel/i })).toHaveCount(0);
+
+    // 2) Y entrar a mano a una pantalla privada termina en el login con el aviso.
+    await page.goto("/inicio", { waitUntil: "domcontentloaded" });
+    await page.waitForURL(/\/login\?expirada=1/, { timeout: 15_000 });
+    await expect(page.getByText(/Tu sesión expiró por seguridad/i)).toBeVisible();
+  });
 });
