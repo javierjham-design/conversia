@@ -39,6 +39,14 @@ sus tokens quedan cifrados por organización.
    > verificación. Los permisos que el cliente realmente otorga quedan guardados en
    > `integration_connections.config.scopes`; si falta uno, el panel pide reconectar en vez
    > de dejar que Google conteste 403. Ver `packages/config/src/google-oauth.ts`.
+   >
+   > **Quien NO declara función recibe los tres.** El drawer de Google de TuBot (`apps/web`)
+   > es una sola tarjeta para Calendar *y* Sheets y llama a `authorize` sin parámetro: para él
+   > "sin declarar" vale los permisos de siempre, o un tenant de TuBot que conecte de cero se
+   > quedaría sin `spreadsheets` y sin ninguna pantalla donde pedirlo. La UI de Conversia manda
+   > `?feature=calendar` explícito, así que su pantalla de Google no menciona planillas. Lo
+   > deciden `scopesForAuthorize` y los guardianes de
+   > `apps/api/test/google-authorize-permisos-drawer.spec.ts`.
 5. Usuarios de prueba: agrega tu propio correo para probar antes de publicar.
 6. Cuando todo funcione, pulsa **Publicar aplicación** (estado *En producción*).
    Con scopes sensibles Google puede pedir verificación; mientras tanto la app

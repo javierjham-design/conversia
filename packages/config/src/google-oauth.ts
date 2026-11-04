@@ -38,6 +38,30 @@ export function scopesForFeature(feature: GoogleFeature): string[] {
   return feature === "sheets" ? [...GOOGLE_SHEETS_SCOPES] : [...GOOGLE_CALENDAR_SCOPES];
 }
 
+/**
+ * Permisos para una petición de autorización, según lo que el cliente DECLARÓ.
+ *
+ * ⚠️ "No declaró función" NO es lo mismo que "calendar": son los permisos de SIEMPRE.
+ *
+ * El drawer de Google de TuBot (`apps/web`) es una sola tarjeta para Calendar **y** Sheets y
+ * llama a `authorize` sin parámetro. Si eso cayera al default `calendar`, un tenant de TuBot
+ * que conecte de cero se quedaría sin `spreadsheets` —y sin ninguna pantalla donde pedirlo—,
+ * dejando muerto el paso "Añadir fila a Google Sheets" de Workflows. La UI de Conversia sí
+ * declara `?feature=calendar`, así que su pantalla de Google sigue sin mencionar planillas,
+ * que es el punto de separar permisos.
+ *
+ * Una función desconocida se RECHAZA (lanza) en vez de degradarse a los tres: un
+ * `?feature=calendario` mal escrito no puede terminar pidiendo acceso a las planillas.
+ */
+export function scopesForAuthorize(feature: string | null | undefined): string[] {
+  const declarada = typeof feature === "string" ? feature.trim() : "";
+  if (!declarada) return [...GOOGLE_LEGACY_SCOPES];
+  if (declarada !== "calendar" && declarada !== "sheets") {
+    throw new Error(`Función de Google inválida: ${declarada} (calendar | sheets)`);
+  }
+  return scopesForFeature(declarada);
+}
+
 /** Credenciales de app de Google que se pueden usar. */
 export type GoogleOAuthApp = "default" | "conversia";
 

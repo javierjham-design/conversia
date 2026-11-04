@@ -13,7 +13,7 @@ import {
   missingScopesForFeature,
   parseGoogleCalendarConfig,
   parseGrantedScopes,
-  scopesForFeature,
+  scopesForAuthorize,
   GOOGLE_CALENDAR_CONFIG_VACIA,
   type GoogleFeature,
   type GoogleOAuthApp,
@@ -125,9 +125,13 @@ export class OAuthController {
   async googleAuthorize(@Query("feature") feature?: string) {
     const ctx = requirePermission("integrations:write");
     const env = getEnv();
-    const parsed = z.enum(["calendar", "sheets"]).default("calendar").safeParse(feature ?? "calendar");
+    // Quién NO declara función: el drawer de TuBot, que es una tarjeta para Calendar Y Sheets.
+    // Para él "sin declarar" vale los 3 permisos de siempre; `scopesForAuthorize` lo decide.
+    const declarada = typeof feature === "string" && feature.trim() !== "";
+    const parsed = z.enum(["calendar", "sheets"]).safeParse(declarada ? feature!.trim() : "calendar");
     if (!parsed.success) throw new BadRequestException("Función inválida (calendar | sheets)");
     const which: GoogleFeature = parsed.data;
+    const pedidos = scopesForAuthorize(declarada ? feature : undefined);
 
     const { app, hasConnection } = await this.googleAppFor(ctx.organizationId);
     const creds = googleOAuthCredentials(app, env);
@@ -142,13 +146,15 @@ export class OAuthController {
       client_id: creds.clientId,
       redirect_uri: googleRedirectUri(),
       response_type: "code",
-      scope: scopesForFeature(which).join(" "),
+      scope: pedidos.join(" "),
       access_type: "offline",
       prompt: "consent", // fuerza refresh_token también en reconexiones
       state: signState(ctx.organizationId),
     });
     if (which === "sheets" || hasConnection) params.set("include_granted_scopes", "true");
-    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, feature: which, app };
+    // `feature` solo informa; ningún panel lo usa para decidir. "legacy" = no se declaró
+    // función y se pidieron los 3 permisos, para que el log no diga "calendar" mintiendo.
+    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, feature: declarada ? which : "legacy", app };
   }
 
   /**
