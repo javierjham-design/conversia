@@ -242,8 +242,12 @@ export function Landing({ inicial }: { inicial: CatalogoInicial | null }) {
             <h3 className="display">Base</h3>
             {/* Sin catálogo confirmado la tarjeta queda sin cifra, no con una inventada. */}
             {basePrice ? <p className="lp-price-amount display">{basePrice}<span>/mes</span></p> : <p className="lp-price-amount display lp-price-sin-dato">Consulta el precio</p>}
+            {/* El adjetivo CONCUERDA con la unidad: la frase estaba escrita para "créditos
+                incluidos" y con el catálogo de conversaciones activo quedaba "conversaciones
+                incluidos". M2 copia esta tarjeta a cuatro páginas de rubro, así que el
+                ternario va acá y no en cada una. */}
             {baseIncluded !== null ? (
-              <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} incluidos al mes{aprox(baseIncluded)}{esCreditos ? " · IVA incluido" : ""}.</p>
+              <p className="lp-price-note">{baseIncluded.toLocaleString("es-CL")} {unidad} {esCreditos ? "incluidos" : "incluidas"} al mes{aprox(baseIncluded)}{esCreditos ? " · IVA incluido" : ""}.</p>
             ) : (
               <p className="lp-price-note">Escríbenos y te confirmamos el plan vigente.</p>
             )}
@@ -417,7 +421,13 @@ function faqs(ctx: { esCreditos: boolean; pruebaGratis: number; conv: (c: number
       : { q: "¿Qué cuenta como una “conversación”?", a: "Toda la atención a un mismo cliente dentro de una ventana de 24 horas, sin importar cuántos mensajes se intercambien." },
     { q: "¿Necesito tarjeta para probar?", a: `No. Creas tu asistente y tienes ${regalo} para probarlo con clientes reales. La tarjeta se pide al activar un plan, no para probar.` },
     { q: "¿Cómo se paga?", a: "El plan y las recargas se cobran con Flow. Para el cobro automático necesitas una tarjeta de CRÉDITO: las de débito y prepago (incluida Redcompra) no permiten cargos automáticos, y con ellas se paga con un link cada vez." },
-    { q: "¿Qué pasa si se me acaban los créditos?", a: "Te avisamos al 75% y al 90% de tu saldo. Con la recarga automática activada no pasa nada: se cobra tu pack y sigue. Sin ella, tu bot sigue respondiendo con 100 créditos de gracia y después se pausa hasta que recargues — nunca queda mudo de golpe." },
+    // M0 — decía "se me acaban los créditos" y "100 créditos de gracia". Las dos cosas estaban
+    // mal con el catálogo de conversaciones activo: la unidad no es el crédito, y la gracia de
+    // ese modelo son 20, no 100 (`billing.controller.ts`: `graceLimit ?? 20`, y 100 solo en la
+    // rama de créditos). La cifra NO se escribe acá: es un dato del servidor que ninguna página
+    // pública puede leer, así que la respuesta promete lo comprobable —que hay gracia y que el
+    // bot no se calla de golpe— sin inventar cuánta. "Saldo" sirve para los dos modelos.
+    { q: "¿Qué pasa si se me acaba el saldo?", a: "Te avisamos al 75% y al 90%. Con la recarga automática activada no pasa nada: se cobra tu pack y sigue. Sin ella, tu bot sigue respondiendo con un saldo de gracia y después se pausa hasta que recargues — nunca queda mudo de golpe." },
     { q: "¿Los mensajes de WhatsApp los cobran ustedes?", a: "No. Los cobra Meta directamente a tu tarjeta, con sus propias tarifas. Nosotros te cobramos el asistente; el canal es tuyo." },
     { q: "¿Funciona con mi número de WhatsApp actual?", a: "Conversia usa la plataforma oficial de WhatsApp Business. Te guiamos para conectar tu número y empezar a atender." },
     // M0 — antes afirmaba que el asistente "no inventa", en absoluto. Ninguna IA puede
