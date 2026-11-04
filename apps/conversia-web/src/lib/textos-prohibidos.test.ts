@@ -68,6 +68,14 @@ const PROHIBIDAS: Array<{ nombre: string; re: RegExp; porque: string }> = [
   { nombre: "30 conversaciones (escrito a mano)", re: /\b30\s+conversaciones/i, porque: "el regalo sale del catálogo activo, no de un número fijo" },
   { nombre: "precio viejo $18.900", re: /18[.,]900/, porque: "el precio sale del catálogo activo" },
   { nombre: "IA que no inventa (absoluto)", re: /(IA|asistente)\s+que\s+no\s+inventa|no\s+inventa\b(?!r)/i, porque: "ninguna IA puede garantizarlo; se dice de dónde saca la información" },
+  // La página decía "100 créditos de gracia": cierto en el catálogo de créditos y FALSO en el
+  // de conversaciones, donde son 20 (`billing.controller.ts`). Es un dato del servidor que
+  // ninguna página pública puede leer, así que no se escribe: se promete que hay gracia.
+  { nombre: "una cantidad de gracia escrita a mano", re: /\d[\d.,]*\s+(cr[ée]ditos|conversaciones)\s+de\s+gracia/i, porque: "la gracia depende del modelo de cobro (100 en créditos, 20 en conversaciones) y la página no puede leerla" },
+  // La unidad seguida de un adjetivo FIJO: la página servía "100 conversaciones incluidos",
+  // porque la frase se escribió para "créditos". Se busca el patrón del FUENTE —`{unidad}` y
+  // después el adjetivo— y no el texto renderizado, que un test unitario no ve.
+  { nombre: "{unidad} con el adjetivo en un solo género", re: /\{unidad\}\s+(incluidos|incluidas|usados|usadas|gastados|gastadas|restantes?\s+incluid)/i, porque: "el adjetivo tiene que concordar con la unidad ACTIVA (créditos/conversaciones), no quedarse en un género" },
 ];
 
 describe("las páginas públicas no usan las frases prohibidas", () => {
