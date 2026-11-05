@@ -423,6 +423,17 @@ body::after {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* Aviso de instalar / actualizar la PWA. En escritorio va pegado abajo; en teléfono tiene
+   que quedar POR ENCIMA de la barra de pestañas (62px + safe-area), porque esa barra es la
+   navegación: con el aviso encima no se podía tocar ningún ítem del menú. */
+.pwa-barra {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 767px) {
+  .pwa-barra {
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+  }
+}
 .indice {
   display: flex;
   gap: 14px;

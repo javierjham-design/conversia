@@ -51,6 +51,27 @@ test.describe("Jornada I — sé en qué menú estoy", () => {
       for (const { nombre } of MENU.slice(0, 4)) {
         await expect(barra.getByText(nombre, { exact: true })).toBeVisible();
       }
+
+      // NADA puede taparla: es la única navegación que hay en un teléfono. El aviso de
+      // "Instala Conversia" se apoyaba justo encima (12px del borde, z-index 60 contra el 20
+      // de la barra) y se comía el toque en los cinco ítems. Esto no se ve "visible/oculto":
+      // el ítem está visible y aun así no se puede tocar, así que se pregunta por el
+      // elemento que de verdad recibe el toque.
+      const recibeElToque = await page.evaluate(() => {
+        const caja = document.querySelector("nav.shell-tabs")?.getBoundingClientRect();
+        if (!caja) return "no hay barra";
+        const puntos: Array<[number, number]> = [
+          [caja.left + caja.width * 0.1, caja.top + 24],
+          [caja.left + caja.width * 0.5, caja.top + 24],
+          [caja.right - caja.width * 0.1, caja.top + 24],
+        ];
+        for (const [x, y] of puntos) {
+          const el = document.elementFromPoint(x, y);
+          if (!el?.closest("nav.shell-tabs")) return `tapada en (${Math.round(x)},${Math.round(y)}) por ${el?.className || el?.tagName || "?"}`;
+        }
+        return "la barra";
+      });
+      expect(recibeElToque).toBe("la barra");
       // El resto vive en "Más", y ahí también va agrupado: es lo que distingue "Caja" (el
       // dinero del negocio) de "Cobros" (lo que Conversia te cobra). Todo acotado a la hoja:
       // el riel sigue en el DOM aunque el CSS lo esconda, así que buscar el texto a secas

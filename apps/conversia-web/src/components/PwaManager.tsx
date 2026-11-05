@@ -153,11 +153,17 @@ export function PwaManager() {
     setUpdateReg(null);
   }
 
+  /**
+   * `pwa-barra` pone el `bottom` (globals.css) y acá NO va en línea: en teléfono esta barra
+   * se apoyaba sobre la barra de pestañas —12px del borde, z-index 60 contra el 20 de la
+   * navegación— y TAPABA el menú entero. Quien no cerrara el aviso de "Instala Conversia"
+   * no podía tocar Hoy, Conversaciones, Agenda, Clientes ni Más. Lo cazó la jornada I al
+   * intentar abrir "Más" en iPhone: el clic se lo comía esta tarjeta.
+   */
   const barBase: React.CSSProperties = {
     position: "fixed",
     left: 12,
     right: 12,
-    bottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
     zIndex: 60,
     maxWidth: 560,
     margin: "0 auto",
@@ -173,7 +179,7 @@ export function PwaManager() {
     <>
       {/* Versión nueva disponible */}
       {updateReg ? (
-        <div className="card" style={{ ...barBase, borderColor: "var(--acc)", background: "var(--card)" }}>
+        <div className="card pwa-barra" style={{ ...barBase, borderColor: "var(--acc)", background: "var(--card)" }}>
           <RefreshCw size={18} style={{ color: "var(--acc-deep)", flexShrink: 0 }} />
           <span style={{ flex: 1, fontSize: 13.5 }}>Hay una versión nueva de Conversia.</span>
           <button onClick={applyUpdate} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "7px 14px" }}>Recargar</button>
@@ -182,7 +188,7 @@ export function PwaManager() {
 
       {/* Instalación (Android/escritorio) */}
       {!dismissed && !updateReg && installEvt ? (
-        <div className="card" style={{ ...barBase, background: "var(--card)" }}>
+        <div className="card pwa-barra" style={{ ...barBase, background: "var(--card)" }}>
           <Download size={18} style={{ color: "var(--acc-deep)", flexShrink: 0 }} />
           <span style={{ flex: 1, fontSize: 13.5 }}>Instala Conversia en tu {isMobile() ? "teléfono" : "equipo"} para abrirla como app y recibir avisos.</span>
           <button onClick={doInstall} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "7px 14px", whiteSpace: "nowrap" }}>Instalar</button>
@@ -192,7 +198,7 @@ export function PwaManager() {
 
       {/* Instrucciones iOS */}
       {!dismissed && !updateReg && !installEvt && showIosHint ? (
-        <div className="card" style={{ ...barBase, background: "var(--card)", alignItems: "flex-start" }}>
+        <div className="card pwa-barra" style={{ ...barBase, background: "var(--card)", alignItems: "flex-start" }}>
           <Share size={18} style={{ color: "var(--acc-deep)", flexShrink: 0, marginTop: 2 }} />
           <span style={{ flex: 1, fontSize: 13 }}>
             Instala Conversia: toca <strong>Compartir</strong> <Share size={12} style={{ verticalAlign: "middle" }} /> y luego <strong>“Añadir a pantalla de inicio”</strong>. Así recibes avisos aunque la cierres.
