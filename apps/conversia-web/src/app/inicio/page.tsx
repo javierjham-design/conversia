@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Bell, CalendarPlus, ChevronRight, Moon, Sun, Sparkles, Zap, ArrowRight } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 
 /* ---------- Helpers de hora en la zona del negocio (A14/§6) ---------- */
 function hourIn(tz?: string): number {
@@ -180,8 +181,10 @@ export default function Home() {
     <AppShell>
       <main style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 20px 48px" }}>
         {/* Topbar */}
-        <header style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+        <header className="topbar-hoy" style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+          {/* El `flex: 1` vive en el CSS y no acá: en línea le ganaba a la regla de móvil que
+              le da fila propia a la fecha (y la dejaba partida en cuatro renglones). */}
+          <div className="topbar-fecha">
             <p className="text-dim" suppressHydrationWarning style={{ margin: 0, fontSize: 12.5 }}>{parts.date} · {parts.time}</p>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 3, fontSize: 12.5, color: assistantOn ? "var(--ok)" : "var(--warn)" }}>
               <Pulse on={assistantOn === true} />
@@ -192,18 +195,34 @@ export default function Home() {
           <button onClick={toggleTheme} aria-label="Modo claro/oscuro" className="card" style={{ width: 38, height: 38, display: "grid", placeItems: "center", cursor: "pointer", borderRadius: 11 }}>
             {isDark ? <Sun size={17} /> : <Moon size={17} />}
           </button>
-          <button aria-label="Notificaciones" className="card" style={{ width: 38, height: 38, display: "grid", placeItems: "center", cursor: "pointer", borderRadius: 11, position: "relative" }}>
+          {/* La campana era un botón MUERTO: no tenía onClick, así que el punto de aviso
+              invitaba a apretar algo que no hacía nada. Lo que el punto anuncia son
+              conversaciones esperando respuesta, así que ahora lleva ahí. */}
+          <a
+            href="/conversaciones"
+            aria-label={pending.length ? `${pending.length} conversaciones te esperan` : "Conversaciones que te esperan"}
+            title={pending.length ? `${pending.length} conversaciones te esperan` : "No tienes nada pendiente"}
+            className="card"
+            style={{ width: 38, height: 38, display: "grid", placeItems: "center", cursor: "pointer", borderRadius: 11, position: "relative", color: "var(--ink)" }}
+          >
             <Bell size={17} />
             {pending.length ? <span style={{ position: "absolute", top: 8, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--warn)" }} /> : null}
-          </button>
+          </a>
           <div className="shell-brand" style={{ width: 38, height: 38, fontSize: 15, marginBottom: 0 }}>{(firstName || "C").charAt(0).toUpperCase()}</div>
         </header>
 
-        {/* Saludo (Fraunces cursiva en el acento) */}
-        <h1 className="display" suppressHydrationWarning style={{ fontSize: 32, margin: "0 0 20px", fontWeight: 600 }}>
-          {greeting(tz)}
-          {firstName ? <span className="display-italic" style={{ color: "var(--acc-deep)" }}>, {firstName}</span> : null}
-        </h1>
+        {/* Saludo (Fraunces cursiva en el acento). Es la única pantalla cuyo título NO es el
+            nombre de su sección, así que el nombre va arriba como antetítulo: también acá
+            tiene que quedar claro a qué parte del menú entraste. */}
+        <EncabezadoSeccion
+          ruta="/inicio"
+          titulo={
+            <>
+              {greeting(tz)}
+              {firstName ? <span className="display-italic" style={{ color: "var(--acc-deep)" }}>, {firstName}</span> : null}
+            </>
+          }
+        />
 
         {/* V2-9 — prueba/activación (modelo por conversación) o migración grandfathering */}
         <V2Banner />

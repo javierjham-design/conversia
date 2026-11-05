@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { api } from "@/lib/api";
 import { leerRetorno, type Retorno } from "@/lib/cobros-retorno";
 
@@ -282,8 +283,20 @@ export default function Cobros() {
   return (
     <AppShell>
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "28px 20px 40px" }}>
-        <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Cobros</h1>
-        <p className="text-dim" style={{ fontSize: 14, margin: "0 0 20px" }}>Tus créditos, tu plan y tus pagos.</p>
+        {/* Pantalla larga (saldo, packs, planes, tarjeta, recarga automática): el índice son
+            atajos a lo que YA está en la página. A propósito no son pestañas que esconden:
+            Convi resalta por `data-copilot` y un elemento dentro de una pestaña cerrada lo
+            dejaría fallando en silencio. Cada atajo se muestra solo si su bloque existe —
+            un enlace a un ancla que no está no lleva a ninguna parte. */}
+        <EncabezadoSeccion
+          ruta="/cobros"
+          indice={[
+            ...(s ? [{ id: "saldo", label: "Saldo" }] : []),
+            ...(pkgs.length ? [{ id: "comprar", label: "Comprar" }] : []),
+            ...(plans.length ? [{ id: "plan", label: "Mi plan" }] : []),
+            ...(conFlow ? [{ id: "recarga", label: "Recarga automática" }, { id: "pago", label: "Método de pago" }] : []),
+          ]}
+        />
 
         {/* Aviso del retorno de la pasarela / de la tarjeta. Siempre arriba y anunciado. */}
         <div aria-live="polite" role="status">
@@ -308,7 +321,7 @@ export default function Cobros() {
 
         {/* Créditos */}
         {s ? (
-          <div className="card" style={{ padding: 22, marginBottom: 16 }}>
+          <div className="card" id="saldo" style={{ padding: 22, marginBottom: 16 }}>
             <p className="text-dim" style={{ margin: 0, fontSize: 13 }}>{s.unit === "conversation" ? "Conversaciones disponibles" : "Créditos disponibles"}</p>
             <p className="display" style={{ margin: "4px 0 6px", fontSize: 40 }}>{s.balance.toLocaleString("es-CL")}</p>
             {/* CRE 3 — EL MEDIDOR, la misma traducción que se ve en Inicio y que usa el
@@ -350,7 +363,7 @@ export default function Cobros() {
         {/* Comprar créditos */}
         {pkgs.length ? (
           <>
-            <h2 className="display" style={{ fontSize: 18, margin: "22px 0 12px" }} data-copilot="comprar-creditos">Comprar créditos</h2>
+            <h2 className="display" id="comprar" style={{ fontSize: 18, margin: "22px 0 12px" }} data-copilot="comprar-creditos">Comprar créditos</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
               {pkgs.map((p) => (
                 <div key={p.code} className="card" style={{ padding: 18, display: "flex", flexDirection: "column" }}>
@@ -375,7 +388,7 @@ export default function Cobros() {
         {/* Plan */}
         {plans.length ? (
           <>
-            <div data-copilot="plan" style={{ display: "flex", alignItems: "center", gap: 12, margin: "28px 0 12px" }}>
+            <div id="plan" data-copilot="plan" style={{ display: "flex", alignItems: "center", gap: 12, margin: "28px 0 12px" }}>
               <h2 className="display" style={{ fontSize: 18, margin: 0 }}>Plan</h2>
               <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "var(--acc-dim)", borderRadius: 999, padding: 3 }}>
                 {(["monthly", "yearly"] as const).map((iv) => (
@@ -429,7 +442,7 @@ export default function Cobros() {
 
         {/* Método de pago (cobro automático con tarjeta en Flow) */}
         {conFlow ? (
-          <div className="card" data-copilot="cobros-metodo-pago" style={{ padding: 22, marginTop: 24 }}>
+          <div className="card" id="pago" data-copilot="cobros-metodo-pago" style={{ padding: 22, marginTop: 24 }}>
             <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Método de pago</h2>
             {me?.paymentMethod ? (
               <>
@@ -621,7 +634,7 @@ function RecargaAutomatica({ tieneTarjeta }: { tieneTarjeta: boolean }) {
   }
 
   return (
-    <div className="card" data-copilot="cobros-recarga-automatica" style={{ padding: 22, marginTop: 24 }}>
+    <div className="card" id="recarga" data-copilot="cobros-recarga-automatica" style={{ padding: 22, marginTop: 24 }}>
       <h2 className="display" style={{ fontSize: 18, margin: "0 0 6px" }}>Recarga automática</h2>
       <p className="text-dim" style={{ fontSize: 13, margin: "0 0 14px" }}>
         {pack

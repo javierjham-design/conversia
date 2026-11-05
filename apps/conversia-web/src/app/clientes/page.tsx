@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MessageCircle, Search, UserRound } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { FichaPanel } from "@/components/FichaPanel";
 import { api } from "@/lib/api";
 
@@ -93,8 +94,7 @@ export default function Clientes() {
       <div style={{ display: "flex", height: "100dvh" }}>
         <main style={{ flex: 1, overflowY: "auto", padding: "28px 20px 40px" }}>
           <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-            <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Clientes</h1>
-            <p className="text-dim" style={{ fontSize: 14, margin: "0 0 18px" }}>{total} contactos{stage ? " en esta etapa" : ""}.</p>
+            <EncabezadoSeccion ruta="/clientes" bajada={`${total} contactos${stage ? " en esta etapa" : ""}.`} />
 
             <div style={{ position: "relative", maxWidth: 420, marginBottom: 14 }}>
               <Search size={16} className="text-dim" style={{ position: "absolute", left: 13, top: 12 }} />

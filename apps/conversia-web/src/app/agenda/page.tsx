@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock, List, Plus, Settings2, X } from "lucide-react";
+import { Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock, List, Plus, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { GoogleSyncButton } from "@/components/GoogleSyncButton";
 import { api } from "@/lib/api";
 
@@ -130,15 +131,17 @@ export default function Agenda() {
   return (
     <AppShell>
       <main style={{ maxWidth: view === "list" ? 760 : 1180, margin: "0 auto", padding: "24px 18px 40px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <h1 className="display" style={{ fontSize: 26, margin: 0 }}>Agenda</h1>
-          <a href="/agenda/configurar" className="nav-item" style={{ marginLeft: "auto", width: "auto", height: 36, padding: "0 12px", gap: 6, border: "1px solid var(--line)", fontSize: 13, textDecoration: "none" }}>
-            <Settings2 size={15} /> Configurar
-          </a>
-          <button className="btn-accent" onClick={() => openNew({})} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Plus size={16} /> Nueva cita
-          </button>
-        </div>
+        {/* "Configurar" dejó de ser un botón suelto arriba a la derecha: es la otra pantalla
+            de esta sección, así que va como pestaña. Desde allá también se vuelve por la
+            pestaña, sin tener que adivinar la jerarquía con una flecha. */}
+        <EncabezadoSeccion
+          ruta="/agenda"
+          acciones={
+            <button className="btn-accent" onClick={() => openNew({})} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Plus size={16} /> Nueva cita
+            </button>
+          }
+        />
 
         {/* Selector de vista + navegación. El botón de Google va acá, junto a los controles
             de fecha y vista: la sincronización se activa desde la Agenda, sin pasar por
