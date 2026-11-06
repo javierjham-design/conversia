@@ -500,10 +500,15 @@ export function SupportWidget() {
   .cv-convi-panel { animation: cvsheet .22s ease-out; }
 }
 @keyframes cvsheet { from { transform: translateY(16px); opacity: .7; } to { transform: translateY(0); opacity: 1; } }
-/* COMPACTO: barra baja, por encima de la tab bar y de su safe-area. No tapa el panel. */
+/* COMPACTO: barra baja, por encima de la tab bar y de su safe-area. No tapa el panel.
+   El 86 no es un número al azar: 62 de la barra de pestañas + 16 que la ENTRADA baja el
+   elemento (la animación cvsheet arranca en translateY(16px)) + 8 de aire. Quieto con 70 no
+   tapaba nada, pero durante esos 0,22 s de entrada se metía 8px sobre la barra y se comía
+   el toque en los ítems del menú: en CI el clic en "Más" falló 45 s seguidos y Playwright
+   señaló a "Empecemos" como el que interceptaba. Lo ata nada-tapa-la-barra.test.ts. */
 .cv-convi-peek {
   position: fixed; z-index: 41; left: 10px; right: 10px;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 15px;
   animation: cvsheet .22s ease-out;
 }

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, Globe, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { SubirLogo } from "@/components/SubirLogo";
 import { api } from "@/lib/api";
 
@@ -66,8 +67,9 @@ export default function MiniSitio() {
   return (
     <AppShell>
       <main style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px 44px" }}>
-        <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Tu página web</h1>
-        <p className="text-dim" style={{ fontSize: 14, margin: "0 0 22px" }}>Una página simple de tu negocio, con botón de WhatsApp. Se arma sola; tú solo ajustas unos textos y la publicas.</p>
+        {/* El menú decía "Mi página" y esta pantalla "Tu página web": dos nombres para lo
+            mismo, a un clic de distancia. Ahora el título SALE del menú. */}
+        <EncabezadoSeccion ruta="/mini-sitio" />
 
         {okMsg ? (
           <div className="card" style={{ padding: 13, marginBottom: 16, display: "flex", gap: 10, alignItems: "center", borderColor: "var(--ok)" }}>

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, LogOut, Moon, Sun } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { BusinessSettings } from "@/components/BusinessSettings";
 import { NotificationsSettings } from "@/components/NotificationsSettings";
 import { api, logout } from "@/lib/api";
@@ -107,15 +108,26 @@ export default function Ajustes() {
   return (
     <AppShell>
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "28px 20px 40px" }}>
-        <h1 className="display" style={{ fontSize: 28, margin: "0 0 20px" }}>Ajustes</h1>
+        <EncabezadoSeccion
+          ruta="/ajustes"
+          bajada="Los datos de tu negocio, cómo se ve el panel y tu cuenta."
+          indice={[
+            { id: "negocio", label: "Tu negocio" },
+            { id: "apariencia", label: "Apariencia" },
+            { id: "avisos", label: "Avisos" },
+            { id: "perfil", label: "Perfil" },
+          ]}
+        />
         {msg ? <p style={{ color: "var(--ok)", fontSize: 13 }}>{msg}</p> : null}
         {error ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p> : null}
 
         {/* COP 1 — primero el negocio: es el paso bloqueante nº1 del montaje y el checklist
             manda a esta pantalla. La apariencia y el perfil personal van después. */}
-        <BusinessSettings />
+        <section id="negocio">
+          <BusinessSettings />
+        </section>
 
-        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+        <div className="card" id="apariencia" style={{ padding: 20, marginBottom: 16 }}>
           <h2 className="display" style={{ fontSize: 18, margin: "0 0 14px" }}>Apariencia</h2>
           <p className="text-dim" style={{ fontSize: 13, margin: "0 0 8px" }}>Modo</p>
           <div style={{ display: "flex", gap: 10 }}>
@@ -139,9 +151,11 @@ export default function Ajustes() {
           </div>
         </div>
 
-        <NotificationsSettings />
+        <section id="avisos">
+          <NotificationsSettings />
+        </section>
 
-        <form onSubmit={saveName} className="card" style={{ padding: 20 }}>
+        <form onSubmit={saveName} className="card" id="perfil" style={{ padding: 20 }}>
           <h2 className="display" style={{ fontSize: 18, margin: "0 0 14px" }}>Perfil</h2>
           <label style={{ fontSize: 12, color: "var(--ink-dim)" }}>
             Nombre

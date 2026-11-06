@@ -92,6 +92,7 @@ export default function Conversaciones() {
   const [showNew, setShowNew] = useState(false);
   const [showFicha, setShowFicha] = useState(false);
   const [narrow, setNarrow] = useState(false);
+  const [apretado, setApretado] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // B2 — acciones del redactor
   const [snips, setSnips] = useState<Snippet[]>([]);
@@ -104,12 +105,31 @@ export default function Conversaciones() {
   const selRef = useRef<string | null>(null);
   selRef.current = sel;
 
+  /**
+   * Dos quiebres, los dos alineados con el riel (globals.css):
+   *  - `narrow` (<768px): no hay riel sino barra inferior → un panel a la vez (lista o hilo)
+   *    y hay que descontar los 62px de esa barra. Decía 619px, pero el riel/tabs cambió a 768
+   *    hace tiempo y esto quedó atrás: entre 620 y 767px la pantalla pintaba DOS paneles a
+   *    `100dvh` dentro de un contenedor que ya reservaba 62px abajo → el redactor quedaba
+   *    debajo de la barra de pestañas, tapado.
+   *  - `apretado` (<1100px): el riel ahora lleva los nombres (214px en vez de 68px), así que
+   *    la lista se compacta para no comerse el hilo. Es la regla §5 del diseño, que estaba
+   *    escrita y sin implementar.
+   */
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 619px)"); // M8 — alineado con el riel/tabs (620)
-    const on = () => setNarrow(mq.matches);
+    const movil = window.matchMedia("(max-width: 767px)");
+    const corto = window.matchMedia("(max-width: 1099px)");
+    const on = () => {
+      setNarrow(movil.matches);
+      setApretado(corto.matches);
+    };
     on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
+    movil.addEventListener("change", on);
+    corto.addEventListener("change", on);
+    return () => {
+      movil.removeEventListener("change", on);
+      corto.removeEventListener("change", on);
+    };
   }, []);
 
   const loadList = useCallback(async () => {
@@ -339,7 +359,7 @@ export default function Conversaciones() {
       <div style={{ display: "flex", height: narrow ? "calc(100dvh - 62px)" : "100dvh" }}>
         {/* LISTA */}
         {showList ? (
-          <div style={{ width: narrow ? "100%" : 340, borderRight: narrow ? "none" : "1px solid var(--hairline)", display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div style={{ width: narrow ? "100%" : apretado ? 248 : 340, borderRight: narrow ? "none" : "1px solid var(--hairline)", display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ padding: "18px 18px 10px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 12px" }}>
                 <h1 className="display" style={{ fontSize: 24, margin: 0 }}>Conversaciones</h1>
@@ -644,7 +664,14 @@ export default function Conversaciones() {
           }}
         />
       ) : null}
-      {error ? <p style={{ color: "var(--danger)", fontSize: 12, position: "fixed", bottom: 8, left: 80 }}>{error}</p> : null}
+      {/* El error se asomaba a 8px del borde inferior y a 80px de la izquierda: lo segundo
+          era el ancho del riel viejo (68px) y lo primero lo metía DEBAJO de la barra de
+          pestañas en teléfono. Arriba del hilo se lee siempre y no se pelea con nada. */}
+      {error ? (
+        <p role="alert" style={{ color: "var(--danger)", fontSize: 12, position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 30, background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, padding: "6px 12px", margin: 0, maxWidth: "min(92vw, 520px)" }}>
+          {error}
+        </p>
+      ) : null}
     </AppShell>
   );
 }

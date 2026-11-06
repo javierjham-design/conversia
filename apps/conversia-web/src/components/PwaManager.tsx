@@ -153,27 +153,34 @@ export function PwaManager() {
     setUpdateReg(null);
   }
 
+  /**
+   * Este aviso **ya no flota**: va en el flujo, arriba del contenido, junto al de verificar
+   * el correo.
+   *
+   * Estaba `position: fixed` a 12px del borde inferior con z-index 60, o sea apoyado encima
+   * de la barra de pestañas (bottom 0, 62px de alto, z-index 20) — la ÚNICA navegación que
+   * hay en un teléfono. Quien no cerrara "Instala Conversia" no podía tocar ningún ítem del
+   * menú. Lo cazó la jornada I al intentar abrir "Más" en iPhone.
+   *
+   * Subirlo 62px no era el arreglo: ahí tapaba el botón "Reintentar" de la tarjeta de
+   * saldo, y lo cazaron las jornadas B y H. Una barra fija abajo SIEMPRE tapa algo; lo que
+   * cambia es qué. En el flujo no tapa nada, en ningún ancho ni a ninguna altura de scroll.
+   */
   const barBase: React.CSSProperties = {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    bottom: "calc(12px + env(safe-area-inset-bottom, 0px))",
-    zIndex: 60,
+    margin: "12px 16px 0",
     maxWidth: 560,
-    margin: "0 auto",
     borderRadius: 14,
     padding: "12px 14px",
     display: "flex",
     alignItems: "center",
     gap: 10,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
   };
 
   return (
     <>
       {/* Versión nueva disponible */}
       {updateReg ? (
-        <div className="card" style={{ ...barBase, borderColor: "var(--acc)", background: "var(--card)" }}>
+        <div className="card pwa-barra" style={{ ...barBase, borderColor: "var(--acc)", background: "var(--card)" }}>
           <RefreshCw size={18} style={{ color: "var(--acc-deep)", flexShrink: 0 }} />
           <span style={{ flex: 1, fontSize: 13.5 }}>Hay una versión nueva de Conversia.</span>
           <button onClick={applyUpdate} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "7px 14px" }}>Recargar</button>
@@ -182,7 +189,7 @@ export function PwaManager() {
 
       {/* Instalación (Android/escritorio) */}
       {!dismissed && !updateReg && installEvt ? (
-        <div className="card" style={{ ...barBase, background: "var(--card)" }}>
+        <div className="card pwa-barra" style={{ ...barBase, background: "var(--card)" }}>
           <Download size={18} style={{ color: "var(--acc-deep)", flexShrink: 0 }} />
           <span style={{ flex: 1, fontSize: 13.5 }}>Instala Conversia en tu {isMobile() ? "teléfono" : "equipo"} para abrirla como app y recibir avisos.</span>
           <button onClick={doInstall} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "7px 14px", whiteSpace: "nowrap" }}>Instalar</button>
@@ -192,7 +199,7 @@ export function PwaManager() {
 
       {/* Instrucciones iOS */}
       {!dismissed && !updateReg && !installEvt && showIosHint ? (
-        <div className="card" style={{ ...barBase, background: "var(--card)", alignItems: "flex-start" }}>
+        <div className="card pwa-barra" style={{ ...barBase, background: "var(--card)", alignItems: "flex-start" }}>
           <Share size={18} style={{ color: "var(--acc-deep)", flexShrink: 0, marginTop: 2 }} />
           <span style={{ flex: 1, fontSize: 13 }}>
             Instala Conversia: toca <strong>Compartir</strong> <Share size={12} style={{ verticalAlign: "middle" }} /> y luego <strong>“Añadir a pantalla de inicio”</strong>. Así recibes avisos aunque la cierres.

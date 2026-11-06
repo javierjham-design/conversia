@@ -58,7 +58,7 @@ jobs:
       # PR que la traiga, no a la noche siguiente.
       # Nightly / manual → suite COMPLETA (todos los proyectos, 14 rubros, C incluido).
       # workers=2 + 1 retry: el sim es un solo contenedor; evita falsos rojos por sobrecarga.
-      - name: e2e como el dueño (crítico A+B+D+G+H+plazo de sesión)
+      - name: e2e como el dueño (crítico A+B+D+G+H+I+plazo de sesión)
         if: github.event_name == 'pull_request'
         env:
           RUN_DUENO: "1"
@@ -66,7 +66,7 @@ jobs:
           SIM_API: http://localhost:4000
         run: >-
           pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
-          --grep "viaje completo|me cuida|marca ajena|pago mi plan|de cero a bot activo|plazo de 24 h"
+          --grep "viaje completo|me cuida|marca ajena|pago mi plan|de cero a bot activo|plazo de 24 h|Jornada I"
           --project=desktop --project=iphone
           --workers=2 --retries=1
 

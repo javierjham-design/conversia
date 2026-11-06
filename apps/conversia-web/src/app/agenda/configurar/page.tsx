@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { GoogleCalendarCard, type GoogleStatus } from "@/components/GoogleCalendarCard";
 import { api } from "@/lib/api";
 
@@ -66,8 +67,7 @@ export default function ConfigurarAgenda() {
   return (
     <AppShell>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "28px 20px 40px" }}>
-        <a href="/agenda" className="text-dim" style={{ fontSize: 13, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}><ArrowLeft size={14} /> Agenda</a>
-        <h1 className="display" style={{ fontSize: 28, margin: "8px 0 20px" }}>Configurar agenda</h1>
+        <EncabezadoSeccion ruta="/agenda/configurar" bajada="Tus servicios, tu equipo y las reglas con las que el asistente puede reservar." />
         {error ? <p style={{ color: "var(--danger)" }}>{error}</p> : null}
 
         {/* Reglas */}

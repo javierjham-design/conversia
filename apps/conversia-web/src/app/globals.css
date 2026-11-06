@@ -210,7 +210,12 @@ body::after {
   color: var(--ink-dim);
 }
 
-/* ---- Navegación unificada (F3 Tramo 2): riel ≥620px · tabs <620px ---- */
+/* ---- Navegación unificada (F3 Tramo 2): riel CON NOMBRE ≥768px · tabs <768px ----
+   El riel era de solo-iconos con tooltip. Con nueve destinos eso no se entiende (reporte
+   del dueño, 3-nov) y encima cuatro secciones solo se alcanzan desde acá. Ahora: icono +
+   nombre, agrupado, con el nombre sacado de `lib/nav.ts` — la misma tabla de la que sale el
+   título de cada pantalla. `.nav-item` NO se toca: la usan como chip genérico ~14 botones de
+   la consola; el riel tiene su propia clase (`.nav-link`), igual que el riel del admin. */
 .shell {
   min-height: 100dvh;
 }
@@ -219,12 +224,13 @@ body::after {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 68px;
+  width: 214px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 0;
+  gap: 2px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border-right: 1px solid var(--hairline);
   backdrop-filter: blur(14px);
@@ -242,6 +248,8 @@ body::after {
   font-weight: 700;
   font-size: 20px;
   margin-bottom: 10px;
+  flex-shrink: 0;
+  text-decoration: none;
 }
 .shell-rail ul {
   list-style: none;
@@ -249,7 +257,62 @@ body::after {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+}
+/* Grupo del riel. El TÍTULO es funcional, no decorativo: es lo que distingue "Caja" (el
+   dinero del negocio del dueño) de "Cobros" (lo que Conversia le cobra a él). */
+.nav-grupo {
+  margin-top: 12px;
+}
+.nav-grupo-titulo {
+  margin: 0 0 4px;
+  padding: 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.6;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nav-link > svg {
+  flex-shrink: 0;
+}
+.nav-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-link:hover {
+  background: var(--acc-dim);
+  color: var(--acc-deep);
+}
+/* Activo: fondo + color + PESO + barra a la izquierda. Antes era solo un fondo tenue, que a
+   un metro de distancia no se ve. El color nunca es el único indicador (§4 del diseño). */
+.nav-link.activa {
+  background: var(--acc-dim);
+  color: var(--acc-deep);
+  font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+.nav-salir {
+  margin-top: auto;
 }
 .nav-item {
   width: 44px;
@@ -270,7 +333,7 @@ body::after {
   box-shadow: inset 2px 0 0 var(--acc);
 }
 .shell-body {
-  margin-left: 68px;
+  margin-left: 214px;
   transition: margin-right .2s ease;
 }
 /* COP 2 — Convi ACOPLADO. Con el panel abierto en escritorio el contenido se CORRE en vez
@@ -286,6 +349,107 @@ body::after {
 }
 .shell-tabs {
   display: none;
+}
+
+/* ---- Encabezado de sección (componente EncabezadoSeccion) ----
+   El título lo pone el componente desde `lib/nav.ts`, así que dice EXACTAMENTE lo mismo que
+   el ítem del menú que trajo al usuario acá. Las pestañas son para secciones con más de una
+   pantalla; el índice, para pantallas largas (no esconde nada: solo salta). */
+.encabezado {
+  margin-bottom: 18px;
+}
+.encabezado-ojo {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  opacity: 0.75;
+}
+.encabezado-fila {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.encabezado-titulo {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+.encabezado-acciones {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.encabezado-bajada {
+  margin: 4px 0 0;
+  font-size: 14px;
+}
+.pestanas {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pestanas::-webkit-scrollbar {
+  display: none;
+}
+.pestana {
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pestana:hover {
+  color: var(--acc-deep);
+  border-color: var(--acc);
+}
+.pestana.activa {
+  background: var(--acc-dim);
+  border-color: var(--acc);
+  color: var(--acc-deep);
+  font-weight: 700;
+}
+.topbar-fecha {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Aviso de instalar / actualizar la PWA: va EN EL FLUJO, arriba del contenido. No flota,
+   así que no puede taparle nada a nadie (flotando abajo se comía la barra de pestañas, que
+   en teléfono es el menú completo). La clase queda como asidero para las pruebas. */
+.pwa-barra {
+  position: static;
+}
+.indice {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.indice a {
+  color: var(--ink-dim);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 1px;
+}
+.indice a:hover {
+  color: var(--acc-deep);
+  border-bottom-color: var(--acc);
+}
+/* Que el ancla no deje el título pegado al borde de la ventana. Acotado al panel: fuera de
+   él (landing, consola) no hay índices y no queremos cambiarle el desplazamiento a nadie. */
+.shell-body [id] {
+  scroll-margin-top: 16px;
 }
 
 /* M3 — móvil/tablet (< 768px): riel oculto, barra de pestañas inferior fija con safe-area iOS. */
@@ -331,5 +495,15 @@ body::after {
   }
   .tab-item.active {
     color: var(--acc-deep);
+  }
+  /* El título ocupa menos en una pantalla de teléfono, pero sigue siendo el título. */
+  .encabezado-titulo {
+    font-size: 24px;
+  }
+  /* En la barra de Hoy conviven la fecha, "Nueva cita", el modo, la campana y el avatar. En
+     390px eso dejaba la fecha partida en cuatro líneas ("Jueves, / 5 de / noviembre / ·
+     08:19 p. m."). La fecha se lleva su propia fila y los botones quedan abajo, enteros. */
+  .topbar-fecha {
+    flex-basis: 100%;
   }
 }

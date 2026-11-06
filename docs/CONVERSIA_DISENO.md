@@ -67,9 +67,20 @@ Paleta curada de 6 — nunca color libre. Cada acento define el set completo par
 
 ## 5. Navegación unificada (misma en TODAS las pantallas)
 
-- **Escritorio/tablet (≥620px)**: riel de iconos fijo izquierda 64px — logo arriba, Hoy · Conversaciones · Agenda · Clientes · Cobros, avatar del usuario abajo; tooltips. Nunca barra superior.
-- **Móvil (<620px)**: el riel desaparece → **tab bar inferior** (Hoy · Chats con globo de pendientes · Agenda · Clientes · Más), blur + hairline superior. En chat abierto a pantalla completa, la tab bar se oculta.
-- Conversaciones: lista 318px (compacta a 236px entre 620–980px); **el navegador SIEMPRE muestra dos paneles**; master-detail solo <620px.
+- **Escritorio/tablet (≥768px)**: riel fijo izquierda **214px con icono + NOMBRE**, agrupado en tres bloques con título (*Día a día* · *Tu negocio* · *Tu cuenta Conversia*) — logo arriba (enlace al inicio), cerrar sesión abajo. Nunca barra superior.
+  > **Corrección del dueño (3-nov-2026).** Esto decía "riel de iconos 64px … tooltips". La maqueta v11 tenía CINCO destinos; el producto llegó a NUEVE, y nueve iconos mudos no se leen: *"no se sabe bien a qué menú se está accediendo"*. Peor, cuatro secciones (Caja, Clientes, Mi página web, Ajustes) no se enlazan desde ninguna otra pantalla, así que un riel que no se entiende las esconde. Un tooltip no sirve: hay que apuntar y esperar, y en táctil no existe. **No volver a iconos solos**; si hace falta recortar, se recortan destinos, no nombres. Los nombres y los grupos salen de `apps/conversia-web/src/lib/nav.ts`, que es también de donde cada pantalla saca su título (ver §5bis).
+- **Móvil (<768px)**: el riel desaparece → **tab bar inferior** (los 4 de *Día a día*: Hoy · Conversaciones · Agenda · Clientes) + **Más**, que abre una hoja con el resto, con los MISMOS títulos de grupo y fondo sólido. En chat abierto a pantalla completa, la tab bar se oculta.
+- Conversaciones: lista 340px, **compacta a 248px bajo 1100px** (el riel con nombres ocupa 214px, no 68); **el navegador SIEMPRE muestra dos paneles**; master-detail solo <768px. Los tres quiebres (riel, tabs y master-detail) son el MISMO: 768px.
+
+## 5bis. El nombre de una sección se escribe UNA vez
+
+`lib/nav.ts` es la única tabla: de ella salen el menú, el título de cada pantalla (componente `EncabezadoSeccion`) y las pestañas. Una pantalla **no escribe su `<h1>`**: pide `<EncabezadoSeccion ruta="/caja" />`. Así el texto del menú y el de la pantalla no pueden divergir — el menú llegó a decir "Mi página" y la pantalla "Tu página web", a un clic de distancia.
+
+- **Pestañas** (`nav.pestanas`) cuando una sección tiene más de una pantalla (Agenda: Calendario · Configurar). Reemplazan la flecha de "volver".
+- **Índice** (`nav.indice`) en pantallas largas (Cobros, Ajustes): enlaces a secciones de la MISMA página. **Nunca pestañas que esconden contenido**: Convi resalta por `data-copilot` y su acción `navigate` solo acepta rutas exactas, sin query (`apps/api/src/assistant/actions.ts`), así que un elemento dentro de una pestaña cerrada lo dejaría fallando en silencio.
+- Los grupos del menú no son decoración: separan **Caja** (el dinero del negocio del dueño) de **Cobros** (lo que Conversia le cobra a él). Antes eso se aclaraba con un paréntesis dentro de la pantalla de Caja. La palabra "Cobros" no se renombra: es la que Convi usa de viva voz con el cliente.
+
+Lo encierra `apps/conversia-web/src/lib/nav.test.ts` y, en navegador, `e2e/como-el-dueno/jornada-i-se-donde-estoy.spec.ts`.
 
 ## 6. Pantallas definidas (specs en maqueta v11)
 
@@ -81,4 +92,4 @@ Paleta curada de 6 — nunca color libre. Cada acento define el set completo par
 
 ## 7. Reglas duras de implementación (resumen del F3)
 
-1. El modo es solo tokens — un layout. 2. Acento = identidad del usuario; créditos = semáforo semántico, NUNCA del acento. 3. Saludo por hora con zona horaria del negocio. 4. Navegación idéntica en todas las pantallas (riel/tab bar). 5. `prefers-reduced-motion` apaga blobs y pulsos. 6. Prohibido importar de `apps/web` (lint). 7. Sin editor de agentes para el cliente ("Mi asistente" solo-lectura + solicitar cambio).
+1. El modo es solo tokens — un layout. 2. Acento = identidad del usuario; créditos = semáforo semántico, NUNCA del acento. 3. Saludo por hora con zona horaria del negocio. 4. Navegación idéntica en todas las pantallas (riel/tab bar), **con el nombre de cada destino escrito** y sacado de `lib/nav.ts` (§5 y §5bis). 5. `prefers-reduced-motion` apaga blobs y pulsos. 6. Prohibido importar de `apps/web` (lint). 7. Sin editor de agentes para el cliente ("Mi asistente" solo-lectura + solicitar cambio).

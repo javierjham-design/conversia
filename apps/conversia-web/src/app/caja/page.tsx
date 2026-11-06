@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { api, getToken } from "@/lib/api";
 
 type Entry = { id: string; type: string; method: string; amount: number; status: string; concept: string | null; createdAt: string };
@@ -84,11 +85,15 @@ export default function Caja() {
   return (
     <AppShell>
       <main style={{ maxWidth: 860, margin: "0 auto", padding: "28px 20px 40px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-          <h1 className="display" style={{ fontSize: 28, margin: 0 }}>Caja</h1>
-          <button onClick={exportCsv} className="nav-item" style={{ marginLeft: "auto", width: "auto", height: 36, padding: "0 12px", border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 13 }}>Exportar CSV</button>
-        </div>
-        <p className="text-dim" style={{ fontSize: 14, margin: "0 0 18px" }}>El dinero que entra y sale de tu negocio hoy. (Esto es TU caja, distinta de tu plan Conversia.)</p>
+        {/* El paréntesis "(Esto es TU caja, distinta de tu plan Conversia)" ya no hace falta:
+            el menú pone Caja bajo "Tu negocio" y Cobros bajo "Tu cuenta Conversia", que es
+            donde correspondía arreglarlo. */}
+        <EncabezadoSeccion
+          ruta="/caja"
+          acciones={
+            <button onClick={exportCsv} className="nav-item" style={{ width: "auto", height: 36, padding: "0 12px", border: "1px solid var(--line)", background: "transparent", cursor: "pointer", fontSize: 13 }}>Exportar CSV</button>
+          }
+        />
         {error ? <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p> : null}
         {msg ? <p style={{ color: "var(--ok)", fontSize: 13 }}>{msg}</p> : null}
 

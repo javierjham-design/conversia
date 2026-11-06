@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, QrCode, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { api } from "@/lib/api";
 import { openAssistant } from "@/lib/assistant";
 
@@ -261,8 +262,7 @@ export default function Canales() {
   return (
     <AppShell>
       <main style={{ maxWidth: 680, margin: "0 auto", padding: "28px 20px 44px" }}>
-        <h1 className="display" style={{ fontSize: 28, margin: "0 0 4px" }}>Canales</h1>
-        <p className="text-dim" style={{ fontSize: 14, margin: "0 0 22px" }}>Conecta dónde conversan tus clientes contigo.</p>
+        <EncabezadoSeccion ruta="/canales" />
 
         {waDown ? (
           <div className="card" style={{ padding: 14, marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start", borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, transparent)" }}>
