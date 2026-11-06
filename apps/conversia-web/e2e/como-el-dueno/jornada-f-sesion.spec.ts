@@ -76,9 +76,22 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
     // I, que pregunta por `elementFromPoint` en los cinco ítems durante 1,2 s con la burbuja
     // de Convi en pantalla — esa es la que cazó los estorbos reales. Acá lo que importa es
     // otra cosa: que exista "Cerrar sesión" y que borre la sesión.
+    //
+    // Va dentro de un `toPass` porque `dispatchEvent` NO espera nada: si React todavía no
+    // enganchó el `onClick`, el evento cae al vacío y —a diferencia de `.click()`— Playwright
+    // no reintenta. En el primer arranque del runner la hidratación llega tarde y el test se
+    // quedaba 45 s esperando una hoja que nadie abrió: verde solo gracias al retry, que es la
+    // forma educada de seguir roto.
     const vp = page.viewportSize();
     if (vp && vp.width < 768) {
-      await page.locator("nav.shell-tabs").getByRole("button", { name: "Más" }).dispatchEvent("click");
+      // Y solo dispara si la hoja NO está abierta: `setMoreOpen` es un TOGGLE, así que un
+      // segundo disparo la cerraría y el reintento se pondría a parpadear.
+      const mas = page.locator("nav.shell-tabs").getByRole("button", { name: "Más" });
+      const hoja = page.locator(".hoja-mas");
+      await expect(async () => {
+        if (!(await hoja.isVisible())) await mas.dispatchEvent("click");
+        await expect(hoja).toBeVisible({ timeout: 1500 });
+      }).toPass({ timeout: 20_000 });
     }
     await page.getByRole("button", { name: "Cerrar sesión" }).click();
 
