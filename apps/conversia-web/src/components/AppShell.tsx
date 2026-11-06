@@ -156,11 +156,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="shell-body">
         <VerifyBanner />
+        {/* En el flujo y arriba, como el aviso de verificar el correo: flotando abajo tapaba
+            la barra de pestañas (el menú entero) en teléfono, y subido tapaba el contenido. */}
+        <PwaManager />
         {children}
       </div>
 
       <SupportWidget />
-      <PwaManager />
 
 
       {/* M9 — hoja "Más" (overflow) para móvil */}

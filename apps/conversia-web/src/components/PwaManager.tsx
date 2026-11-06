@@ -154,25 +154,26 @@ export function PwaManager() {
   }
 
   /**
-   * `pwa-barra` pone el `bottom` (globals.css) y acá NO va en línea: en teléfono esta barra
-   * se apoyaba sobre la barra de pestañas —12px del borde, z-index 60 contra el 20 de la
-   * navegación— y TAPABA el menú entero. Quien no cerrara el aviso de "Instala Conversia"
-   * no podía tocar Hoy, Conversaciones, Agenda, Clientes ni Más. Lo cazó la jornada I al
-   * intentar abrir "Más" en iPhone: el clic se lo comía esta tarjeta.
+   * Este aviso **ya no flota**: va en el flujo, arriba del contenido, junto al de verificar
+   * el correo.
+   *
+   * Estaba `position: fixed` a 12px del borde inferior con z-index 60, o sea apoyado encima
+   * de la barra de pestañas (bottom 0, 62px de alto, z-index 20) — la ÚNICA navegación que
+   * hay en un teléfono. Quien no cerrara "Instala Conversia" no podía tocar ningún ítem del
+   * menú. Lo cazó la jornada I al intentar abrir "Más" en iPhone.
+   *
+   * Subirlo 62px no era el arreglo: ahí tapaba el botón "Reintentar" de la tarjeta de
+   * saldo, y lo cazaron las jornadas B y H. Una barra fija abajo SIEMPRE tapa algo; lo que
+   * cambia es qué. En el flujo no tapa nada, en ningún ancho ni a ninguna altura de scroll.
    */
   const barBase: React.CSSProperties = {
-    position: "fixed",
-    left: 12,
-    right: 12,
-    zIndex: 60,
+    margin: "12px 16px 0",
     maxWidth: 560,
-    margin: "0 auto",
     borderRadius: 14,
     padding: "12px 14px",
     display: "flex",
     alignItems: "center",
     gap: 10,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
   };
 
   return (

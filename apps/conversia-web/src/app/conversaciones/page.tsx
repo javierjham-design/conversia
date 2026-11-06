@@ -664,7 +664,14 @@ export default function Conversaciones() {
           }}
         />
       ) : null}
-      {error ? <p style={{ color: "var(--danger)", fontSize: 12, position: "fixed", bottom: 8, left: 80 }}>{error}</p> : null}
+      {/* El error se asomaba a 8px del borde inferior y a 80px de la izquierda: lo segundo
+          era el ancho del riel viejo (68px) y lo primero lo metía DEBAJO de la barra de
+          pestañas en teléfono. Arriba del hilo se lee siempre y no se pelea con nada. */}
+      {error ? (
+        <p role="alert" style={{ color: "var(--danger)", fontSize: 12, position: "fixed", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 30, background: "var(--surface-solid)", border: "1px solid var(--line)", borderRadius: 10, padding: "6px 12px", margin: 0, maxWidth: "min(92vw, 520px)" }}>
+          {error}
+        </p>
+      ) : null}
     </AppShell>
   );
 }
