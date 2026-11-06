@@ -129,6 +129,27 @@ describe("nada flotante tapa la barra de pestañas", () => {
     expect(peek?.bottom, "el detector no está restando la bajada").toBe(reposo - bajada);
   });
 
+  it("el panel reserva abajo el espacio que ocupa el acceso de Convi", () => {
+    // La barra no es lo único que flota: el acceso de Convi se apoya ENCIMA de ella. Si el
+    // contenido no reserva su alto, lo último de cada pantalla no se puede subir por encima
+    // y queda un rincón donde el dedo siempre toca a Convi — el botón "Reintentar" de la
+    // tarjeta de saldo cayó justo ahí dos veces, con 4px de margen.
+    const widget = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8");
+    const regla = /\.cv-convi-acceso \{([^}]*)\}/s.exec(widget)?.[1] ?? "";
+    const borde = Number(/bottom:\s*calc\((\d+)px/.exec(regla)?.[1]);
+    const alto = Number(/height:\s*(\d+)px/.exec(regla)?.[1]);
+    expect(borde, "no se pudo leer el bottom del acceso").toBeTruthy();
+    expect(alto, "no se pudo leer el alto del acceso").toBeTruthy();
+
+    const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
+    const movil = css.slice(css.indexOf("@media (max-width: 767px)"));
+    const reservado = Number(/\.shell-body \{[^}]*padding-bottom:\s*calc\((\d+)px/s.exec(movil)?.[1]);
+    expect(reservado, "no se pudo leer el padding inferior del panel en móvil").toBeTruthy();
+    expect(reservado, `el panel reserva ${reservado}px y el acceso llega hasta ${borde + alto}px`).toBeGreaterThanOrEqual(
+      borde + alto,
+    );
+  });
+
   it("las exenciones siguen siendo ciertas", () => {
     // Una lista de exenciones que nadie comprueba es una lista de bugs futuros. El aviso de
     // cookies se apoya a 16px del borde con z-index 60 —tres veces el de la barra—, así que

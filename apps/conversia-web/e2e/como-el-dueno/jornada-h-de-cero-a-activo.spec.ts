@@ -56,7 +56,13 @@ test.describe("Jornada H — de cero a bot activo (medida)", () => {
     // adivinaba que ahí había alguien que le monta el negocio conversando.
     const cartel = page.getByTestId("convi-cartel");
     await expect(cartel).toBeVisible({ timeout: 20_000 });
-    await expect(cartel).toContainText(/asistente/i);
+    // Qué tiene que decir: dónde va el montaje y qué hacer ahora. El texto exacto depende
+    // de cuánto lleve hecho la cuenta (una recién registrada ya trae pasos cerrados), así
+    // que se exige la ESTRUCTURA, no una frase: avance, invitación y el monito con su
+    // cartel, que es lo que hace entender de un vistazo que ahí hay alguien.
+    await expect(cartel).toContainText(/Paso \d+ de \d+/);
+    await expect(cartel.getByRole("button", { name: /Empecemos|Seguir/i })).toBeVisible();
+    await expect(cartel.locator(".cv-convi-con-cartel")).toBeVisible();
     await expect(cartel.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
     marcar("cartel_visible");
 

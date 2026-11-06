@@ -752,13 +752,18 @@ export function SupportWidget() {
 .cv-convi-pulse { animation: cvasst 1.8s ease-in-out 2; }
 @keyframes cvasst { 0%,100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--acc) 30%, transparent); } }
 /* EL ACCESO. Redondo y mudo cuando ya está todo andando; con palabras mientras falte
-   montaje. Los dos valores de bottom se apoyan POR ENCIMA de la barra de pestañas (62px):
-   en teléfono esa barra es toda la navegación que hay, y lo que se apoye encima se come el
-   toque sin que se vea nada raro en pantalla. Lo ata nada-tapa-la-barra.test.ts.
+   montaje. Se apoya POR ENCIMA de la barra de pestañas (62px): en teléfono esa barra es
+   toda la navegación que hay, y lo que se apoye encima se come el toque sin que se vea
+   nada raro en pantalla. Lo ata nada-tapa-la-barra.test.ts.
+   El 78 es EL MISMO que tenía antes y no se toca a la ligera: subirlo a 86 (copiando el
+   de la burbuja compacta, que necesita margen por su animación de entrada) movió el acceso
+   8px y pasó a comerse el clic del botón "Reintentar" de la tarjeta de saldo en iPhone.
+   Una barra fija abajo SIEMPRE tapa algo: lo único que cambia es qué. El inset de iOS va
+   sumado porque la barra también lo suma — si no, en un iPhone de verdad quedan 16px menos.
    (Sin acentos graves acá dentro: esto vive en un template literal de JS y una comilla
    invertida en un comentario de CSS corta el literal y rompe el build.) */
 .cv-convi-acceso {
-  position: fixed; right: 18px; bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  position: fixed; right: 18px; bottom: calc(78px + env(safe-area-inset-bottom, 0px));
   z-index: 40; display: flex; align-items: center; gap: 10px; padding: 7px;
   width: 56px; height: 56px; justify-content: center; border-radius: 999px;
   background: var(--surface-solid); border: 1px solid var(--line); box-shadow: var(--shadow);
@@ -772,7 +777,6 @@ export function SupportWidget() {
 .cv-convi-acceso-t1 { font-size: 13px; font-weight: 650; line-height: 1.25; }
 .cv-convi-acceso-t2 { font-size: 11.5px; color: var(--ink-dim); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cv-convi-punto { position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--surface-solid); }
-@media (min-width: 768px) { .cv-convi-acceso { bottom: 78px; } }
 /* Panel ACOPLADO a la derecha en escritorio; HOJA INFERIOR en móvil. El breakpoint es EL
    MISMO que el del armazón (768px, globals.css): riel a la izquierda arriba de eso,
    pestañas abajo. Si se desalinean, en tablet el panel se solapa con la tab bar. */
