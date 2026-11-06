@@ -63,9 +63,22 @@ test.describe("Jornada F — sesión vencida y cerrar sesión", () => {
     await expect(page).toHaveURL(/\/inicio/);
 
     // En móvil el botón vive en la hoja "Más"; en escritorio, al final del riel.
+    //
+    // `dispatchEvent` y no `.click()`, por lo mismo que la jornada I (ver el comentario
+    // largo allí): con `isMobile`, el punto que Playwright calcula para tocar una barra
+    // `position: fixed` pegada abajo no coincide con el que mide el navegador, y el clic se
+    // queda 45 s reintentando señalando a la burbuja de Convi. Reventó el job `dueno` del 2
+    // al 6 de noviembre —cinco días, rotando de proyecto— y NUNCA se reprodujo en local con
+    // el mismo `devices["iPhone 13"]`, ni en serie, ni repitiendo, ni con la API frenada a
+    // propósito.
+    //
+    // Que el menú se pueda tocar DE VERDAD no se deja de comprobar: lo garantiza la jornada
+    // I, que pregunta por `elementFromPoint` en los cinco ítems durante 1,2 s con la burbuja
+    // de Convi en pantalla — esa es la que cazó los estorbos reales. Acá lo que importa es
+    // otra cosa: que exista "Cerrar sesión" y que borre la sesión.
     const vp = page.viewportSize();
     if (vp && vp.width < 768) {
-      await page.getByRole("button", { name: "Más" }).click();
+      await page.locator("nav.shell-tabs").getByRole("button", { name: "Más" }).dispatchEvent("click");
     }
     await page.getByRole("button", { name: "Cerrar sesión" }).click();
 
