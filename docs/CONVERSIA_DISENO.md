@@ -93,6 +93,27 @@ Convi es quien saca al cliente del 0%: si no se entiende que está ahí, el mont
 - **Panel acoplado desde 1100px**, no desde 768: el riel con nombres ocupa 214px y el panel 404, así que en una tablet de 800px al contenido le quedaban 182px. Entre 768 y 1099 el panel se superpone.
 - Cuando Convi **resalta algo que no está en pantalla**, lo dice con palabras y con el nombre que esa pantalla tiene en el menú (`dondeEsta()`); antes el resaltado fallido no dejaba rastro de ningún tipo.
 
+## 5quater. Orden de apilado: en teléfono, la barra de abajo manda
+
+En un teléfono la barra de pestañas **es el menú entero**. Que nada la tape se vigila por dos vías, y hacen falta las dos:
+
+1. **Distancia** — nada fijo se apoya dentro de sus 62px.
+2. **Apilado** — lo que flota va *por debajo* de ella, así que si alguna vez se rozan, el toque sigue siendo del menú.
+
+Con solo la distancia esto se rompió **tres veces**: el aviso PWA (que acabó yendo en el flujo), la burbuja de Convi y su acceso. Cada arreglo subía el `bottom` del estorbo de turno — 70, 78, 86 — y el problema volvía por otro lado. La distancia es una tregua; el orden es una garantía.
+
+| Capa | z-index | Puede tapar la barra |
+|---|---|---|
+| Acceso flotante de Convi | 40 | no |
+| Burbuja (peek) de Convi | 41 | no |
+| **Barra de pestañas** (`.shell-tabs`) | **45** | — |
+| Velo + hoja "Más" | 46 / 47 | sí: *es* el menú |
+| Velo + menú de la barra de operación | 49 / 50 | sí |
+| Chat de Convi abierto | 50 | sí: ocupa la pantalla a propósito |
+| Modales con velo, aviso de cookies | 60 | sí |
+
+Regla para lo nuevo: **un aviso va por debajo de 45; una hoja que el dueño abrió a propósito, por encima de 46.** Lo ata `nada-tapa-la-barra.test.ts`, que además comprueba que supo leer cada valor (un guardián que no encuentra el número se pone rojo, no verde).
+
 ## 6. Pantallas definidas (specs en maqueta v11)
 
 **Hoy**: topbar (fecha+hora · "Asistente activo" con pulso · campana con punto · avatar) → saludo Fraunces con cursiva en el acento, **según hora del negocio** ("Buenos días" <12 · "Buenas tardes" 12–19:59 · "Buenas noches" ≥20) → 4 KPIs de vidrio (citas hoy · por confirmar (warn) · caja con sparkline del acento · conversaciones IA) → agenda del día (riel de acento por cita, pasadas al 55% opacidad, línea **"AHORA · hh:mm"** en el acento) + columna "Te esperan" y tarjeta de créditos con **anillo semántico** + proyección + botón sobre.

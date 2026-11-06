@@ -168,12 +168,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* M9 — hoja "Más" (overflow) para móvil */}
       {moreOpen ? (
         <>
-          <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 40 }} />
+          <div onClick={() => setMoreOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 46 }} />
           {/* `hoja-mas` es el asidero para las pruebas: en teléfono el riel sigue en el DOM
               (oculto por CSS), así que buscar "Tu negocio" a secas encuentra DOS. */}
           {/* Fondo SÓLIDO: la clase `card` es vidrio esmerilado (4% de blanco) y con la hoja
               más alta el contenido de atrás se leía a través de los nombres del menú. */}
-          <div className="card hoja-mas" style={{ position: "fixed", left: 12, right: 12, bottom: 76, zIndex: 41, padding: 10, borderRadius: 16, background: "var(--surface-solid)", boxShadow: "0 18px 50px rgba(0,0,0,.45)" }}>
+          {/* 47 (y su velo 46) para quedar POR ENCIMA de la barra de pestañas, que subió a
+              45: esta hoja ES el menú, la abrió el dueño tocando "Más" y tiene que recibir
+              el toque antes que la barra que la desplegó. */}
+          <div className="card hoja-mas" style={{ position: "fixed", left: 12, right: 12, bottom: 76, zIndex: 47, padding: 10, borderRadius: 16, background: "var(--surface-solid)", boxShadow: "0 18px 50px rgba(0,0,0,.45)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 8px 8px" }}>
               <span className="text-dim" style={{ fontSize: 12, fontWeight: 600 }}>Más</span>
               <button onClick={() => setMoreOpen(false)} aria-label="Cerrar" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }}><X size={18} /></button>

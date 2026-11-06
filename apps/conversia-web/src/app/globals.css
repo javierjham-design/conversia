@@ -487,7 +487,17 @@ body::after {
     border-top: 1px solid var(--hairline);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    z-index: 20;
+    /* 45 y no 20: en teléfono esta barra es la ÚNICA navegación, así que gana el toque por
+       APILADO y no por aritmética. Con 20 quedaba debajo de todo lo que flota (acceso de
+       Convi 40, burbuja 41, menús 50, modales 60) y bastaba que uno la rozara un píxel
+       —entrando con su animación, re-renderizando, o con la API lenta— para comerse el
+       toque. Se arregló tres veces subiendo el `bottom` del estorbo de turno (70 → 78 → 86)
+       y las tres volvió por otro lado: el aviso PWA, la burbuja de Convi y el acceso. La
+       distancia es una tregua; el orden es una garantía.
+       Lo que SÍ va por encima está a 46+: son hojas que el dueño abrió a propósito (la hoja
+       "Más" —que ES este menú—, el chat de Convi y los modales con velo). Lo ata
+       `nada-tapa-la-barra.test.ts`. */
+    z-index: 45;
   }
   .tab-item {
     display: flex;

@@ -5,10 +5,14 @@ import { describe, expect, it } from "vitest";
 /**
  * NADA FLOTANTE PUEDE PISAR LA BARRA DE PESTAÑAS.
  *
- * En un teléfono esa barra (`nav.shell-tabs`: 62px de alto pegada abajo, z-index 20) es la
+ * En un teléfono esa barra (`nav.shell-tabs`: 62px de alto pegada abajo, z-index 45) es la
  * ÚNICA navegación que hay. Cualquier cosa `position: fixed` apoyada más abajo de 62px la
  * tapa — y como queda *visible*, el fallo no se ve mirando la pantalla: se ve cuando
  * intentas tocar y el toque se lo come otro elemento.
+ *
+ * Se vigila por DOS vías, porque hacen falta las dos: la DISTANCIA (nada se apoya dentro de
+ * sus 62px) y el APILADO (lo que flota va por debajo, así que si alguna vez se rozan, el
+ * toque igual es del menú). Con solo la primera esto se rompió tres veces seguidas.
  *
  * Pasó dos veces el mismo día:
  *  1. El aviso "Instala Conversia" (`PwaManager`) estaba a 12px del borde con z-index 60.
@@ -152,7 +156,7 @@ describe("nada flotante tapa la barra de pestañas", () => {
 
   it("las exenciones siguen siendo ciertas", () => {
     // Una lista de exenciones que nadie comprueba es una lista de bugs futuros. El aviso de
-    // cookies se apoya a 16px del borde con z-index 60 —tres veces el de la barra—, así que
+    // cookies se apoya a 16px del borde con z-index 60 —por encima de la barra—, así que
     // lo ÚNICO que lo salva es no dibujarse nunca en el panel.
     const cookies = readFileSync(join(__dirname, "..", "components", "AvisoCookies.tsx"), "utf8");
     expect(cookies, "el aviso de cookies perdió la puerta de 'solo rutas de marketing'").toMatch(
@@ -162,6 +166,53 @@ describe("nada flotante tapa la barra de pestañas", () => {
     // Y el panel de Convi sigue siendo una hoja que ocupa la pantalla, no una barrita.
     const widget = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8");
     expect(widget).toMatch(/\.cv-convi-panel \{[^}]*height: min\(78dvh/);
+  });
+
+  it("la barra gana el toque por APILADO, no solo por distancia", () => {
+    /**
+     * Lo de arriba mide distancias; esto mide quién va encima. Son cosas distintas y el
+     * fallo del 2 al 6 de noviembre vivió justo en la diferencia: todos los `bottom`
+     * estaban bien (78 y 86 contra una barra de 62) y aun así, cinco días seguidos, el job
+     * `dueno` no pudo tocar "Más" en teléfono — Playwright señalaba al acceso de Convi y a
+     * la burbuja. Con la barra en z-index 20 y los flotantes en 40/41, basta que uno la
+     * roce un píxel (entrando con su animación, re-renderizando, con la API lenta) para
+     * que se quede el toque. Se parchó tres veces subiendo el estorbo de turno — 70, 78,
+     * 86 — y volvió por otro lado las tres. La distancia es una tregua; el orden es una
+     * garantía.
+     */
+    const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
+    const movil = css.slice(css.indexOf("@media (max-width: 767px)"));
+    const barra = Number(/\.shell-tabs \{([^}]*)\}/s.exec(movil)?.[1].match(/z-index:\s*(\d+)/)?.[1]);
+    expect(barra, "no se pudo leer el z-index de .shell-tabs en móvil").toBeTruthy();
+
+    const widget = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8");
+    const zDe = (selector: string) =>
+      Number(new RegExp(`\\${selector} \\{([^}]*)\\}`, "s").exec(widget)?.[1].match(/z-index:\s*(\d+)/)?.[1]);
+
+    for (const aviso of [".cv-convi-acceso", ".cv-convi-peek"]) {
+      const z = zDe(aviso);
+      expect(z, `no se pudo leer el z-index de ${aviso}`).toBeTruthy();
+      expect(z, `${aviso} (z ${z}) puede robarle el toque a la barra (z ${barra})`).toBeLessThan(barra);
+    }
+  });
+
+  it("las hojas que el dueño abre a propósito SÍ van por encima de la barra", () => {
+    // El contrapeso del test de arriba: si para que nada tape la barra dejáramos debajo
+    // también a la hoja "Más", el menú del teléfono no se podría usar — es la barra la que
+    // lo despliega. Lo mismo el chat de Convi, que ocupa la pantalla porque se lo pidieron.
+    const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
+    const movil = css.slice(css.indexOf("@media (max-width: 767px)"));
+    const barra = Number(/\.shell-tabs \{([^}]*)\}/s.exec(movil)?.[1].match(/z-index:\s*(\d+)/)?.[1]);
+
+    const shell = readFileSync(join(__dirname, "..", "components", "AppShell.tsx"), "utf8");
+    const hoja = Number(/className="card hoja-mas"[\s\S]{0,200}?zIndex:\s*(\d+)/.exec(shell)?.[1]);
+    expect(hoja, 'no se pudo leer el z-index de la hoja "Más"').toBeTruthy();
+    expect(hoja, 'la hoja "Más" quedó bajo la barra que la abre').toBeGreaterThan(barra);
+
+    const widget = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8");
+    const panel = Number(/\.cv-convi-panel \{([^}]*)\}/s.exec(widget)?.[1].match(/z-index:\s*(\d+)/)?.[1]);
+    expect(panel, "no se pudo leer el z-index de .cv-convi-panel").toBeTruthy();
+    expect(panel, "el chat de Convi quedó bajo la barra").toBeGreaterThan(barra);
   });
 
   it("el aviso de la PWA no flota: va en el flujo", () => {
