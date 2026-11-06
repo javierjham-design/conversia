@@ -464,8 +464,13 @@ body::after {
   }
   .shell-body {
     margin-left: 0;
-    /* Deja espacio para la tab bar + el home indicator de iOS. */
-    padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+    /* Deja espacio para la tab bar + el home indicator de iOS Y PARA EL ACCESO DE CONVI,
+       que flota encima de la barra (78px de borde + 56 de alto). Sin estos 140, lo último
+       de cada pantalla no se puede subir por encima del acceso y queda un rincón donde el
+       dedo siempre toca a Convi: el botón "Reintentar" de la tarjeta de saldo cayó justo
+       ahí dos veces. Reservar el espacio lo arregla para TODAS las pantallas, en vez de
+       ir corriendo elementos de a uno. Lo ata nada-tapa-la-barra.test.ts. */
+    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
   .shell-tabs {
     position: fixed;
