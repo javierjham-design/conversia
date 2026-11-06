@@ -53,6 +53,9 @@ importers:
       bullmq:
         specifier: ^5.34.0
         version: 5.81.2
+      express:
+        specifier: ^5.1.0
+        version: 5.2.1
       helmet:
         specifier: ^8.3.0
         version: 8.3.0

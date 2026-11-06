@@ -162,4 +162,60 @@ test.describe("Jornada H — de cero a bot activo (medida)", () => {
     const inesperados = errores.filter((e) => !/favicon|manifest|load resource/i.test(e));
     expect(inesperados, `Errores de consola inesperados: ${inesperados.join(" | ")}`).toEqual([]);
   });
+
+  /**
+   * LE MUESTRO LAS COSAS EN VEZ DE ESCRIBIRLAS.
+   *
+   * El cuello de botella del montaje por chat es tonto: la información ya existe —la lista
+   * de precios, una foto del cartel, la web que ya tiene— y había que teclearla. Esto
+   * recorre el camino de verdad en un navegador: adjuntar, ver la ficha, mandar, y que el
+   * archivo VIAJE en la petición.
+   *
+   * Lo que se afirma del servidor es que lo recibe y contesta 200; la calidad de lo que
+   * Convi entienda depende del modelo, y en el sim el proveedor es el de simulación.
+   */
+  test("Convi recibe lo que le muestro: una lista de precios y un pantallazo", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "Basta un proyecto: lo que se prueba es el camino, no el layout.");
+    await registrarEnNavegador(page, { negocio: `Peluquería QA ${Date.now()}`, rubroIndex: 0 });
+
+    const panel = page.locator(".cv-convi-panel");
+    if (!(await panel.isVisible())) await page.locator("button.cv-convi-acceso").dispatchEvent("click");
+    await expect(panel).toBeVisible({ timeout: 20_000 });
+
+    // Lo que viaja en la petición: se captura ANTES de mandar.
+    let cuerpo: any = null;
+    await page.route("**/assistant/message", async (route) => {
+      try {
+        cuerpo = JSON.parse(route.request().postData() ?? "{}");
+      } catch {
+        cuerpo = null;
+      }
+      await route.continue();
+    });
+
+    // Dos archivos de golpe: un documento y una "foto" (el PNG mínimo válido).
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    await panel.locator('input[type="file"]').setInputFiles([
+      { name: "precios.txt", mimeType: "text/plain", buffer: Buffer.from("Corte $12.000\nBarba $7.000", "utf8") },
+      { name: "pantallazo.png", mimeType: "image/png", buffer: png },
+    ]);
+
+    // Las fichas dicen qué se va a mandar y se pueden sacar antes de enviar.
+    await expect(panel.getByText("precios.txt")).toBeVisible({ timeout: 10_000 });
+    await expect(panel.getByText("pantallazo.png")).toBeVisible();
+    await panel.getByRole("button", { name: /Quitar pantallazo\.png/i }).click();
+    await expect(panel.getByText("pantallazo.png")).toHaveCount(0);
+
+    // Y se puede mandar SIN escribir nada: el archivo es el mensaje.
+    await panel.getByRole("button", { name: "Enviar" }).click();
+    await expect.poll(() => cuerpo?.adjuntos?.length ?? 0, { timeout: 15_000 }).toBe(1);
+    expect(cuerpo.adjuntos[0]).toMatchObject({ tipo: "documento", nombre: "precios.txt", mime: "text/plain" });
+    expect(Buffer.from(cuerpo.adjuntos[0].dataBase64, "base64").toString("utf8")).toContain("Corte $12.000");
+
+    // El mensaje del dueño muestra lo que adjuntó (no una burbuja vacía).
+    await expect(panel.getByText("precios.txt").first()).toBeVisible();
+  });
 });
