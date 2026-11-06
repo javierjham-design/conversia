@@ -76,6 +76,20 @@ describe("nada flotante tapa la barra de pestañas", () => {
     expect(flotan.map((f) => f.bottom).sort((a, b) => a - b)).toEqual([76, 78]);
   });
 
+  it("la burbuja de Convi se apoya por encima de la barra INCLUSO mientras entra", () => {
+    // El caso más sutil de los tres: quieta no tapaba nada (bottom 70 > 62), pero su
+    // animación de entrada arranca 16px más abajo y durante 0,22 s se metía sobre la barra.
+    // Un elemento que tapa solo mientras anima no se ve en una captura y aun así se come el
+    // toque. Por eso las dos cifras se comparan: el reposo tiene que aguantar la bajada.
+    const src = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8");
+    const reposo = /\.cv-convi-peek\s*\{[^}]*?bottom:\s*calc\((\d+)px/s.exec(src);
+    const bajada = /@keyframes cvsheet\s*\{[^}]*?translateY\((\d+)px\)/s.exec(src);
+    expect(reposo, "no se pudo leer el `bottom` de .cv-convi-peek").toBeTruthy();
+    expect(bajada, "no se pudo leer la bajada de @keyframes cvsheet").toBeTruthy();
+    expect(Number(reposo![1]), `reposo ${reposo![1]}px no aguanta barra ${ALTO_BARRA} + bajada ${bajada![1]}`)
+      .toBeGreaterThanOrEqual(ALTO_BARRA + Number(bajada![1]));
+  });
+
   it("el aviso de la PWA no flota: va en el flujo", () => {
     const src = readFileSync(join(__dirname, "..", "components", "PwaManager.tsx"), "utf8");
     expect(src, "volvió a flotar").not.toContain('position: "fixed"');
