@@ -183,7 +183,10 @@ function Popover({
       <div onClick={() => setOpen((v) => !v)}>{trigger}</div>
       {open ? (
         <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={close} />
+          {/* 49: justo debajo de su menú (50) y por encima de la barra de pestañas (45),
+              igual que antes de que la barra subiera. Si quedara debajo, tocar el menú de
+              abajo con este desplegable abierto navegaría en vez de cerrarlo. */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 49 }} onClick={close} />
           <div
             className="card"
             role="menu"

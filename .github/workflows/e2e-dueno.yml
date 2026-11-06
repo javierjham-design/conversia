@@ -58,7 +58,12 @@ jobs:
       # PR que la traiga, no a la noche siguiente.
       # Nightly / manual → suite COMPLETA (todos los proyectos, 14 rubros, C incluido).
       # workers=2 + 1 retry: el sim es un solo contenedor; evita falsos rojos por sobrecarga.
-      - name: e2e como el dueño (crítico A+B+D+G+H+I+plazo de sesión)
+      # "cerrar sesión desde el panel" entra desde el 6-nov-2026: en TELÉFONO ese botón vive
+      # dentro de la hoja "Más", así que es el único test que comprueba que la barra de abajo
+      # —el menú entero del teléfono— todavía recibe el toque. Se rompió TRES veces (aviso
+      # PWA, burbuja de Convi, acceso de Convi) y la tercera estuvo CINCO DÍAS roja en main
+      # sin que nadie lo viera, precisamente porque solo corría fuera de los PR.
+      - name: e2e como el dueño (crítico A+B+D+G+H+I+sesión)
         if: github.event_name == 'pull_request'
         env:
           RUN_DUENO: "1"
@@ -66,7 +71,7 @@ jobs:
           SIM_API: http://localhost:4000
         run: >-
           pnpm --filter @conversia/conversia-web exec playwright test como-el-dueno
-          --grep "viaje completo|me cuida|marca ajena|pago mi plan|de cero a bot activo|plazo de 24 h|Jornada I"
+          --grep "viaje completo|me cuida|marca ajena|pago mi plan|de cero a bot activo|plazo de 24 h|Jornada I|cerrar sesión desde el panel"
           --project=desktop --project=iphone
           --workers=2 --retries=1
 

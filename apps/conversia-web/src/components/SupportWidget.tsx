@@ -783,7 +783,11 @@ export function SupportWidget() {
 /* Fondo SÓLIDO y no el vidrio de .card: hasta 1099px el panel se superpone al contenido en
    vez de correrlo, y con el 4% de blanco del vidrio se leía la pantalla de atrás a través
    de la conversación. Es el mismo arreglo que necesitó la hoja "Más" del menú. */
-.cv-convi-panel { position: fixed; z-index: 41; display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--surface-solid); }
+/* 50: por ENCIMA de la barra de pestañas (45). Esta hoja sí la tapa a propósito — ocupa
+   78dvh, la abrió el dueño y se cierra con su X o con Escape. El acceso (40) y la burbuja
+   (41) se quedan DEBAJO: son avisos, no hojas, y si alguna vez rozan la barra el toque
+   tiene que seguir siendo del menú. */
+.cv-convi-panel { position: fixed; z-index: 50; display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--surface-solid); }
 @media (min-width: 768px) {
   .cv-convi-panel { right: 16px; top: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); }
 }
