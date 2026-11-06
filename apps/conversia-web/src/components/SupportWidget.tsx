@@ -10,9 +10,11 @@ import {
   CONVI_NAME,
   INACTIVIDAD_MS,
   avisosProactivos,
+  cartelDeConvi,
   chipsSugeridos,
   debeAbrirseSolo,
   debeOfrecerAyuda,
+  dondeEsta,
   estadoDeConvi,
   saludoDeConvi,
   textoDeProgreso,
@@ -77,6 +79,15 @@ export function SupportWidget() {
   const [avisoVisto, setAvisoVisto] = useState<string | null>(null);
   /** Hoja inferior COMPACTA (solo móvil): Convi se presenta sin tapar el panel. */
   const [compacto, setCompacto] = useState(false);
+  /**
+   * El acceso se ANUNCIA con palabras al llegar a una pantalla y se encoge al círculo en
+   * cuanto el dueño toca algo. Sin esto, una píldora de 300px fija abajo a la derecha tapa
+   * campos del formulario justo en las pantallas del montaje, que son las que se vienen a
+   * llenar — la misma trampa del aviso de la PWA, que dejó de tapar el menú para pasar a
+   * tapar un botón. Se encoge por INTERACCIÓN y no por un temporizador: así desaparece
+   * exactamente cuando estorbaría, y no antes.
+   */
+  const [anunciando, setAnunciando] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const seededRef = useRef(false);
@@ -139,7 +150,21 @@ export function SupportWidget() {
         if (a.type === "navigate") {
           router.push(a.to);
         } else if (a.type === "highlight") {
-          if (!resaltar(a.target, a.text)) window.setTimeout(() => resaltar(a.target, a.text), 700);
+          if (!resaltar(a.target, a.text)) {
+            window.setTimeout(() => {
+              if (resaltar(a.target, a.text)) return;
+              // Segundo intento fallido: el elemento NO está en esta pantalla (no cargó, o
+              // esa tarjeta no se dibuja en esta cuenta). Antes esto terminaba en silencio
+              // absoluto — Convi decía "te lo marco" y no se marcaba nada. Si sabemos en
+              // qué pantalla vive, lo decimos con palabras y con el nombre que tiene en el
+              // menú; si no lo sabemos, al menos queda dicha la indicación.
+              const donde = dondeEsta(a.target);
+              setMsgs((m) => [
+                ...m,
+                { role: "assistant", content: donde ? `${a.text}\n\nLo encuentras en **${donde}**.` : a.text },
+              ]);
+            }, 700);
+          }
         } else if (a.type === "celebrate") {
           celebrar();
           setCelebrando(true);
@@ -286,6 +311,18 @@ export function SupportWidget() {
     };
   }, [ctx, open, pathname]);
 
+  // Al cambiar de pantalla Convi vuelve a presentarse; al primer toque se corre a un lado.
+  useEffect(() => {
+    setAnunciando(true);
+    const callar = () => setAnunciando(false);
+    for (const ev of ["pointerdown", "keydown", "wheel", "touchmove"] as const) {
+      window.addEventListener(ev, callar, { passive: true, once: true });
+    }
+    return () => {
+      for (const ev of ["pointerdown", "keydown", "wheel", "touchmove"] as const) window.removeEventListener(ev, callar);
+    };
+  }, [pathname]);
+
   // Escape cierra el panel (accesibilidad: no obligar a encontrar la X con el mouse).
   useEffect(() => {
     if (!open) return;
@@ -322,6 +359,11 @@ export function SupportWidget() {
     pensando: busy,
     conversacionEmpezada: msgs.length > 1,
   });
+  const cartel = ctx ? cartelDeConvi(ctx) : null;
+  // El acceso habla… salvo en "Hoy", donde la TARJETA ya dice lo mismo: las dos cosas a la
+  // vez muestran la misma frase dos veces en la misma pantalla, una encima de la otra, y
+  // eso se lee como un error, no como insistencia.
+  const accesoConPalabras = montaje && pathname !== "/inicio" && anunciando;
   const avisos = ctx && !montaje ? avisosProactivos(ctx) : [];
   const avisoPendiente = avisos.find((a) => a.key !== avisoVisto) ?? null;
   const pasosBloqueantes = (ctx?.steps ?? []).filter((s) => s.blocking);
@@ -331,15 +373,23 @@ export function SupportWidget() {
       {!open ? (
         <button
           onClick={() => abrir()}
-          aria-label={montaje ? `${CONVI_NAME}: ${textoDeProgreso(ctx!)}` : `${CONVI_NAME}, tu copiloto`}
-          className={pulse ? "cv-convi-pulse" : ""}
-          style={{ position: "fixed", right: 18, bottom: 78, zIndex: 40, width: 56, height: 56, borderRadius: "50%", background: "var(--card)", border: "1px solid var(--line)", boxShadow: "var(--shadow)", cursor: "pointer", display: "grid", placeItems: "center", padding: 0 }}
+          aria-label={montaje && cartel ? `${CONVI_NAME}: ${cartel.pancarta}. ${textoDeProgreso(ctx!)}` : `${CONVI_NAME}, tu copiloto`}
+          className={`cv-convi-acceso${accesoConPalabras ? " cv-convi-acceso-ancho" : ""}${pulse ? " cv-convi-pulse" : ""}`}
         >
           {/* El acceso lleva el avatar con su anillo de progreso, no un ícono genérico: el
-              dueño ve de un vistazo cuánto le falta sin abrir nada. */}
-          <ConviAvatar estado={pulse ? "saludando" : estado} size={48} progreso={montaje ? ctx?.checklistPct ?? 0 : null} />
+              dueño ve de un vistazo cuánto le falta sin abrir nada. Y DURANTE EL MONTAJE
+              lleva además las palabras: una carita sola no dice que ahí hay alguien que te
+              arma el negocio conversando — es el mismo acertijo que eran los nueve iconos
+              mudos del menú. Cuando el bot ya atiende vuelve a ser un acceso discreto. */}
+          <ConviAvatar estado={pulse ? "saludando" : estado} size={accesoConPalabras ? 40 : 48} progreso={montaje ? ctx?.checklistPct ?? 0 : null} />
+          {accesoConPalabras && cartel ? (
+            <span className="cv-convi-acceso-texto">
+              <span className="cv-convi-acceso-t1">{cartel.pancarta}</span>
+              <span className="cv-convi-acceso-t2">{textoDeProgreso(ctx!)}</span>
+            </span>
+          ) : null}
           {avisoPendiente ? (
-            <span aria-hidden="true" style={{ position: "absolute", top: 2, right: 2, width: 12, height: 12, borderRadius: "50%", background: avisoPendiente.urgente ? "var(--danger)" : "var(--acc-deep)", border: "2px solid var(--card)" }} />
+            <span aria-hidden="true" className="cv-convi-punto" style={{ background: avisoPendiente.urgente ? "var(--danger)" : "var(--acc-deep)" }} />
           ) : null}
         </button>
       ) : compacto ? (
@@ -488,10 +538,39 @@ export function SupportWidget() {
       <style>{`
 .cv-convi-pulse { animation: cvasst 1.8s ease-in-out 2; }
 @keyframes cvasst { 0%,100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--acc) 30%, transparent); } }
+/* EL ACCESO. Redondo y mudo cuando ya está todo andando; con palabras mientras falte
+   montaje. Se apoya POR ENCIMA de la barra de pestañas (62px): en teléfono esa barra es
+   toda la navegación que hay, y lo que se apoye encima se come el toque sin que se vea
+   nada raro en pantalla. Lo ata nada-tapa-la-barra.test.ts.
+   El 78 es EL MISMO que tenía antes y no se toca a la ligera: subirlo a 86 (copiando el
+   de la burbuja compacta, que necesita margen por su animación de entrada) movió el acceso
+   8px y pasó a comerse el clic del botón "Reintentar" de la tarjeta de saldo en iPhone.
+   Una barra fija abajo SIEMPRE tapa algo: lo único que cambia es qué. El inset de iOS va
+   sumado porque la barra también lo suma — si no, en un iPhone de verdad quedan 16px menos.
+   (Sin acentos graves acá dentro: esto vive en un template literal de JS y una comilla
+   invertida en un comentario de CSS corta el literal y rompe el build.) */
+.cv-convi-acceso {
+  position: fixed; right: 18px; bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  z-index: 40; display: flex; align-items: center; gap: 10px; padding: 7px;
+  width: 56px; height: 56px; justify-content: center; border-radius: 999px;
+  background: var(--surface-solid); border: 1px solid var(--line); box-shadow: var(--shadow);
+  cursor: pointer; color: var(--ink); text-align: left;
+}
+.cv-convi-acceso-ancho {
+  width: auto; height: auto; justify-content: flex-start; padding: 8px 16px 8px 8px;
+  max-width: min(300px, calc(100vw - 36px)); border-color: var(--acc);
+}
+.cv-convi-acceso-texto { display: flex; flex-direction: column; min-width: 0; }
+.cv-convi-acceso-t1 { font-size: 13px; font-weight: 650; line-height: 1.25; }
+.cv-convi-acceso-t2 { font-size: 11.5px; color: var(--ink-dim); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cv-convi-punto { position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--surface-solid); }
 /* Panel ACOPLADO a la derecha en escritorio; HOJA INFERIOR en móvil. El breakpoint es EL
    MISMO que el del armazón (768px, globals.css): riel a la izquierda arriba de eso,
    pestañas abajo. Si se desalinean, en tablet el panel se solapa con la tab bar. */
-.cv-convi-panel { position: fixed; z-index: 41; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+/* Fondo SÓLIDO y no el vidrio de .card: hasta 1099px el panel se superpone al contenido en
+   vez de correrlo, y con el 4% de blanco del vidrio se leía la pantalla de atrás a través
+   de la conversación. Es el mismo arreglo que necesitó la hoja "Más" del menú. */
+.cv-convi-panel { position: fixed; z-index: 41; display: flex; flex-direction: column; padding: 0; overflow: hidden; background: var(--surface-solid); }
 @media (min-width: 768px) {
   .cv-convi-panel { right: 16px; top: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); }
 }

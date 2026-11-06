@@ -3,9 +3,11 @@ import {
   CONVI_NAME,
   INACTIVIDAD_MS,
   avisosProactivos,
+  cartelDeConvi,
   chipsSugeridos,
   debeAbrirseSolo,
   debeOfrecerAyuda,
+  dondeEsta,
   estadoDeConvi,
   saludoDeConvi,
   textoDeProgreso,
@@ -216,5 +218,66 @@ describe("cuándo vuelve a ofrecer ayuda", () => {
   it("no molesta si no falta nada", () => {
     expect(debeOfrecerAyuda({ ...quieto, pasoPendienteKey: null })).toBe(false);
     expect(debeOfrecerAyuda({ ...quieto, mode: "asistencia" })).toBe(false);
+  });
+});
+
+/**
+ * EL CARTEL. Lo que el dueño vio (6-nov): la burbuja de Convi es una carita de 56px sin una
+ * palabra, y nadie adivina que ahí hay alguien que te monta el negocio conversando — el
+ * mismo acertijo que eran los nueve iconos mudos del menú. Así que ahora Convi se presenta
+ * con una pancarta, y lo primero que dice es QUÉ HACE POR TI, no cómo se llama.
+ */
+describe("el cartel de Convi", () => {
+  it("en una cuenta recién nacida ofrece el montaje, no se presenta y ya", () => {
+    const c = cartelDeConvi(base);
+    expect(c.pancarta).toContain(CONVI_NAME);
+    // Lo que tiene que quedar claro es el resultado: que le dejamos el asistente andando.
+    expect(c.pancarta.toLowerCase()).toContain("asistente");
+    expect(c.detalle).toContain("21 min");
+    expect(c.cta).toBe("Empecemos");
+    expect(c.destacado).toBe(true);
+  });
+
+  it("empezado el montaje, la pancarta nombra el paso que sigue", () => {
+    const ctx: ConviCtx = { ...base, blockingCompleted: 2, checklistPct: 28, nextStep: { key: "whatsapp", label: "Conecta tu WhatsApp", href: "/canales" } };
+    const c = cartelDeConvi(ctx);
+    expect(c.pancarta).toContain("conecta tu whatsapp");
+    expect(c.cta).toBe("Seguir");
+    // El detalle NO repite el avance: "Paso 3 de 7" ya va pegado a la barra de progreso, y
+    // la tarjeta llegó a decirlo dos veces, una debajo de la otra.
+    expect(c.detalle).not.toBe(textoDeProgreso(ctx));
+    expect(c.detalle).not.toMatch(/Paso \d/);
+  });
+
+  it("sin minutos estimados no inventa un plazo", () => {
+    expect(cartelDeConvi({ ...base, remainingMinutes: 0 }).detalle).not.toMatch(/min/);
+  });
+
+  it("con el bot ya atendiendo se hace a un lado", () => {
+    const c = cartelDeConvi({ ...base, mode: "asistencia", checklistPct: 100, blockingCompleted: 7, saldo: "120 conversaciones disponibles" });
+    expect(c.destacado).toBe(false);
+    expect(c.detalle).toBe("120 conversaciones disponibles");
+    expect(c.cta).toBe("Pregúntame");
+  });
+});
+
+/**
+ * DÓNDE ESTÁ. Convi resalta elementos de la pantalla y, cuando el elemento no está montado,
+ * el resaltado no hacía absolutamente nada: ni aviso ni rastro. Ahora al menos lo dice con
+ * palabras, y con el nombre que esa pantalla tiene EN EL MENÚ.
+ */
+describe("dondeEsta", () => {
+  it("usa el nombre del menú, no la ruta", () => {
+    expect(dondeEsta("conectar-whatsapp")).toBe("Canales");
+    expect(dondeEsta("plan")).toBe("Cobros");
+    expect(dondeEsta("negocio-horario")).toBe("Ajustes");
+  });
+
+  it("nombra la pestaña cuando la cosa vive en una sub-pantalla", () => {
+    expect(dondeEsta("servicios")).toBe("Agenda → Configurar");
+  });
+
+  it("no inventa una pantalla para algo que no conoce", () => {
+    expect(dondeEsta("lo-que-sea")).toBeNull();
   });
 });

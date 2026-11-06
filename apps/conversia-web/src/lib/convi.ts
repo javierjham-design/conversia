@@ -7,8 +7,47 @@
  * tests.
  */
 
+import { pestanaActiva, seccionActiva } from "./nav";
+
 /** Nombre del copiloto. Constante de marca: el dueño puede cambiarlo sin tocar la UI. */
 export const CONVI_NAME = "Convi";
+
+/**
+ * DÓNDE VIVE cada cosa que Convi puede señalar (`data-copilot`, lista blanca en
+ * `apps/api/src/assistant/actions.ts`).
+ *
+ * Para qué: Convi resalta elementos de la pantalla, y a veces el elemento NO está —la
+ * tarjeta todavía no cargó, o no se dibuja porque esa cuenta no la tiene. Hasta ahora eso
+ * terminaba en nada: Convi decía "mira acá" y no pasaba absolutamente nada, sin un aviso
+ * ni en el chat ni en la consola. Con este mapa, cuando el resaltado falla Convi igual
+ * dice CON PALABRAS en qué pantalla está la cosa, usando el nombre que esa pantalla tiene
+ * en el menú (`lib/nav.ts`), que es el que el dueño va a leer en el riel.
+ *
+ * `convi-donde-esta.test.ts` lo compara contra la lista blanca real del servidor: si allá
+ * se agrega un objetivo y acá no, falla.
+ */
+export const PANTALLA_DEL_OBJETIVO: Record<string, string> = {
+  "negocio-datos": "/ajustes",
+  "negocio-horario": "/ajustes",
+  servicios: "/agenda/configurar",
+  profesionales: "/agenda/configurar",
+  "reglas-reserva": "/agenda/configurar",
+  "conectar-whatsapp": "/canales",
+  plan: "/cobros",
+  "comprar-creditos": "/cobros",
+  "cobros-metodo-pago": "/cobros",
+  "cobros-recarga-automatica": "/cobros",
+};
+
+/** "Agenda → Configurar" / "Cobros". `null` si no sabemos dónde está (no se inventa). */
+export function dondeEsta(target: string): string | null {
+  const ruta = PANTALLA_DEL_OBJETIVO[target];
+  if (!ruta) return null;
+  const seccion = seccionActiva(ruta);
+  if (!seccion) return null;
+  const pestana = pestanaActiva(seccion.pestanas, ruta);
+  return pestana && pestana.href !== seccion.href ? `${seccion.label} → ${pestana.label}` : seccion.label;
+}
 
 export type ConviEstado = "saludando" | "pensando" | "hablando" | "celebrando" | "preocupado";
 
@@ -90,6 +129,63 @@ export function chipsSugeridos(c: ConviCtx): string[] {
   const delPaso = c.nextStep ? CHIPS_POR_PASO[c.nextStep.key] : undefined;
   // Siempre dejamos la salida a "qué me falta": es la pregunta que hace todo el mundo.
   return [...(delPaso ?? []), "¿Qué me falta para activarlo?"].slice(0, 3);
+}
+
+/**
+ * EL CARTEL DE CONVI — lo que su pancarta dice.
+ *
+ * El acceso a Convi era un círculo de 56px con una carita y nada escrito. Es el mismo
+ * problema que tenía el menú con nueve iconos mudos: nadie adivina que ahí hay alguien que
+ * te monta el negocio conversando. Así que Convi ahora se presenta CON PALABRAS, y lo
+ * primero que dicen es qué hace por ti, no cómo se llama.
+ *
+ * Esto decide el texto; el componente dibuja. `destacado` distingue los dos momentos: en
+ * MONTAJE Convi tiene que notarse (es quien te saca del 0%), y en ASISTENCIA se corre a un
+ * lado para no estorbar a quien ya está trabajando.
+ */
+export interface CartelDeConvi {
+  /** La pancarta: lo que Convi ofrece, en primera persona y corto. */
+  pancarta: string;
+  /** Debajo: dónde va el montaje, o el estado cuando ya terminó. */
+  detalle: string;
+  /** El botón. */
+  cta: string;
+  /** ¿Se nota (montaje) o es discreto (asistencia)? */
+  destacado: boolean;
+}
+
+export function cartelDeConvi(c: ConviCtx): CartelDeConvi {
+  if (c.mode === "asistencia") {
+    return {
+      pancarta: `Soy ${CONVI_NAME} y te ayudo con lo que necesites`,
+      detalle: c.saldo ?? "Tu asistente está atendiendo",
+      cta: "Pregúntame",
+      destacado: false,
+    };
+  }
+  // Nadie ha empezado: lo que importa es que SE PUEDE hacer conversando y que es corto.
+  if (c.blockingCompleted === 0) {
+    return {
+      pancarta: `Soy ${CONVI_NAME} y te dejo tu asistente andando`,
+      detalle:
+        c.remainingMinutes > 0
+          ? `Lo armamos conversando acá mismo, en unos ${c.remainingMinutes} min`
+          : "Lo armamos conversando, acá mismo",
+      cta: "Empecemos",
+      destacado: true,
+    };
+  }
+  // Ya empezó: nombrar el paso que sigue vale más que repetir quién es Convi.
+  //
+  // El detalle NO repite el avance: "Paso 3 de 7" ya va al lado de la barra de progreso, y
+  // la tarjeta lo decía dos veces, una debajo de la otra. Acá va lo que sí hace falta
+  // saber: que Convi no solo explica, también lo hace.
+  return {
+    pancarta: c.nextStep ? `Sigamos: ${c.nextStep.label.toLowerCase()}` : "Te ayudo con lo que falta",
+    detalle: "Te abro la pantalla, te marco qué tocar y, si prefieres, lo dejo listo yo",
+    cta: "Seguir",
+    destacado: true,
+  };
 }
 
 export interface AvisoProactivo {

@@ -19,11 +19,23 @@ export function ConviAvatar({
   size = 34,
   /** Anillo de progreso alrededor del avatar (0-100). `null` = sin anillo. */
   progreso = null,
+  /**
+   * Convi levanta un CARTEL. La pancarta de verdad —las palabras— va en HTML al lado del
+   * avatar: un `<text>` dentro de este SVG mide 5px a tamaño de burbuja, no se lee, no lo
+   * ve un lector de pantalla y no se puede cambiar sin tocar el dibujo. Acá se dibuja el
+   * cartel vacío, que es lo que hace entender de un vistazo que el monito está AVISANDO
+   * algo; lo que avisa lo dice `cartelDeConvi` en texto.
+   *
+   * Pensado para los tamaños grandes (≥48px). No se combina con `progreso`: el anillo y el
+   * cartel se pelean el mismo borde — en la tarjeta el avance va en su propia barra.
+   */
+  pancarta = false,
   title,
 }: {
   estado?: ConviEstado;
   size?: number;
   progreso?: number | null;
+  pancarta?: boolean;
   title?: string;
 }) {
   const r = 46;
@@ -32,7 +44,7 @@ export function ConviAvatar({
 
   return (
     <span
-      className={`cv-convi cv-convi-${estado}`}
+      className={`cv-convi cv-convi-${estado}${pancarta ? " cv-convi-con-cartel" : ""}`}
       style={{ display: "inline-grid", placeItems: "center", width: size, height: size, flexShrink: 0, lineHeight: 0 }}
       role="img"
       aria-label={title ?? `Convi, ${etiqueta(estado)}`}
@@ -58,7 +70,28 @@ export function ConviAvatar({
           </>
         ) : null}
 
-        {/* Cuerpo: una gota redondeada, con el color de acento */}
+        {/* EL CARTEL que Convi levanta. Va ANTES del cuerpo para que el palito quede por
+            detrás, y el cuerpo se corre abajo-izquierda (`cv-convi-body` lo transforma) para
+            hacerle sitio sin salirse del viewBox: con `overflow: visible` el dibujo se saldría
+            de los 56px del acceso y se metería encima de lo que tenga al lado. */}
+        {pancarta ? (
+          <g className="cv-convi-sign">
+            {/* El palito, de la "mano" al cartel */}
+            <path d="M68 62 L82 38" stroke="var(--acc-deep)" strokeWidth="5" strokeLinecap="round" />
+            <g transform="rotate(-9 88 22)">
+              <rect x="58" y="4" width="50" height="33" rx="8" fill="var(--surface-solid)" stroke="var(--acc-deep)" strokeWidth="4" />
+              {/* Dos renglones: a este tamaño leen como "acá dice algo", que es el punto. */}
+              <path d="M68 16 h30" stroke="var(--acc-deep)" strokeWidth="4.5" strokeLinecap="round" opacity="0.9" />
+              <path d="M68 26 h18" stroke="var(--acc-deep)" strokeWidth="4.5" strokeLinecap="round" opacity="0.55" />
+            </g>
+          </g>
+        ) : null}
+
+        {/* Cuerpo: una gota redondeada, con el color de acento.
+            El encogido por el cartel va en un grupo APARTE y como atributo del SVG: si se
+            pusiera como `transform` de CSS en `.cv-convi-body`, el saludo (que anima
+            `transform`) lo pisaría y el monito volvería a su tamaño justo al saludar. */}
+        <g transform={pancarta ? "translate(1 15) scale(0.76)" : undefined}>
         <g className="cv-convi-body">
           <circle cx="55" cy="55" r={pct != null ? 36 : 42} fill="var(--acc)" />
           {/* Reflejo, para que no se vea plano */}
@@ -101,6 +134,7 @@ export function ConviAvatar({
             <path d="M45 66 q10 9 20 0" stroke="var(--acc-ink)" strokeWidth="3.4" fill="none" strokeLinecap="round" />
           )}
         </g>
+        </g>
       </svg>
       <style>{CONVI_CSS}</style>
     </span>
@@ -132,6 +166,10 @@ const CONVI_CSS = `
 .cv-convi-hablando .cv-convi-mouth { animation: cvhabla .45s ease-in-out infinite; transform-origin: 55px 68px; }
 .cv-convi-celebrando .cv-convi-body { animation: cvcelebra .7s ease-out 2; transform-origin: 55px 90px; }
 .cv-convi-preocupado .cv-convi-body { animation: cvpreocupa 1.6s ease-in-out 1; transform-origin: 55px 55px; }
+/* El cartel se levanta despacio y no para: es lo que hace que el monito se NOTE sin tener
+   que gritar con colores. Tres veces y se queda quieto, para no distraer eternamente. */
+.cv-convi-con-cartel .cv-convi-sign { animation: cvcartel 2.6s ease-in-out 3; transform-origin: 70px 60px; }
+@keyframes cvcartel { 0%,100% { transform: rotate(0deg); } 30% { transform: rotate(-6deg) translateY(-2px); } 60% { transform: rotate(3deg); } }
 @keyframes cvsaluda { 0%,100% { transform: rotate(0deg); } 20% { transform: rotate(-7deg); } 40% { transform: rotate(7deg); } 60% { transform: rotate(-4deg); } }
 @keyframes cvpiensa { 0%,100% { opacity: .3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2.5px); } }
 @keyframes cvhabla { 0%,100% { transform: scaleY(.55); } 50% { transform: scaleY(1); } }

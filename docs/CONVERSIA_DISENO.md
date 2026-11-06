@@ -82,6 +82,17 @@ Paleta curada de 6 — nunca color libre. Cada acento define el set completo par
 
 Lo encierra `apps/conversia-web/src/lib/nav.test.ts` y, en navegador, `e2e/como-el-dueno/jornada-i-se-donde-estoy.spec.ts`.
 
+## 5ter. Convi tiene que notarse (y no tapar nada)
+
+Convi es quien saca al cliente del 0%: si no se entiende que está ahí, el montaje se abandona. Hasta el 6-nov-2026 su única presencia era una carita de 56px flotando abajo a la derecha, **sin una sola palabra** — el mismo acertijo que eran los nueve iconos mudos del menú (§5).
+
+- **En el flujo de "Hoy"**: tarjeta `ConviCartel` con el monito levantando un cartel, la pancarta, el avance y el botón. Solo en MODO MONTAJE; desaparece sola al llegar al 100%, no se cierra a mano. Va **en el flujo** y no flotando porque una barra fija abajo SIEMPRE tapa algo (ver `nada-tapa-la-barra.test.ts`): ahí puede ser todo lo grande que haga falta.
+- **El acceso flotante** lleva el avatar **y las palabras** mientras quede montaje (pancarta + "Paso N de M"); terminado el montaje vuelve a ser el círculo discreto de siempre.
+- **El dibujo**: `ConviAvatar` acepta `pancarta`, que dibuja el cartel vacío. Las PALABRAS van siempre en HTML al lado, nunca en un `<text>` del SVG (a tamaño de burbuja mide 5px, no lo lee un lector de pantalla y no se puede cambiar sin tocar el dibujo).
+- Los textos salen de `cartelDeConvi()` en `lib/convi.ts` — una sola función para la tarjeta y para el acceso, para que no digan cosas distintas del mismo montaje.
+- **Panel acoplado desde 1100px**, no desde 768: el riel con nombres ocupa 214px y el panel 404, así que en una tablet de 800px al contenido le quedaban 182px. Entre 768 y 1099 el panel se superpone.
+- Cuando Convi **resalta algo que no está en pantalla**, lo dice con palabras y con el nombre que esa pantalla tiene en el menú (`dondeEsta()`); antes el resaltado fallido no dejaba rastro de ningún tipo.
+
 ## 6. Pantallas definidas (specs en maqueta v11)
 
 **Hoy**: topbar (fecha+hora · "Asistente activo" con pulso · campana con punto · avatar) → saludo Fraunces con cursiva en el acento, **según hora del negocio** ("Buenos días" <12 · "Buenas tardes" 12–19:59 · "Buenas noches" ≥20) → 4 KPIs de vidrio (citas hoy · por confirmar (warn) · caja con sparkline del acento · conversaciones IA) → agenda del día (riel de acento por cita, pasadas al 55% opacidad, línea **"AHORA · hh:mm"** en el acento) + columna "Te esperan" y tarjeta de créditos con **anillo semántico** + proyección + botón sobre.

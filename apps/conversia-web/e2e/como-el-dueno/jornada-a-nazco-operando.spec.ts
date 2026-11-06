@@ -61,22 +61,28 @@ test.describe("Jornada A — quedo operando (viaje completo)", () => {
     //    REAL del backend, no IA). En escritorio aparece el panel acoplado completo; en móvil
     //    aparece COMPACTO —saludo + progreso— para no taparme el panel que vengo a ver, y se
     //    expande al tocar. Las dos formas llevan el nombre del negocio y el paso que sigue.
+    // Los localizadores van ACOTADOS a cada pieza: Convi se presenta ahora en dos sitios a
+    // la vez —la tarjeta de la pantalla "Hoy" y el panel— y los dos dicen "Soy Convi" y
+    // llevan su barra de progreso. Un `getByText` suelto encuentra los dos y Playwright
+    // falla por modo estricto, que es ruido, no un hallazgo.
     const esMovil = testInfo.project.name !== "desktop";
     if (esMovil) {
-      await expect(page.getByText(/Convi te acompaña/i)).toBeVisible({ timeout: 15_000 });
+      const peek = page.locator(".cv-convi-peek");
+      await expect(peek).toContainText(/Convi te acompaña/i, { timeout: 15_000 });
       // El progreso del montaje se ve sin abrir nada.
-      await expect(page.getByText(/Paso \d+ de \d+/)).toBeVisible();
-      await page.getByRole("button", { name: /Empecemos|Abrir/i }).dispatchEvent("click");
+      await expect(peek).toContainText(/Paso \d+ de \d+/);
+      await peek.getByRole("button", { name: /Empecemos|Abrir/i }).dispatchEvent("click");
     }
-    await expect(page.getByRole("dialog", { name: /Convi/i })).toBeVisible({ timeout: 15_000 });
+    const panelConvi = page.locator(".cv-convi-panel");
+    await expect(panelConvi).toBeVisible({ timeout: 15_000 });
     // Saluda por el nombre del negocio y propone el paso pendiente (no un texto genérico).
-    await expect(page.getByText(/Soy Convi/i)).toBeVisible();
-    await expect(page.getByText(/Gimnasio QA/i).first()).toBeVisible();
+    await expect(panelConvi).toContainText(/Soy Convi/i);
+    await expect(panelConvi).toContainText(/Gimnasio QA/i);
     // Barra de progreso del montaje, siempre visible mientras falte algo.
-    await expect(page.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
+    await expect(panelConvi.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
     await expect(page.getByText(/not found/i)).toHaveCount(0);
     // Lo cierro (en móvil taparía el compositor de la Bandeja más adelante).
-    await page.getByRole("dialog", { name: /Convi/i }).getByRole("button", { name: "Cerrar" }).dispatchEvent("click");
+    await panelConvi.getByRole("button", { name: "Cerrar" }).dispatchEvent("click");
     await expect(page.getByRole("dialog", { name: /Convi/i })).toHaveCount(0);
 
     // 3) Cargo 2 servicios con su precio (por el formulario; la vía por chat exige IA real).
