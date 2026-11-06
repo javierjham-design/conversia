@@ -51,23 +51,39 @@ test.describe("Jornada H — de cero a bot activo (medida)", () => {
     const token = await tokenFromBrowser(page);
     marcar("registro");
 
-    // ── 2) Convi se presenta SOLO (COP 2) y me dice qué sigue ──────────────────
+    // ── 2) La pantalla "Hoy" me dice CON PALABRAS que hay quien me ayuda ──────
+    // Antes esto era una carita de 56px flotando abajo a la derecha, sin texto: nadie
+    // adivinaba que ahí había alguien que le monta el negocio conversando.
+    const cartel = page.getByTestId("convi-cartel");
+    await expect(cartel).toBeVisible({ timeout: 20_000 });
+    await expect(cartel).toContainText(/asistente/i);
+    await expect(cartel.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
+    marcar("cartel_visible");
+
+    // ── 2b) Convi se presenta SOLO (COP 2) y me dice qué sigue ────────────────
     const esMovil = testInfo.project.name !== "desktop";
     if (esMovil) {
-      await expect(page.getByText(/Convi te acompaña/i)).toBeVisible({ timeout: 20_000 });
-      await page.getByRole("button", { name: /Empecemos|Abrir/i }).dispatchEvent("click");
+      const peek = page.locator(".cv-convi-peek");
+      await expect(peek).toContainText(/Convi te acompaña/i, { timeout: 20_000 });
+      await peek.getByRole("button", { name: /Empecemos|Abrir/i }).dispatchEvent("click");
     }
-    const panel = page.getByRole("dialog", { name: /Convi/i });
+    const panel = page.locator(".cv-convi-panel");
     await expect(panel).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
+    await expect(panel.getByRole("progressbar", { name: /Avance del montaje/i })).toBeVisible();
     // El primer paso pendiente de una cuenta nueva son los datos del negocio.
     await expect(page.getByText(/datos de tu negocio/i).first()).toBeVisible();
     marcar("convi_saluda");
     // Lo cierro para operar la pantalla (en móvil taparía los formularios).
     await panel.getByRole("button", { name: "Cerrar" }).dispatchEvent("click");
 
+    const acceso = page.locator("button.cv-convi-acceso");
+    await expect(acceso).toBeVisible();
+
     // ── 3) Datos del negocio + HORARIO por el formulario (COP 1) ───────────────
     await page.goto("/ajustes", { waitUntil: "domcontentloaded" });
+    // Fuera de "Hoy" (donde la tarjeta ya habla), el acceso flotante lleva las palabras: el
+    // montaje se hace en estas pantallas, y acá es donde una carita muda no dice nada.
+    await expect(acceso).toContainText(/Paso \d+ de \d+/, { timeout: 20_000 });
     const tarjeta = page.locator('[data-copilot="negocio-datos"]');
     await expect(tarjeta).toBeVisible({ timeout: 20_000 });
     await tarjeta.getByLabel("Dirección").fill("Av. Siempre Viva 742, Providencia");

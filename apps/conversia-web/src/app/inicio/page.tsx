@@ -4,6 +4,7 @@ import { Bell, CalendarPlus, ChevronRight, Moon, Sun, Sparkles, Zap, ArrowRight 
 import { api, getToken } from "@/lib/api";
 import { AppShell } from "@/components/AppShell";
 import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
+import { ConviCartel } from "@/components/ConviCartel";
 
 /* ---------- Helpers de hora en la zona del negocio (A14/§6) ---------- */
 function hourIn(tz?: string): number {
@@ -223,6 +224,10 @@ export default function Home() {
             </>
           }
         />
+
+        {/* Convi se presenta con palabras mientras el montaje no esté listo. Va PRIMERO:
+            es lo único que importa en una cuenta recién nacida, y desaparece solo. */}
+        <ConviCartel />
 
         {/* V2-9 — prueba/activación (modelo por conversación) o migración grandfathering */}
         <V2Banner />
