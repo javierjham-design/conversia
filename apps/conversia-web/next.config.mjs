@@ -42,7 +42,13 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "no-referrer" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), browsing-topics=()" },
+  // `microphone=(self)` y no `()`: Convi acepta notas de voz, y con la lista vacía el
+  // navegador le niega el micrófono AL PROPIO SITIO sin preguntarle nada al dueño — el
+  // botón de grabar quedaba muerto en producción, contestando siempre "revisa el permiso
+  // del navegador" (donde no hay nada que revisar). `(self)` no concede nada: solo permite
+  // PEDIRLO, y el permiso se lo sigue dando el dueño en el diálogo del navegador. La cámara
+  // sigue apagada: las fotos entran por el selector de archivos, que usa la app del sistema.
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=(), browsing-topics=()" },
 ];
 
 const nextConfig = {

@@ -141,3 +141,33 @@ describe("el compositor de Convi", () => {
     expect(widget).toMatch(/puedeGrabar\(\) \?/);
   });
 });
+
+/**
+ * EL PERMISO DEL NAVEGADOR TIENE QUE DEJARLO.
+ *
+ * Esto se envió roto y no lo cazó ningún test de los otros: el sitio manda
+ * `Permissions-Policy: microphone=()`, que **le niega el micrófono al propio origen** sin
+ * preguntarle nada al dueño. `getUserMedia` falla siempre, y el botón de grabar quedaba
+ * contestando "revisa el permiso del navegador" — donde no hay ningún permiso que revisar.
+ *
+ * Es el tipo de fallo que no se ve en una captura ni en un unit test del componente: la
+ * cabecera vive en `next.config.mjs`, a tres archivos de distancia del botón.
+ */
+describe("la política de permisos del sitio", () => {
+  const config = readFileSync(join(__dirname, "..", "..", "next.config.mjs"), "utf8");
+  const politica = /"Permissions-Policy", value: "([^"]+)"/.exec(config)?.[1] ?? "";
+
+  it("se puede leer (si no, este test no prueba nada)", () => {
+    expect(politica).toContain("camera=");
+  });
+
+  it("deja que el sitio PIDA el micrófono, porque Convi acepta notas de voz", () => {
+    const ofreceGrabar = readFileSync(join(__dirname, "..", "components", "SupportWidget.tsx"), "utf8").includes("alternarGrabacion");
+    if (!ofreceGrabar) return; // si algún día se quita la grabación, esto deja de aplicar
+    expect(politica, "microphone=() le niega el micrófono al propio origen").toMatch(/microphone=\(self\)/);
+  });
+
+  it("y la cámara sigue apagada (las fotos entran por el selector de archivos)", () => {
+    expect(politica).toMatch(/camera=\(\)/);
+  });
+});
