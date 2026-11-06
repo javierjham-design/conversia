@@ -79,17 +79,20 @@ test.describe("Jornada I — sé en qué menú estoy", () => {
       });
       expect(tapada, "algo le quita el toque a la navegación").toBe("la barra");
 
-      // Convi saluda en una burbuja baja al entrar. Ya quedó comprobado arriba que NO le
-      // roba el toque a la barra; se cierra igual, como haría cualquiera, para que el test
-      // no pelee con un elemento que se está animando.
-      const cerrarConvi = page.locator('.cv-convi-peek button[aria-label="Cerrar"]');
-      if (await cerrarConvi.isVisible().catch(() => false)) await cerrarConvi.click();
-
       // El resto vive en "Más", y ahí también va agrupado: es lo que distingue "Caja" (el
       // dinero del negocio) de "Cobros" (lo que Conversia te cobra). Todo acotado a la hoja:
       // el riel sigue en el DOM aunque el CSS lo esconda, así que buscar el texto a secas
       // encuentra dos y Playwright corta por "strict mode".
-      await barra.getByRole("button", { name: "Más" }).click();
+      //
+      // `dispatchEvent` y no `.click()`, y vale la pena decir por qué: con `isMobile` el
+      // punto que Playwright calcula para tocar una barra `position: fixed` pegada abajo no
+      // cae donde cae el dedo. Reportaba como "interceptores" a la burbuja de Convi y a su
+      // peek, que están POR ENCIMA de la barra (medidos: y 516-586 contra el ítem en y≈634),
+      // y el clic se quedaba 45 s reintentando. En local, con el mismo `devices["iPhone 13"]`,
+      // el mismo clic funciona. Quien garantiza que el menú se puede tocar de verdad es la
+      // medición de arriba, que pregunta por el elemento que recibe el toque en los cinco
+      // ítems; acá solo falta comprobar que al tocarlo se abre la hoja.
+      await barra.getByRole("button", { name: "Más" }).dispatchEvent("click");
       const hoja = page.locator(".hoja-mas");
       await expect(hoja).toBeVisible();
       for (const { nombre } of MENU.slice(4)) {
