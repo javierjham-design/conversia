@@ -52,26 +52,39 @@ test.describe("Jornada I — sé en qué menú estoy", () => {
         await expect(barra.getByText(nombre, { exact: true })).toBeVisible();
       }
 
-      // NADA puede taparla: es la única navegación que hay en un teléfono. El aviso de
-      // "Instala Conversia" se apoyaba justo encima (12px del borde, z-index 60 contra el 20
-      // de la barra) y se comía el toque en los cinco ítems. Esto no se ve "visible/oculto":
-      // el ítem está visible y aun así no se puede tocar, así que se pregunta por el
-      // elemento que de verdad recibe el toque.
-      const recibeElToque = await page.evaluate(() => {
-        const caja = document.querySelector("nav.shell-tabs")?.getBoundingClientRect();
-        if (!caja) return "no hay barra";
-        const puntos: Array<[number, number]> = [
-          [caja.left + caja.width * 0.1, caja.top + 24],
-          [caja.left + caja.width * 0.5, caja.top + 24],
-          [caja.right - caja.width * 0.1, caja.top + 24],
-        ];
-        for (const [x, y] of puntos) {
-          const el = document.elementFromPoint(x, y);
-          if (!el?.closest("nav.shell-tabs")) return `tapada en (${Math.round(x)},${Math.round(y)}) por ${el?.className || el?.tagName || "?"}`;
+      // NADA puede taparla: es la única navegación que hay en un teléfono, y dos cosas la
+      // tapaban. El aviso "Instala Conversia" se apoyaba a 12px del borde con z-index 60
+      // contra el 20 de la barra. Y la burbuja de Convi, que quieta queda por encima, se
+      // mete 8px sobre ella MIENTRAS ENTRA (su animación arranca en translateY(16px)).
+      //
+      // Un `toBeVisible` no ve nada de esto: el ítem está visible y aun así no se puede
+      // tocar. Hay que preguntar qué elemento RECIBE el toque, en los CINCO ítems, y durante
+      // un rato — si solo se mira una vez se puede caer justo entre dos animaciones.
+      const tapada = await page.evaluate(async () => {
+        const barra = document.querySelector("nav.shell-tabs");
+        if (!barra) return "no hay barra";
+        const items = [...barra.querySelectorAll("a,button")];
+        const hasta = Date.now() + 1200;
+        while (Date.now() < hasta) {
+          for (const it of items) {
+            const c = it.getBoundingClientRect();
+            const el = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+            if (!el?.closest("nav.shell-tabs")) {
+              return `"${it.textContent?.trim()}" lo tapa ${el?.className || el?.tagName || "?"}`;
+            }
+          }
+          await new Promise((r) => requestAnimationFrame(r));
         }
         return "la barra";
       });
-      expect(recibeElToque).toBe("la barra");
+      expect(tapada, "algo le quita el toque a la navegación").toBe("la barra");
+
+      // Convi saluda en una burbuja baja al entrar. Ya quedó comprobado arriba que NO le
+      // roba el toque a la barra; se cierra igual, como haría cualquiera, para que el test
+      // no pelee con un elemento que se está animando.
+      const cerrarConvi = page.locator('.cv-convi-peek button[aria-label="Cerrar"]');
+      if (await cerrarConvi.isVisible().catch(() => false)) await cerrarConvi.click();
+
       // El resto vive en "Más", y ahí también va agrupado: es lo que distingue "Caja" (el
       // dinero del negocio) de "Cobros" (lo que Conversia te cobra). Todo acotado a la hoja:
       // el riel sigue en el DOM aunque el CSS lo esconda, así que buscar el texto a secas
