@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import helmet from "helmet";
+import { json } from "express";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { getEnv } from "@conversia/config";
@@ -10,6 +11,12 @@ async function bootstrap() {
   const env = getEnv();
   // rawBody: necesario para verificar la firma HMAC de los webhooks de Meta
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
+
+  // Convi recibe fotos, notas de voz y PDF en base64 (que infla 4/3), y con el tope de 2mb
+  // un pantallazo de un teléfono moderno se rechazaba con un 413 crudo. Va ANTES del
+  // parser global y acotado a ESA ruta: el que corre primero deja `req.body` puesto y el
+  // global se saltea solo, así que ninguna otra ruta —ni las de TuBot— cambia de límite.
+  app.use("/assistant/message", json({ limit: "7mb" }));
 
   // Límites de tamaño de cuerpo (anti-DoS por payloads gigantes) sin doble
   // parseo. 2mb: el import CSV de contactos admite hasta 10 000 filas por POST.

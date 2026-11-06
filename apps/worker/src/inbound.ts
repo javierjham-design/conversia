@@ -1,6 +1,9 @@
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { InboundJob } from "@conversia/types";
-import { computeWhatsappCostUsd } from "@conversia/agents";
+// `extractDocumentText` vivía acá al lado. Se movió a @conversia/agents SIN tocarle una
+// línea, para que Convi (en el api) pueda leer los PDF que le mande el dueño con el mismo
+// código que ya lee los que mandan los clientes por WhatsApp.
+import { computeWhatsappCostUsd, extractDocumentText } from "@conversia/agents";
 import { geoFromPhone } from "./phone-geo";
 import { getWhatsappRatesOverride, getWhatsappRateSchedule } from "./cost-settings";
 import { refundForMessage, normalizeCategory } from "./wallet";
@@ -8,7 +11,7 @@ import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
 import { transcribeWhatsappAudio } from "./audio";
 import { downloadWhatsappMedia } from "./media";
-import { extractDocumentText } from "./document-text";
+
 import { resolveChannelAuth } from "./channel-auth";
 import { estadoDesdeMeta, estadosQuePermiten } from "./message-status-order";
 import { parseLeadgenChanges, processLeadgen } from "./meta-leads";

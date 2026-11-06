@@ -243,18 +243,12 @@ importers:
       bullmq:
         specifier: ^5.34.0
         version: 5.81.2
-      exceljs:
-        specifier: ^4.4.0
-        version: 4.4.0
       ioredis:
         specifier: ^5.4.2
         version: 5.11.1
       nodemailer:
         specifier: ^9.0.3
         version: 9.0.3
-      unpdf:
-        specifier: ^1.8.1
-        version: 1.8.1
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
@@ -289,9 +283,15 @@ importers:
       '@conversia/types':
         specifier: workspace:*
         version: link:../types
+      exceljs:
+        specifier: ^4.4.0
+        version: 4.4.0
       openai:
         specifier: ^7.0.0
         version: 7.0.0(zod@3.25.76)
+      unpdf:
+        specifier: ^1.8.1
+        version: 1.8.1
       zod:
         specifier: ^3.24.1
         version: 3.25.76
