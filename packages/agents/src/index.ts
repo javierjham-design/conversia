@@ -9,6 +9,7 @@ export * from "./gasto-por-modelo.js";
 export * from "./providers.js";
 export * from "./resilient.js";
 export * from "./transcription.js";
+export * from "./document-text.js";
 export * from "./actions.js";
 export * from "./core-guardrails.js";
 export * from "./tools.js";

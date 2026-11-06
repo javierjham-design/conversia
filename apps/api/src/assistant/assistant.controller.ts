@@ -4,6 +4,7 @@ import type { AIChatMessage } from "@conversia/types";
 import { requireContext } from "../tenancy/context";
 import { RateLimitService } from "../common/rate-limit";
 import { AssistantService, isWebOwner } from "./assistant.service";
+import { adjuntosSchema } from "./adjuntos";
 
 /**
  * BLOQUE B — API del Asistente Conversia. GET /assistant/context alimenta la burbuja
@@ -40,17 +41,35 @@ export class AssistantController {
     await this.assertConversia(ctx.organizationId);
     const parsed = z
       .object({
-        message: z.string().trim().min(1).max(2000),
+        // Sin `min(1)`: un mensaje puede ser SOLO una nota de voz o una foto, y exigir
+        // texto obligaba a escribir "mira esto" para poder mandar lo que importa.
+        message: z.string().trim().max(2000),
         route: z.string().max(120).optional(),
         history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(20).optional(),
+        adjuntos: adjuntosSchema.optional(),
       })
+      .refine((d) => d.message.length > 0 || (d.adjuntos?.length ?? 0) > 0, "Escribe algo o adjunta un archivo")
       .safeParse(body);
     if (!parsed.success) throw new BadRequestException("Mensaje requerido");
     // Antiabuso: el asistente corre IA; acotamos a 20 turnos / 5 min por usuario.
     const rl = await this.rateLimit.custom(`rl:assistant:${ctx.userId ?? "anon"}`, 20, 300);
     if (!rl.allowed) throw new HttpException("Vas muy rápido. Espera unos segundos.", HttpStatus.TOO_MANY_REQUESTS);
+    // Y un tope PROPIO para los adjuntos: transcribir audio y mirar imágenes cuesta varias
+    // veces más que un turno de texto, así que 20 turnos con tres archivos cada uno no es
+    // el mismo gasto que 20 turnos escritos.
+    const adjuntos = parsed.data.adjuntos ?? [];
+    if (adjuntos.length) {
+      const rlAdj = await this.rateLimit.custom(`rl:assistant:adj:${ctx.userId ?? "anon"}`, 12, 300);
+      if (!rlAdj.allowed) throw new HttpException("Vamos muy rápido con los archivos. Espera un momento.", HttpStatus.TOO_MANY_REQUESTS);
+    }
     const history = (parsed.data.history ?? []) as AIChatMessage[];
-    const r = await this.assistant.run({ organizationId: ctx.organizationId, userId: ctx.userId, role: ctx.roleCode }, parsed.data.message, history, parsed.data.route);
+    const r = await this.assistant.run(
+      { organizationId: ctx.organizationId, userId: ctx.userId, role: ctx.roleCode },
+      parsed.data.message,
+      history,
+      parsed.data.route,
+      adjuntos,
+    );
     return r;
   }
 }

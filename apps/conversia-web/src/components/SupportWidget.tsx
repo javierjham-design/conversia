@@ -1,8 +1,17 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Check, CreditCard, ExternalLink, MessageCircle, Send, X } from "lucide-react";
+import { Check, CreditCard, ExternalLink, FileText, Image as ImageIcon, Mic, Paperclip, MessageCircle, Send, Square, X } from "lucide-react";
 import { api } from "@/lib/api";
+import {
+  MAX_ADJUNTOS,
+  nombreCorto,
+  pesoLegible,
+  porQueNoPuedo,
+  type AdjuntoListo,
+  type TipoAdjunto,
+} from "@/lib/adjuntos";
+import { prepararAdjunto, puedeGrabar } from "@/lib/adjuntos-navegador";
 import { contactoDeSoporte } from "@/lib/assistant";
 import { COPILOT_ACTION_CSS, celebrar, renderMarkdown, resaltar, type AssistantAction } from "@/lib/copilot-actions";
 import { ConviAvatar } from "@/components/ConviAvatar";
@@ -21,7 +30,13 @@ import {
   type ConviCtx,
 } from "@/lib/convi";
 
-type Msg = { role: "user" | "assistant"; content: string; actions?: AssistantAction[] };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  actions?: AssistantAction[];
+  /** Lo que el dueño le mostró en ese turno (para que su mensaje no se vea vacío). */
+  adjuntos?: { tipo: TipoAdjunto; nombre: string }[];
+};
 type Step = { key: string; label: string; href: string; done: boolean; blocking: boolean };
 type Ctx = (ConviCtx & { canConfigure: boolean; steps: Step[] }) | null;
 
@@ -88,11 +103,21 @@ export function SupportWidget() {
    * exactamente cuando estorbaría, y no antes.
    */
   const [anunciando, setAnunciando] = useState(true);
+  /** Lo que el dueño va a mostrarle en este mensaje (fotos, notas de voz, PDF). */
+  const [adjuntos, setAdjuntos] = useState<AdjuntoListo[]>([]);
+  /** Por qué un archivo no se pudo adjuntar, en lenguaje humano. */
+  const [avisoAdjunto, setAvisoAdjunto] = useState<string | null>(null);
+  const [grabando, setGrabando] = useState(false);
+  const [segundos, setSegundos] = useState(0);
+  const grabadoraRef = useRef<MediaRecorder | null>(null);
+  const archivoRef = useRef<HTMLInputElement>(null);
+  const adjuntosRef = useRef<AdjuntoListo[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const seededRef = useRef(false);
   const eligibleRef = useRef<boolean | null>(null);
   useEffect(() => { eligibleRef.current = eligible; }, [eligible]);
+  useEffect(() => { adjuntosRef.current = adjuntos; }, [adjuntos]);
 
   const cargarContexto = useCallback(
     () =>
@@ -191,19 +216,29 @@ export function SupportWidget() {
     [router],
   );
 
-  const ask = useCallback(async (userText: string) => {
+  const ask = useCallback(async (userText: string, archivos: AdjuntoListo[] = []) => {
     const body = userText.trim();
-    if (!body || busy) return;
+    // Un mensaje puede ser SOLO una foto o una nota de voz: exigir texto obligaba a
+    // escribir "mira esto" para poder mandar lo que de verdad importa.
+    if ((!body && !archivos.length) || busy) return;
     const history = msgs.slice(-12).map((m) => ({ role: m.role, content: m.content }));
-    setMsgs((m) => [...m, { role: "user", content: body }]);
+    setMsgs((m) => [...m, { role: "user", content: body, adjuntos: archivos.map((a) => ({ tipo: a.tipo, nombre: a.nombre })) }]);
     setText("");
+    setAdjuntos([]);
     setBusy(true);
     setFalloAlgo(false);
     setOfrecerSoporte(false);
     try {
       const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean }>("/assistant/message", {
         method: "POST",
-        body: JSON.stringify({ message: body, route: pathname, history }),
+        body: JSON.stringify({
+          message: body,
+          route: pathname,
+          history,
+          ...(archivos.length
+            ? { adjuntos: archivos.map((a) => ({ tipo: a.tipo, nombre: a.nombre, mime: a.mime, dataBase64: a.dataBase64 })) }
+            : {}),
+        }),
       });
       // 200 con respuesta de respaldo: el proveedor de IA falló. Para el dueño esto es "Convi
       // está caído", así que ofrecemos una persona igual que en un error de red.
@@ -235,6 +270,99 @@ export function SupportWidget() {
       setBusy(false);
     }
   }, [busy, msgs, pathname, ejecutarAcciones]);
+
+  /**
+   * Suma archivos a lo que se va a mandar. Uno por uno y con su motivo: si el dueño
+   * arrastra cinco cosas, las que entren entran y de las que no, se dice por qué.
+   */
+  const sumarArchivos = useCallback(async (archivos: File[]) => {
+    if (!archivos.length) return;
+    setAvisoAdjunto(null);
+    const listos: AdjuntoListo[] = [];
+    let aviso: string | null = null;
+    // La cuenta se lleva en una variable y no leyendo el estado: `setAdjuntos` no se ve
+    // reflejado hasta el siguiente render, así que con cinco archivos a la vez el límite
+    // se comprobaba cinco veces contra el mismo cero y pasaban todos.
+    let cuenta = adjuntosRef.current.length;
+    for (const f of archivos) {
+      const motivo = porQueNoPuedo(f, cuenta);
+      if (motivo) {
+        aviso = motivo;
+        continue;
+      }
+      const listo = await prepararAdjunto(f).catch(() => null);
+      if (!listo) {
+        aviso = `No pude abrir “${f.name}”.`;
+        continue;
+      }
+      listos.push(listo);
+      cuenta += 1;
+    }
+    if (listos.length) setAdjuntos((prev) => [...prev, ...listos].slice(0, MAX_ADJUNTOS));
+    if (aviso) setAvisoAdjunto(aviso);
+  }, []);
+
+  /**
+   * PEGAR un pantallazo. Es la forma natural de mostrar un error o una pantalla de Meta:
+   * se captura y se pega. Sin esto habría que guardar el archivo y buscarlo con el clip.
+   */
+  const alPegar = useCallback(
+    (e: React.ClipboardEvent) => {
+      const archivos = Array.from(e.clipboardData?.files ?? []);
+      if (!archivos.length) return;
+      e.preventDefault();
+      void sumarArchivos(archivos);
+    },
+    [sumarArchivos],
+  );
+
+  /** Nota de voz: grabar / parar. Si el navegador no deja, el botón no se dibuja. */
+  const alternarGrabacion = useCallback(async () => {
+    if (grabadoraRef.current) {
+      grabadoraRef.current.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const trozos: BlobPart[] = [];
+      rec.ondataavailable = (ev) => { if (ev.data.size) trozos.push(ev.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        grabadoraRef.current = null;
+        setGrabando(false);
+        const blob = new Blob(trozos, { type: rec.mimeType || "audio/webm" });
+        if (blob.size < 1200) {
+          setAvisoAdjunto("La nota de voz quedó muy corta.");
+          return;
+        }
+        const ext = (rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
+        void sumarArchivos([new File([blob], `nota.${ext}`, { type: blob.type })]);
+      };
+      grabadoraRef.current = rec;
+      setGrabando(true);
+      setSegundos(0);
+      rec.start();
+    } catch {
+      // Permiso denegado o sin micrófono: se dice y no se insiste.
+      setAvisoAdjunto("No pude usar el micrófono. Revisa el permiso del navegador.");
+      setGrabando(false);
+      grabadoraRef.current = null;
+    }
+  }, [sumarArchivos]);
+
+  // Contador de la grabación + corte duro: un minuto es de sobra para contarle algo a
+  // Convi, y evita que un micrófono abierto por olvido termine en un archivo enorme.
+  useEffect(() => {
+    if (!grabando) return;
+    const t = window.setInterval(() => {
+      setSegundos((s) => {
+        if (s + 1 >= 60) grabadoraRef.current?.stop();
+        return s + 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [grabando]);
 
   /** Abre el panel y, la primera vez, deja el saludo de Convi. */
   const abrir = useCallback((contexto?: NonNullable<Ctx>, como: "completo" | "compacto" = "completo") => {
@@ -479,7 +607,25 @@ export function SupportWidget() {
                     aria-live={mine ? undefined : "polite"}
                     style={{ padding: "8px 12px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, wordBreak: "break-word", background: mine ? "var(--acc)" : "var(--surface-solid)", color: mine ? "var(--acc-ink)" : "var(--ink)", border: mine ? "none" : "1px solid var(--hairline)" }}
                   >
-                    {mine ? <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span> : renderMarkdown(m.content)}
+                    {mine ? (
+                      <>
+                        {/* Lo que le mostró: sin esto, un mensaje que es SOLO una foto o una
+                            nota de voz aparecía como una burbuja vacía. */}
+                        {m.adjuntos?.length ? (
+                          <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: m.content ? 6 : 0 }}>
+                            {m.adjuntos.map((a, k) => (
+                              <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, opacity: 0.9 }}>
+                                {a.tipo === "imagen" ? <ImageIcon size={12} /> : a.tipo === "audio" ? <Mic size={12} /> : <FileText size={12} />}
+                                {a.tipo === "audio" ? "Nota de voz" : nombreCorto(a.nombre, 22)}
+                              </span>
+                            ))}
+                          </span>
+                        ) : null}
+                        {m.content ? <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span> : null}
+                      </>
+                    ) : (
+                      renderMarkdown(m.content)
+                    )}
                   </div>
                   {/* Botones del copiloto: pagar y conectar WhatsApp SOLO pasan por acá, con
                       el clic del dueño (el popup de Meta se bloquea si no nace de un clic). */}
@@ -529,9 +675,76 @@ export function SupportWidget() {
 
           {waLink ? <a href={waLink} target="_blank" rel="noreferrer" className="text-accent" style={{ fontSize: 12, textAlign: "center", padding: "6px 0", textDecoration: "none", borderTop: "1px solid var(--hairline)" }}>Prefiero hablar por WhatsApp →</a> : null}
 
-          <form onSubmit={(e) => { e.preventDefault(); void ask(text); }} style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--hairline)" }}>
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`Escríbele a ${CONVI_NAME}…`} aria-label={`Mensaje para ${CONVI_NAME}`} style={{ flex: 1, padding: "10px 12px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }} />
-            <button className="btn-accent" type="submit" disabled={busy || !text.trim()} style={{ borderRadius: "50%", width: 40, height: 40, display: "grid", placeItems: "center", flexShrink: 0, opacity: busy || !text.trim() ? 0.5 : 1 }} aria-label="Enviar"><Send size={16} /></button>
+          {/* MOSTRARLE las cosas en vez de escribirlas: fotos y pantallazos, notas de voz,
+              PDF y planillas. Las fichas de lo adjuntado van arriba del compositor para que
+              se vea qué se va a mandar y se pueda sacar antes de enviar. */}
+          {adjuntos.length || avisoAdjunto ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 10px 6px" }}>
+              {adjuntos.map((a, i) => (
+                <span key={`${a.nombre}-${i}`} className="card" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, padding: "5px 8px", borderRadius: 9 }}>
+                  {a.tipo === "imagen" ? <ImageIcon size={13} /> : a.tipo === "audio" ? <Mic size={13} /> : <FileText size={13} />}
+                  {a.tipo === "audio" ? "Nota de voz" : nombreCorto(a.nombre)}
+                  <span className="text-dim">{pesoLegible(a.bytes)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAdjuntos((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label={`Quitar ${a.nombre}`}
+                    style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)", lineHeight: 0, padding: 0 }}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              {avisoAdjunto ? <span className="text-dim" style={{ fontSize: 11.5, alignSelf: "center" }} role="status">{avisoAdjunto}</span> : null}
+            </div>
+          ) : null}
+
+          <form onSubmit={(e) => { e.preventDefault(); void ask(text, adjuntos); }} style={{ display: "flex", alignItems: "center", gap: 6, padding: 10, borderTop: "1px solid var(--hairline)" }}>
+            <input
+              ref={archivoRef}
+              type="file"
+              multiple
+              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/csv,text/markdown,.md,.csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(e) => { void sumarArchivos(Array.from(e.target.files ?? [])); e.target.value = ""; }}
+              style={{ display: "none" }}
+            />
+            <button
+              type="button"
+              onClick={() => archivoRef.current?.click()}
+              disabled={busy || adjuntos.length >= MAX_ADJUNTOS}
+              aria-label="Adjuntar una foto, un PDF o una planilla"
+              title="Adjuntar una foto, un PDF o una planilla"
+              style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)", lineHeight: 0, padding: 6, opacity: busy || adjuntos.length >= MAX_ADJUNTOS ? 0.4 : 1 }}
+            >
+              <Paperclip size={17} />
+            </button>
+            {puedeGrabar() ? (
+              <button
+                type="button"
+                onClick={() => void alternarGrabacion()}
+                disabled={busy || (!grabando && adjuntos.length >= MAX_ADJUNTOS)}
+                aria-label={grabando ? "Terminar la nota de voz" : "Grabar una nota de voz"}
+                title={grabando ? "Terminar la nota de voz" : "Grabar una nota de voz"}
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: grabando ? "var(--danger)" : "var(--ink-dim)", lineHeight: 0, padding: 6, opacity: busy ? 0.4 : 1 }}
+              >
+                {grabando ? <Square size={16} /> : <Mic size={17} />}
+              </button>
+            ) : null}
+            {grabando ? (
+              <span role="status" style={{ fontSize: 12.5, color: "var(--danger)", fontVariantNumeric: "tabular-nums", flex: 1 }}>
+                Grabando… {String(Math.floor(segundos / 60)).padStart(2, "0")}:{String(segundos % 60).padStart(2, "0")}
+              </span>
+            ) : (
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={alPegar}
+                placeholder={`Escríbele a ${CONVI_NAME}…`}
+                aria-label={`Mensaje para ${CONVI_NAME}`}
+                style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }}
+              />
+            )}
+            <button className="btn-accent" type="submit" disabled={busy || grabando || (!text.trim() && !adjuntos.length)} style={{ borderRadius: "50%", width: 40, height: 40, display: "grid", placeItems: "center", flexShrink: 0, opacity: busy || grabando || (!text.trim() && !adjuntos.length) ? 0.5 : 1 }} aria-label="Enviar"><Send size={16} /></button>
           </form>
         </div>
       )}
