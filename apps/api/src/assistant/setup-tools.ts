@@ -365,6 +365,14 @@ export async function runSetupTool(
   if (name === "leerSitioWeb") {
     const url = String(input?.url ?? "").trim().slice(0, 400);
     if (!url) return { content: "Dime la dirección de la página y la leo.", isError: true };
+    // Un esquema que no sea http(s) se corta ACÁ. `fetchWebPageText` le antepone "https://"
+    // a lo que no empiece por http (para aceptar "clinica.cl"), así que "file:///etc/passwd"
+    // terminaba como "https://file:///etc/passwd" y se iba 8 segundos a resolver el host
+    // "file" por DNS antes de que el guard pudiera decir que no. No era un agujero —el
+    // guard igual rechazaba— pero sí un turno entero colgado por un enlace mal escrito.
+    if (/^(?!https?:)[a-z][a-z0-9+.-]*:/i.test(url)) {
+      return { content: "Esa no es una dirección web. Pásame el enlace de tu página o tu perfil (https).", isError: true };
+    }
     const r = await fetchWebPageText(url, { maxChars: MAX_CHARS_SITIO, timeoutMs: 8000 });
     if (!r.ok) {
       return {

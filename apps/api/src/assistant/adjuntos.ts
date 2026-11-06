@@ -98,7 +98,12 @@ export function envolverContenidoAjeno(titulo: string, cuerpo: string): string {
  */
 export async function procesarAdjuntos(
   adjuntos: AdjuntoEntrada[],
-  opts: { openaiApiKey?: string; transcribeModel?: string },
+  opts: {
+    openaiApiKey?: string;
+    transcribeModel?: string;
+    /** Inyectable para poder probar la transcripción sin llamar a OpenAI. */
+    transcribir?: typeof transcribeAudio;
+  },
 ): Promise<AdjuntosProcesados> {
   const out: AdjuntosProcesados = { texto: "", imagenes: [], avisos: [], audiosTranscritos: 0 };
   let bytesUsados = 0;
@@ -140,7 +145,7 @@ export async function procesarAdjuntos(
         continue;
       }
       try {
-        const { text } = await transcribeAudio({
+        const { text } = await (opts.transcribir ?? transcribeAudio)({
           apiKey: opts.openaiApiKey,
           audio: buf,
           filename: nombre.toLowerCase().endsWith(".ogg") ? nombre : "nota.ogg",
