@@ -330,8 +330,13 @@ export async function buildToolServices(orgId: string, t: ToolTargets, opts: Too
       }
       // Sin profesional fijo: consultar SOLO los permitidos y agregar (Cláriva requiere
       // professionalId; así el bot obtiene horarios reales del set habilitado).
-      const per = await Promise.all([...allowed].map((pid) => rawScheduling.getAvailableSlots({ ...q, professionalId: pid }).then((r) => r ?? []).catch(() => [])));
-      return per.flat().filter((s) => !s.professionalId || allowed.has(s.professionalId));
+      // Como en el proveedor: éxito parcial OK, pero si TODOS los permitidos fallan, propagar
+      // el error (no devolver [] → evita el falso "no hay horas" cuando no se pudo consultar).
+      const per = await Promise.allSettled([...allowed].map((pid) => rawScheduling.getAvailableSlots({ ...q, professionalId: pid }).then((r) => r ?? [])));
+      const rejected = per.find((r) => r.status === "rejected");
+      const ok = per.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+      if (!ok.length && rejected) throw (rejected as PromiseRejectedResult).reason;
+      return ok.filter((s) => !s.professionalId || allowed.has(s.professionalId));
     };
     scoped.createAppointment = async (input) => {
       if (input.professionalId && !allowed.has(input.professionalId)) {

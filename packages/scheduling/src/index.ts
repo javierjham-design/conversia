@@ -432,8 +432,14 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
     if (!pros.length) return one();
-    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
-    return per.flat();
+    // Si TODOS los profesionales fallan (proveedor caído / 401 / timeout), NO devolver [] en
+    // silencio: eso haría que el bot diga "no hay horas" HABIENDO agenda y perdería al paciente.
+    // Se devuelve lo que SÍ se pudo consultar (éxito parcial); si no se pudo consultar NINGUNO,
+    // se PROPAGA el error para que el bot avise "no puedo ver la agenda ahora", no "no hay".
+    const per = await Promise.allSettled(pros.map((p) => one(p.id)));
+    const ok = per.filter((r): r is PromiseFulfilledResult<SchedSlot[]> => r.status === "fulfilled").map((r) => r.value);
+    if (!ok.length) throw (per.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined)?.reason ?? new Error("No se pudo consultar la disponibilidad");
+    return ok.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
@@ -576,8 +582,14 @@ export class CustomSchedulingProvider implements SchedulingProvider {
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
     if (!pros.length) return one();
-    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
-    return per.flat();
+    // Si TODOS los profesionales fallan (proveedor caído / 401 / timeout), NO devolver [] en
+    // silencio: eso haría que el bot diga "no hay horas" HABIENDO agenda y perdería al paciente.
+    // Se devuelve lo que SÍ se pudo consultar (éxito parcial); si no se pudo consultar NINGUNO,
+    // se PROPAGA el error para que el bot avise "no puedo ver la agenda ahora", no "no hay".
+    const per = await Promise.allSettled(pros.map((p) => one(p.id)));
+    const ok = per.filter((r): r is PromiseFulfilledResult<SchedSlot[]> => r.status === "fulfilled").map((r) => r.value);
+    if (!ok.length) throw (per.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined)?.reason ?? new Error("No se pudo consultar la disponibilidad");
+    return ok.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
