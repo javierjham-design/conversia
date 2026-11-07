@@ -135,3 +135,64 @@ describe("getAvailability — error del proveedor NO es 'no hay horas'", () => {
     expect(out.nota).toMatch(/NO digas que no hay horas/i);
   });
 });
+
+// Caso Tatiana (7-nov-2026): la lista ofreció la MISMA hora (15:15) en miércoles, jueves y viernes.
+// El paciente dijo "Miércoles 15:15"; el modelo mandó la hora sin fijar el día → getSlot daba null →
+// el bot decía "ya no está disponible" y re-ofrecía (incluyendo el mismo 15:15). Ahora se desambigua
+// por el día que nombró el paciente y se agenda; si no se puede, se PREGUNTA, nunca "no disponible".
+describe("createAppointment — misma hora en varios días: desambiguar, no decir 'no disponible'", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function setup() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-07T12:00:00-03:00")); // sábado 7-nov (Chile)
+    // 15:15 Chile (UTC-3 en noviembre) = 18:15 UTC, el MISMO horario en 3 días.
+    const sched = makeSched({ "2026-11-11": ["18:15"], "2026-11-12": ["18:15"], "2026-11-13": ["18:15"] });
+    const r = reg();
+    const ctx = makeCtx(sched, "en la tarde");
+    return { r, ctx };
+  }
+  async function offerTarde(r: any, ctx: any) {
+    ctx.lastUserText = "en la tarde";
+    const a = await r.execute("getAvailability", { professionalId: "p1", franja: "tarde" }, ctx);
+    return JSON.parse(a.content);
+  }
+
+  it("'miércoles 15:15' (3 cupos a esa hora) → agenda el MIÉRCOLES, sin slotExpired ni 'no disponible'", async () => {
+    const { r, ctx } = setup();
+    const off = await offerTarde(r, ctx);
+    expect(off.horas.length).toBe(3); // mié/jue/vie a las 15:15
+    ctx.lastUserText = "Miércoles 15:15";
+    const res = await r.execute("createAppointment", { slotId: "1515" }, ctx); // hora sin día = ambiguo
+    const out = JSON.parse(res.content);
+    expect(out.slotExpired).toBeUndefined();
+    expect(out.needsDayClarification).toBeUndefined();
+    expect(out.ok).toBe(true);
+    expect(out.appointment.start).toBe("2026-11-11T18:15:00.000Z"); // miércoles 11
+  });
+
+  it("'miércoles 25 a las 15' se resuelve por el NÚMERO de día aunque el weekday no alcance", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-07T12:00:00-03:00"));
+    // Varios MIÉRCOLES a las 15:00 (18:00 UTC): 12, 19, 26-nov (todos miércoles).
+    const sched = makeSched({ "2026-11-12": ["18:00"], "2026-11-19": ["18:00"], "2026-11-26": ["18:00"] });
+    const r = reg();
+    const ctx = makeCtx(sched, "en la tarde");
+    ctx.lastUserText = "en la tarde";
+    await r.execute("getAvailability", { professionalId: "p1", franja: "tarde" }, ctx);
+    ctx.lastUserText = "miércoles 26 a las 15:00"; // 26 fija el día entre los miércoles
+    const out = JSON.parse((await r.execute("createAppointment", { slotId: "1500" }, ctx)).content);
+    expect(out.ok).toBe(true);
+    expect(out.appointment.start).toBe("2026-11-26T18:00:00.000Z");
+  });
+
+  it("sin día en el texto → PIDE aclarar, no agenda a ciegas ni dice 'no disponible'", async () => {
+    const { r, ctx } = setup();
+    await offerTarde(r, ctx);
+    ctx.lastUserText = "la de las 15:15";
+    const out = JSON.parse((await r.execute("createAppointment", { slotId: "1515" }, ctx)).content);
+    expect(out.needsDayClarification).toBe(true);
+    expect(out.slotExpired).toBeUndefined();
+    expect(out.ok).toBeUndefined();
+  });
+});

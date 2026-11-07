@@ -209,6 +209,18 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
     }
     return null;
   };
+  // Cupos cacheados (lista fresca) que caen a la MISMA hora que `id`, en CUALQUIER día. Sirve
+  // para desambiguar cuando la lista ofreció la misma hora en varios días (p.ej. miércoles,
+  // jueves y viernes a las 15:15) y el paciente eligió "miércoles 15:15": NO es que la hora
+  // esté tomada, es que falta el día. getSlot devuelve null en ese caso (hits !== 1).
+  const slotsSameHour = (convId: string, id: string): CachedSlot[] => {
+    const c = slotCache.get(convId);
+    if (!c || Date.now() - c.at > SLOTS_TTL_MS) return [];
+    const m = String(id).trim().toLowerCase().match(/(\d{3,4})\s*$/);
+    if (!m) return [];
+    const hhmm = m[1].padStart(4, "0");
+    return [...c.slots.values()].filter((sl) => slotId(sl.start).endsWith(`-${hhmm}`));
+  };
 
   // GUARDIA anti doble-agendamiento: el modelo a veces llama createAppointment varias
   // veces en el mismo turno (dos slots distintos + reintentos) → creaba 2-3 citas reales
@@ -300,7 +312,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           if (m1) { day = parseInt(m1[1], 10); month = MESMAP[m1[2]]; }
           if (day == null) {
             for (const [name, n] of Object.entries(WDMAP)) {
-              const mm = t.match(new RegExp(`\\b${name}s?\\s+(\\d{1,2})\\b`));
+              // Excluir una HORA tras el día ("miércoles 15:15" NO es el día 15; "jueves 9 hrs"
+              // NO es el día 9): solo cuenta un número de día "pelado".
+              const mm = t.match(new RegExp(`\\b${name}s?\\s+(\\d{1,2})\\b(?!\\s*[:.]\\d|\\s*(?:hrs?|horas?|h\\b))`));
               if (mm) { day = parseInt(mm[1], 10); wdWanted = n; break; }
             }
           }
@@ -577,7 +591,36 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return { error: "El contacto no tiene teléfono registrado. Pídele su número al paciente y vuelve a llamar createAppointment pasándolo en el campo `telefono` (o guárdalo antes con updateContactFields.phone)." };
         }
         // El id corto se resuelve al slot real cacheado → fecha/profesional exactos.
-        const slot = getSlot(convId, String(input.slotId ?? ""));
+        let slot = getSlot(convId, String(input.slotId ?? ""));
+        if (!slot) {
+          // AMBIGÜEDAD DE DÍA (caso Tatiana, 7-nov): la lista ofreció esa MISMA hora en varios días
+          // (p.ej. miércoles, jueves y viernes a las 15:15) y el modelo mandó la hora sin fijar el
+          // día → getSlot da null. NO es "no disponible". Se resuelve con el día que nombró el
+          // paciente en su mensaje (weekday o número); si queda único, se agenda; si no, se PREGUNTA
+          // el día — jamás se le dice al paciente que la hora no está.
+          const sameHour = slotsSameHour(convId, String(input.slotId ?? ""));
+          if (sameHour.length > 1) {
+            const t = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+            const WD: Record<string, number> = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
+            const WDSHORT: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+            const wdOf = (iso: string) => WDSHORT[new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", weekday: "short" }).format(new Date(iso))] ?? -1;
+            const domOf = (iso: string) => Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", day: "2-digit" }).format(new Date(iso)));
+            const wantWd = Object.entries(WD).filter(([n]) => new RegExp(`\\b${n}s?\\b`).test(t)).map(([, v]) => v);
+            const domM = t.match(/(?<!:)\b(\d{1,2})\b(?!\s*[:.]\d)/); // número de día pelado (no la hora "15:15")
+            const wantDom = domM ? Number(domM[1]) : null;
+            let narrowed = sameHour;
+            if (wantWd.length) { const n2 = narrowed.filter((sl) => wantWd.includes(wdOf(sl.start))); if (n2.length) narrowed = n2; }
+            if (wantDom && wantDom >= 1 && wantDom <= 31) { const n2 = narrowed.filter((sl) => domOf(sl.start) === wantDom); if (n2.length) narrowed = n2; }
+            if (narrowed.length === 1) {
+              slot = narrowed[0];
+            } else {
+              return {
+                needsDayClarification: true,
+                nota: `El paciente eligió una hora que la lista ofreció en VARIOS días (${sameHour.map((sl) => slotWhen.format(new Date(sl.start))).join("; ")}). NO le digas que la hora no está disponible: pregúntale CUÁL de esos días quiere y agéndalo con el id EXACTO de ese día.`,
+              };
+            }
+          }
+        }
         if (!slot) {
           // La lista venció (TTL) o el id no calza. Es el caso Víctor: el paciente confirma una hora
           // que se ofreció hace rato y que ya pudo tomarse otra persona. NO afirmes que esa hora sigue
@@ -585,7 +628,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return {
             slotExpired: true,
             error:
-              "Esa hora ya no está reservada o la lista venció (pudo tomarla otra persona). Discúlpate BREVEMENTE con el paciente SOLO por esa hora puntual, vuelve a llamar getAvailability y ofrécele ÚNICAMENTE las horas nuevas que devuelva. NO repitas ni confirmes las horas de un mensaje anterior sin reconsultar.",
+              "No pude confirmar esa hora exacta (la lista pudo vencer o pudo tomarla otra persona). Discúlpate BREVEMENTE SOLO por esa hora puntual, vuelve a llamar getAvailability y ofrécele ÚNICAMENTE las horas nuevas que devuelva. NO repitas ni confirmes las horas de un mensaje anterior sin reconsultar.",
           };
         }
         // GUARDIA PERSISTENTE anti doble-agendamiento (sobrevive reinicios del worker y
