@@ -115,3 +115,23 @@ describe("getAvailability — resolución del día del mes pedido", () => {
     expect(out.horas.length).toBeGreaterThan(0); // abanico normal por día
   });
 });
+
+// Cuando el proveedor (Cláriva) se cae/timeout, el bot NO debe decir "no hay horas": debe avisar
+// que no pudo revisar la agenda. Antes el error se tragaba como [] → sinCupos → paciente perdido.
+describe("getAvailability — error del proveedor NO es 'no hay horas'", () => {
+  it("si getAvailableSlots lanza (proveedor caído) → errorAgenda, sin sinCupos", async () => {
+    const sched = {
+      kind: "clariva" as const,
+      async getProfessionals() { return [{ id: "p1", name: "Dr. Aedo", specialty: null }]; },
+      async getAvailableSlots() { throw new Error("Cláriva GET /availability → 503"); },
+      async createAppointment(i: any) { return i; },
+      async getPatientAppointments() { return []; },
+      async updateAppointment(id: string, c: any) { return { id, ...c }; },
+    };
+    const r = await reg().execute("getAvailability", { professionalId: "p1" }, makeCtx(sched, "quiero una hora"));
+    const out = JSON.parse(r.content);
+    expect(out.errorAgenda).toBe(true);
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.nota).toMatch(/NO digas que no hay horas/i);
+  });
+});

@@ -397,7 +397,17 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // Traemos la ventana ancha UNA vez y aplicamos filtros progresivamente más laxos (sin más
         // llamadas al proveedor). RESPALDOS para NO devolver "sinCupos" si hay horas reales cerca:
         // el modelo interpretaba el vacío como "no hay nada" y escalaba/negaba días que ni consultó.
-        const all = (await sched.getAvailableSlots({ ...query, from, to: wide })) ?? [];
+        let all: Awaited<ReturnType<typeof sched.getAvailableSlots>>;
+        try {
+          all = (await sched.getAvailableSlots({ ...query, from, to: wide })) ?? [];
+        } catch {
+          // No se pudo CONSULTAR la agenda (proveedor caído/timeout/credenciales). NO es lo mismo
+          // que "no hay horas": si el bot lo dijera, el paciente se iría creyendo que está lleno.
+          return {
+            errorAgenda: true,
+            nota: "No pude consultar la agenda en este momento por un problema técnico temporal. NO digas que no hay horas ni que está lleno. Dile al paciente con calidez que tuviste un inconveniente para revisar la agenda y que en un ratito le confirmas; si insiste o es urgente, usa transferToHuman para que una persona lo coordine.",
+          };
+        }
         let ensanchado = false;
         let tramoRelajado = false;
         let diaRelajado = false;
