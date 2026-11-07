@@ -283,13 +283,56 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return out;
         };
         const wdList = wdFromModel.length ? wdFromModel : wdFromText();
-        const wantWD = wdList.length ? new Set(wdList) : null;
-        const from = wantWD ? todayChile : input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
+        // DÍA ESPECÍFICO DEL MES pedido por el paciente ("el 9", "lunes 9", "9 de noviembre"):
+        // determinista desde el texto. CAUSA RAÍZ del "pide el 9 y el bot insiste con el 16": antes
+        // solo se miraba el día de la SEMANA (wdFromText) y el NÚMERO del día se descartaba, así que
+        // el bot abanicaba TODOS los lunes y, si el 9 estaba lleno, ofrecía el 16 SIN avisar que el 9
+        // no tenía. Ahora, si el paciente nombra un día concreto, se consulta ESE día y, si no hay,
+        // se DICE y se ofrecen los más cercanos con cupo (sin saltar mudo a otra fecha).
+        const MESMAP: Record<string, number> = { enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5, julio: 6, agosto: 7, septiembre: 8, setiembre: 8, octubre: 9, noviembre: 10, diciembre: 11 };
+        const fmtDia = (ymd: string) => new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long" }).format(new Date(`${ymd}T12:00:00Z`));
+        const win28 = new Date(new Date(`${todayChile}T00:00:00Z`).getTime() + 28 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+        const specificDay = (): { ymd: string; conflict: boolean } | null => {
+          const t = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+          if (!t) return null;
+          let day: number | null = null, month: number | null = null, wdWanted: number | null = null;
+          const m1 = t.match(/\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/);
+          if (m1) { day = parseInt(m1[1], 10); month = MESMAP[m1[2]]; }
+          if (day == null) {
+            for (const [name, n] of Object.entries(WDMAP)) {
+              const mm = t.match(new RegExp(`\\b${name}s?\\s+(\\d{1,2})\\b`));
+              if (mm) { day = parseInt(mm[1], 10); wdWanted = n; break; }
+            }
+          }
+          if (day == null) {
+            // "el 9", "el dia 9", "para el 16" — pero NO una hora ("a las 9", "9:30", "9 hrs", "9 de la tarde").
+            const mm = t.match(/\b(?:el|para el|del)\s+(?:dia\s+)?(\d{1,2})\b(?!\s*[:.h]|\s*(?:hrs?|horas?|am|pm|de la|y media|y cuarto))/);
+            if (mm) day = parseInt(mm[1], 10);
+          }
+          if (day == null || day < 1 || day > 31) return null;
+          const [ty, tm, td] = todayChile.split("-").map(Number);
+          for (let i = 0; i <= 62; i++) {
+            const d = new Date(Date.UTC(ty, tm - 1, td + i));
+            if (d.getUTCDate() === day && (month == null || d.getUTCMonth() === month)) {
+              return { ymd: d.toISOString().slice(0, 10), conflict: wdWanted != null && d.getUTCDay() !== wdWanted };
+            }
+          }
+          return null;
+        };
+        const pedido = specificDay();
+        if (pedido?.conflict) {
+          // "lunes 9" pero el 9 cae otro día: no adivinar, aclarar.
+          return { aclararFecha: true, nota: "El paciente nombró un día de la semana y un número de día que NO coinciden en el calendario (p.ej. 'lunes 9' cuando el 9 cae otro día). Con calidez, pregúntale a qué fecha exacta se refiere y recién entonces vuelve a consultar; no ofrezcas horas hasta aclararlo." };
+        }
+        // Día pedido válido y dentro de la ventana consultable → GOBIERNA la consulta (ignora weekday).
+        const diaPedido = pedido && pedido.ymd >= todayChile && pedido.ymd <= win28 ? pedido.ymd : null;
+        const wantWD = !diaPedido && wdList.length ? new Set(wdList) : null;
+        const from = wantWD || diaPedido ? todayChile : input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
         const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
         // Ventana por defecto de 28 días: si el profesional está copado las próximas 2 semanas, con
         // 14 devolvía vacío y el agente escalaba. Con 28 encuentra el cupo más próximo.
         const wide = plus(28);
-        const to = wantWD ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
+        const to = wantWD || diaPedido ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
         const sched = services(ctx).scheduling;
         // RESOLUCIÓN DE PROFESIONAL: el modelo a veces manda el NOMBRE ("Javier Hernán Aedo Mella",
         // "Dr. Aedo") en professionalId en vez del id. Cláriva, al recibir un id que no reconoce,
@@ -355,28 +398,46 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // llamadas al proveedor). RESPALDOS para NO devolver "sinCupos" si hay horas reales cerca:
         // el modelo interpretaba el vacío como "no hay nada" y escalaba/negaba días que ni consultó.
         const all = (await sched.getAvailableSlots({ ...query, from, to: wide })) ?? [];
-        let slots = all.filter((s) => enTramo(s.start) && enDia(s.start) && (wantWD || s.start.slice(0, 10) <= to));
         let ensanchado = false;
         let tramoRelajado = false;
         let diaRelajado = false;
-        if (!slots.length) {
-          // 1) ensanchar fechas (toda la ventana), manteniendo tramo horario + día.
-          slots = all.filter((s) => enTramo(s.start) && enDia(s.start));
-          ensanchado = slots.length > 0;
-        }
-        if (!slots.length && (hasHora || input.franja)) {
-          // 2) soltar el tramo horario (franja/hora), mantener el día pedido.
-          slots = all.filter((s) => enDia(s.start));
-          tramoRelajado = slots.length > 0;
-        }
-        if (!slots.length && wantWD) {
-          // 3) soltar el día pedido (no había NADA ese día): ofrecer otros días reales (con tramo si se pidió).
-          slots = all.filter((s) => enTramo(s.start));
-          diaRelajado = slots.length > 0;
-        }
-        if (!slots.length) {
-          // 4) soltar todo: cualquier hora real del rango.
-          slots = all;
+        let diaPedidoSinCupos = false;
+        let franjaRelajadaEnDia = false;
+        let slots: typeof all;
+        if (diaPedido) {
+          // DÍA ESPECÍFICO: primero SOLO ese día (con tramo si lo pidió), luego ese día sin tramo.
+          slots = all.filter((s) => s.start.slice(0, 10) === diaPedido && enTramo(s.start));
+          if (!slots.length) {
+            const mismoDia = all.filter((s) => s.start.slice(0, 10) === diaPedido);
+            if (mismoDia.length) { slots = mismoDia; franjaRelajadaEnDia = hasHora || Boolean(input.franja); }
+          }
+          if (!slots.length) {
+            // ESE día NO tiene horas: ofrecer las más cercanas CON cupo, DICIÉNDOLO (no saltar mudo).
+            diaPedidoSinCupos = true;
+            slots = all.filter((s) => enTramo(s.start));
+            if (!slots.length) slots = all;
+          }
+        } else {
+          slots = all.filter((s) => enTramo(s.start) && enDia(s.start) && (wantWD || s.start.slice(0, 10) <= to));
+          if (!slots.length) {
+            // 1) ensanchar fechas (toda la ventana), manteniendo tramo horario + día.
+            slots = all.filter((s) => enTramo(s.start) && enDia(s.start));
+            ensanchado = slots.length > 0;
+          }
+          if (!slots.length && (hasHora || input.franja)) {
+            // 2) soltar el tramo horario (franja/hora), mantener el día pedido.
+            slots = all.filter((s) => enDia(s.start));
+            tramoRelajado = slots.length > 0;
+          }
+          if (!slots.length && wantWD) {
+            // 3) soltar el día pedido (no había NADA ese día): ofrecer otros días reales (con tramo si se pidió).
+            slots = all.filter((s) => enTramo(s.start));
+            diaRelajado = slots.length > 0;
+          }
+          if (!slots.length) {
+            // 4) soltar todo: cualquier hora real del rango.
+            slots = all;
+          }
         }
         if (!slots.length) {
           // Vacío de verdad: NO hay NINGUNA hora en ~28 días. Recién aquí el modelo puede afirmar que
@@ -433,7 +494,15 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // tenía que desdecirse ("ya no está disponible"). Regla: ofrecer SOLO las horas de ESTA lista
         // (la más reciente) y, si pasó un rato, volver a llamar getAvailability ANTES de confirmar.
         notas.push("IMPORTANTE: estas horas NO quedan reservadas; otra persona puede tomarlas mientras el paciente decide. Ofrece SOLO las horas de ESTA lista (la más reciente que consultaste). Si ya habías ofrecido horas en un mensaje anterior, o el paciente se demoró o preguntó otra cosa entremedio, vuelve a llamar getAvailability ANTES de confirmar y NO repitas horas de un mensaje anterior sin reconsultar.");
-        if (hasHora && !tramoRelajado) {
+        if (diaPedido && !diaPedidoSinCupos) {
+          notas.push(franjaRelajadaEnDia
+            ? `El día que pidió el paciente (${fmtDia(diaPedido)}) no tiene horas en la franja/hora exacta que pidió, pero SÍ tiene estas otras horas ESE MISMO día: ofrécelas diciendo la hora exacta.`
+            : `Estas horas son del día que pidió el paciente (${fmtDia(diaPedido)}): ofrécelas TODAS indicando la hora exacta de cada una.`);
+        }
+        if (diaPedidoSinCupos) {
+          notas.push(`IMPORTANTE: el día que pidió el paciente (${fmtDia(diaPedido!)}) NO tiene horas disponibles. Díselo con calidez y claridad, y ofrécele ESTAS, que son las más cercanas CON cupo — di la FECHA y la hora exactas de cada una. NO presentes ninguna como si fuera del día que pidió, ni insistas con ese día.`);
+        }
+        if (hasHora && !tramoRelajado && !diaPedido) {
           const cond = minHora != null && maxHora != null ? `entre las ${minHora}:00 y las ${maxHora}:00` : minHora != null ? `desde las ${minHora}:00 en adelante` : `antes de las ${maxHora}:00`;
           notas.push(`Estas horas cumplen lo que pidió el paciente (${cond}): ofrécelas indicando la fecha y hora exactas.`);
         }
