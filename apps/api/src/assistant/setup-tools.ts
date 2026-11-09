@@ -103,7 +103,11 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         },
       },
       {
-        name: "acompañarPaso",
+        // SIN la ñ, y no es un descuido: OpenAI valida el nombre de cada herramienta contra
+        // `^[a-zA-Z0-9_-]+$` y rechaza la petición ENTERA con un 400 — no esta herramienta,
+        // TODAS. Anthropic la aceptaba, así que el error vivió latente hasta que Convi pasó a
+        // OpenAI y se quedó mudo en producción. Lo ata `copiloto-herramientas.spec.ts`.
+        name: "acompanarPaso",
         description:
           "Lleva al cliente a la pantalla del paso que están haciendo y le resalta qué tocar. Úsalo cuando le propongas un paso del montaje o cuando pregunte dónde está algo. Claves: negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio.",
         inputJsonSchema: {
@@ -515,7 +519,7 @@ export async function runSetupTool(
     };
   }
 
-  if (name === "acompañarPaso") {
+  if (name === "acompanarPaso") {
     const paso = String(input?.paso ?? "");
     // Se comprueba el PASO, no si salieron acciones: estando ya en la pantalla de un paso
     // sin elemento que resaltar la lista queda vacía, y eso no es un error.
