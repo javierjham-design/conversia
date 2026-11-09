@@ -432,8 +432,14 @@ export class ClarivaSchedulingProvider implements SchedulingProvider {
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
     if (!pros.length) return one();
-    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
-    return per.flat();
+    // Si TODOS los profesionales fallan (proveedor caído / 401 / timeout), NO devolver [] en
+    // silencio: eso haría que el bot diga "no hay horas" HABIENDO agenda y perdería al paciente.
+    // Se devuelve lo que SÍ se pudo consultar (éxito parcial); si no se pudo consultar NINGUNO,
+    // se PROPAGA el error para que el bot avise "no puedo ver la agenda ahora", no "no hay".
+    const per = await Promise.allSettled(pros.map((p) => one(p.id)));
+    const ok = per.filter((r): r is PromiseFulfilledResult<SchedSlot[]> => r.status === "fulfilled").map((r) => r.value);
+    if (!ok.length) throw (per.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined)?.reason ?? new Error("No se pudo consultar la disponibilidad");
+    return ok.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
@@ -576,8 +582,14 @@ export class CustomSchedulingProvider implements SchedulingProvider {
     if (q.professionalId) return one(q.professionalId);
     const pros = await this.getProfessionals(q.clinicId).catch(() => [] as SchedProfessional[]);
     if (!pros.length) return one();
-    const per = await Promise.all(pros.map((p) => one(p.id).catch(() => [] as SchedSlot[])));
-    return per.flat();
+    // Si TODOS los profesionales fallan (proveedor caído / 401 / timeout), NO devolver [] en
+    // silencio: eso haría que el bot diga "no hay horas" HABIENDO agenda y perdería al paciente.
+    // Se devuelve lo que SÍ se pudo consultar (éxito parcial); si no se pudo consultar NINGUNO,
+    // se PROPAGA el error para que el bot avise "no puedo ver la agenda ahora", no "no hay".
+    const per = await Promise.allSettled(pros.map((p) => one(p.id)));
+    const ok = per.filter((r): r is PromiseFulfilledResult<SchedSlot[]> => r.status === "fulfilled").map((r) => r.value);
+    if (!ok.length) throw (per.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined)?.reason ?? new Error("No se pudo consultar la disponibilidad");
+    return ok.flat();
   }
   createAppointment(input: CreateAppointmentInput) {
     // Idempotency-Key determinístico (profesional+inicio+teléfono): el proveedor
@@ -676,13 +688,20 @@ export function createSchedulingProvider(sel: ProviderSelection): SchedulingProv
 export function withAppointmentDuration(base: SchedulingProvider, durMin: number): SchedulingProvider {
   const wrapped = Object.create(base) as SchedulingProvider;
   wrapped.getAvailableSlots = async (q) => {
-    // Pedimos la grilla NATIVA (sin forzar durationMin): pedirla con la duración exacta hacía que
-    // Cláriva devolviera VACÍO cuando la cita es MÁS LARGA que la granularidad de la agenda (p. ej.
-    // 60 min con slots de 30) — aunque hubiera huecos CONSECUTIVOS que sí forman una ventana válida.
-    // Luego: los bloques >= durMin se SUBDIVIDEN; los más cortos se COMBINAN con los consecutivos del
-    // MISMO profesional (sin hueco) hasta cubrir durMin. Así una cita de 60 min encuentra ventana en
-    // dos slots de 30 seguidos (caso Angelica/Carolina/Maria Cecilia: "no hay" habiendo decenas de cupos).
-    const slots = (await base.getAvailableSlots({ ...q, durationMin: undefined })) ?? [];
+    // Pedimos la grilla a una GRANULARIDAD FINA (bloque de 15 min), NO "sin duración" y NO con la
+    // duración exacta de la cita. Las dos alternativas estaban rotas:
+    //  • Sin duración (lo anterior): Cláriva usa su paso por DEFECTO de 30 min. En una agenda de
+    //    bloques de 15 con citas de 20 min, cada celda de 30 choca con alguna cita y Cláriva devuelve
+    //    CERO aunque haya 1–2 h libres seguidas. Caso real Dr. Aedo, lunes 9: 0 cupos con paso 30,
+    //    10 cupos con paso 15 — es la causa de fondo del "no ve las horas".
+    //  • Con la duración EXACTA: Cláriva daba VACÍO cuando la cita es MÁS LARGA que el bloque (60 min
+    //    con bloques de 30) aunque hubiera huecos CONSECUTIVOS que sí forman una ventana válida.
+    // Con paso fino 15 se evitan ambas: los bloques >= durMin se SUBDIVIDEN; los más cortos se COMBINAN
+    // con los consecutivos del MISMO profesional (sin hueco) hasta cubrir durMin. Así una cita de 60
+    // encuentra ventana en 4 bloques de 15 seguidos (caso Angelica/Carolina/Maria Cecilia) y una de 15
+    // ve TODOS los huecos reales de 15. GRID_MIN nunca es más grueso que la propia cita.
+    const GRID_MIN = 15;
+    const slots = (await base.getAvailableSlots({ ...q, durationMin: Math.min(durMin, GRID_MIN) })) ?? [];
     const MS = durMin * 60000;
     const groups = new Map<string, typeof slots>();
     for (const s of slots) {
