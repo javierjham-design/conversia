@@ -48,6 +48,23 @@ describe("ToolRegistry.specsFor", () => {
   const registry = new ToolRegistry();
   for (const t of buildCoreTools()) registry.register(t);
 
+  it("el nombre de CADA tool de TuBot lo acepta cualquier proveedor", () => {
+    /**
+     * OpenAI valida el nombre de cada tool contra `^[a-zA-Z0-9_-]{1,64}$` y, si una sola no
+     * calza, rechaza la petición ENTERA con un 400 — no esa tool: TODAS, así que el agente
+     * se queda mudo. Anthropic es permisivo, de modo que el fallo solo aparece el día que se
+     * cambia de proveedor. Le pasó a Convi en producción el 7-nov-2026 con `acompañarPaso`.
+     *
+     * Las tools de TuBot hoy son todas ASCII; esto es para que sigan siéndolo, porque acá
+     * una ñ no se nota hasta que un cliente real se queda sin respuesta.
+     */
+    const PERMITIDO = /^[a-zA-Z0-9_-]{1,64}$/;
+    const nombres = buildCoreTools().map((t) => t.name);
+    expect(nombres.length, "no se leyó ninguna tool").toBeGreaterThan(20);
+    const malos = nombres.filter((n) => !PERMITIDO.test(n));
+    expect(malos, `OpenAI rechazaría el turno entero por estos nombres: ${malos.join(", ")}`).toEqual([]);
+  });
+
   it("solo expone las tools habilitadas", () => {
     expect(registry.specsFor(["getServices"]).map((s) => s.name)).toEqual(["getServices"]);
   });

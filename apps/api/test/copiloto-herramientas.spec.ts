@@ -119,7 +119,25 @@ describe("el registro de herramientas", () => {
     expect(isSetupWriteTool("completarDatosNegocio")).toBe(true);
     expect(isSetupWriteTool("publicarAsistente")).toBe(true);
     expect(isSetupWriteTool("diagnosticarWhatsapp")).toBe(false);
-    expect(isSetupWriteTool("acompañarPaso")).toBe(false);
+    expect(isSetupWriteTool("acompanarPaso")).toBe(false);
+  });
+
+  it("el nombre de CADA herramienta lo acepta cualquier proveedor", () => {
+    /**
+     * OpenAI valida el nombre de cada herramienta contra `^[a-zA-Z0-9_-]{1,64}$` y, si una
+     * sola no calza, rechaza la petición ENTERA con un 400 — no esa herramienta: TODAS.
+     * Anthropic es permisivo, así que `acompañarPaso` (con ñ) convivió meses sin molestar y
+     * tumbó a Convi EN PRODUCCIÓN el día que el Super Admin lo cambió a OpenAI: contestaba
+     * "estoy teniendo un problema para responder" a todo el mundo.
+     *
+     * El error del proveedor dice `tools[10].function.name` y nada más — ni qué herramienta
+     * ni qué carácter. Por eso el guardián nombra al culpable.
+     */
+    const PERMITIDO = /^[a-zA-Z0-9_-]{1,64}$/;
+    const todas = [...setupToolSpecs().read, ...setupToolSpecs().write];
+    expect(todas.length, "no se leyó ninguna herramienta").toBeGreaterThan(10);
+    const malos = todas.filter((t) => !PERMITIDO.test(t.name)).map((t) => t.name);
+    expect(malos, `OpenAI rechazaría la petición entera por estos nombres: ${malos.join(", ")}`).toEqual([]);
   });
 
   it("ninguna herramienta promete cambiar el modelo de IA", () => {
@@ -348,16 +366,16 @@ describe("diagnosticarWhatsapp", () => {
   });
 });
 
-describe("acompañarPaso", () => {
+describe("acompanarPaso", () => {
   it("navega, resalta y agrega el botón cuando el paso lo exige", async () => {
     const { prisma } = fakePrisma();
-    const r = await runSetupTool(prisma, { ...ctx, route: "/inicio" }, "acompañarPaso", { paso: "pago" });
+    const r = await runSetupTool(prisma, { ...ctx, route: "/inicio" }, "acompanarPaso", { paso: "pago" });
     expect(r?.actions?.map((a) => a.type)).toEqual(["navigate", "highlight", "button"]);
   });
 
   it("un paso inventado no hace nada", async () => {
     const { prisma } = fakePrisma();
-    expect((await runSetupTool(prisma, ctx, "acompañarPaso", { paso: "volar" }))?.isError).toBe(true);
+    expect((await runSetupTool(prisma, ctx, "acompanarPaso", { paso: "volar" }))?.isError).toBe(true);
   });
 });
 

@@ -56,7 +56,7 @@ export function accionesParaPaso(stepKey: string, rutaActual?: string): Assistan
   return acciones;
 }
 
-/** ¿Este paso tiene una pantalla a la que acompañar? (`acompañarPaso` falla si no.) */
+/** ¿Este paso tiene una pantalla a la que acompañar? (`acompanarPaso` falla si no.) */
 export function pasoConocido(stepKey: string): boolean {
   return Object.prototype.hasOwnProperty.call(PASO_A_PANTALLA, stepKey);
 }

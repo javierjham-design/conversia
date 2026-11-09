@@ -29,7 +29,7 @@ qué tocar y dónde. El dueño tenía que leer la indicación, encontrar la pant
 Ahora el copiloto **hace**:
 
 - **Navega y resalta.** Cuando propone un paso, lleva al dueño a la pantalla y le marca el
-  control con un globo explicativo (`acompañarPaso`).
+  control con un globo explicativo (`acompanarPaso`).
 - **Completa los datos del negocio** (nombre, rubro, dirección, descripción) y **el horario
   de atención**, entendiendo lo que se le dicta ("lunes a viernes de 9 a 18", "6pm").
 - **Arma la agenda**: suma a quien atiende con su horario semanal y ajusta el bloque entre
