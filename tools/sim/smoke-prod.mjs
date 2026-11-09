@@ -542,6 +542,12 @@ async function checkWhatsappTokenHealth() {
   const subs = [
     { ok: body.whatsappTokenOk === true, label: `whatsappTokenOk = ${body.whatsappTokenOk} (${body.checks?.whatsappToken?.detail ?? "sin detalle"})` },
   ];
+  // CONVI. Estuvo SIETE DÍAS contestando "estoy teniendo un problema para responder" a todo
+  // el mundo (2 al 9-nov-2026) sin que nada lo notara: lo vio el dueño en la pantalla. Si el
+  // deploy todavía no expone la bandera no se afirma nada (no inventamos un verde ni un rojo).
+  if (typeof body.conviOk === "boolean") {
+    subs.push({ ok: body.conviOk === true, label: `conviOk = ${body.conviOk} (${body.checks?.convi?.detail ?? "sin detalle"})` });
+  }
   return rollup(subs);
 }
 
