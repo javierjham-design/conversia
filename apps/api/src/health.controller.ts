@@ -2,6 +2,7 @@ import { Controller, Get, Header, Headers, ServiceUnavailableException, Unauthor
 import { getEnv, BRANDS, messagingFuseKeys } from "@conversia/config";
 import { ensureTenantDbRoleChecked } from "@conversia/database";
 import { AI_DEGRADED_PROVIDERS, aiDegradedRedisKey } from "@conversia/types";
+import { detalleConviCaido, leerConviCaido } from "./assistant/convi-salud";
 import { QueueService } from "./queues";
 import { PrismaService } from "./prisma.service";
 
@@ -204,12 +205,29 @@ export class HealthController {
       checks.ai = { ok: true, detail: "no verificable" };
     }
 
+    // 8. CONVI. El chequeo `ai` de arriba NO lo cubre: mira la degradación que marca el
+    //    worker, o sea los bots de WhatsApp. El 2-nov-2026 Convi quedó contestando "estoy
+    //    teniendo un problema para responder" a todo el mundo y estuvo SIETE DÍAS así con
+    //    este endpoint en verde; lo encontró el dueño mirando la pantalla. La marca la pone
+    //    el propio copiloto al fallarle el proveedor y se borra sola en el primer turno
+    //    bueno, así que un incidente resuelto no deja la alarma encendida.
+    //
+    //    VA ANTES del agregado a propósito: `ok` se calcula sobre `checks`, así que un
+    //    chequeo añadido después sale en el detalle pero NO tumba el `ok` — una alarma que
+    //    se publica y no suena.
+    const conviCaido = await leerConviCaido();
+    checks.convi = conviCaido ? { ok: false, detail: detalleConviCaido(conviCaido) } : { ok: true };
+
     const ok = Object.values(checks).every((c) => c.ok);
+
     // `whatsappTokenOk`, `dbRoleOk` y `aiOk` explícitos para el humo (smoke-prod) además del agregado.
     const whatsappTokenOk = checks.whatsappToken?.ok ?? true;
     const dbRoleOk = checks.dbRole?.ok ?? true;
     const aiOk = checks.ai?.ok ?? true;
-    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, dbRoleOk, aiOk, checks });
-    return { ok, whatsappTokenOk, dbRoleOk, aiOk, checks };
+    // `conviOk` explícito, como `aiOk`: el humo diario (smoke-prod) lo mira por su nombre, así
+    // que una caída del copiloto se ve aunque nadie esté leyendo el agregado.
+    const conviOk = checks.convi?.ok ?? true;
+    if (!ok) throw new ServiceUnavailableException({ ok, whatsappTokenOk, dbRoleOk, aiOk, conviOk, checks });
+    return { ok, whatsappTokenOk, dbRoleOk, aiOk, conviOk, checks };
   }
 }

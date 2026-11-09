@@ -11,6 +11,7 @@ import { procesarAdjuntos, type AdjuntoEntrada } from "./adjuntos";
 import { SETUP_TOOL_NAMES, isSetupWriteTool, runSetupTool, setupToolSpecs } from "./setup-tools";
 import { packUnitForOrg } from "../billing/pack-unit";
 import { configEfectiva, modeloIgnorado, readAssistantConfig } from "./assistant-config";
+import { limpiarConviCaido, marcarConviCaido } from "./convi-salud";
 
 /**
  * BLOQUE B — "Asistente Conversia": un chat in-app que LIDERA la implementación y da
@@ -465,6 +466,9 @@ AUTONOMÍA:
         `✖ Asistente: proveedor de IA no disponible [${cfg.provider}/${model}] (${(e as Error).message?.slice(0, 300)})`,
       );
       degradado = true;
+      // ALARMA PROPIA: hasta hoy una caida de Convi era INVISIBLE —`/health/status` miraba
+      // solo la degradacion que marca el worker (los bots)— y estuvo roto siete dias.
+      await marcarConviCaido(cfg.provider, model, (e as Error).message ?? String(e));
       if (!reply) {
         // NO decir "escríbele a soporte": esto se lee DENTRO de la ventana que es el soporte, y
         // mandar ahí a quien ya está ahí es dejarlo sin salida. El canal real (WhatsApp o correo)
@@ -475,6 +479,11 @@ AUTONOMÍA:
           "Si sigue sin funcionar, acá abajo te dejo cómo hablar con una persona del equipo.";
       }
     }
+
+    // Convi volvio a responder: se apaga la alarma. Va aqui y no dentro del `try` para que
+    // un turno bueno la apague AUNQUE haya habido errores de herramienta por el camino: lo
+    // que la alarma vigila es que el PROVEEDOR conteste, no que el turno sea perfecto.
+    if (!degradado) await limpiarConviCaido();
 
     // COP 1 — COSTO DEL MONTAJE. Se registra para saber lo que cuesta de verdad llevar a un
     // cliente de la cuenta nueva al bot andando (CRE 4 lo usa para el margen por cliente).
