@@ -369,13 +369,29 @@ type V2Status = {
   trial: { active: boolean; freeRemaining: number; freeTotal: number } | null;
   wallet: { remaining: number; graceUsed: number } | null;
   activation: { basePlanCode: string; basePriceClp: number; basePriceUsd: number; baseIncluded: number } | null;
-  grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string } | null;
+  // `targetUnit` = unidad del plan al que lleva "Cambiarme" (NO la del plan actual, que es
+  // V1 y no cobra por uso). Si es null no hay plan de prepago en venta y no se ofrece nada.
+  grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string; targetUnit: "conversation" | "credit" | null } | null;
 };
 type V2Sim = {
   currency: string;
   monthlyConversations: number;
+  // CRE 2 — la unidad del plan que se le va a contratar. Manda sobre los textos: el mismo
+  // botón lleva a "por conversación" o a "Créditos IA" según qué catálogo esté encendido, y
+  // el estimado está calculado en esa unidad. `null` = no hay plan de prepago en venta.
+  unit: "conversation" | "credit" | null;
   v1: { planName: string; monthlyPrice: number };
-  v2: { included: number; estimatedMonthly: number; extraConversations: number };
+  v2: {
+    basePlanCode: string | null;
+    included: number;
+    estimatedMonthly: number;
+    extraConversations: number;
+    creditsNeeded: number | null;
+    extraCredits: number | null;
+    recharges: number | null;
+    rechargePack: { code: string; credits: number; priceClp: number; priceUsd: number } | null;
+    courtesy: number | null;
+  };
   savesMoney: boolean;
 };
 
@@ -478,7 +494,17 @@ function V2Banner() {
   }
   async function migrate() {
     setBusy(true); setMsg(null);
-    try { await api("/billing/v2-migrate", { method: "POST", body: "{}" }); setMsg("¡Te cambiaste al plan por conversación! Te regalamos 100 conversaciones del primer mes."); setSt(null); }
+    // El nombre del plan y la cortesía salen del backend: el mensaje tenía "plan por
+    // conversación" y "100 conversaciones" escritos a mano, así que el día del go-live le
+    // decía eso a quien acababa de quedar en Créditos IA con 1.000 créditos de regalo.
+    try {
+      const r = (await api("/billing/v2-migrate", { method: "POST", body: "{}" })) as { unit?: string; courtesyCredits?: number } | null;
+      const u = r?.unit ?? st?.grandfather?.targetUnit;
+      const cortesia = typeof r?.courtesyCredits === "number" ? r.courtesyCredits : null;
+      const regalo = cortesia !== null ? ` Te regalamos ${cortesia.toLocaleString("es-CL")} ${u === "credit" ? "créditos" : "conversaciones"} del primer mes.` : "";
+      setMsg(`¡Te cambiaste al plan ${u === "credit" ? "de Créditos IA" : "por conversación"}!${regalo}`);
+      setSt(null);
+    }
     catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   }
 
@@ -486,14 +512,17 @@ function V2Banner() {
   const clpN = (n: number) => "$" + Math.round(n).toLocaleString("es-CL");
 
   // Caso A — org V1 elegible a migrar (grandfathering): banner + simulador.
+  // `eligible` ya exige que HAYA un plan de prepago en venta: sin eso no se ofrece nada,
+  // porque un banner que ofrece contratar un plan apagado termina en un error al apretar.
   if (st.grandfather?.eligible) {
+    const esCred = st.grandfather.targetUnit === "credit";
     return (
       <div className="card" style={{ padding: 18, marginBottom: 18, borderColor: "var(--acc)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
           <span style={{ width: 38, height: 38, borderRadius: 11, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Sparkles size={19} /></span>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>Nuevo: paga solo por conversación</h2>
-            <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>Estás en el plan <b>{st.grandfather.v1PlanName}</b>. El modelo por conversación suele salir más barato — míralo con tu uso real. Sin apuro: tu plan sigue igual hasta que decidas.</p>
+            <h2 className="display" style={{ fontSize: 17, margin: "0 0 2px" }}>{esCred ? "Nuevo: paga solo por lo que usa tu asistente" : "Nuevo: paga solo por conversación"}</h2>
+            <p className="text-dim" style={{ margin: 0, fontSize: 13.5 }}>Estás en el plan <b>{st.grandfather.v1PlanName}</b>. {esCred ? "El plan de Créditos IA suele salir más barato" : "El modelo por conversación suele salir más barato"} — míralo con tu uso real. Sin apuro: tu plan sigue igual hasta que decidas.</p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {!sim ? <button onClick={loadSim} disabled={busy} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px" }}>Ver mi ahorro</button> : null}
@@ -505,7 +534,17 @@ function V2Banner() {
             <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Tu uso (~2 meses)</p><p className="display" style={{ margin: 0, fontSize: 20 }}>{sim.monthlyConversations.toLocaleString("es-CL")} <span style={{ fontSize: 13 }} className="text-dim">conv/mes</span></p></div>
             <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Hoy pagas</p><p className="display" style={{ margin: 0, fontSize: 20 }}>{clpN(sim.v1.monthlyPrice)}</p></div>
             <ArrowRight size={18} className="text-dim" />
-            <div><p className="text-dim" style={{ margin: 0, fontSize: 12 }}>Por conversación</p><p className="display" style={{ margin: 0, fontSize: 20, color: sim.savesMoney ? "var(--ok)" : "var(--ink)" }}>{clpN(sim.v2.estimatedMonthly)}</p></div>
+            <div>
+              <p className="text-dim" style={{ margin: 0, fontSize: 12 }}>{sim.unit === "credit" ? "Con Créditos IA" : "Por conversación"}</p>
+              <p className="display" style={{ margin: 0, fontSize: 20, color: sim.savesMoney ? "var(--ok)" : "var(--ink)" }}>{clpN(sim.v2.estimatedMonthly)}</p>
+              {/* Con créditos el extra se compra en recargas ENTERAS, así que se muestra el
+                  desglose: el número suelto no se puede reproducir y parece inventado. */}
+              {sim.unit === "credit" && sim.v2.recharges !== null ? (
+                <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 11.5 }}>
+                  plan{sim.v2.recharges > 0 ? ` + ${sim.v2.recharges} recarga${sim.v2.recharges === 1 ? "" : "s"}` : " (te alcanza sin recargar)"}
+                </p>
+              ) : null}
+            </div>
             {sim.savesMoney ? <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ok)", border: "1px solid var(--ok)", borderRadius: 999, padding: "3px 10px" }}>Ahorras {clpN(sim.v1.monthlyPrice - sim.v2.estimatedMonthly)}/mes</span> : <span className="text-dim" style={{ fontSize: 12.5 }}>Estimación con tu uso reciente</span>}
           </div>
         ) : null}

@@ -5,9 +5,22 @@
 `docs/CREDITOS_IA_RESULTADOS.md`. Pendientes las Etapas 2 (catálogo y migración),
 3 (transparencia y avisos) y 4 (margen), en el orden de `PLAN_EJECUCION_LANZAMIENTO.md`.
 
-> El motor está APAGADO para todos: cobra solo si el plan tiene
-> `features.aiCreditsWallet`, y ningún plan del catálogo lo trae todavía. Se enciende con
-> la Etapa 2, cuando el dueño apruebe activar el catálogo nuevo.
+> **ENCENDIDO EN PRODUCCIÓN el 9-nov-2026** con el OK del dueño. Lo que hay vivo hoy:
+> plan Base `conversia_creditos_base` **$24.990 con 300 créditos** (público), prueba
+> `conversia_creditos_trial` con **200 créditos** de regalo, y las cuatro recargas
+> (420/$24.990 · 880/$49.900 +5% · 1.850/$99.900 +10% · 2.900/$149.900 +15%).
+> El modelo por conversación (`conversia_v2_base`, $18.900 con 100) **dejó de venderse**:
+> sigue existiendo y sirviendo a quien ya lo tenía, pero no aparece en los precios.
+>
+> Secuencia que se corrió, en este orden: `seed-conversia-catalog.mjs` (faltaban en
+> producción los tres packs con bono) → `creditos-migrar-saldos.mjs --aplicar` (4 cuentas de
+> prueba, 120 conversaciones → 1.200 créditos) → `creditos-golive.mjs`. Reversible con
+> `OFF=1`. Antes se corrió el ensayo completo contra Docker (`tools/sim/ensayo-golive.mjs`,
+> 30 comprobaciones).
+>
+> El motor cobra solo si el plan tiene `features.aiCreditsWallet`, así que **las cuentas que
+> ya existían siguen en su unidad anterior**: el cambio de unidad les ocurre cuando migran
+> de plan, no al encender el catálogo.
 
 ## Decisión que origina este documento
 
