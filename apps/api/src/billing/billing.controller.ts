@@ -3,7 +3,7 @@ import type { Request } from "express";
 import { z } from "zod";
 import { getEnv, brandOf, billingReturnUrls } from "@conversia/config";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro, messageWalletQuota, raiseException, refillMessageWallet } from "@conversia/database";
-import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, MAX_RECARGAS_MES, PREFIJO_ORDEN_RECARGA, bonoDePacks, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
+import { AUTO_RECARGA_DEFAULTS, CLP_PER_USD_REF, CREDITOS_POR_CONVERSACION_POR_DEFECTO, MAX_RECARGAS_MES, PREFIJO_ORDEN_RECARGA, bonoDePacks, estimarAlcance, explicarBase, frasePorSaldo } from "@conversia/agents";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { informarHitoCapiApi } from "../common/funnel-capi";
@@ -14,6 +14,7 @@ import { createPaymentProvider, flowSign, verifyLemonSqueezySignature, verifyStr
 import { flowCollect, flowCustomerCreate, flowRegisterCard, flowRegisterStatus } from "./flow-subscriptions";
 import { PaymentSettingsService } from "./payment-settings.service";
 import { isLotPack, packUnitForOrg } from "./pack-unit";
+import { cortesiaDelPlan, incluidoDelPlan, planDePrepagoEnVenta, type UnidadPrepago } from "./plan-prepago";
 import { PREFIJO_ORDEN_SUSCRIPCION, reservarCobro } from "./cobro-en-vuelo";
 import { revisarTope, techoDelTope } from "./tope-recarga";
 import { resolveConsent } from "./auto-recharge-consent";
@@ -1388,13 +1389,19 @@ export class BillingController {
     }
 
     // Grandfathering: org conversia V1 (plan conversia_* NO V2) → elegible a migrar.
-    let grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string } | null = null;
+    let grandfather: { eligible: boolean; v1PlanCode: string; v1PlanName: string; targetUnit: UnidadPrepago | null } | null = null;
     if (brand === "conversia" && !isV2) {
       const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true } });
       const plan = sub?.planId ? await admin.plan.findUnique({ where: { id: sub.planId }, select: { code: true, name: true, features: true } }) : null;
       const migrationScheduled = (org?.settings as any)?.conversia?.v2MigrationScheduled ?? null;
       if (plan && plan.code.startsWith("conversia_") && (plan.features as any)?.conversationDebitsWallet !== true) {
-        grandfather = { eligible: !migrationScheduled, v1PlanCode: plan.code, v1PlanName: plan.name };
+        // CRE 2 — `targetUnit` es la unidad del plan al que lo llevaría el botón, que NO es
+        // la de su plan actual: una org V1 no cobra por conversación ni por créditos. El
+        // banner titula con esto, porque antes decía "paga solo por conversación" fijo y el
+        // día del go-live ofrecía un modelo que ya no se vendía. Sin plan en venta queda
+        // `null` y la UI no ofrece nada.
+        const enVenta = await planDePrepagoEnVenta(admin as never);
+        grandfather = { eligible: !migrationScheduled && enVenta !== null, v1PlanCode: plan.code, v1PlanName: plan.name, targetUnit: enVenta?.unit ?? null };
       }
     }
 
@@ -1425,12 +1432,47 @@ export class BillingController {
     const totalConvs = convDirect > 0 ? convDirect : Math.round(msgs / 6);
     const monthlyConvs = Math.round(totalConvs / 2); // ~2 meses de ventana
 
-    const base = await admin.plan.findUnique({ where: { code: "conversia_v2_base" }, select: { priceClp: true, priceUsd: true, features: true } });
-    const included = Number((base?.features as any)?.conversationsIncluded) || 100;
-    const basePrice = currency === "CLP" ? Number(base?.priceClp ?? 18900) : Number(base?.priceUsd ?? 19);
-    const extra = Math.max(0, monthlyConvs - included);
-    const perConv = currency === "CLP" ? this.V2_PER_CONV_CLP : 0.23;
-    const v2Estimated = Math.round(basePrice + extra * perConv);
+    // CRE 2 — se cotiza EL MISMO plan al que lleva el botón "Cambiarme" (`v2-migrate`), por
+    // `planDePrepagoEnVenta`. Antes esto leía `conversia_v2_base` escrito a mano: el día del
+    // go-live el cliente V1 veía "$18.900 + $219 por conversación extra" al lado de un botón
+    // que lo dejaba en "$24.990 con 300 créditos". Sin plan activo no se inventa un precio.
+    const enVenta = await planDePrepagoEnVenta(admin as never);
+    const unit: UnidadPrepago | null = enVenta?.unit ?? null;
+    const base = enVenta?.plan ?? null;
+    const included = base && unit ? incluidoDelPlan(base, unit) : 0;
+    const basePrice = base ? (currency === "CLP" ? Number(base.priceClp) : Number(base.priceUsd)) : 0;
+
+    // En créditos el extra NO se vende de a uno: se compra la recarga básica entera, así que
+    // el estimado honesto son recargas completas (el cálculo con el que se calibró el precio:
+    // plan + 7 recargas ≈ $200.000 al mes). El precio por crédito sale del catálogo, nunca
+    // escrito acá.
+    let recarga: { code: string; credits: number; priceClp: number; priceUsd: number } | null = null;
+    let necesita = monthlyConvs; // en la unidad del plan
+    let extra = 0;
+    let recargas = 0;
+    let estimated = 0;
+    if (unit === "credit") {
+      // El cuántos-créditos-por-conversación lo da el MEDIDOR, no un supuesto propio: ya
+      // pasó que dos superficies tuvieran el suyo (4,2 contra 9) y el mismo cliente viera
+      // "238 conversaciones" en una pantalla y "111" en la otra, en la misma sesión.
+      const medidor = await this.creditMeter(ctx.organizationId, 0).catch(() => null);
+      const porConv = Number(medidor?.creditosPorConversacion) || CREDITOS_POR_CONVERSACION_POR_DEFECTO;
+      necesita = Math.ceil(monthlyConvs * porConv);
+      extra = Math.max(0, necesita - included);
+      const pack = await admin.messagePackage.findFirst({
+        where: { active: true, brand: "conversia", type: "credit" },
+        orderBy: { order: "asc" },
+      });
+      recarga = pack ? { code: pack.code, credits: pack.credits, priceClp: Number(pack.priceClp), priceUsd: Number(pack.priceUsd) } : null;
+      recargas = recarga && recarga.credits > 0 ? Math.ceil(extra / recarga.credits) : 0;
+      const precioRecarga = recarga ? (currency === "CLP" ? recarga.priceClp : recarga.priceUsd) : 0;
+      estimated = Math.round(basePrice + recargas * precioRecarga);
+    } else {
+      extra = Math.max(0, monthlyConvs - included);
+      const perConv = currency === "CLP" ? this.V2_PER_CONV_CLP : 0.23;
+      estimated = Math.round(basePrice + extra * perConv);
+    }
+    const v2Estimated = estimated;
 
     // Precio actual del tenant (plan V1 vigente).
     const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" }, select: { planId: true, lockedPriceClp: true, lockedPriceUsd: true } });
@@ -1443,8 +1485,26 @@ export class BillingController {
       monthlyConversations: monthlyConvs,
       estimateBasis: convDirect > 0 ? "conversation_events" : "whatsapp_messages_proxy",
       v1: { planName: plan?.name ?? "actual", monthlyPrice: v1Current },
-      v2: { basePlanCode: "conversia_v2_base", included, estimatedMonthly: v2Estimated, extraConversations: extra },
-      savesMoney: v1Current > 0 && v2Estimated < v1Current,
+      // `unit` manda sobre los textos de la pantalla: a quien va a pagar con Créditos IA no
+      // se le puede titular "paga solo por conversación" ni prometerle "100 conversaciones
+      // de cortesía" cuando el plan le va a regalar 1.000 créditos. `null` = el dueño no ha
+      // encendido ningún plan de prepago: no hay nada que ofrecer, y la UI lo oculta.
+      unit,
+      v2: {
+        basePlanCode: base?.code ?? null,
+        included,
+        estimatedMonthly: v2Estimated,
+        extraConversations: unit === "credit" ? 0 : extra,
+        /** Créditos que haría su uso al mes, y cuántos no cubre el plan. Solo en créditos. */
+        creditsNeeded: unit === "credit" ? necesita : null,
+        extraCredits: unit === "credit" ? extra : null,
+        /** El extra se paga en recargas ENTERAS: así se calibró el precio y así se cobra. */
+        recharges: unit === "credit" ? recargas : null,
+        rechargePack: recarga,
+        /** Cortesía del primer mes, del plan (1.000 créditos o 100 conversaciones). */
+        courtesy: base ? cortesiaDelPlan(base) : null,
+      },
+      savesMoney: base !== null && v1Current > 0 && v2Estimated < v1Current,
     };
   }
 
@@ -1465,13 +1525,16 @@ export class BillingController {
     // CRE 2 — migra al plan de prepago que esté ACTIVO: Créditos IA si el dueño ya encendió
     // ese catálogo, y si no el de conversaciones. Sin esto, el día del cambio esta ruta
     // dejaría al cliente en un plan desactivado (sin saldo que acreditar y sin poder pagar).
-    const creditos = await admin.plan.findUnique({ where: { code: "conversia_creditos_base" } });
-    const base = creditos?.active === true ? creditos : await admin.plan.findUnique({ where: { code: "conversia_v2_base" } });
-    if (!base || !base.active) throw new BadRequestException("El modelo de prepago aún no está disponible.");
+    // Va por `planDePrepagoEnVenta`, el MISMO lector que usa el simulador: cuando cada uno
+    // resolvía el plan por su cuenta, el estimado cotizaba un modelo y el botón contrataba
+    // el otro.
+    const enVenta = await planDePrepagoEnVenta(admin as never);
+    if (!enVenta) throw new BadRequestException("El modelo de prepago aún no está disponible.");
+    const base = (await admin.plan.findUnique({ where: { code: enVenta.plan.code } }))!;
     // Cortesía del primer mes, del catálogo: 100 conversaciones o su equivalente en
     // créditos (×10, §8.4). Escrita en el plan para que el día del cambio no quede un "100"
     // en el código regalando diez veces menos de lo que corresponde.
-    const cortesia = Number((base.features as any)?.migrationCourtesyCredits) || 100;
+    const cortesia = cortesiaDelPlan(base as never);
 
     const sub = await admin.subscription.findFirst({ where: { organizationId: ctx.organizationId, status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" } });
     // Cambia el plan de la suscripción vigente a V2 (precio sellado V2). Mantiene periodEnd
@@ -1501,8 +1564,11 @@ export class BillingController {
       where: { id: ctx.organizationId },
       data: { settings: { ...prev, conversia: { ...prevConversia, lifecycle: "v2", v2MigratedAt: new Date().toISOString() } } as object },
     });
-    await admin.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.v2_migrate", entityType: "subscription", entityId: base.id, after: { courtesyCredits: 100 } as object } });
-    return { ok: true, migrated: true, courtesyCredits: 100 };
+    // `cortesia`, no un 100 escrito a mano: el lote que se acredita arriba usa `cortesia`
+    // (1.000 en Créditos IA), así que un 100 fijo dejaba la auditoría contando una décima
+    // parte de lo que se regaló de verdad, y el mensaje de la pantalla prometiendo eso.
+    await admin.auditLog.create({ data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "billing.v2_migrate", entityType: "subscription", entityId: base.id, after: { courtesyCredits: cortesia, planCode: base.code, unit: enVenta.unit } as object } });
+    return { ok: true, migrated: true, courtesyCredits: cortesia, planCode: base.code, unit: enVenta.unit };
   }
 
   /**
