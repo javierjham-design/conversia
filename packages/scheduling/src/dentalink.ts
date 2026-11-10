@@ -18,6 +18,7 @@ import type {
   SchedSlot,
   SchedulingProvider,
 } from "@conversia/types";
+import { ZONA_POR_DEFECTO, offsetForZoneOnDate } from "./zona";
 
 export interface DentalinkClientOptions {
   token: string;
@@ -27,7 +28,11 @@ export interface DentalinkClientOptions {
   workStartHour?: number; // 9
   workEndHour?: number; // 19
   slotMinutes?: number; // 30
-  utcOffset?: string; // "-04:00" (Chile continental)
+  /** Zona IANA de la clínica (default "America/Santiago"): de ahí sale el offset de cada día. */
+  timeZone?: string;
+  /** Offset fijo; solo para pruebas. Dentalink manda horas sin zona y un offset fijo se
+   *  equivoca una hora entera cada vez que Chile cambia la hora. */
+  utcOffset?: string;
 }
 
 const DEFAULT_BASE = "https://api.dentalink.healthatom.com/api/v1";
@@ -61,9 +66,15 @@ export interface DentalinkCita {
   celular_paciente?: string;
 }
 
-/** Cita de Dentalink → cita estándar (ISO con offset del tenant). */
-export function mapDentalinkCita(cita: DentalinkCita, utcOffset = "-04:00"): SchedAppointment {
-  const start = `${cita.fecha}T${cita.hora_inicio.padStart(5, "0")}:00${utcOffset}`;
+/**
+ * Cita de Dentalink → cita estándar (ISO con offset del tenant).
+ *
+ * Dentalink entrega `fecha` y `hora_inicio` SIN zona, así que el offset lo tenemos que
+ * poner nosotros; sin uno dado, sale de la hora oficial de Chile EN ESA FECHA.
+ */
+export function mapDentalinkCita(cita: DentalinkCita, utcOffset?: string): SchedAppointment {
+  const offset = utcOffset ?? offsetForZoneOnDate(ZONA_POR_DEFECTO, cita.fecha);
+  const start = `${cita.fecha}T${cita.hora_inicio.padStart(5, "0")}:00${offset}`;
   const end = new Date(new Date(start).getTime() + (Number(cita.duracion) || 30) * 60_000).toISOString();
   return {
     id: String(cita.id),
@@ -95,20 +106,22 @@ export function computeDentalinkSlots(args: {
   workStartHour?: number;
   workEndHour?: number;
   slotMinutes?: number;
+  timeZone?: string;
   utcOffset?: string;
   now?: Date;
 }): SchedSlot[] {
   const startHour = args.workStartHour ?? 9;
   const endHour = args.workEndHour ?? 19;
   const step = args.slotMinutes ?? 30;
-  const offset = args.utcOffset ?? "-04:00";
+  // Offset por FECHA: Chile cambia de hora y un rango puede cruzar el cambio.
+  const offsetDe = (fecha: string) => args.utcOffset ?? offsetForZoneOnDate(args.timeZone || ZONA_POR_DEFECTO, fecha);
   const now = (args.now ?? new Date()).getTime();
 
   // Intervalos ocupados del profesional (ignora canceladas/anuladas)
   const busyRanges = args.busy
     .filter((c) => String(c.id_dentista) === args.professionalId && mapDentalinkEstado(c.estado_cita) !== "cancelled")
     .map((c) => {
-      const s = new Date(`${c.fecha}T${c.hora_inicio.padStart(5, "0")}:00${offset}`).getTime();
+      const s = new Date(`${c.fecha}T${c.hora_inicio.padStart(5, "0")}:00${offsetDe(c.fecha)}`).getTime();
       return { start: s, end: s + (Number(c.duracion) || 30) * 60_000 };
     });
 
@@ -118,6 +131,7 @@ export function computeDentalinkSlots(args: {
   for (let d = new Date(from); d <= to && slots.length < 200; d.setUTCDate(d.getUTCDate() + 1)) {
     if (d.getUTCDay() === 0) continue; // domingo cerrado
     const dateStr = d.toISOString().slice(0, 10);
+    const offset = offsetDe(dateStr);
     for (let h = startHour; h < endHour; h++) {
       for (let m = 0; m < 60; m += step) {
         const startIso = `${dateStr}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00${offset}`;
@@ -222,6 +236,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
           workStartHour: this.opts.workStartHour,
           workEndHour: this.opts.workEndHour,
           slotMinutes: this.opts.slotMinutes,
+          timeZone: this.opts.timeZone,
           utcOffset: this.opts.utcOffset,
         }),
       );
@@ -233,7 +248,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
     const patient = await this.createOrUpdatePatient(input.patient);
     const start = new Date(input.start);
     const durMin = Math.max(15, Math.round((new Date(input.end).getTime() - start.getTime()) / 60_000));
-    const offset = this.opts.utcOffset ?? "-04:00";
+    const offset = this.offsetDe(input.start.slice(0, 10));
     // fecha/hora en el huso del tenant (el input viene ISO con offset)
     const local = new Date(start.getTime() + parseOffsetMs(offset));
     const cita = await this.request<DentalinkCita>("POST", "/citas", {
@@ -251,7 +266,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
   async updateAppointment(id: string, changes: Partial<CreateAppointmentInput>): Promise<SchedAppointment> {
     const body: Record<string, unknown> = {};
     if (changes.start) {
-      const offset = this.opts.utcOffset ?? "-04:00";
+      const offset = this.offsetDe(changes.start.slice(0, 10));
       const local = new Date(new Date(changes.start).getTime() + parseOffsetMs(offset));
       body.fecha = local.toISOString().slice(0, 10);
       body.hora_inicio = local.toISOString().slice(11, 16);
@@ -261,7 +276,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
     }
     if (changes.notes !== undefined) body.comentario = changes.notes;
     const cita = await this.request<DentalinkCita>("PUT", `/citas/${id}`, body);
-    return mapDentalinkCita(cita, this.opts.utcOffset);
+    return mapDentalinkCita(cita, this.offsetDe(cita.fecha));
   }
 
   async cancelAppointment(id: string): Promise<SchedAppointment> {
@@ -280,7 +295,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
   async getAppointment(id: string): Promise<SchedAppointment | null> {
     try {
       const cita = await this.request<DentalinkCita>("GET", `/citas/${id}`);
-      return mapDentalinkCita(cita, this.opts.utcOffset);
+      return mapDentalinkCita(cita, this.offsetDe(cita.fecha));
     } catch {
       return null;
     }
@@ -290,7 +305,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
     const paciente = await this.findPatientByPhone(phone);
     if (!paciente) return [];
     const citas = await this.request<DentalinkCita[]>("GET", `/citas${this.q({ id_paciente: { eq: Number(paciente.id) } })}`);
-    return citas.map((c) => mapDentalinkCita(c, this.opts.utcOffset));
+    return citas.map((c) => mapDentalinkCita(c, this.offsetDe(c.fecha)));
   }
 
   async createOrUpdatePatient(patient: SchedPatient): Promise<SchedPatient> {
@@ -326,6 +341,16 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
     return this.estadosCache;
   }
 
+  /**
+   * Offset que rige en la clínica EN ESA FECHA. Único lugar de la clase que lo decide.
+   *
+   * `utcOffset` existe para pruebas; cuando no viene, manda la zona y entonces el cambio
+   * de hora de Chile queda cubierto sin que nadie tenga que acordarse de reconfigurar nada.
+   */
+  private offsetDe(fecha: string): string {
+    return this.opts.utcOffset ?? offsetForZoneOnDate(this.opts.timeZone || ZONA_POR_DEFECTO, fecha);
+  }
+
   private async setEstado(id: string, match: RegExp): Promise<SchedAppointment> {
     const estados = await this.getEstados();
     const estado = estados.find((e) => match.test(e.nombre.toLowerCase()));
@@ -333,7 +358,7 @@ export class DentalinkSchedulingProvider implements SchedulingProvider {
       throw new Error(`Dentalink: no existe un estado de cita que coincida con ${match} — créalo en Dentalink`);
     }
     const cita = await this.request<DentalinkCita>("PUT", `/citas/${id}`, { id_estado: estado.id });
-    return mapDentalinkCita(cita, this.opts.utcOffset);
+    return mapDentalinkCita(cita, this.offsetDe(cita.fecha));
   }
 }
 

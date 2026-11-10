@@ -5,7 +5,9 @@
  */
 export * from "./availability";
 export * from "./google-busy";
+export * from "./zona";
 import { computeNativeSlots, type BusyInterval, type WorkBlock } from "./availability";
+import { ZONA_POR_DEFECTO, offsetForZoneOnDate } from "./zona";
 import { createHmac, randomUUID } from "node:crypto";
 import type {
   AvailabilityQuery,
@@ -32,7 +34,9 @@ export interface MockSchedulingData {
   dayStartHour?: number;
   dayEndHour?: number;
   slotMinutes?: number;
-  /** offset horario fijo para el mock, p.ej. "-04:00" (Chile) */
+  /** Zona IANA del negocio (default "America/Santiago"); de ahí sale el offset de cada día. */
+  timeZone?: string;
+  /** Offset fijo, solo para pruebas deterministas. En producción manda la zona. */
   utcOffset?: string;
 }
 
@@ -66,7 +70,7 @@ export class MockSchedulingProvider implements SchedulingProvider {
     const startHour = this.data.dayStartHour ?? 10;
     const endHour = this.data.dayEndHour ?? 18;
     const step = this.data.slotMinutes ?? 30;
-    const offset = this.data.utcOffset ?? "-04:00";
+    const zona = this.data.timeZone || ZONA_POR_DEFECTO;
     const professionals = query.professionalId
       ? this.data.professionals.filter((p) => p.id === query.professionalId)
       : this.data.professionals;
@@ -79,6 +83,8 @@ export class MockSchedulingProvider implements SchedulingProvider {
       const day = d.getUTCDay();
       if (day === 0) continue; // domingo cerrado
       const dateStr = d.toISOString().slice(0, 10);
+      // Offset del DÍA (Chile cambia de hora): ver `zona.ts`.
+      const offset = this.data.utcOffset ?? offsetForZoneOnDate(zona, dateStr);
       for (const prof of professionals) {
         for (let h = startHour; h < endHour; h++) {
           for (let m = 0; m < 60; m += step) {
@@ -193,7 +199,14 @@ export interface NativeAgendaConfig {
   slotStepMin?: number; // granularidad (mínimo 5)
   bufferMin?: number; // separación entre citas
   minAdvanceMin?: number; // anticipación mínima
-  offset?: string; // ej "-04:00"
+  /**
+   * Zona IANA del negocio (`organizations.timezone`, "America/Santiago" por defecto).
+   *
+   * Reemplazó a un `offset` fijo a propósito: un offset escrito en la configuración no
+   * puede saber del cambio de hora, y el que había ("-04:00") corría la agenda una hora
+   * completa de septiembre a abril.
+   */
+  timeZone?: string;
 }
 export interface NativeProfessional {
   id: string;
@@ -269,7 +282,7 @@ export class NativeSchedulingProvider implements SchedulingProvider {
         slotStepMin: cfg.slotStepMin,
         bufferMin: cfg.bufferMin,
         minAdvanceMin: cfg.minAdvanceMin,
-        offset: cfg.offset,
+        timeZone: cfg.timeZone,
       });
       for (const s of slots) out.push({ start: s.start, end: s.end, professionalId: prof.id, clinicId, serviceId: query.serviceId });
     }

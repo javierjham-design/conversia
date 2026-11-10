@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { z } from "zod";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
-import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, computeNativeSlots } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, ZONA_POR_DEFECTO, computeNativeSlots, inicioDelDiaEnZona } from "@conversia/scheduling";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret } from "../common/crypto";
@@ -21,19 +21,6 @@ const workingHours = z.array(workBlock).max(60);
 
 function slug(s: string): string {
   return (s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "svc") + "-" + Math.random().toString(36).slice(2, 6);
-}
-
-/**
- * N2 — inicio del día local del negocio (medianoche en el offset dado), devuelto como Date UTC.
- * Evita que las citas de hoy "desaparezcan" al avanzar la hora (el rango no debe partir en "ahora").
- */
-function startOfLocalDay(offset: string): Date {
-  const sign = offset.trim().startsWith("-") ? -1 : 1;
-  const [h, m] = offset.replace(/[+-]/, "").split(":").map((n) => Number(n) || 0);
-  const offsetMin = sign * (h * 60 + m);
-  const local = new Date(Date.now() + offsetMin * 60000);
-  local.setUTCHours(0, 0, 0, 0);
-  return new Date(local.getTime() - offsetMin * 60000);
 }
 
 /**
@@ -126,7 +113,7 @@ export class AgendaController {
       pros: await tx.professional.findMany({ where: { active: true } }),
       appts: await tx.appointment.findMany({ where: { startsAt: { gte, lte }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }, select: { professionalId: true, startsAt: true, endsAt: true } }),
     }));
-    const cfg = ((datos.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as { slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string };
+    const cfg = ((datos.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as { slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number };
     const fromDate = gte.toISOString().slice(0, 10);
     const toDate = lte.toISOString().slice(0, 10);
     // Etapa 2 — el panel resta las MISMAS horas ocupadas de Google que resta el bot. Si no,
@@ -151,7 +138,9 @@ export class AgendaController {
         slotStepMin: cfg.slotStepMin,
         bufferMin: cfg.bufferMin,
         minAdvanceMin: cfg.minAdvanceMin,
-        offset: cfg.offset ?? "-04:00",
+        // MISMA zona que usa el bot: si el panel armara las horas con otro offset, el dueño
+        // vería libre una hora que el bot no ofrece (o al revés).
+        timeZone: datos.org?.timezone || ZONA_POR_DEFECTO,
         maxSlots: 500,
       });
       for (const s of free) slots.push({ professionalId: p.id, start: s.start, end: s.end });
@@ -348,10 +337,11 @@ export class AgendaController {
   async listAppointments(@Query("from") from?: string, @Query("to") to?: string) {
     const ctx = requireContext();
     // N2 — por defecto el rango parte en el INICIO del día local del negocio (no "hace 24 h"),
-    // para que las citas de hoy sigan visibles aunque ya haya pasado su hora.
-    const org0 = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
-    const offset = (((org0?.settings as Record<string, any> | null)?.agenda?.offset as string) || "-04:00");
-    const gte = from ? new Date(from) : startOfLocalDay(offset);
+    // para que las citas de hoy sigan visibles aunque ya haya pasado su hora. "Medianoche"
+    // la decide la ZONA de la cuenta: con un offset fijo, de septiembre a abril el día del
+    // panel empezaba una hora tarde y la primera cita de la mañana se escondía.
+    const org0 = await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { timezone: true } });
+    const gte = from ? new Date(from) : inicioDelDiaEnZona(org0?.timezone || ZONA_POR_DEFECTO);
     const lte = to ? new Date(to) : new Date(gte.getTime() + 30 * 24 * 3600 * 1000);
 
     const provider = await this.externalProvider(ctx.organizationId);

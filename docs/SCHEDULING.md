@@ -47,4 +47,20 @@ Reglas que conviene no olvidar:
 
 ## Pendiente
 
-Trigger `appointment_upcoming` (crear scheduled_job al crear cita) · reagendamiento conversacional completo (updateAppointment tool) · zonas horarias por sede en slots del mock (hoy offset fijo -04:00) · webhooks entrantes de proveedores → estados de cita.
+Trigger `appointment_upcoming` (crear scheduled_job al crear cita) · reagendamiento conversacional completo (updateAppointment tool) · webhooks entrantes de proveedores → estados de cita.
+
+## Zona horaria
+
+La hora local sale de `organizations.timezone` (zona IANA, `America/Santiago` por defecto) y el
+offset se calcula **por día** en `packages/scheduling/src/zona.ts`. No hay offsets escritos a
+mano en ninguna parte del camino de la agenda, y un test los busca
+(`apps/api/test/agenda-hora-chile.spec.ts`).
+
+Por qué importa: Chile está en `-04:00` en invierno y en `-03:00` de septiembre a abril. Con el
+offset fijo que había antes, un negocio abierto de 09:00 a 19:00 recibía ofertas de 10:00 a
+20:00 durante medio año —y en invierno el error desaparecía solo, que es la razón de que
+viviera meses sin que nadie lo notara—. Un rango de varios días puede cruzar el cambio de hora,
+así que el offset **nunca** se resuelve una vez por consulta: se resuelve por cada fecha.
+
+Una sede en otro país funciona igual: lo que manda es la zona, no un ajuste. Lo que no cambia
+son las citas ya guardadas: en la base viven como instantes absolutos.
