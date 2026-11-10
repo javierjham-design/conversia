@@ -71,3 +71,75 @@ describe("parseMessagingEvents", () => {
     expect(e).toMatchObject({ platform: "instagram", channelExternalId: "IG_9", senderId: "U1", externalId: "m_chg", text: "hola por changes" });
   });
 });
+
+/**
+ * C3(e) — casos nuevos que aparecen en producción con Instagram y que el v1 no cubría.
+ */
+describe("C3 — casos reales de Instagram", () => {
+  const sobre = (items: unknown[], object = "instagram") => ({ object, entry: [{ id: "ig-cuenta", messaging: items }] });
+
+  it("respuesta a una HISTORIA: llega como mensaje normal con su adjunto", () => {
+    const [e] = parseMessagingEvents(
+      sobre([
+        {
+          sender: { id: "igsid-1" },
+          recipient: { id: "ig-cuenta" },
+          timestamp: 1_762_000_000_000,
+          message: { mid: "mid.story", text: "me encantó este corte", reply_to: { story: { id: "story-1", url: "https://..." } } },
+        },
+      ]),
+    );
+    expect(e.text).toBe("me encantó este corte");
+    expect(e.senderId).toBe("igsid-1");
+    expect(e.externalId).toBe("mid.story");
+  });
+
+  it("adjunto CON texto: se quedan los dos (el texto manda, el adjunto se sabe)", () => {
+    const [e] = parseMessagingEvents(
+      sobre([
+        {
+          sender: { id: "igsid-2" },
+          recipient: { id: "ig-cuenta" },
+          message: { mid: "mid.ambos", text: "¿me haces este?", attachments: [{ type: "image", payload: { url: "https://..." } }] },
+        },
+      ]),
+    );
+    expect(e.text).toBe("¿me haces este?");
+    expect(e.attachmentType).toBe("image");
+  });
+
+  it("el ECO de lo que mandamos nosotros se descarta (si no, el bot se respondería solo)", () => {
+    expect(
+      parseMessagingEvents(
+        sobre([
+          { sender: { id: "ig-cuenta" }, recipient: { id: "igsid-3" }, message: { mid: "mid.eco", text: "hola, soy el asistente", is_echo: true } },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("un postback (botón) se ignora: no es un mensaje del cliente", () => {
+    expect(
+      parseMessagingEvents(sobre([{ sender: { id: "igsid-4" }, recipient: { id: "ig-cuenta" }, postback: { title: "Empezar", payload: "START" } }])),
+    ).toEqual([]);
+  });
+
+  it("los acuses de lectura y entrega tampoco son mensajes", () => {
+    expect(
+      parseMessagingEvents(
+        sobre([
+          { sender: { id: "igsid-5" }, recipient: { id: "ig-cuenta" }, read: { watermark: 1 } },
+          { sender: { id: "igsid-5" }, recipient: { id: "ig-cuenta" }, delivery: { mids: ["mid.x"] } },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("una mención en historia llega como adjunto, no como texto vacío", () => {
+    const [e] = parseMessagingEvents(
+      sobre([{ sender: { id: "igsid-6" }, recipient: { id: "ig-cuenta" }, message: { mid: "mid.mention", attachments: [{ type: "story_mention", payload: {} }] } }]),
+    );
+    expect(e.text).toBeNull();
+    expect(e.attachmentType).toBe("story_mention");
+  });
+});
