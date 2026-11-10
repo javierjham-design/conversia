@@ -528,3 +528,31 @@ Dos cosas que vale la pena recordar:
 - **Un mock con la FORMA equivocada tumba el panel entero.** Devolverle `{}` a una pantalla que
   espera un arreglo revienta el render, el error se lleva el AppShell y el síntoma es "Convi no
   aparece" — nada que ver con el widget.
+
+## Instagram y Messenger para clientes de Conversia (tanda C, 2026-11-10)
+
+El panel de Conversia conectaba SOLO WhatsApp: Instagram y Messenger decían «Próximamente» y
+el botón abría el asistente. El flujo existía —es el que usa TuBot— pero vivía en
+«Integraciones → Meta CRM», mezclado con Lead Ads, y su OAuth volvía siempre al panel de TuBot.
+
+- **#633 (C1)** — API: `authorize?purpose=messaging&return=/canales`, `state` firmado con
+  propósito y ruta (ver ADR-16), callback por marca, `connect` que no importa formularios y
+  deja el canal ya atendido, `GET /channels/:id/status` para canales de página, y la bandera
+  `META_MESSAGING_REVIEW_APPROVED` (ver ADR-15). El catálogo deja de decir «TuBot» fijo.
+- **#634 (C2)** — la pantalla: conectar con un botón, elegir página si hay varias, la misma
+  tarjeta de reporte adaptada, desconectar, y el aviso de revisión de Meta. La portada vuelve
+  a prometer multicanal SOLO con la bandera en true, decidido en el servidor.
+- **#635 (C3)** — runtime: un canal de redes ya no tumba un flujo (el nodo `send_text` llamaba
+  a `resolveChannelAuth` y lanzaba), los adjuntos le llegan al agente en castellano y con qué
+  hacer, y quedó comprobado que el cobro NO depende del canal y que el modo dueño sigue siendo
+  exclusivo de WhatsApp.
+- **#636 (C4)** — Convi conoce los tres canales (`estadoCanales`), el checklist suma el paso
+  OPCIONAL «redes», y los textos de catálogo y correos salen por marca.
+
+Tres cosas que vale la pena recordar:
+- **El `return` de un OAuth es un redirect abierto esperando a ocurrir.** Va validado, firmado
+  y vuelto a validar al abrir.
+- **«Conectado» sin asistente asignado es la peor versión de conectado**: el canal recibe y
+  nadie contesta. Por eso `connect` asigna el agente publicado.
+- **La ventana de 24 h de Meta no es un error**: es como funciona. Un flujo que se cae por eso
+  es un defecto nuestro, no de Meta.

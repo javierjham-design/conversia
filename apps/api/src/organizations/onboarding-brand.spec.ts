@@ -113,6 +113,8 @@ describe("GET /onboarding — gate por marca", () => {
       "whatsapp",
       "prueba",
       "pago",
+      // C4 — "redes" (Instagram/Messenger): OPCIONAL, no mueve `blockingTotal`.
+      "redes",
       "mini_sitio",
       "equipo",
       "pwa",

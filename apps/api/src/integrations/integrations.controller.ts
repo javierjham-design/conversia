@@ -477,7 +477,9 @@ export class IntegrationsController {
       return { conn, cfg, pass };
     });
 
-    const subject = "Correo de prueba — TuBot";
+    // C4 — el correo de prueba llega con el nombre de SU marca, no con el de la otra.
+    const marcaCorreo = brandOf(await this.prisma.admin.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } }).catch(() => null)).name;
+    const subject = `Correo de prueba — ${marcaCorreo}`;
     const html = "<p>✔ La conexión de correo de tu organización funciona correctamente.</p>";
     let ok = false;
     let detail = "";
@@ -1576,7 +1578,7 @@ export class IntegrationsController {
           organizationId: ctx.organizationId,
           endpointId: id,
           event: "test.ping",
-          payload: { test: true, message: "Entrega de prueba desde TuBot", occurredAt: new Date().toISOString() },
+          payload: { test: true, message: `Entrega de prueba desde ${brandOf(await tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { brand: true } }).catch(() => null)).name}`, occurredAt: new Date().toISOString() },
           status: "PENDING",
         },
       });
