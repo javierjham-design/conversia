@@ -5,10 +5,10 @@ import {
   fetchCalendarBusy,
   googleEventsToBusy,
   makeExternalBusy,
-  offsetForZoneOnDate,
   rangeForDates,
   type GoogleEvent,
 } from "./google-busy";
+import { offsetForZoneOnDate } from "./zona";
 import { NativeSchedulingProvider } from "./index";
 
 /**
@@ -290,7 +290,9 @@ const DATOS = {
   services: [{ id: "corte", name: "Corte", durationMin: 30 }],
   busy: [] as Array<{ professionalId: string; start: string; end: string }>,
   // nowMs no se puede inyectar desde acá: el rango es futuro para que `minAdvanceMin` no filtre.
-  config: { slotStepMin: 30, bufferMin: 0, minAdvanceMin: 0, offset: "-03:00" },
+  // El offset NO se escribe: sale de la zona. Las horas esperadas más abajo son "-03:00"
+  // porque en noviembre Chile está en -03:00, y eso lo tiene que deducir el motor.
+  config: { slotStepMin: 30, bufferMin: 0, minAdvanceMin: 0, timeZone: TZ },
 };
 // 2026-11-10 es MARTES.
 const CONSULTA = { from: "2026-11-10", to: "2026-11-10", serviceId: "corte" };

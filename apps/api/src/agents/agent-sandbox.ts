@@ -1,5 +1,5 @@
 import { resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
-import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider, withAppointmentDuration } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, DentalinkSchedulingProvider, MockSchedulingProvider, ZONA_POR_DEFECTO, withAppointmentDuration } from "@conversia/scheduling";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
 import type { CreateAppointmentInput, SchedAppointment, SchedulingProvider } from "@conversia/types";
 import { decryptSecret } from "../common/crypto";
@@ -101,18 +101,21 @@ export async function buildSandboxServices(
     scheduling = scoped(conn.provider === "CLARIVA" ? new ClarivaSchedulingProvider({ baseUrl, apiKey }) : new DentalinkSchedulingProvider({ baseUrl, token: apiKey }));
   } else {
     const data = await withTenant(orgId, async (tx) => {
-      const [clinics, professionals, services] = await Promise.all([
+      const [org, clinics, professionals, services] = await Promise.all([
+        tx.organization.findUnique({ where: { id: orgId }, select: { timezone: true } }),
         tx.clinic.findMany({ where: { active: true, deletedAt: null } }),
         tx.professional.findMany({ where: { active: true } }),
         tx.service.findMany({ where: { active: true } }),
       ]);
-      return { clinics, professionals, services };
+      return { org, clinics, professionals, services };
     });
     scheduling = scoped(new MockSchedulingProvider({
       clinics: data.clinics.map((c) => ({ id: c.id, name: c.name, address: c.address ?? undefined, timezone: c.timezone })),
       professionals: data.professionals.map((p) => ({ id: p.id, name: p.name, specialty: p.specialty ?? undefined })),
       services: data.services.map((s) => ({ id: s.code, name: s.name, durationMin: s.durationMin, price: s.price ? Number(s.price) : undefined, currency: s.currency })),
-      utcOffset: "-04:00",
+      // El probador tiene que mostrar las MISMAS horas que vería el cliente: la zona de la
+      // cuenta, con el offset del día (Chile cambia de hora).
+      timeZone: data.org?.timezone || ZONA_POR_DEFECTO,
     }));
   }
   // DURACIÓN DE CITA por agente (misma lógica que el worker): subdivide bloques y

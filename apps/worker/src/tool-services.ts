@@ -20,7 +20,7 @@ import { enqueueCalendarSync } from "./google-calendar";
 import { emitPlatformEvent } from "./platform-events";
 import { dispatchEvent, scheduleAppointmentReminders, startWorkflowByName } from "./workflow-runtime";
 import { fetchWebPageText, type ToolServices } from "@conversia/agents";
-import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider, withAppointmentDuration } from "@conversia/scheduling";
+import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider, NativeSchedulingProvider, ZONA_POR_DEFECTO, withAppointmentDuration } from "@conversia/scheduling";
 import { decryptCredential } from "./credentials";
 import type { SchedAppointment, SchedulingProvider } from "@conversia/types";
 
@@ -77,6 +77,7 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
   // Dentalink (Healthatom): token por tenant cifrado + ventana laboral configurable.
   if (kind === "DENTALINK" && connection) {
     const cfg = (connection.config ?? {}) as Record<string, unknown>;
+    const orgTz = await withTenant(orgId, (tx) => tx.organization.findUnique({ where: { id: orgId }, select: { timezone: true } }));
     let token = "";
     if (connection.credentialId) {
       const cred = await withTenant(orgId, (tx) =>
@@ -95,7 +96,10 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
       workStartHour: cfg.workStartHour ? Number(cfg.workStartHour) : undefined,
       workEndHour: cfg.workEndHour ? Number(cfg.workEndHour) : undefined,
       slotMinutes: cfg.slotMinutes ? Number(cfg.slotMinutes) : undefined,
-      utcOffset: typeof cfg.utcOffset === "string" ? cfg.utcOffset : undefined,
+      // La hora local sale de la ZONA de la cuenta, nunca de un offset guardado en la
+      // conexión: un "-04:00" en la configuración no sabe del cambio de hora de Chile y
+      // corría la agenda una hora completa de septiembre a abril.
+      timeZone: orgTz?.timezone || ZONA_POR_DEFECTO,
     });
   }
 
@@ -117,7 +121,7 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
     return { org, clinics, professionals, services, appts };
   });
   const agenda = ((data.org?.settings as Record<string, unknown> | null)?.agenda ?? {}) as {
-    slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number; offset?: string;
+    slotStepMin?: number; bufferMin?: number; minAdvanceMin?: number;
   };
   // ETAPA 2 — horas ocupadas del Google Calendar de cada profesional. `undefined` si el
   // tenant no lo usa: así el turno del bot no paga nada por una función que no tiene activa.
@@ -143,7 +147,8 @@ export async function getSchedulingProviderFor(orgId: string): Promise<Schedulin
     busy: data.appts
       .filter((a) => a.professionalId)
       .map((a) => ({ professionalId: a.professionalId as string, start: a.startsAt.toISOString(), end: a.endsAt.toISOString() })),
-    config: { slotStepMin: agenda.slotStepMin, bufferMin: agenda.bufferMin, minAdvanceMin: agenda.minAdvanceMin, offset: agenda.offset ?? "-04:00" },
+    // La zona de la cuenta decide la hora local de CADA día (Chile cambia de hora).
+    config: { slotStepMin: agenda.slotStepMin, bufferMin: agenda.bufferMin, minAdvanceMin: agenda.minAdvanceMin, timeZone: data.org?.timezone || ZONA_POR_DEFECTO },
     externalBusy,
   });
 }

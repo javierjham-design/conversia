@@ -461,7 +461,10 @@ sin reconectar, y el sondeo de cambios está gateado a la marca `conversia`.
   en api y worker, para que el cliente vea "Conversia" en la pantalla de Google.
 - Verificar la app ante Google: política de privacidad (ya publicada), dominio verificado y el
   video de `docs/GUION_VIDEO_GOOGLE.md`.
-- **Decidir el arreglo de la zona horaria** (informe en el PR #602): la agenda nativa usa un
-  offset fijo `-04:00` y Chile está en `-03:00` desde septiembre, así que las horas ofrecidas
-  están corridas una hora. Hoy no afecta a ninguna cuenta con citas reales de agenda nativa;
-  el helper que hace falta (`offsetForZoneOnDate`) ya quedó en el PR #604.
+- ~~Decidir el arreglo de la zona horaria~~ ✅ **RESUELTO (9-nov-2026)**: la agenda se rige por
+  la hora oficial de Chile. El offset ya no se escribe en ninguna parte —sale de
+  `organizations.timezone` y se calcula POR DÍA (`packages/scheduling/src/zona.ts`)—, así que un
+  rango que cruza el cambio de hora resuelve cada día por separado. Mismo arreglo en los
+  límites del día de F9 Caja, que tenía un `-03:00` fijo. Guardianes:
+  `packages/scheduling/src/zona-chile.test.ts`, `apps/api/test/agenda-hora-chile.spec.ts` y
+  `apps/api/test/caja-hora-chile.spec.ts`.

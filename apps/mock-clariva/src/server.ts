@@ -56,6 +56,16 @@ app.get("/api/v1/professionals", (_req, res) => res.json(professionals));
 app.get("/api/v1/services", (_req, res) => res.json(services));
 app.get("/api/v1/professionals/:id/services", (_req, res) => res.json(services));
 
+/**
+ * Offset de Chile en esa fecha. A PROPÓSITO no usa `@conversia/scheduling`: este servicio
+ * imita a un proveedor EXTERNO, y si compartiera nuestro código un error de offset se
+ * reflejaría en los dos lados y la prueba lo taparía.
+ */
+function offsetChile(date: string): string {
+  const partes = new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", timeZoneName: "longOffset" }).formatToParts(new Date(`${date}T12:00:00Z`));
+  return /GMT([+-]\d{2}:\d{2})/.exec(partes.find((p) => p.type === "timeZoneName")?.value ?? "")?.[1] ?? "-04:00";
+}
+
 app.get("/api/v1/availability", (req, res) => {
   const from = String(req.query.from ?? new Date().toISOString().slice(0, 10));
   const to = String(req.query.to ?? from);
@@ -68,7 +78,7 @@ app.get("/api/v1/availability", (req, res) => {
     const date = d.toISOString().slice(0, 10);
     for (const pr of professionals.filter((p) => !professionalId || p.id === professionalId)) {
       for (const time of ["10:00", "11:30", "15:00", "16:30"]) {
-        const start = `${date}T${time}:00-04:00`;
+        const start = `${date}T${time}:00${offsetChile(date)}`;
         const taken = [...appointments.values()].some(
           (a) => a.professionalId === pr.id && a.status !== "cancelled" && a.start === start,
         );

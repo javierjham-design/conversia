@@ -1,4 +1,5 @@
 import type { BusyInterval } from "./availability";
+import { offsetForZoneOnDate } from "./zona";
 
 /**
  * HORAS OCUPADAS EN GOOGLE CALENDAR (Etapa 2).
@@ -28,30 +29,12 @@ export interface GoogleEvent {
 }
 
 /**
- * Offset real de una zona IANA en una fecha ("YYYY-MM-DD" → "-03:00").
+ * "YYYY-MM-DD" + offset → instante ISO del comienzo de ese día local.
  *
  * Hace falta para los eventos de DÍA COMPLETO: Google los manda como fechas sin hora, y
- * "bloquea el 10 de noviembre" significa distinto en Santiago que en UTC. Usa el mismo `Intl`
- * que ya usa el repo en producción para formatear horas de Chile.
- *
- * Si la zona no se reconoce cae a UTC: bloquear el día corrido unas horas es mejor que no
- * bloquear nada o que tirar una excepción en el camino del bot.
+ * "bloquea el 10 de noviembre" significa distinto en Santiago que en UTC. El offset sale de
+ * `zona.ts`, que es quien sabe la hora oficial de cada día.
  */
-export function offsetForZoneOnDate(timeZone: string, date: string): string {
-  try {
-    const d = new Date(`${date}T12:00:00Z`);
-    const parts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" }).formatToParts(d);
-    const name = parts.find((p) => p.type === "timeZoneName")?.value ?? "";
-    const m = /GMT([+-]\d{2}:\d{2})/.exec(name);
-    if (m) return m[1];
-    if (/^GMT$/.test(name)) return "+00:00"; // Londres en invierno
-    return "+00:00";
-  } catch {
-    return "+00:00";
-  }
-}
-
-/** "YYYY-MM-DD" + offset → instante ISO del comienzo de ese día local. */
 function startOfDayISO(date: string, timeZone: string): string {
   return new Date(`${date}T00:00:00${offsetForZoneOnDate(timeZone, date)}`).toISOString();
 }

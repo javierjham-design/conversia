@@ -743,7 +743,8 @@ export class IntegrationsController {
         workStartHour: input.workStartHour ?? (existing?.config as any)?.workStartHour ?? 9,
         workEndHour: input.workEndHour ?? (existing?.config as any)?.workEndHour ?? 19,
         slotMinutes: input.slotMinutes ?? (existing?.config as any)?.slotMinutes ?? 30,
-        utcOffset: "-04:00",
+        // Sin `utcOffset`: la hora local la decide la ZONA de la cuenta (`organizations.timezone`)
+        // y se resuelve por fecha. Un offset guardado acá no sabe del cambio de hora de Chile.
       } as object;
       if (existing) {
         await tx.schedulingConnection.update({

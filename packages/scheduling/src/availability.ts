@@ -4,9 +4,12 @@
  * las citas ya ocupadas, la duración del servicio, la granularidad (bloque mínimo, ej 5
  * min), el buffer entre citas y la anticipación mínima, devuelve los SLOTS LIBRES.
  *
- * Todo configurable por cuenta/persona. La zona horaria se maneja con un offset fijo
- * (ej "-04:00") que arma los ISO 8601 locales; el calendario/DST fino queda para después.
+ * Todo configurable por cuenta/persona. La hora local sale de la ZONA de la cuenta
+ * (`America/Santiago` por defecto) y el offset se calcula POR DÍA: Chile cambia de hora,
+ * y un offset fijo corría toda la agenda una hora durante medio año. Ver `zona.ts`.
  */
+
+import { ZONA_POR_DEFECTO, offsetForZoneOnDate } from "./zona";
 
 export interface WorkBlock {
   day: number; // 0=domingo … 6=sábado
@@ -29,7 +32,13 @@ export interface NativeSlotInput {
   durationMin: number; // duración del servicio
   slotStepMin?: number; // granularidad; mínimo 5
   bufferMin?: number; // separación entre citas
-  offset?: string; // ej "-04:00" (default -04:00, zona de Chile)
+  /** Zona IANA del negocio (default "America/Santiago"). De aquí sale el offset de CADA día. */
+  timeZone?: string;
+  /**
+   * Offset fijo, SOLO como atajo para pruebas de la aritmética de cupos.
+   * En producción no se pasa: lo decide la zona, que es la que sabe del cambio de hora.
+   */
+  offset?: string;
   minAdvanceMin?: number; // no ofrecer slots antes de ahora + esto
   nowMs?: number; // inyectable para tests (default Date.now())
   maxSlots?: number; // tope defensivo (default 300)
@@ -66,7 +75,7 @@ export function computeNativeSlots(input: NativeSlotInput): NativeSlot[] {
   const step = Math.max(5, input.slotStepMin ?? 30); // mínimo 5 min
   const buffer = Math.max(0, input.bufferMin ?? 0);
   const dur = Math.max(1, input.durationMin);
-  const offset = input.offset ?? "-04:00";
+  const zona = input.timeZone || ZONA_POR_DEFECTO;
   const now = input.nowMs ?? Date.now();
   const minStartMs = now + (input.minAdvanceMin ?? 0) * 60000;
   const maxSlots = input.maxSlots ?? 300;
@@ -77,6 +86,9 @@ export function computeNativeSlots(input: NativeSlotInput): NativeSlot[] {
 
   for (const date of eachDate(input.fromDate, input.toDate)) {
     if (slots.length >= maxSlots) break;
+    // El offset se resuelve DÍA POR DÍA: un rango de una semana puede cruzar el cambio de
+    // hora, y ahí las 09:00 del lunes y las del domingo no son el mismo instante.
+    const offset = input.offset ?? offsetForZoneOnDate(zona, date);
     const wd = weekdayOf(date);
     const blocks = input.workBlocks.filter((b) => b.day === wd);
     for (const block of blocks) {

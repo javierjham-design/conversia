@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, NotFoundException, Post, Qu
 import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { ZONA_POR_DEFECTO, fechaDesplazada, fechaEnZona, inicioDeFechaEnZona } from "@conversia/scheduling";
 import { PrismaService } from "../prisma.service";
 import { requirePermission } from "../tenancy/permissions";
 import { csvCell } from "@conversia/types";
@@ -26,18 +27,28 @@ const entrySchema = z.object({
   idempotencyKey: z.string().max(100).optional(),
 });
 
-/** Límites del día en zona de Chile (-03:00). date = YYYY-MM-DD (default hoy). */
-function dayRange(date?: string): { from: Date; to: Date } {
-  const base = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
-  const from = new Date(`${base}T00:00:00-03:00`);
-  const to = new Date(from.getTime() + 24 * 3600_000);
-  return { from, to };
+/**
+ * Límites del día de caja en la HORA OFICIAL DE CHILE. date = YYYY-MM-DD (default hoy).
+ *
+ * Antes el offset estaba escrito a mano ("-03:00") y "hoy" se calculaba restando 3 horas a
+ * UTC. Eso es correcto solo medio año: en invierno Chile está en -04:00, y entonces lo que
+ * se cobraba entre las 23:00 y la medianoche caía en la caja del día SIGUIENTE. El cierre
+ * de caja no cuadraba y no había forma de verlo desde la pantalla.
+ */
+function dayRange(date?: string): { from: Date; to: Date; base: string } {
+  const base = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : fechaEnZona(ZONA_POR_DEFECTO);
+  return {
+    from: inicioDeFechaEnZona(ZONA_POR_DEFECTO, base),
+    // El día siguiente, no "+24 h": el día del cambio de hora dura 23 o 25.
+    to: inicioDeFechaEnZona(ZONA_POR_DEFECTO, fechaDesplazada(base, 1)),
+    base,
+  };
 }
 function rangeFor(range: "day" | "week" | "month", date?: string): { from: Date; to: Date } {
-  const { from, to } = dayRange(date);
+  const { from, to, base } = dayRange(date);
   if (range === "day") return { from, to };
-  if (range === "week") return { from: new Date(from.getTime() - 6 * 24 * 3600_000), to };
-  return { from: new Date(from.getTime() - 29 * 24 * 3600_000), to };
+  const dias = range === "week" ? 6 : 29;
+  return { from: inicioDeFechaEnZona(ZONA_POR_DEFECTO, fechaDesplazada(base, -dias)), to };
 }
 
 export type Entry = { id: string; type: string; method: string; amount: number; currency: string; status: string; concept: string | null; refType: string | null; refId: string | null; reversalOf: string | null; origin: string; createdById: string; createdAt: Date };
