@@ -210,6 +210,9 @@ export function SupportWidget() {
     (a: Extract<AssistantAction, { type: "button" }>) => {
       if (a.kind === "pago") router.push("/cobros");
       else if (a.kind === "whatsapp") router.push("/canales");
+      // A3 — "probar=1" hace que Canales arranque la prueba sola: el dueño no tiene que
+      // buscar el botón después de que Convi le dijo que probara.
+      else if (a.kind === "whatsapp_test") router.push("/canales?probar=1");
       else if (a.kind === "interno" && a.payload) router.push(a.payload);
       else if (a.kind === "externo" && a.payload) window.open(a.payload, "_blank", "noopener,noreferrer");
     },
@@ -634,7 +637,7 @@ export function SupportWidget() {
                       {m.actions.map((a, j) =>
                         a.type === "button" ? (
                           <button key={j} onClick={() => tocarBoton(a)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "7px 12px", display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            {a.kind === "pago" ? <CreditCard size={14} /> : a.kind === "whatsapp" ? <MessageCircle size={14} /> : a.kind === "externo" ? <ExternalLink size={14} /> : null}
+                            {a.kind === "pago" ? <CreditCard size={14} /> : a.kind === "whatsapp" || a.kind === "whatsapp_test" ? <MessageCircle size={14} /> : a.kind === "externo" ? <ExternalLink size={14} /> : null}
                             {a.label}
                           </button>
                         ) : null,

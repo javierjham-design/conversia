@@ -124,6 +124,19 @@ export function ReporteDeCanal({
     void leer();
   }, [leer]);
 
+  /**
+   * A3 — Convi puede mandar al dueño directo a probar (`/canales?probar=1`). Se dispara una
+   * sola vez: si no, cada relectura del reporte reiniciaría la prueba.
+   */
+  const arranqueRef = useRef(false);
+  useEffect(() => {
+    if (arranqueRef.current || !r) return;
+    if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("probar") !== "1") return;
+    arranqueRef.current = true;
+    void probar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r]);
+
   // Mientras Meta publica el número, la pantalla se refresca sola: era justo el caso en que
   // el dueño veía "Conectado ·" sin número y no sabía si tenía que hacer algo.
   useEffect(() => {

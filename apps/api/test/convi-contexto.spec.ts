@@ -47,6 +47,9 @@ function prismaCon(opts: { features?: Record<string, unknown>; lotes?: number; g
   return { admin, withTenant: async (_o: string, fn: (t: unknown) => unknown) => fn(admin) } as never;
 }
 
+/** Doble del lector del reporte de canales (A3): estos tests prueban el contexto, no el reporte. */
+const estadoStub = () => ({ reporte: async () => ({}), invalidar: async () => undefined }) as never;
+
 describe("minutos estimados del montaje", () => {
   it("cada paso trae su estimación (si falta una, la barra de progreso miente)", () => {
     const sinMinutos = buildSetupSteps(EMPTY_SETUP_FACTS).filter((s) => !(s.minutes > 0));
@@ -83,7 +86,7 @@ describe("minutos estimados del montaje", () => {
 
 describe("saldo en el contexto del copiloto", () => {
   it("plan por CONVERSACIONES: lo nombra como conversaciones", async () => {
-    const svc = new AssistantService(prismaCon({ features: { conversationDebitsWallet: true }, lotes: 120 }));
+    const svc = new AssistantService(prismaCon({ features: { conversationDebitsWallet: true }, lotes: 120 }), estadoStub());
     const c = await svc.buildContext("org-1");
     expect(c.saldo).toBe("120 conversaciones disponibles");
     expect(c.saldoRestante).toBe(120);
@@ -91,7 +94,7 @@ describe("saldo en el contexto del copiloto", () => {
   });
 
   it("plan por CRÉDITOS IA: ya NO queda en blanco (regresión de CRE 2)", async () => {
-    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }));
+    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }), estadoStub());
     const c = await svc.buildContext("org-1");
     expect(c.saldo).toContain("450 créditos");
     expect(c.saldoRestante).toBe(450);
@@ -102,27 +105,27 @@ describe("saldo en el contexto del copiloto", () => {
     // "te quedan 450 créditos" no le dice nada a nadie; el copiloto habla de créditos pero
     // tiene que poder decir a cuántas conversaciones equivalen, con el MISMO estimador que
     // el medidor del panel y los avisos del worker.
-    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }));
+    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 450 }), estadoStub());
     expect((await svc.buildContext("org-1")).saldo).toMatch(/≈ \d+ conversaciones/);
   });
 
   it("en conversaciones NO se traduce nada (una conversación ya se cuenta de a una)", async () => {
-    const svc = new AssistantService(prismaCon({ features: { conversationDebitsWallet: true }, lotes: 120 }));
+    const svc = new AssistantService(prismaCon({ features: { conversationDebitsWallet: true }, lotes: 120 }), estadoStub());
     expect((await svc.buildContext("org-1")).saldo).toBe("120 conversaciones disponibles");
   });
 
   it("la gracia ya usada se descuenta del saldo que se le muestra", async () => {
-    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 100, graceUsed: 30 }));
+    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 100, graceUsed: 30 }), estadoStub());
     expect((await svc.buildContext("org-1")).saldoRestante).toBe(70);
   });
 
   it("nunca muestra un saldo negativo", async () => {
-    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 10, graceUsed: 90 }));
+    const svc = new AssistantService(prismaCon({ features: { aiCreditsWallet: true }, lotes: 10, graceUsed: 90 }), estadoStub());
     expect((await svc.buildContext("org-1")).saldoRestante).toBe(0);
   });
 
   it("un plan que no debita del monedero no muestra saldo", async () => {
-    const svc = new AssistantService(prismaCon({ features: {}, lotes: 500 }));
+    const svc = new AssistantService(prismaCon({ features: {}, lotes: 500 }), estadoStub());
     const c = await svc.buildContext("org-1");
     expect(c.saldo).toBeNull();
     expect(c.saldoRestante).toBeNull();
@@ -131,12 +134,12 @@ describe("saldo en el contexto del copiloto", () => {
 
 describe("señales proactivas", () => {
   it("cuenta las citas por confirmar", async () => {
-    const svc = new AssistantService(prismaCon({ citas: 3 }));
+    const svc = new AssistantService(prismaCon({ citas: 3 }), estadoStub());
     expect((await svc.buildContext("org-1")).citasPorConfirmar).toBe(3);
   });
 
   it("el contexto trae los minutos que faltan", async () => {
-    const svc = new AssistantService(prismaCon({}));
+    const svc = new AssistantService(prismaCon({}), estadoStub());
     expect((await svc.buildContext("org-1")).remainingMinutes).toBeGreaterThan(0);
   });
 });

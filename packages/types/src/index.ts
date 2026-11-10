@@ -956,8 +956,10 @@ export type AssistantAction =
 /**
  * Qué hace el botón al tocarlo. `whatsapp` y `pago` son los dos casos que NO pueden
  * ocurrir sin clic; `interno` navega dentro del panel y `externo` abre un enlace.
+ * `whatsapp_test` abre Canales YA en modo de prueba: es la diferencia entre "anda a
+ * Canales y aprieta Probar" y dejarlo probando.
  */
-export type AssistantButtonKind = "whatsapp" | "pago" | "interno" | "externo";
+export type AssistantButtonKind = "whatsapp" | "whatsapp_test" | "pago" | "interno" | "externo";
 
 /** Respuesta de `POST /assistant/message`. */
 export interface AssistantTurn {

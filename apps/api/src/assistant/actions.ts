@@ -72,7 +72,7 @@ const highlightSchema = z.object({
 const buttonSchema = z.object({
   type: z.literal("button"),
   label: z.string().trim().min(1).max(40),
-  kind: z.enum(["whatsapp", "pago", "interno", "externo"]),
+  kind: z.enum(["whatsapp", "whatsapp_test", "pago", "interno", "externo"]),
   payload: z.string().trim().max(300).optional(),
 });
 const refreshSchema = z.object({ type: z.literal("checklist_refresh") });
