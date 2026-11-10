@@ -248,6 +248,16 @@ const envSchema = z.object({
   // de login creada en la app (opcional; sin ella se piden scopes sueltos).
   META_CRM_APP_ID: z.string().optional().default(""),
   META_CRM_CONFIG_ID: z.string().optional().default(""),
+  /** C1 — configuración de Login for Business SOLO con permisos de mensajería (sin leads ni ads). */
+  META_CRM_CONFIG_ID_MESSAGING: z.string().optional().default(""),
+  /**
+   * C0/C1 — ¿Meta ya aprobó la App Review de mensajería?
+   *
+   * Mientras sea false, Instagram y Messenger solo reciben los DM de cuentas con rol en la
+   * app. El producto tiene que comportarse bien en los dos estados, así que la UI lo dice en
+   * vez de prometer algo que Meta todavía no entrega.
+   */
+  META_MESSAGING_REVIEW_APPROVED: z.coerce.boolean().optional().default(false),
 
   SCHEDULING_PROVIDER: z.enum(["mock", "clariva"]).default("mock"),
   CLARIVA_BASE_URL: z.string().default("http://localhost:4010"),

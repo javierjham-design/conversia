@@ -148,6 +148,12 @@ export class PublicController {
       esVersion,
       // true si la marca ya tiene config → el front habilita el botón "Conectar".
       ready: Boolean(env.META_APP_ID && configId),
+      /**
+       * C1 — ¿Meta aprobó ya la App Review de mensajería? Mientras sea false, Instagram y
+       * Messenger solo reciben DM de cuentas con rol en la app, y la UI lo dice en vez de
+       * prometer lo que Meta todavía no entrega.
+       */
+      messagingReviewApproved: env.META_MESSAGING_REVIEW_APPROVED === true,
     };
   }
 
