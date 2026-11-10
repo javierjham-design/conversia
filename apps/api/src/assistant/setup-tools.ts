@@ -86,6 +86,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
+        name: "estadoCanales",
+        description:
+          "Estado de TODOS los canales del cliente (WhatsApp, Instagram y Messenger): cuáles están conectados, quién atiende cada uno, qué está pendiente y, en las redes, si Meta todavía está revisando la app. Úsalo cuando pregunten por Instagram, Messenger, «dónde me pueden escribir» o quieran conectar otra red.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
         name: "listarPlantillasAsistente",
         description: "Lista las plantillas de asistente disponibles para el rubro del negocio, con su nombre y para qué sirven. Úsalo antes de crear un asistente.",
         inputJsonSchema: { type: "object", properties: {} },
@@ -330,10 +336,15 @@ function estadoDelCanal(r: ReporteDeCanal): "activandose" | "interrumpido" | "ac
  * el diagnóstico de siempre en vez de reventar.
  */
 async function reportesDeWhatsapp(prisma: PrismaService, ctx: SetupToolCtx): Promise<ReporteDeCanal[]> {
+  return reportesDeCanales(prisma, ctx, ["WHATSAPP_CLOUD"]);
+}
+
+/** Igual, para los tipos de canal que se le pidan. */
+async function reportesDeCanales(prisma: PrismaService, ctx: SetupToolCtx, tipos: string[]): Promise<ReporteDeCanal[]> {
   if (!ctx.estado) return [];
   const canales = await prisma.admin.channelConnection
     .findMany({
-      where: { organizationId: ctx.organizationId, type: "WHATSAPP_CLOUD", status: { not: "inactive" } },
+      where: { organizationId: ctx.organizationId, type: { in: tipos as never }, status: { not: "inactive" } },
       select: { id: true },
       orderBy: { createdAt: "asc" },
       take: 5,
@@ -341,7 +352,7 @@ async function reportesDeWhatsapp(prisma: PrismaService, ctx: SetupToolCtx): Pro
     .catch(() => [] as Array<{ id: string }>);
   const out: ReporteDeCanal[] = [];
   for (const c of canales) {
-    const r = await ctx.estado.reporte(ctx.organizationId, c.id).catch(() => null);
+    const r = await ctx.estado!.reporte(ctx.organizationId, c.id).catch(() => null);
     if (r) out.push(r);
   }
   return out;
@@ -410,6 +421,40 @@ export async function runSetupTool(
     return {
       content: JSON.stringify({ conectado: true, resumen: reportes.map(resumirReporte).join(" "), canales }),
       actions: [{ type: "button", label: "Probar mi WhatsApp", kind: "whatsapp_test" }],
+    };
+  }
+
+  /**
+   * C4 — TODOS los canales de una vez. Convi tenía que poder hablar de Instagram y
+   * Messenger igual que de WhatsApp: son el mismo asistente y la misma bandeja.
+   */
+  if (name === "estadoCanales") {
+    const reportes = await reportesDeCanales(prisma, ctx, ["WHATSAPP_CLOUD", "INSTAGRAM", "MESSENGER"]);
+    const NOMBRE: Record<string, string> = { WHATSAPP_CLOUD: "WhatsApp", INSTAGRAM: "Instagram", MESSENGER: "Messenger" };
+    const canales = reportes.map((r) => ({
+      canal: NOMBRE[r.channelType] ?? r.channelType,
+      nombre: r.channelName,
+      numero: r.displayPhone,
+      estado: estadoDelCanal(r),
+      atiende: r.defaultAgent?.name ?? null,
+      // En redes, mientras Meta no apruebe la App Review solo llegan los mensajes de
+      // cuentas con rol en la app. No es un problema del cliente y hay que decirlo así.
+      enRevisionDeMeta: r.reviewApproved === false ? true : undefined,
+      pendientes: r.checks.filter((c) => !c.ok && !c.unknown).map((c) => ({ que: c.label, explicacion: c.detail, comoSeArregla: c.fix ?? null })),
+    }));
+    const faltan = ["INSTAGRAM", "MESSENGER"].filter((t) => !reportes.some((r) => r.channelType === t)).map((t) => NOMBRE[t]);
+    return {
+      content: JSON.stringify({
+        canales,
+        sinConectar: faltan,
+        comoSeConectan: {
+          WhatsApp: "Desde Canales, con el número que ya usa (coexistencia) o uno nuevo.",
+          Instagram: "Desde Canales, con un botón. Necesita una página de Facebook vinculada a su cuenta de Instagram profesional.",
+          Messenger: "Desde Canales, con un botón. Tiene que ser administrador de la página.",
+        },
+        nota: "El MISMO asistente atiende los tres y todo llega a la misma bandeja.",
+      }),
+      actions: faltan.length || canales.length ? [{ type: "button", label: "Ir a Canales", kind: "interno", payload: "/canales" }] : [],
     };
   }
 

@@ -112,3 +112,51 @@ organización. Sin borrado automático por ahora.
 
 **Costo aceptado**: dos tablas más bajo RLS y una llamada barata de resumen cada ~20 turnos de
 una conversación larga.
+
+## ADR-15 — `META_MESSAGING_REVIEW_APPROVED`: el producto se comporta bien en los DOS estados
+
+**Contexto**: hasta que Meta apruebe la App Review de mensajería, Instagram y Messenger solo
+entregan los DM de cuentas **con rol en la app**. Eso no se arregla con código y puede tardar
+semanas.
+
+**Decisión**: una bandera de plataforma (default `false`) que se expone en
+`/public/meta-config` como `messagingReviewApproved`, y el producto entero se comporta bien en
+los dos estados:
+
+- **Se puede conectar igual.** El cliente conecta su Instagram y el canal queda operativo; lo
+  que no llega todavía son los mensajes del público.
+- **La tarjeta lo dice con calma**: «Meta está revisando nuestra app. Por ahora tu asistente
+  solo recibe los mensajes de cuentas de prueba». Con un botón para que le avisen, no una
+  fecha inventada.
+- **La portada NO lo promete** mientras sea `false`. Decidir eso en el cliente no sirve: la
+  portada se prerenderiza, así que el HTML que ve Google —y el revisor de anuncios de Meta—
+  saldría prometiéndolo siempre. Se lee en el servidor.
+- **Convi lo explica** igual: no es un error, no se puede apurar, y cuando Meta apruebe
+  empieza a llegar todo sin que el cliente haga nada.
+
+**Por qué no esperar a la aprobación para construirlo**: el trabajo de conexión, runtime y
+cobro es el mismo, y dejarlo listo detrás de una bandera convierte el trámite de Meta en un
+interruptor en vez de en un proyecto.
+
+## ADR-16 — El OAuth de mensajería vuelve a la marca del cliente, con `return` firmado
+
+**Contexto**: `GET integrations/meta-crm/oauth/authorize` servía a Lead Ads y su callback
+redirigía SIEMPRE a `WEB_URL` (el panel de TuBot). Un cliente de Conversia que conectara
+Instagram desde su pantalla de Canales terminaba en el panel de otra marca.
+
+**Decisión**: el `state` del OAuth —que ya viajaba firmado con el `orgId`— ahora lleva también
+el **propósito** (`leads` | `messaging`) y la **ruta de retorno**. El callback redirige a
+`brandOf(org).webUrl + retorno` con `?meta=ok|permisos|error`.
+
+**La parte delicada es el `retorno`**: es un dato que viene de la URL y termina en un
+`Location:`. Sin cuidado, es un **redirect abierto** — el truco clásico de usar un dominio de
+confianza para mandar a alguien a otro lado. Por eso: solo rutas relativas (nada de `//`, `:`,
+`\` ni `..`), validadas con zod, **firmadas** dentro del `state`, y **vuelto a validar al
+abrir**. Quitar esa validación pone 11 tests en rojo.
+
+**Compatibilidad**: sin `retorno` todo sigue igual —TuBot vuelve a `/integrations/meta-crm`
+con sus parámetros `oauth=` de siempre— y el formato viejo del `state` se sigue aceptando,
+para que un viaje a Meta que empezó antes del cambio no quede colgado a mitad de camino.
+
+**Los permisos exigidos dependen del propósito**: pedirle `leads_retrieval` a quien solo
+quiere contestar sus DM lo dejaba afuera por un permiso que no necesita.

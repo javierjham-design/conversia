@@ -88,6 +88,8 @@ export interface SetupFacts {
   publishedAgents: number;
   /** Hay un canal/número de WhatsApp activo. */
   whatsappConnected: boolean;
+  /** C4 — Instagram o Messenger conectados (paso OPCIONAL: no bloquea el 100%). */
+  socialChannels: number;
   /** Canales activos CON `defaultAgentId`: sin esto nadie responde en el número. */
   channelsWithAgent: number;
   /** El bot ya respondió al menos un mensaje real (OUTBOUND de autor AGENT). */
@@ -126,6 +128,7 @@ export const EMPTY_SETUP_FACTS: SetupFacts = {
   googleCalendarConnected: false,
   publishedAgents: 0,
   whatsappConnected: false,
+  socialChannels: 0,
   channelsWithAgent: 0,
   botReplied: false,
   planActive: false,
@@ -283,6 +286,18 @@ export function buildSetupSteps(facts: SetupFacts): SetupChecklistStep[] {
           : undefined,
     }),
     // ---- Opcionales: suman, pero JAMÁS impiden llegar al 100% ----
+    // C4 — redes. No bloquea: a muchos negocios sus clientes les escriben solo por WhatsApp,
+    // y exigirles conectar Instagram para llegar al 100% sería inventarles una tarea.
+    step({
+      key: "redes",
+      label: "Conecta Instagram o Messenger (opcional)",
+      description: "Si tus clientes también te escriben por ahí, el mismo asistente les responde y todo llega a la misma bandeja.",
+      ctaLabel: "Conectar redes",
+      href: "/canales",
+      done: facts.socialChannels > 0,
+      minutes: 2,
+      blocking: false,
+    }),
     step({
       key: "mini_sitio",
       label: "Publica tu mini-sitio",
@@ -430,6 +445,7 @@ export async function readSetupFacts(
     publishedAgents,
     activeChannels,
     channelsWithAgent,
+    socialChannels,
     waNumbers,
     botReply,
     activeSub,
@@ -454,6 +470,8 @@ export async function readSetupFacts(
     admin.channelConnection.count({ where: { organizationId, status: "active" } }).catch(() => 0),
     // CON agente asignado: sin defaultAgentId el número queda conectado y mudo (hallazgo 2).
     admin.channelConnection.count({ where: { organizationId, status: "active", defaultAgentId: { not: null } } }).catch(() => 0),
+    // C4 — canales de redes conectados (paso opcional "redes").
+    admin.channelConnection.count({ where: { organizationId, status: "active", type: { in: ["INSTAGRAM", "MESSENGER"] as never } } }).catch(() => 0),
     admin.whatsappPhoneNumber.count({ where: { organizationId, status: "active" } }).catch(() => 0),
     // Prueba real: un mensaje SALIENTE escrito por el AGENTE (no por una persona del equipo).
     admin.message.findFirst({ where: { organizationId, direction: "OUTBOUND", authorType: "AGENT" }, select: { id: true } }).catch(() => null),
@@ -498,6 +516,7 @@ export async function readSetupFacts(
     publishedAgents,
     whatsappConnected: activeChannels > 0 || waNumbers > 0,
     channelsWithAgent,
+    socialChannels,
     botReplied: !!botReply,
     planActive: !!activeSub,
     // La recarga automática solo cuenta si tiene el CONSENTIMIENTO: sin él el worker no
