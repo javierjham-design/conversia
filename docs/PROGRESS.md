@@ -468,3 +468,40 @@ sin reconectar, y el sondeo de cambios está gateado a la marca `conversia`.
   límites del día de F9 Caja, que tenía un `-03:00` fijo. Guardianes:
   `packages/scheduling/src/zona-chile.test.ts`, `apps/api/test/agenda-hora-chile.spec.ts` y
   `apps/api/test/caja-hora-chile.spec.ts`.
+
+## Canales: el dueño VE que su WhatsApp quedó conectado (tanda A, 2026-11-10)
+
+El reclamo era "conecté y la página se ve igual". Antes de tocar nada se reprodujo en el
+stack local, con cuatro organizaciones en el estado exacto en que las deja una conexión
+real, midiendo la API y el navegador. Eran **tres** caminos distintos, no uno:
+
+1. **El número faltaba, no estaba vacío.** En coexistencia el canal nace `active` con
+   `config.pendingNumber` y SIN fila en `whatsapp_phone_numbers`, así que `GET /channels`
+   devolvía `displayPhone: null` y el encabezado quedaba en "Conectado ·", sin nada después
+   del punto.
+2. **El pie contradecía al encabezado.** El paso del checklist exige
+   `whatsappConnected && channelsWithAgent > 0`, así que un canal conectado sin asistente
+   dejaba abajo "Paso pendiente: conecta tu número de WhatsApp".
+3. **La página solo miraba `status === "active"`.** Cualquier otro estado dejaba el bloque
+   de conexión arriba, idéntico a antes de conectar; el banner rojo solo cubría `error`.
+
+- **#626 (A1)** — `GET /channels/:id/status`: número, nombre verificado, calidad, modo,
+  quién atiende, si Meta nos avisa de los mensajes, última actividad y `checks` accionables.
+  El armado es PURO (`channel-status.ts`) y el IO + la caché de 60 s viven en el servicio.
+  `POST /channels/:id/test` —que usa el panel de TuBot en producción— pasó a leer el número
+  por la misma función, con sus cinco respuestas fijadas en el test.
+- **#628 (A2)** — la pantalla: tarjeta de reporte como primer elemento en cuanto existe
+  CUALQUIER canal, "Activándose" con refresco solo cada 15 s, tercer texto del checklist
+  ("Conectado, falta asignar el asistente") con el botón que lo asigna, y "Probar ahora"
+  con enlace wa.me + QR que detecta el mensaje entrante y el tiempo de respuesta.
+- **#629 (A3)** — Convi lee el mismo reporte (`estadoWhatsapp`), distingue "activándose" de
+  "roto", no alarma con lo que Meta no contestó y entrega el botón que abre Canales ya
+  probando.
+
+Tres decisiones que vale la pena recordar:
+- **Un tercer estado `unknown` en los chequeos.** Un hipo de Graph no puede pintar una cruz
+  roja sobre una cuenta sana, y un `ok: true` mentiría. Se pinta en gris y no cuenta.
+- **El GET del reporte no escribe.** Se lee en bucle durante la prueba; marcar el canal como
+  caído desde ahí convertiría un error transitorio de Meta en un cambio de estado del canal.
+- **La clave `whatsapp` del checklist no cambió** (la usan Convi y el copiloto): lo que
+  cambia es lo que se le dice al dueño.
