@@ -100,6 +100,35 @@ function makeDeps(): EngineDeps {
         return { message, phone: conversation.contact.phone, channelConnectionId: conversation.channelConnectionId };
       });
       if (!data) return;
+      /**
+       * C3 — contacto SIN teléfono = Instagram o Messenger. Antes esto seguía derecho a
+       * `resolveChannelAuth`, que no encuentra un canal de WhatsApp y LANZA: el flujo entero
+       * se caía por un recordatorio que no se podía mandar. Ahora sale por la página, y si
+       * está fuera de la ventana de 24 h de Meta queda registrado como OMITIDO —no hay nada
+       * roto: así funciona Meta— y el flujo sigue por su rama normal.
+       */
+      if (!data.phone) {
+        const { enviarPorPagina } = await import("./messaging-send.js");
+        const r = await enviarPorPagina(ctx.organizationId, ctx.conversationId!, data.message.id, text);
+        if (r === "omitido-ventana" || r === "sin-identidad") {
+          await withTenant(ctx.organizationId, (tx) =>
+            tx.integrationEvent.create({
+              data: {
+                organizationId: ctx.organizationId,
+                provider: "meta_crm",
+                type: "messaging.omitido",
+                status: "warning",
+                message:
+                  r === "omitido-ventana"
+                    ? "Mensaje del flujo omitido: fuera de la ventana de 24 h de Meta (en Instagram y Messenger hay que esperar a que el cliente escriba)"
+                    : "Mensaje del flujo omitido: el contacto no tiene identidad de la red",
+                payload: { conversationId: ctx.conversationId, messageId: data.message.id } as object,
+              },
+            }),
+          ).catch(() => undefined);
+        }
+        return;
+      }
       // Número + token reales del canal de la conversación (antes se enviaba
       // con un id sintético "wf:<org>" que solo funcionaba en mock).
       const auth = await resolveChannelAuth(ctx.organizationId, { channelConnectionId: data.channelConnectionId });
@@ -436,7 +465,25 @@ function makeDeps(): EngineDeps {
           where: { id: ctx.conversationId! },
           include: { contact: true },
         });
-        if (!conversation?.contact.phone) return null;
+        // C3 — sin teléfono es Instagram/Messenger: ahí NO existen las plantillas. Antes
+        // se salía en silencio; ahora queda constancia de que el paso se omitió a propósito.
+        if (!conversation?.contact.phone) {
+          if (conversation) {
+            await tx.integrationEvent
+              .create({
+                data: {
+                  organizationId: ctx.organizationId,
+                  provider: "meta_crm",
+                  type: "messaging.omitido",
+                  status: "warning",
+                  message: "Plantilla omitida: Instagram y Messenger no admiten plantillas; solo se puede responder dentro de la ventana de 24 h",
+                  payload: { conversationId: ctx.conversationId } as object,
+                },
+              })
+              .catch(() => undefined);
+          }
+          return null;
+        }
         let template = wantName
           ? await tx.whatsappTemplate.findFirst({ where: { name: wantName, status: "APPROVED" }, orderBy: { updatedAt: "desc" } })
           : null;

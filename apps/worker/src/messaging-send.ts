@@ -47,6 +47,13 @@ export function messagingChannelInfo(channel: { type: string; config: unknown } 
 }
 
 /**
+ * Resultado del envío por página. C3 — hace falta distinguir "no se pudo" de "no
+ * correspondía": fuera de la ventana de 24 h de Meta no hay nada roto, simplemente no se
+ * puede escribir primero, y un flujo no debería fallar por eso.
+ */
+export type ResultadoEnvioPagina = "no-aplica" | "enviado" | "omitido-ventana" | "sin-identidad" | "fallo";
+
+/**
  * Envía texto a un contacto de Messenger/IG y actualiza el estado del mensaje.
  * Devuelve true si el canal ERA de mensajería (haya salido bien o mal).
  */
@@ -56,6 +63,16 @@ export async function trySendMessagingReply(
   messageId: string,
   text: string,
 ): Promise<boolean> {
+  return (await enviarPorPagina(organizationId, conversationId, messageId, text)) !== "no-aplica";
+}
+
+/** Igual que `trySendMessagingReply`, pero contando QUÉ pasó. */
+export async function enviarPorPagina(
+  organizationId: string,
+  conversationId: string,
+  messageId: string,
+  text: string,
+): Promise<ResultadoEnvioPagina> {
   const info = await withTenant(organizationId, async (tx) => {
     const conversation = await tx.conversation.findUnique({ where: { id: conversationId } });
     if (!conversation?.channelConnectionId) return null;
@@ -73,19 +90,19 @@ export async function trySendMessagingReply(
     });
     return { mi, recipientId: identity?.externalId ?? null, lastInboundAt: lastInbound?.createdAt ?? null };
   });
-  if (!info) return false; // no es un canal de mensajería de redes
+  if (!info) return "no-aplica"; // no es un canal de mensajería de redes
 
   const fail = (error: string) =>
     withTenant(organizationId, (tx) => tx.message.update({ where: { id: messageId }, data: { status: "FAILED", error: error.slice(0, 500) } }));
 
   if (!info.recipientId) {
     await fail("Contacto sin identidad de la red (PSID/IGSID) — no se puede responder");
-    return true;
+    return "sin-identidad";
   }
   // Ventana de 24 h (sin plantillas en IG/Messenger: fuera de ventana no hay envío)
   if (!info.lastInboundAt || Date.now() - info.lastInboundAt.getTime() > 24 * 3600 * 1000) {
     await fail("Fuera de la ventana de 24 h de Meta: el contacto debe escribir primero para poder responderle");
-    return true;
+    return "omitido-ventana";
   }
 
   try {
@@ -107,6 +124,7 @@ export async function trySendMessagingReply(
     );
   } catch (err) {
     await fail((err as Error).message);
+    return "fallo";
   }
-  return true;
+  return "enviado";
 }

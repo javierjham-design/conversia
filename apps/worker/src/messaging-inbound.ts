@@ -133,6 +133,28 @@ async function enrichContactName(
   }
 }
 
+/**
+ * C3 — qué ve el AGENTE cuando el cliente manda solo una foto, un audio o un archivo.
+ *
+ * Antes el cuerpo quedaba como `[image]`: en inglés, sin sujeto y sin decirle al agente qué
+ * hacer con eso. El agente no recibe el archivo (la visión y la transcripción de Instagram
+ * quedan para después), así que lo honesto es que SEPA que llegó algo, que no puede verlo y
+ * que tiene que pedir el detalle por escrito — en vez de inventar una respuesta sobre una
+ * imagen que nunca vio.
+ */
+export function descripcionDeAdjunto(tipo: string | null | undefined): string {
+  const QUE: Record<string, string> = {
+    image: "una foto",
+    video: "un video",
+    audio: "un audio",
+    file: "un archivo",
+    share: "algo que compartió",
+    story_mention: "una mención en su historia",
+  };
+  const que = QUE[String(tipo ?? "")] ?? "un archivo";
+  return `[El cliente envió ${que}. No puedes verlo ni escucharlo: pídele con amabilidad que te cuente por escrito lo que necesita.]`;
+}
+
 export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
   const organizationId = await resolveMessagingTenant(e);
   if (!organizationId) {
@@ -210,7 +232,7 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
       started = true;
     }
 
-    const body = e.text ?? `[${e.attachmentType ?? "adjunto"}]`;
+    const body = e.text ?? descripcionDeAdjunto(e.attachmentType);
     await tx.message.create({
       data: {
         organizationId,
