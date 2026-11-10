@@ -47,12 +47,15 @@ function makePrisma(opts: { brand?: string; published?: boolean } = {}) {
   return { prisma, channels, audit };
 }
 
+/** Doble del servicio del reporte de conexión (A1): este spec prueba `create`, no el reporte. */
+const estadoStub = () => ({ reporte: async () => ({}), invalidar: async () => undefined }) as never;
+
 const ctx = (permissions: string[]): RequestContext => ({ userId: "u1", organizationId: "org1", roleCode: "owner", permissions });
 
 describe("ChannelsController.create — agente asignado al conectar", () => {
   it("canal nuevo sin agente + agente publicado → se asigna solo y queda auditado", async () => {
     const { prisma, channels, audit } = makePrisma();
-    const c = new ChannelsController(prisma);
+    const c = new ChannelsController(prisma, estadoStub());
 
     await runWithContext(ctx(["channels:write"]), () => c.create({ type: "MOCK", name: "Canal de prueba" }));
 
@@ -63,7 +66,7 @@ describe("ChannelsController.create — agente asignado al conectar", () => {
 
   it("si el cliente eligió el agente, se respeta (no se pisa)", async () => {
     const { prisma, channels, audit } = makePrisma();
-    const c = new ChannelsController(prisma);
+    const c = new ChannelsController(prisma, estadoStub());
 
     await runWithContext(ctx(["channels:write"]), () =>
       c.create({ type: "MOCK", name: "Canal de prueba", defaultAgentId: "el-que-eligio" }),
@@ -75,7 +78,7 @@ describe("ChannelsController.create — agente asignado al conectar", () => {
 
   it("org sin agente publicado: el canal se crea igual, sin agente y sin error", async () => {
     const { prisma, channels, audit } = makePrisma({ published: false });
-    const c = new ChannelsController(prisma);
+    const c = new ChannelsController(prisma, estadoStub());
 
     const r: any = await runWithContext(ctx(["channels:write"]), () => c.create({ type: "MOCK", name: "Canal de prueba" }));
 
@@ -86,7 +89,7 @@ describe("ChannelsController.create — agente asignado al conectar", () => {
 
   it("TuBot intacto: en una org de marca tubot el canal se crea como siempre, sin asignar nada", async () => {
     const { prisma, channels, audit } = makePrisma({ brand: "tubot" });
-    const c = new ChannelsController(prisma);
+    const c = new ChannelsController(prisma, estadoStub());
 
     await runWithContext(ctx(["channels:write"]), () => c.create({ type: "MOCK", name: "Canal de prueba" }));
 
