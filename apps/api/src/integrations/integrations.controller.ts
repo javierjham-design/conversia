@@ -27,7 +27,7 @@ import {
   googleOAuthAppOfConnection,
   googleOAuthCredentials,
   grantedScopes,
-  missingScopesForFeature,
+  missingScopesForFeature,
   brandOf,
 } from "@conversia/config";
 import { requireContext } from "../tenancy/context";
