@@ -9,6 +9,7 @@ import { getSetupChecklist } from "../onboarding/setup-checklist";
 import { sanitizeActions } from "./actions";
 import { procesarAdjuntos, type AdjuntoEntrada } from "./adjuntos";
 import { SETUP_TOOL_NAMES, isSetupWriteTool, runSetupTool, setupToolSpecs } from "./setup-tools";
+import { MENSAJES_EN_EL_PROMPT } from "./assistant-threads.service";
 import { ChannelStatusService } from "../channels/channel-status.service";
 import { packUnitForOrg } from "../billing/pack-unit";
 import { configEfectiva, modeloIgnorado, readAssistantConfig } from "./assistant-config";
@@ -278,7 +279,7 @@ export class AssistantService {
   }
 
   /** System prompt según el modo + contexto + si es dueño (webOwnerContext). */
-  private systemPrompt(ctx: Awaited<ReturnType<AssistantService["buildContext"]>>, owner: boolean, route?: string): string {
+  private systemPrompt(ctx: Awaited<ReturnType<AssistantService["buildContext"]>>, owner: boolean, route?: string, resumenDelHilo?: string | null): string {
     const base = `Eres el Asistente de Conversia, dentro del panel del cliente. Hablas español de Chile, cálido y BREVE (2-4 frases). Ayudas al dueño de un negocio a dejar su asistente de WhatsApp andando y a resolver dudas.
 
 CONTEXTO ACTUAL (ya lo sabes, no lo preguntes):
@@ -323,7 +324,16 @@ AUTONOMÍA:
 - NUNCA cambias el modelo de IA del asistente: eso lo fija Conversia.
 - Después de crear el asistente, pruébalo con un mensaje realista de su rubro ANTES de ofrecer publicarlo: que el dueño vea cómo atiende.`
       : `\n\nEste usuario NO es dueño ni administrador: NO configures nada. Solo informa y, si hace falta, escala a un humano.`;
-    return base + modeBlock + pagoBlock + ownerBlock;
+    // B2 — lo que ya conversaron antes de los últimos 20 mensajes. Va en el prompt del
+    // sistema y no como un mensaje más para que no se confunda con algo que el dueño acaba
+    // de decir: es memoria, no una instrucción nueva.
+    const memoriaBlock = resumenDelHilo?.trim()
+      ? `
+
+LO QUE YA CONVERSARON ANTES (resumen de esta misma conversación, no lo vuelvas a preguntar):
+${resumenDelHilo.trim()}`
+      : "";
+    return base + modeBlock + pagoBlock + ownerBlock + memoriaBlock;
   }
 
   /**
@@ -357,6 +367,8 @@ AUTONOMÍA:
     history: AIChatMessage[],
     route?: string,
     adjuntos: AdjuntoEntrada[] = [],
+    /** B2 — resumen de lo viejo del hilo (cuando pasó de 40 mensajes). */
+    resumenDelHilo?: string | null,
   ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[]; degradado: boolean }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
@@ -425,7 +437,9 @@ AUTONOMÍA:
       : "";
     const contenidoUsuario = `${userMessage}${procesados?.texto ?? ""}${avisosAdjuntos}`.trim() || "(sin texto)";
     const messages: AIChatMessage[] = [
-      ...history.slice(-12),
+      // B2 — 20 y no 12: el historial ahora sale de la base y lo viejo va resumido aparte,
+      // así que caben los últimos 20 turnos sin que el prompt crezca sin techo.
+      ...history.slice(-MENSAJES_EN_EL_PROMPT),
       { role: "user", content: contenidoUsuario, ...(procesados?.imagenes.length ? { images: procesados.imagenes } : {}) },
     ];
     const toolTranscript: NonNullable<Parameters<typeof ai.chat>[0]["toolTranscript"]> = [];
@@ -447,7 +461,7 @@ AUTONOMÍA:
       // (ver el estado → listar plantillas → crearlo → probarlo → publicarlo) y con 4 el
       // copiloto se quedaba a mitad de camino sin decir por qué.
       for (let round = 0; round < 8; round++) {
-        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route), messages, tools: specs, maxTokens: 1200, toolTranscript });
+        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route, resumenDelHilo), messages, tools: specs, maxTokens: 1200, toolTranscript });
         inputTokens += resp.usage?.inputTokens ?? 0;
         outputTokens += resp.usage?.outputTokens ?? 0;
         if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
