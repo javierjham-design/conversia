@@ -3,13 +3,21 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, QrCode, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
+import { ReporteDeCanal } from "@/components/ReporteDeCanal";
 import { api } from "@/lib/api";
 import { openAssistant } from "@/lib/assistant";
 
 /* BLOQUE A — Conexión de WhatsApp AUTOSERVICIO desde el panel del cliente (Embedded
  * Signup de Meta). Reusa el backend existente: GET /public/meta-config (config del SDK
  * por marca), POST /channels/embedded-signup (intercambio de code + alta), GET /channels
- * (lista), GET /onboarding (checklist). Errores legibles + reporte a la cola de operación. */
+ * (lista), GET /onboarding (checklist). Errores legibles + reporte a la cola de operación.
+ *
+ * A2 (nov-2026) — EN CUANTO EXISTE UN CANAL, LO PRIMERO ES EL REPORTE DE CONEXIÓN.
+ * Antes la pantalla solo reaccionaba a `status === "active"` y leía el número de la lista de
+ * canales, así que recién conectado se veía igual que antes por tres caminos: coexistencia
+ * con el número sin publicar (el encabezado quedaba en "Conectado ·"), canal sin asistente
+ * (el pie seguía diciendo "conecta tu número") y canal en cualquier otro estado (el bloque
+ * de conexión se quedaba arriba). La reproducción de los tres está en el PR de A1. */
 
 type Channel = { id: string; type: string; name: string; status: string; displayPhone: string | null; defaultAgentName: string | null };
 type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string; esVersion?: "v4" | "v5" };
@@ -65,6 +73,14 @@ export default function Canales() {
   const [err, setErr] = useState<{ title: string; help: string } | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [needsVerif, setNeedsVerif] = useState(false);
+  /**
+   * A2.e — id del canal que ACABA de crear el POST de conexión.
+   *
+   * Sin esto, quedar "conectado" en pantalla dependía de que `load()` encontrara un canal
+   * `active` CON número, que es justo lo que no pasa en coexistencia cuando Meta todavía no
+   * publica el número: el cliente terminaba de conectar y veía la pantalla de antes.
+   */
+  const [canalNuevoId, setCanalNuevoId] = useState<string | null>(null);
   // 2.3 — id del número PREVERIFICADO asignado a esta org (si la marca lo tiene activo). Si llega,
   // se pasa en setup.preVerifiedPhone para saltar el SMS en el flujo de número nuevo.
   const [preVerifiedId, setPreVerifiedId] = useState<string | null>(null);
@@ -166,7 +182,7 @@ export default function Canales() {
     const steps = coexistence ? COEX_STEPS : STEPS;
     const timer = setInterval(() => setStepIdx((i) => Math.min(i + 1, steps.length - 1)), 1600);
     try {
-      const r = await api<{ displayPhone: string; businessName?: string | null; coexistence?: boolean }>(endpoint, {
+      const r = await api<{ id?: string; displayPhone: string; businessName?: string | null; coexistence?: boolean; pendingNumber?: boolean }>(endpoint, {
         method: "POST",
         // 2.1 — enviamos también el `event` (cómo terminó la sesión: FINISH estándar vs
         // coexistencia) para que el backend lo persista en el canal.
@@ -175,9 +191,12 @@ export default function Canales() {
       clearInterval(timer);
       attemptsRef.current = 0;
       setPhase("idle");
+      // A2.e — la pantalla pasa a "conectado" con la respuesta del POST, sin esperar a que
+      // `load()` encuentre el canal: el reporte ya sabe contar un número que se está activando.
+      if (r.id) setCanalNuevoId(r.id);
       setOkMsg(
         coexistence
-          ? `¡Listo! Conectamos el WhatsApp que ya usas: ${r.displayPhone}. Sigues respondiendo desde tu teléfono y tu asistente también.`
+          ? `¡Listo! Conectamos el WhatsApp que ya usas${r.pendingNumber ? "" : `: ${r.displayPhone}`}. Sigues respondiendo desde tu teléfono y tu asistente también.`
           : `¡Listo! WhatsApp conectado: ${r.displayPhone}${r.businessName ? ` · ${r.businessName}` : ""}.`,
       );
       await load();
@@ -252,9 +271,17 @@ export default function Canales() {
   }
 
   const waChannels = (channels ?? []).filter((c) => c.type === "WHATSAPP_CLOUD");
-  const waActive = waChannels.find((c) => c.status === "active");
   // Canal caído por TOKEN (lo marca el worker ante un 190 de Meta): aviso humano al dueño.
   const waDown = waChannels.find((c) => c.status === "error");
+  /**
+   * A2.a — el canal del que se muestra el reporte: CUALQUIERA que exista (activo, pendiente
+   * o en error), no solo `active`. Esa condición era la que dejaba la pantalla igual que
+   * antes de conectar cuando el canal quedaba en otro estado.
+   */
+  const canalReporte = waChannels.find((c) => c.status === "active") ?? waChannels[0] ?? null;
+  const idReporte = canalReporte?.id ?? canalNuevoId;
+  /** Conectado pero sin asistente: el caso en que el pie decía "conecta tu número". */
+  const faltaAsistente = waChannels.some((c) => c.status === "active" && !c.defaultAgentName);
   const activeSteps = modeRef.current === "coexistence" ? COEX_STEPS : STEPS;
   // Al menos una vía disponible habilita el botón principal.
   const canConnect = Boolean(coex?.ready || es?.ready);
@@ -281,102 +308,108 @@ export default function Canales() {
           </div>
         ) : null}
 
-        {/* ---------- WhatsApp ---------- */}
-        <div className="card" style={{ padding: 20, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ width: 44, height: 44, borderRadius: 13, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><MessageCircle size={22} /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>WhatsApp</p>
-              <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 13 }}>
-                {waActive ? <>Conectado · {waActive.displayPhone}{waActive.defaultAgentName ? ` · atiende ${waActive.defaultAgentName}` : ""}</> : "Tu asistente atiende por tu número de WhatsApp Business."}
-              </p>
+        {/* ---------- WhatsApp: el reporte manda cuando ya hay canal ---------- */}
+        {idReporte ? (
+          <ReporteDeCanal channelId={idReporte} onCambio={() => void load()} />
+        ) : (
+          <div className="card" style={{ padding: 20, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ width: 44, height: 44, borderRadius: 13, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><MessageCircle size={22} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>WhatsApp</p>
+                <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 13 }}>Tu asistente atiende por tu número de WhatsApp Business.</p>
+              </div>
             </div>
-            {waActive ? <span style={{ fontSize: 12, fontWeight: 600, padding: "5px 11px", borderRadius: 999, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "inline-flex", alignItems: "center", gap: 5 }}><Check size={13} /> Activo</span> : null}
-          </div>
 
-          {/* Estado: conectando (stepper animado) */}
-          {phase === "connecting" ? (
-            <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 9 }}>
-              {activeSteps.map((label, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, opacity: i > stepIdx ? 0.4 : 1 }}>
-                  {i < stepIdx ? <Check size={16} style={{ color: "var(--ok)" }} /> : i === stepIdx ? <Loader2 size={16} className="lp-spin" style={{ color: "var(--acc-deep)" }} /> : <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--line)" }} />}
-                  <span style={{ color: i === stepIdx ? "var(--ink)" : "var(--ink-dim)" }}>{label}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {/* Estado: error accionable */}
-          {phase === "error" && err ? (
-            <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "color-mix(in srgb, var(--warn) 9%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)" }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} style={{ color: "var(--warn)", flexShrink: 0 }} /> {err.title}</p>
-              <p className="text-dim" style={{ margin: "7px 0 12px", fontSize: 13, lineHeight: 1.5 }}>{err.help}</p>
-              {needsVerif ? (
-                <div style={{ margin: "0 0 12px", padding: 12, borderRadius: 10, background: "var(--acc-dim)" }}>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Meta pide verificar tu negocio</p>
-                  <p className="text-dim" style={{ margin: "5px 0 0", fontSize: 12.5, lineHeight: 1.5 }}>
-                    Es un trámite de Meta para confirmar que tu negocio existe (una sola vez). Nosotros te acompañamos hoy para dejarlo listo. Si solo quieres empezar ya, conectar el WhatsApp <strong>que ya usas</strong> normalmente no lo necesita.
+            {/* Acción primaria (si no está conectado y no estamos en medio de algo) */}
+            {phase === "idle" ? (
+              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Vía 1 (recomendada): tu número. Con "Phone Number First" el diálogo de Meta pide
+                    el número al inicio y, si ya lo usas en la app de WhatsApp Business, lo conecta en
+                    coexistencia automáticamente (sin selector de "cuenta existente"). */}
+                <div data-copilot="conectar-whatsapp" style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <MessageCircle size={17} style={{ color: "var(--acc-deep)" }} />
+                    <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
+                  </div>
+                  <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 13, lineHeight: 1.5 }}>
+                    Ingresa tu número en la ventana de Meta. Si ya lo usas en la app de <strong>WhatsApp Business</strong>, lo conectamos tal cual: sigues respondiendo desde tu teléfono con tus chats de siempre y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
                   </p>
+                  <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
+                    <MessageCircle size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
+                  </button>
                 </div>
-              ) : null}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => connect(modeRef.current)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><RefreshCw size={14} /> Reintentar</button>
-                {needsVerif ? (
-                  <button onClick={() => connect("coexistence")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><QrCode size={14} /> Usar el que ya tengo</button>
+
+                {/* Vía 2: número NUEVO dedicado (Embedded Signup de número nuevo) */}
+                <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <QrCode size={16} style={{ color: "var(--ink-dim)" }} />
+                    <span style={{ fontWeight: 600, fontSize: 14 }}>Prefiero un número nuevo dedicado</span>
+                  </div>
+                  <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 12.5, lineHeight: 1.5 }}>
+                    ¿No usas WhatsApp Business o quieres un número aparte solo para el asistente, sin tocar el tuyo? Te guiamos para crearlo en la misma ventana de Meta.
+                  </p>
+                  <button onClick={() => connect("embedded")} disabled={es ? !es.ready : true} className="card" style={{ cursor: es?.ready ? "pointer" : "not-allowed", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: es?.ready ? 1 : 0.6 }}>
+                    <QrCode size={14} /> Usar un número nuevo
+                  </button>
+                </div>
+
+                {!canConnect ? (
+                  <p className="text-dim" style={{ margin: 0, fontSize: 12 }}>La conexión se habilita en breve; mientras, pide ayuda al asistente y el equipo la deja lista.</p>
                 ) : null}
-                <button onClick={() => pedirAyuda(needsVerif ? `Me piden verificación de negocio en Meta al conectar un número nuevo. Quiero que una persona me acompañe hoy. (${err.title})` : `Error al conectar WhatsApp: ${err.title}. ${err.help}`)} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><HelpCircle size={14} /> {needsVerif ? "Que me acompañe una persona" : "Pedir ayuda al asistente"}</button>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
+        )}
 
-          {/* Acción primaria (si no está conectado y no estamos en medio de algo) */}
-          {!waActive && phase === "idle" ? (
-            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Vía 1 (recomendada): tu número. Con "Phone Number First" el diálogo de Meta pide
-                  el número al inicio y, si ya lo usas en la app de WhatsApp Business, lo conecta en
-                  coexistencia automáticamente (sin selector de "cuenta existente"). */}
-              <div data-copilot="conectar-whatsapp" style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <MessageCircle size={17} style={{ color: "var(--acc-deep)" }} />
-                  <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
-                </div>
-                <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 13, lineHeight: 1.5 }}>
-                  Ingresa tu número en la ventana de Meta. Si ya lo usas en la app de <strong>WhatsApp Business</strong>, lo conectamos tal cual: sigues respondiendo desde tu teléfono con tus chats de siempre y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
+        {/* Estado: conectando (stepper animado). Vive FUERA de la tarjeta para que también se
+            vea al reconectar un canal que ya existe. */}
+        {phase === "connecting" ? (
+          <div className="card" style={{ padding: 16, marginBottom: 14, display: "flex", flexDirection: "column", gap: 9 }}>
+            {activeSteps.map((label, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, opacity: i > stepIdx ? 0.4 : 1 }}>
+                {i < stepIdx ? <Check size={16} style={{ color: "var(--ok)" }} /> : i === stepIdx ? <Loader2 size={16} className="lp-spin" style={{ color: "var(--acc-deep)" }} /> : <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--line)" }} />}
+                <span style={{ color: i === stepIdx ? "var(--ink)" : "var(--ink-dim)" }}>{label}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Estado: error accionable */}
+        {phase === "error" && err ? (
+          <div className="card" style={{ marginBottom: 14, padding: 14, background: "color-mix(in srgb, var(--warn) 9%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 40%, transparent)" }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}><AlertTriangle size={16} style={{ color: "var(--warn)", flexShrink: 0 }} /> {err.title}</p>
+            <p className="text-dim" style={{ margin: "7px 0 12px", fontSize: 13, lineHeight: 1.5 }}>{err.help}</p>
+            {needsVerif ? (
+              <div style={{ margin: "0 0 12px", padding: 12, borderRadius: 10, background: "var(--acc-dim)" }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Meta pide verificar tu negocio</p>
+                <p className="text-dim" style={{ margin: "5px 0 0", fontSize: 12.5, lineHeight: 1.5 }}>
+                  Es un trámite de Meta para confirmar que tu negocio existe (una sola vez). Nosotros te acompañamos hoy para dejarlo listo. Si solo quieres empezar ya, conectar el WhatsApp <strong>que ya usas</strong> normalmente no lo necesita.
                 </p>
-                <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
-                  <MessageCircle size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
-                </button>
               </div>
-
-              {/* Vía 2: número NUEVO dedicado (Embedded Signup de número nuevo) */}
-              <div style={{ padding: 15, borderRadius: 13, border: "1px solid var(--line)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <QrCode size={16} style={{ color: "var(--ink-dim)" }} />
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>Prefiero un número nuevo dedicado</span>
-                </div>
-                <p className="text-dim" style={{ margin: "0 0 11px", fontSize: 12.5, lineHeight: 1.5 }}>
-                  ¿No usas WhatsApp Business o quieres un número aparte solo para el asistente, sin tocar el tuyo? Te guiamos para crearlo en la misma ventana de Meta.
-                </p>
-                <button onClick={() => connect("embedded")} disabled={es ? !es.ready : true} className="card" style={{ cursor: es?.ready ? "pointer" : "not-allowed", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6, opacity: es?.ready ? 1 : 0.6 }}>
-                  <QrCode size={14} /> Usar un número nuevo
-                </button>
-              </div>
-
-              {!canConnect ? (
-                <p className="text-dim" style={{ margin: 0, fontSize: 12 }}>La conexión se habilita en breve; mientras, pide ayuda al asistente y el equipo la deja lista.</p>
+            ) : null}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => connect(modeRef.current)} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><RefreshCw size={14} /> Reintentar</button>
+              {needsVerif ? (
+                <button onClick={() => connect("coexistence")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><QrCode size={14} /> Usar el que ya tengo</button>
               ) : null}
+              <button onClick={() => pedirAyuda(needsVerif ? `Me piden verificación de negocio en Meta al conectar un número nuevo. Quiero que una persona me acompañe hoy. (${err.title})` : `Error al conectar WhatsApp: ${err.title}. ${err.help}`)} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><HelpCircle size={14} /> {needsVerif ? "Que me acompañe una persona" : "Pedir ayuda al asistente"}</button>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {/* Reconectar / agregar otro si ya hay uno */}
-          {waActive && phase === "idle" ? (
-            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={() => connect("coexistence")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><QrCode size={14} /> Conectar el que ya uso</button>
-              <button onClick={() => connect("embedded")} className="card" style={{ cursor: "pointer", fontSize: 13, padding: "8px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}><MessageCircle size={14} /> Conectar otro número</button>
-            </div>
-          ) : null}
-        </div>
+        {/* A2.a — conectar otro número / reconectar: en pequeño, debajo del reporte */}
+        {idReporte && phase === "idle" ? (
+          <div style={{ margin: "0 0 14px", display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5 }}>
+            <button onClick={() => connect("embedded")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--acc-deep)", textDecoration: "underline" }}>
+              Conectar otro número
+            </button>
+            <button onClick={() => connect("coexistence")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--acc-deep)", textDecoration: "underline" }}>
+              Reconectar
+            </button>
+          </div>
+        ) : null}
 
         {/* ---------- Próximamente: Instagram + Messenger ---------- */}
         {[
@@ -393,10 +426,33 @@ export default function Canales() {
           </div>
         ))}
 
-        {/* ---------- Checklist: conectar número ---------- */}
-        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}>
+        {/* ---------- Checklist: conectar número ----------
+            A2.d — tres estados, no dos. La clave `whatsapp` del checklist NO cambia (la usan
+            Convi y el copiloto): lo que cambia es lo que se le dice al dueño. */}
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 9, fontSize: 13, flexWrap: "wrap" }}>
           {whatsappDone ? <CheckCircle2 size={17} style={{ color: "var(--ok)" }} /> : <span style={{ width: 17, height: 17, borderRadius: "50%", border: "1.5px solid var(--line)" }} />}
-          <span className="text-dim">{whatsappDone ? "Tu número está conectado — ¡listo para atender!" : "Paso pendiente: conecta tu número de WhatsApp."}</span>
+          <span className="text-dim">
+            {whatsappDone
+              ? "Tu número está conectado — ¡listo para atender!"
+              : faltaAsistente
+                ? "Conectado, falta asignar el asistente."
+                : "Paso pendiente: conecta tu número de WhatsApp."}
+          </span>
+          {!whatsappDone && faltaAsistente ? (
+            <button
+              onClick={() => {
+                // El botón que hace el trabajo vive en el reporte, justo arriba: esto lleva
+                // al dueño hasta él y lo pulsa, para que el pie no sea un callejón sin salida.
+                const b = document.querySelector<HTMLButtonElement>('[data-accion="asignar-asistente"]');
+                b?.scrollIntoView({ behavior: "smooth", block: "center" });
+                b?.click();
+              }}
+              className="btn-accent"
+              style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "5px 11px" }}
+            >
+              Asignar asistente
+            </button>
+          ) : null}
         </div>
 
         <style>{`.lp-spin { animation: lpspin 1s linear infinite; } @keyframes lpspin { to { transform: rotate(360deg); } }`}</style>
