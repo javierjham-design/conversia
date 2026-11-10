@@ -15,6 +15,7 @@ const DAY = "2026-12-21"; // futuro
 function makeScheduling() {
   const appts: Array<{ id: string; clinicId: string; professionalId: string; patient: any; start: string; end: string; status: string }> = [];
   const availCalls: Array<string | undefined> = []; // professionalId con que se consultó la disponibilidad
+  const durCalls: Array<number | undefined> = []; // durationMin con que se consultó la disponibilidad
   let seq = 0;
   const mk = (pid: string, utcHour: number, min: number) => ({
     start: `${DAY}T${String(utcHour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00.000Z`,
@@ -25,12 +26,14 @@ function makeScheduling() {
   return {
     appts,
     availCalls,
+    durCalls,
     kind: "clariva" as const,
     async getProfessionals() {
       return [{ id: V, name: "Dra. Paula Vargas Rodriguez", specialty: null }, { id: P, name: "Dr. Nicolas Pabst Prassel", specialty: null }];
     },
-    async getAvailableSlots(q: { professionalId?: string; from: string }) {
+    async getAvailableSlots(q: { professionalId?: string; from: string; durationMin?: number }) {
       availCalls.push(q.professionalId);
+      durCalls.push(q.durationMin);
       // Con profesional fijo → solo sus cupos. Sin fijar → mezcla (Pabst primero, como en prod).
       if (q.professionalId) return [mk(q.professionalId, 12, 15), mk(q.professionalId, 12, 30)];
       return [mk(P, 12, 15), mk(V, 13, 15)];
@@ -65,9 +68,11 @@ function makeCtx(scheduling: ReturnType<typeof makeScheduling>, conversationId: 
   return { organizationId: "org1", conversationId, clinicId: "c", agentName: "Agendamiento", brandName: "Digital-Dent", services } as any;
 }
 
-// Siembra una cita futura del paciente con `prof` (simula la cita que YA tenía).
-function seedCita(scheduling: ReturnType<typeof makeScheduling>, prof: string, utcHour = 15, min = 0) {
-  scheduling.appts.push({ id: "existente", clinicId: "c", professionalId: prof, patient: { phone: "+56990000001" }, start: `${DAY}T${String(utcHour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00.000Z`, end: `${DAY}T${String(utcHour).padStart(2, "0")}:15:00.000Z`, status: "confirmed" });
+// Siembra una cita futura del paciente con `prof` (simula la cita que YA tenía), con duración `durMin`.
+function seedCita(scheduling: ReturnType<typeof makeScheduling>, prof: string, utcHour = 15, min = 0, durMin = 15) {
+  const start = `${DAY}T${String(utcHour).padStart(2, "0")}:${String(min).padStart(2, "0")}:00.000Z`;
+  const end = new Date(Date.parse(start) + durMin * 60000).toISOString();
+  scheduling.appts.push({ id: "existente", clinicId: "c", professionalId: prof, patient: { phone: "+56990000001" }, start, end, status: "confirmed" });
 }
 
 async function offer(reg: ToolRegistry, ctx: any, input: Record<string, unknown>) {
@@ -121,6 +126,27 @@ describe("reagendamiento — mismo profesional", () => {
     expect(sched.appts).toHaveLength(1); // movió, no duplicó
     expect(sched.appts[0].professionalId).toBe(V); // sigue con Vargas
     expect(sched.appts[0].start).toBe(`${DAY}T12:30:00.000Z`);
+  });
+
+  it("reagendar CONSERVA la duración de la cita original (60 min → 60 min, no la del slot de 15)", async () => {
+    const sched = makeScheduling();
+    seedCita(sched, V, 12, 15, 60); // cita de 60 min con Vargas (12:15–13:15 UTC)
+    const reg = new ToolRegistry();
+    for (const t of buildCoreTools()) reg.register(t);
+    const ctx = makeCtx(sched, "c-dur");
+    const disp = await offer(reg, ctx, {}); // el modelo NO pasó durationMin
+    // La disponibilidad se consultó con la duración ORIGINAL (60), no sin duración ni la del slot.
+    expect(sched.availCalls.at(-1)).toBe(V);
+    expect(sched.durCalls.at(-1)).toBe(60);
+    const slot0930 = (disp.horas as { id: string }[]).find((h) => /0930$/.test(h.id))!;
+    const r = await reg.execute("createAppointment", { slotId: slot0930.id }, ctx);
+    const out = JSON.parse(r.content);
+    expect(out.rescheduled).toBe(true);
+    expect(sched.appts).toHaveLength(1); // movió, no duplicó
+    const moved = sched.appts[0];
+    // La cita movida dura 60 min (NO los 15 del slot ni los 30 por defecto).
+    expect(Date.parse(moved.end) - Date.parse(moved.start)).toBe(60 * 60000);
+    expect(moved.start).toBe(`${DAY}T12:30:00.000Z`);
   });
 
   it("esCitaAdicional:true permite agendar con otro profesional (cita ADEMÁS de la que tiene)", async () => {
