@@ -505,3 +505,26 @@ Tres decisiones que vale la pena recordar:
   caído desde ahí convertiría un error transitorio de Meta en un cambio de estado del canal.
 - **La clave `whatsapp` del checklist no cambió** (la usan Convi y el copiloto): lo que
   cambia es lo que se le dice al dueño.
+
+## Convi se acuerda: historial persistente (tanda B, 2026-11-10)
+
+El copiloto perdía la conversación al cambiar de sección —la navegación del panel es `<a href>`,
+o sea una carga completa— y el cliente no podía volver a leer lo que habían acordado. El
+contexto del modelo, además, lo mandaba el navegador.
+
+- **#630 (B1)** — `assistant_threads` + `assistant_messages` con RLS, borrado en cascada y un
+  índice único PARCIAL que garantiza UN hilo abierto por usuario. Verificado contra el Postgres
+  del stack, no contra un doble. Ver ADR-14.
+- **#631 (B2)** — el servidor manda: elige el hilo, lee el historial de la base, guarda el turno
+  (con las acciones y los METADATOS del adjunto) y resume lo viejo pasados los 40 mensajes. El
+  `history` del cuerpo se acepta y se ignora. Endpoints de historial con paginación por cursor.
+- **#632 (B3)** — el widget recupera el hilo al abrir, manda `threadId`, tiene "Nueva
+  conversación" e "Historial", y el envío es optimista: el mensaje aparece al instante y, si
+  falla, queda marcado "No se envió · Reintentar".
+
+Dos cosas que vale la pena recordar:
+- **Guardar es best-effort.** Si la base falla, el dueño YA tiene su respuesta en pantalla;
+  perder el registro es mucho menos grave que convertir un turno bueno en un error.
+- **Un mock con la FORMA equivocada tumba el panel entero.** Devolverle `{}` a una pantalla que
+  espera un arreglo revienta el render, el error se lleva el AppShell y el síntoma es "Convi no
+  aparece" — nada que ver con el widget.

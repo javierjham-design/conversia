@@ -78,3 +78,37 @@ eso: escribimos → el sondeo lo ve como cambio → actualiza la cita → el esp
 **Alcance**: el sondeo está gateado a la marca **conversia**. Las cuentas de TuBot que hoy
 espejan a Google siguen funcionando igual: traerles cambios desde Google sería un comportamiento
 nuevo que nadie pidió.
+
+## ADR-14 — El historial de Convi vive en TABLAS propias, no en un JSON
+
+**Contexto**: la conversación con el copiloto vivía en el `useState` del widget. La navegación
+del panel usa `<a href>` (carga completa), así que cambiar de sección la borraba, y el contexto
+que recibía el modelo lo mandaba el NAVEGADOR en cada turno.
+
+**Decisión**: `assistant_threads` + `assistant_messages`, con RLS por `organization_id`.
+
+**Por qué no un JSON en una fila**, como `support_tickets.thread`: ahí el hilo es corto y se lee
+entero. Acá hay que **paginar** (el dueño vuelve a conversaciones de hace semanas), **buscar** y
+**resumir lo antiguo**. Un arreglo dentro de una fila obliga a traer el hilo completo en cada
+turno y crece sin techo; a los cientos de mensajes, cada turno del copiloto arrastraría la
+conversación entera solo para agregarle una línea.
+
+**Consecuencia principal: el servidor es el dueño del contexto.** El historial que recibe el
+modelo se lee de la base. El campo `history` del cuerpo se sigue aceptando por compatibilidad y
+se **ignora** — antes, lo que Convi "recordaba" era lo que el cliente quisiera decirle.
+
+**Un solo hilo abierto por usuario, garantizado por un índice único PARCIAL** (`WHERE status =
+'open'`). Elegir el hilo es un busca-si-no-crea que dos pestañas del mismo dueño pueden ganar a
+la vez; sin el índice quedarían dos hilos abiertos y la conversación se partiría en dos sin que
+se entienda por qué.
+
+**Conversaciones largas**: pasados los 40 mensajes se resume lo viejo en `thread.summary` con el
+modelo barato del proveedor configurado, y el prompt pasa a ser `resumen + últimos 20`. El
+resumen va en el prompt del SISTEMA, no como un mensaje más: es memoria, no una instrucción que
+el dueño acabe de dar.
+
+**Quién lo ve** (decisión del dueño): el propio usuario y los administradores de su
+organización. Sin borrado automático por ahora.
+
+**Costo aceptado**: dos tablas más bajo RLS y una llamada barata de resumen cada ~20 turnos de
+una conversación larga.
