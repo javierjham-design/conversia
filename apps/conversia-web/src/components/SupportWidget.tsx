@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Check, CreditCard, ExternalLink, FileText, Image as ImageIcon, Mic, Paperclip, MessageCircle, Send, Square, X } from "lucide-react";
+import { Check, CreditCard, ExternalLink, FileText, History, Image as ImageIcon, Mic, Paperclip, MessageCircle, PenLine, Send, Square, X } from "lucide-react";
 import { api } from "@/lib/api";
 import {
   MAX_ADJUNTOS,
@@ -31,12 +31,29 @@ import {
 } from "@/lib/convi";
 
 type Msg = {
+  /** Id local (solo para reconciliar el envío optimista con su resultado). */
+  id?: string;
   role: "user" | "assistant";
   content: string;
   actions?: AssistantAction[];
   /** Lo que el dueño le mostró en ese turno (para que su mensaje no se vea vacío). */
   adjuntos?: { tipo: TipoAdjunto; nombre: string }[];
+  /** B3 — se está enviando (aparece al instante, antes de que el servidor conteste). */
+  pendiente?: boolean;
+  /** B3 — no se envió: el dueño puede reintentarlo sin volver a escribirlo. */
+  fallo?: boolean;
 };
+/** Fecha corta para la lista del historial, en la hora de Chile (la del negocio). */
+function fechaCorta(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+  } catch {
+    return "";
+  }
+}
+
+/** Un hilo del historial (B2). */
+type Hilo = { id: string; title: string | null; status: string; lastMessageAt: string; preview: string | null; userName?: string | null };
 type Step = { key: string; label: string; href: string; done: boolean; blocking: boolean };
 type Ctx = (ConviCtx & { canConfigure: boolean; steps: Step[] }) | null;
 
@@ -84,6 +101,11 @@ export function SupportWidget() {
   // (`assertConversia`) jamás debe llegar al dueño como un "(Not Found)" crudo.
   const [eligible, setEligible] = useState<boolean | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  /** B3 — el hilo donde se está conversando. Lo manda el servidor; acá solo se arrastra. */
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [hilos, setHilos] = useState<Hilo[] | null>(null);
+  const [verHistorial, setVerHistorial] = useState(false);
+  const [cargandoHilo, setCargandoHilo] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -224,20 +246,22 @@ export function SupportWidget() {
     // Un mensaje puede ser SOLO una foto o una nota de voz: exigir texto obligaba a
     // escribir "mira esto" para poder mandar lo que de verdad importa.
     if ((!body && !archivos.length) || busy) return;
-    const history = msgs.slice(-12).map((m) => ({ role: m.role, content: m.content }));
-    setMsgs((m) => [...m, { role: "user", content: body, adjuntos: archivos.map((a) => ({ tipo: a.tipo, nombre: a.nombre })) }]);
+    // B3 — el mensaje del dueño aparece AL INSTANTE y después se reconcilia con el
+    // resultado. `history` ya no se manda: el historial lo arma el servidor desde la base.
+    const idLocal = `l${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+    setMsgs((m) => [...m, { id: idLocal, role: "user", content: body, adjuntos: archivos.map((a) => ({ tipo: a.tipo, nombre: a.nombre })), pendiente: true }]);
     setText("");
     setAdjuntos([]);
     setBusy(true);
     setFalloAlgo(false);
     setOfrecerSoporte(false);
     try {
-      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean }>("/assistant/message", {
+      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean; threadId?: string }>("/assistant/message", {
         method: "POST",
         body: JSON.stringify({
           message: body,
           route: pathname,
-          history,
+          ...(threadId ? { threadId } : {}),
           ...(archivos.length
             ? { adjuntos: archivos.map((a) => ({ tipo: a.tipo, nombre: a.nombre, mime: a.mime, dataBase64: a.dataBase64 })) }
             : {}),
@@ -249,7 +273,11 @@ export function SupportWidget() {
       let reply = r.reply;
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
       const actions = r.actions ?? [];
-      setMsgs((m) => [...m, { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button") }]);
+      if (r.threadId) setThreadId(r.threadId);
+      setMsgs((m) => [
+        ...m.map((x) => (x.id === idLocal ? { ...x, pendiente: false } : x)),
+        { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button") },
+      ]);
       ejecutarAcciones(actions);
     } catch (e) {
       // NUNCA mostrar el error técnico crudo al dueño (jamás un "(Not Found)"). Mensaje humano
@@ -258,6 +286,9 @@ export function SupportWidget() {
       // 401 = sesión vencida: lib/api ya limpió la sesión y está redirigiendo a /login. NO es un
       // fallo del asistente → no mostramos nada (evita el falso "No pude responder" del hallazgo 26-oct).
       if (status === 401) return;
+      // El mensaje del dueño queda MARCADO como no enviado, para que pueda reintentarlo sin
+      // volver a escribirlo (y para que no crea que Convi lo recibió y no contestó).
+      setMsgs((m) => m.map((x) => (x.id === idLocal ? { ...x, pendiente: false, fallo: true } : x)));
       setFalloAlgo(true);
       // Nada de "escríbele a soporte" dentro del soporte: salvo el 429 (que se resuelve solo
       // esperando), todo fallo ofrece el botón con el canal real.
@@ -272,7 +303,80 @@ export function SupportWidget() {
     } finally {
       setBusy(false);
     }
-  }, [busy, msgs, pathname, ejecutarAcciones]);
+  }, [busy, pathname, threadId, ejecutarAcciones]);
+
+  /**
+   * B3 — trae la conversación de la base. Sin `id` busca el hilo ABIERTO del dueño.
+   *
+   * Es lo que hace que cambiar de sección (el panel navega con <a href>, o sea recarga
+   * entera) deje de borrar la conversación. Si falla, se empieza de cero sin mostrar un
+   * error: no tener historial no es un problema que el dueño tenga que resolver.
+   */
+  const cargarHilo = useCallback(async (id?: string) => {
+    setCargandoHilo(true);
+    try {
+      let hiloId = id;
+      if (!hiloId) {
+        const r = await api<{ hilos: Hilo[] }>("/assistant/threads?limit=20");
+        setHilos(r.hilos);
+        hiloId = r.hilos.find((h) => h.status === "open")?.id;
+      }
+      if (!hiloId) return;
+      const r = await api<{ messages: Array<{ role: string; content: string; actions?: unknown }> }>(`/assistant/threads/${hiloId}/messages`);
+      setThreadId(hiloId);
+      setMsgs(
+        r.messages.map((m) => ({
+          role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+          content: m.content,
+          actions: Array.isArray(m.actions) ? (m.actions as AssistantAction[]).filter((a) => a.type === "button") : undefined,
+        })),
+      );
+      setVerHistorial(false);
+    } catch {
+      /* sin historial se empieza de cero */
+    } finally {
+      setCargandoHilo(false);
+    }
+  }, []);
+
+  /** Una sola carga por montaje del widget, la primera vez que se abre. */
+  const hiloCargadoRef = useRef(false);
+  useEffect(() => {
+    if (!open || hiloCargadoRef.current) return;
+    hiloCargadoRef.current = true;
+    void cargarHilo();
+  }, [open, cargarHilo]);
+
+  const nuevaConversacion = useCallback(async () => {
+    try {
+      const r = await api<{ id: string }>("/assistant/threads/new", { method: "POST", body: "{}" });
+      setThreadId(r.id);
+      setMsgs([]);
+      setHilos(null);
+      setVerHistorial(false);
+    } catch {
+      /* si falla, se sigue en la conversación actual */
+    }
+  }, []);
+
+  const abrirHistorial = useCallback(async () => {
+    setVerHistorial(true);
+    try {
+      const r = await api<{ hilos: Hilo[] }>("/assistant/threads?limit=20");
+      setHilos(r.hilos);
+    } catch {
+      setHilos([]);
+    }
+  }, []);
+
+  /** Reintenta un mensaje que no se envió, sin que el dueño lo vuelva a escribir. */
+  const reintentar = useCallback(
+    (m: Msg) => {
+      setMsgs((prev) => prev.filter((x) => x.id !== m.id));
+      void ask(m.content);
+    },
+    [ask],
+  );
 
   /**
    * Suma archivos a lo que se va a mandar. Uno por uno y con su motivo: si el dueño
@@ -560,6 +664,10 @@ export function SupportWidget() {
                 {ctx?.saldo && !montaje ? ` · ${ctx.saldo}` : ""}
               </p>
             </div>
+            {/* B3 — el hilo vive en la base, así que se puede empezar otro y volver a los
+                anteriores. Dos botones chicos: el widget sigue siendo un widget. */}
+            <button onClick={() => void nuevaConversacion()} data-convi="nueva-conversacion" title="Nueva conversación" aria-label="Nueva conversación" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }}><PenLine size={16} /></button>
+            <button onClick={() => void (verHistorial ? setVerHistorial(false) : abrirHistorial())} data-convi="historial" title="Historial" aria-label="Historial" style={{ border: "none", background: "transparent", cursor: "pointer", color: verHistorial ? "var(--acc-deep)" : "var(--ink-dim)" }}><History size={16} /></button>
             <button onClick={cerrar} aria-label="Cerrar" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-dim)" }}><X size={18} /></button>
           </div>
 
@@ -598,8 +706,34 @@ export function SupportWidget() {
           ) : null}
 
           <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-            {msgs.length === 0 ? <p className="text-dim" style={{ fontSize: 13 }}>Escríbeme y te ayudo a dejar tu asistente andando o resuelvo tus dudas.</p> : null}
-            {msgs.map((m, i) => {
+            {verHistorial ? (
+              <div data-convi="lista-historial" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <p className="text-dim" style={{ fontSize: 12.5, margin: "0 0 2px" }}>Tus conversaciones</p>
+                {hilos === null ? (
+                  <p className="text-dim" style={{ fontSize: 13 }}>Buscando…</p>
+                ) : hilos.length === 0 ? (
+                  <p className="text-dim" style={{ fontSize: 13 }}>Todavía no hay conversaciones guardadas.</p>
+                ) : (
+                  hilos.map((h) => (
+                    <button
+                      key={h.id}
+                      onClick={() => void cargarHilo(h.id)}
+                      style={{ textAlign: "left", border: "1px solid var(--hairline)", background: h.id === threadId ? "var(--acc-dim)" : "transparent", borderRadius: 11, padding: "9px 11px", cursor: "pointer", color: "var(--ink)" }}
+                    >
+                      <span style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, fontWeight: 600 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.title ?? "Sin título"}</span>
+                        <span className="text-dim" style={{ fontSize: 11.5, fontWeight: 400, whiteSpace: "nowrap" }}>{fechaCorta(h.lastMessageAt)}</span>
+                      </span>
+                      {h.preview ? <span className="text-dim" style={{ display: "block", fontSize: 12, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.preview}</span> : null}
+                      {h.userName ? <span className="text-dim" style={{ display: "block", fontSize: 11, marginTop: 2 }}>de {h.userName}</span> : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+            {!verHistorial && msgs.length === 0 && !cargandoHilo ? <p className="text-dim" style={{ fontSize: 13 }}>Escríbeme y te ayudo a dejar tu asistente andando o resuelvo tus dudas.</p> : null}
+            {!verHistorial && cargandoHilo && msgs.length === 0 ? <p className="text-dim" style={{ fontSize: 13 }}>Recuperando nuestra conversación…</p> : null}
+            {(verHistorial ? [] : msgs).map((m, i) => {
               const mine = m.role === "user";
               return (
                 <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "88%" }}>
@@ -608,7 +742,7 @@ export function SupportWidget() {
                       el énfasis que marca la acción. `aria-live` para los lectores. */}
                   <div
                     aria-live={mine ? undefined : "polite"}
-                    style={{ padding: "8px 12px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, wordBreak: "break-word", background: mine ? "var(--acc)" : "var(--surface-solid)", color: mine ? "var(--acc-ink)" : "var(--ink)", border: mine ? "none" : "1px solid var(--hairline)" }}
+                    style={{ padding: "8px 12px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, wordBreak: "break-word", background: mine ? "var(--acc)" : "var(--surface-solid)", color: mine ? "var(--acc-ink)" : "var(--ink)", border: mine ? "none" : "1px solid var(--hairline)", opacity: m.pendiente ? 0.65 : 1 }}
                   >
                     {mine ? (
                       <>
@@ -630,6 +764,16 @@ export function SupportWidget() {
                       renderMarkdown(m.content)
                     )}
                   </div>
+                  {/* B3 — el mensaje no se envió: se dice y se ofrece reintentar, en vez de
+                      dejarlo en pantalla como si Convi lo hubiera recibido y no contestara. */}
+                  {mine && m.fallo ? (
+                    <span style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, fontSize: 11.5, marginTop: 3, color: "var(--danger)" }}>
+                      No se envió
+                      <button onClick={() => reintentar(m)} data-convi="reintentar" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--acc-deep)", fontSize: 11.5, textDecoration: "underline", padding: 0 }}>
+                        Reintentar
+                      </button>
+                    </span>
+                  ) : null}
                   {/* Botones del copiloto: pagar y conectar WhatsApp SOLO pasan por acá, con
                       el clic del dueño (el popup de Meta se bloquea si no nace de un clic). */}
                   {m.actions?.length ? (
