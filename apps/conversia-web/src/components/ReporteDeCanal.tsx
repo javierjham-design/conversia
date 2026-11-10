@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { AlertTriangle, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MinusCircle, RefreshCw, Smartphone } from "lucide-react";
 import { api } from "@/lib/api";
@@ -46,7 +46,13 @@ export interface ReporteDeCanal {
   lastInboundAt: string | null;
   lastOutboundAt: string | null;
   checks: ChequeoDeCanal[];
+  /** C1 — canales de página: ¿Meta aprobó la App Review de mensajería? */
+  reviewApproved?: boolean | null;
+  pageName?: string | null;
 }
+
+/** Instagram y Messenger: viven en una página de Facebook y se prueban distinto. */
+export const esCanalDePagina = (tipo: string): boolean => tipo === "INSTAGRAM" || tipo === "MESSENGER";
 
 type AgenteAsignable = { id: string; name: string };
 
@@ -87,11 +93,17 @@ export function ReporteDeCanal({
   channelId,
   onCambio,
   titulo = "WhatsApp",
+  icono,
+  onDesconectar,
 }: {
   channelId: string;
   /** Avisa a la página que algo cambió (asistente asignado, número publicado). */
   onCambio?: () => void;
   titulo?: string;
+  /** Ícono de la tarjeta (Instagram/Messenger traen el suyo). */
+  icono?: ReactNode;
+  /** Si se pasa, la tarjeta ofrece desconectar el canal. */
+  onDesconectar?: () => void;
 }) {
   const [r, setR] = useState<ReporteDeCanal | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -228,6 +240,7 @@ export function ReporteDeCanal({
   }
 
   const est = estadoVisible(r);
+  const dePagina = esCanalDePagina(r.channelType);
   const nuevoEntrante = Boolean(r.lastInboundAt && r.lastInboundAt !== baseRef.current.inbound);
   const nuevoSaliente = Boolean(r.lastOutboundAt && r.lastOutboundAt !== baseRef.current.outbound);
   const segundos = nuevoEntrante && nuevoSaliente && r.lastInboundAt && r.lastOutboundAt
@@ -241,11 +254,13 @@ export function ReporteDeCanal({
       {/* Encabezado: número, estado y quién atiende */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ width: 44, height: 44, borderRadius: 13, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <MessageCircle size={22} />
+          {icono ?? <MessageCircle size={22} />}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>
-            {titulo}
+            {/* En Instagram/Messenger el nombre del canal YA trae la cuenta («Instagram ·
+                @usuario»), que es como el cliente la reconoce. */}
+            {dePagina ? r.channelName : titulo}
             {r.displayPhone ? <span style={{ fontWeight: 500 }}> · {r.displayPhone}</span> : null}
           </p>
           <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 13 }}>
@@ -253,7 +268,7 @@ export function ReporteDeCanal({
               ? "Activándose: Meta suele tardar unos minutos en publicar tu número."
               : r.defaultAgent
                 ? `Atiende ${r.defaultAgent.name}`
-                : "Falta asignar el asistente que atiende este número."}
+                : `Falta asignar el asistente que atiende ${dePagina ? "este canal" : "este número"}.`}
           </p>
         </div>
         <span style={{ fontSize: 12, fontWeight: 600, padding: "5px 11px", borderRadius: 999, background: `color-mix(in srgb, ${est.color} 14%, transparent)`, color: est.color, display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
@@ -264,18 +279,27 @@ export function ReporteDeCanal({
 
       {/* Ficha: lo que el dueño quiere poder leer sin preguntarle a nadie */}
       <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-        <div style={fila}>
-          <span className="text-dim">Nombre verificado</span>
-          <span>{r.verifiedName ?? "—"}</span>
-        </div>
-        <div style={fila}>
-          <span className="text-dim">Calidad del número</span>
-          <span>{r.qualityRating ? CALIDAD[r.qualityRating] : "—"}</span>
-        </div>
-        <div style={fila}>
-          <span className="text-dim">Modo</span>
-          <span>{r.mode === "coexistence" ? "Tu número de siempre (coexistencia)" : "Número dedicado"}</span>
-        </div>
+        {dePagina ? (
+          <div style={fila}>
+            <span className="text-dim">Página de Facebook</span>
+            <span>{r.pageName ?? "—"}</span>
+          </div>
+        ) : (
+          <>
+            <div style={fila}>
+              <span className="text-dim">Nombre verificado</span>
+              <span>{r.verifiedName ?? "—"}</span>
+            </div>
+            <div style={fila}>
+              <span className="text-dim">Calidad del número</span>
+              <span>{r.qualityRating ? CALIDAD[r.qualityRating] : "—"}</span>
+            </div>
+            <div style={fila}>
+              <span className="text-dim">Modo</span>
+              <span>{r.mode === "coexistence" ? "Tu número de siempre (coexistencia)" : "Número dedicado"}</span>
+            </div>
+          </>
+        )}
         <div style={fila}>
           <span className="text-dim">Atiende</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -308,6 +332,22 @@ export function ReporteDeCanal({
         </div>
       ) : null}
 
+      {/* C2 — Meta todavía está revisando la app: se dice con calma y sin prometer nada. */}
+      {dePagina && r.reviewApproved === false ? (
+        <div data-aviso="revision-meta" style={{ marginTop: 12, padding: 12, borderRadius: 11, background: "var(--acc-dim)" }}>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>
+            <b>Meta está revisando nuestra app.</b> Por ahora tu asistente solo recibe los mensajes de cuentas de prueba. Cuando Meta apruebe, empiezan a llegar los de todo el mundo sin que tengas que hacer nada.
+          </p>
+          <button
+            onClick={() => openAssistant({ topic: "canal", context: `Conecté ${titulo} y dice que Meta está revisando la app. Quiero que me avisen apenas esté aprobado y lleguen los mensajes de todo el mundo.` })}
+            className="card"
+            style={{ marginTop: 8, cursor: "pointer", fontSize: 12.5, padding: "6px 11px" }}
+          >
+            Avísame cuando esté listo
+          </button>
+        </div>
+      ) : null}
+
       {/* Avisos de la cuenta: se cuentan con calma, nunca en tono de alarma */}
       {r.accountAlert ? (
         <div style={{ marginTop: 12, padding: 12, borderRadius: 11, background: "color-mix(in srgb, var(--warn) 9%, transparent)", border: "1px solid color-mix(in srgb, var(--warn) 35%, transparent)" }}>
@@ -322,6 +362,11 @@ export function ReporteDeCanal({
 
       {/* Acciones */}
       <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {onDesconectar ? (
+          <button onClick={onDesconectar} data-accion="desconectar" className="card" style={{ cursor: "pointer", fontSize: 12.5, padding: "7px 12px", order: 2 }}>
+            Desconectar
+          </button>
+        ) : null}
         <button onClick={() => void probar()} disabled={probando} data-accion="probar-ahora" className="btn-accent" style={{ border: "none", cursor: probando ? "wait" : "pointer", fontSize: 13.5, padding: "9px 16px", display: "inline-flex", alignItems: "center", gap: 7, opacity: probando ? 0.7 : 1 }}>
           {probando ? <Loader2 size={15} className="lp-spin" /> : <Smartphone size={15} />} {probando ? "Esperando tu mensaje…" : "Probar ahora"}
         </button>
@@ -342,11 +387,17 @@ export function ReporteDeCanal({
             </>
           ) : (
             <>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Escríbele «hola» a tu número desde otro celular</p>
-              <p className="text-dim" style={{ margin: "6px 0 10px", fontSize: 13, lineHeight: 1.5 }}>
-                {r.displayPhone ? <>Tiene que ser desde un teléfono distinto al que tiene este número: {r.displayPhone}.</> : "En cuanto Meta publique tu número verás acá el enlace para probarlo."}
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+                {dePagina ? `Envíate un mensaje a ${titulo} desde otra cuenta` : "Escríbele «hola» a tu número desde otro celular"}
               </p>
-              {tel ? (
+              <p className="text-dim" style={{ margin: "6px 0 10px", fontSize: 13, lineHeight: 1.5 }}>
+                {dePagina
+                  ? `Tiene que ser desde otra cuenta, no la tuya: ${titulo === "Instagram" ? "un DM a tu Instagram" : "un mensaje a tu página"}. Acá te avisamos en cuanto llegue.`
+                  : r.displayPhone
+                    ? `Tiene que ser desde un teléfono distinto al que tiene este número: ${r.displayPhone}.`
+                    : "En cuanto Meta publique tu número verás acá el enlace para probarlo."}
+              </p>
+              {tel && !dePagina ? (
                 <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
                   <a href={`https://wa.me/${tel}?text=hola`} target="_blank" rel="noopener noreferrer" className="card" style={{ fontSize: 13, padding: "8px 14px", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <MessageCircle size={14} /> Abrir el chat

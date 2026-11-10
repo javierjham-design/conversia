@@ -20,7 +20,9 @@ import { openAssistant } from "@/lib/assistant";
  * de conexión se quedaba arriba). La reproducción de los tres está en el PR de A1. */
 
 type Channel = { id: string; type: string; name: string; status: string; displayPhone: string | null; defaultAgentName: string | null };
-type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string; esVersion?: "v4" | "v5" };
+type EsConfig = { appId: string; configId: string; graphVersion: string; featureType?: string; ready: boolean; mode?: string; esVersion?: "v4" | "v5"; messagingReviewApproved?: boolean };
+/** C2 — una página de Facebook del cliente (para elegir cuál conectar). */
+type PaginaMeta = { id: string; name: string; pictureUrl: string | null };
 type ConnMode = "coexistence" | "embedded";
 
 /** Pasos que corre el backend al conectar (se animan mientras el POST está en vuelo). */
@@ -81,6 +83,11 @@ export default function Canales() {
    * publica el número: el cliente terminaba de conectar y veía la pantalla de antes.
    */
   const [canalNuevoId, setCanalNuevoId] = useState<string | null>(null);
+  /** C2 — vuelta del OAuth de Meta: ok | permisos | error. */
+  const [metaRetorno, setMetaRetorno] = useState<string | null>(null);
+  const [paginas, setPaginas] = useState<PaginaMeta[] | null>(null);
+  const [conectandoPagina, setConectandoPagina] = useState<string | null>(null);
+  const [errorPagina, setErrorPagina] = useState<string | null>(null);
   // 2.3 — id del número PREVERIFICADO asignado a esta org (si la marca lo tiene activo). Si llega,
   // se pasa en setup.preVerifiedPhone para saltar el SMS en el flujo de número nuevo.
   const [preVerifiedId, setPreVerifiedId] = useState<string | null>(null);
@@ -98,8 +105,75 @@ export default function Canales() {
     setChannels(chs);
     setWhatsappDone(onb.steps.find((s) => s.key === "whatsapp")?.done ?? chs.some((c) => c.type === "WHATSAPP_CLOUD" && c.status === "active"));
   }
+  /**
+   * C2 — vuelta del OAuth de Meta (`?meta=ok|permisos|error`). Con `ok` se listan las
+   * páginas del cliente: si tiene una sola se conecta sola, y si tiene varias elige.
+   */
+  async function cargarPaginas() {
+    setConectandoPagina("listando");
+    setErrorPagina(null);
+    try {
+      const r = await api<{ pages: PaginaMeta[] } | PaginaMeta[]>("/integrations/meta-crm/pages");
+      const lista = Array.isArray(r) ? r : (r.pages ?? []);
+      if (lista.length === 1) {
+        await conectarPagina(lista[0].id);
+        return;
+      }
+      setPaginas(lista);
+    } catch (e) {
+      setErrorPagina((e as Error).message);
+    } finally {
+      setConectandoPagina(null);
+    }
+  }
+
+  async function conectarPagina(pageId: string) {
+    setConectandoPagina(pageId);
+    setErrorPagina(null);
+    try {
+      await api(`/integrations/meta-crm/pages/${pageId}/connect`, { method: "POST", body: JSON.stringify({ purpose: "messaging" }) });
+      setPaginas(null);
+      setMetaRetorno(null);
+      await load();
+    } catch (e) {
+      setErrorPagina((e as Error).message);
+    } finally {
+      setConectandoPagina(null);
+    }
+  }
+
+  /** Abre el diálogo de Meta pidiendo SOLO los permisos de mensajería, y vuelve acá. */
+  async function conectarRed(red: "Instagram" | "Messenger") {
+    setErrorPagina(null);
+    try {
+      const r = await api<{ url: string }>("/integrations/meta-crm/oauth/authorize?purpose=messaging&return=/canales");
+      window.location.href = r.url;
+    } catch {
+      setErrorPagina(`No pudimos abrir la conexión con Meta para ${red}. Reintenta en un momento.`);
+    }
+  }
+
+  async function desconectarCanal(id: string) {
+    try {
+      await api(`/channels/${id}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setErrorPagina((e as Error).message);
+    }
+  }
+
   useEffect(() => {
     void load();
+    // C2 — ¿volvemos del diálogo de Meta?
+    if (typeof window !== "undefined") {
+      const meta = new URLSearchParams(window.location.search).get("meta");
+      if (meta) {
+        setMetaRetorno(meta);
+        // La marca se limpia de la URL: recargar no debe repetir la conexión.
+        window.history.replaceState(null, "", "/canales");
+        if (meta === "ok") void cargarPaginas();
+      }
+    }
     // COP 1 — cuando el copiloto completa un paso del montaje emite esta señal y la pantalla
     // se refresca sola. Antes había que recargar a mano para ver el estado real del canal.
     const onRefresh = () => void load();
@@ -280,6 +354,8 @@ export default function Canales() {
    */
   const canalReporte = waChannels.find((c) => c.status === "active") ?? waChannels[0] ?? null;
   const idReporte = canalReporte?.id ?? canalNuevoId;
+  const igCanal = (channels ?? []).find((c) => c.type === "INSTAGRAM") ?? null;
+  const msgrCanal = (channels ?? []).find((c) => c.type === "MESSENGER") ?? null;
   /** Conectado pero sin asistente: el caso en que el pie decía "conecta tu número". */
   const faltaAsistente = waChannels.some((c) => c.status === "active" && !c.defaultAgentName);
   const activeSteps = modeRef.current === "coexistence" ? COEX_STEPS : STEPS;
@@ -411,20 +487,66 @@ export default function Canales() {
           </div>
         ) : null}
 
-        {/* ---------- Próximamente: Instagram + Messenger ---------- */}
-        {[
-          { key: "ig", label: "Instagram", Icon: Camera, desc: "Responde los DM de tu Instagram con el mismo asistente." },
-          { key: "msj", label: "Messenger", Icon: MessageSquare, desc: "Atiende tu página de Facebook desde la misma bandeja." },
-        ].map(({ key, label, Icon, desc }) => (
-          <div key={key} className="card" style={{ padding: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 12, opacity: 0.92 }}>
-            <span style={{ width: 40, height: 40, borderRadius: 12, background: "var(--line)", color: "var(--ink-dim)", display: "grid", placeItems: "center", flexShrink: 0 }}><Icon size={20} /></span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{label}</p>
-              <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5 }}>{desc}</p>
-            </div>
-            <button onClick={() => pedirAyuda(`Quiero conectar ${label}.`, key)} className="card" style={{ cursor: "pointer", fontSize: 12.5, padding: "6px 12px" }}>Próximamente</button>
+        {/* ---------- Instagram + Messenger (C2) ---------- */}
+        {metaRetorno === "permisos" ? (
+          <div className="card" style={{ padding: 14, marginBottom: 12, fontSize: 13.5, lineHeight: 1.5 }}>
+            Faltaron permisos en la ventana de Meta. Vuelve a intentarlo y acepta los de <b>mensajes</b>: sin ellos no podemos recibir tus DM.
           </div>
-        ))}
+        ) : null}
+        {metaRetorno === "error" ? (
+          <div className="card" style={{ padding: 14, marginBottom: 12, fontSize: 13.5, lineHeight: 1.5 }}>
+            No pudimos completar la conexión con Meta. Reintenta; si vuelve a fallar, pídele ayuda al asistente.
+          </div>
+        ) : null}
+        {errorPagina ? (
+          <div className="card" style={{ padding: 14, marginBottom: 12, fontSize: 13.5, borderColor: "var(--warn)" }}>{errorPagina}</div>
+        ) : null}
+
+        {/* Varias páginas: el cliente elige cuál conectar. */}
+        {paginas?.length ? (
+          <div className="card" data-seleccion="paginas" style={{ padding: 18, marginBottom: 12 }}>
+            <p style={{ margin: "0 0 4px", fontWeight: 600, fontSize: 15 }}>¿Cuál de tus páginas conectamos?</p>
+            <p className="text-dim" style={{ margin: "0 0 12px", fontSize: 12.5 }}>De esa página salen los mensajes de Messenger, y su Instagram vinculado.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {paginas.map((p) => (
+                <button key={p.id} onClick={() => void conectarPagina(p.id)} disabled={Boolean(conectandoPagina)} className="card" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", textAlign: "left" }}>
+                  {p.pictureUrl ? <img src={p.pictureUrl} alt="" width={28} height={28} style={{ borderRadius: 8 }} /> : null}
+                  <span style={{ fontSize: 13.5 }}>{p.name}</span>
+                  {conectandoPagina === p.id ? <Loader2 size={14} className="lp-spin" style={{ marginLeft: "auto" }} /> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {([
+          { key: "ig", label: "Instagram" as const, Icon: Camera, canal: igCanal, desc: "Responde los DM de tu Instagram con el mismo asistente.", requisito: "Necesitas una página de Facebook vinculada a tu cuenta de Instagram profesional." },
+          { key: "msj", label: "Messenger" as const, Icon: MessageSquare, canal: msgrCanal, desc: "Atiende los mensajes de tu página de Facebook desde la misma bandeja.", requisito: "Necesitas ser administrador de la página." },
+        ]).map(({ key, label, Icon, canal, desc, requisito }) =>
+          canal ? (
+            <ReporteDeCanal
+              key={key}
+              channelId={canal.id}
+              titulo={label}
+              icono={<Icon size={22} />}
+              onCambio={() => void load()}
+              onDesconectar={() => void desconectarCanal(canal.id)}
+            />
+          ) : (
+            <div key={key} className="card" style={{ padding: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ width: 40, height: 40, borderRadius: 12, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Icon size={20} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{label}</p>
+                <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5, lineHeight: 1.45 }}>
+                  {desc} {requisito}
+                </p>
+              </div>
+              <button onClick={() => void conectarRed(label)} data-accion={`conectar-${key}`} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "7px 13px", whiteSpace: "nowrap" }}>
+                Conectar {label}
+              </button>
+            </div>
+          ),
+        )}
 
         {/* ---------- Checklist: conectar número ----------
             A2.d — tres estados, no dos. La clave `whatsapp` del checklist NO cambia (la usan

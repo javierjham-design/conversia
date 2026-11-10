@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import {
   ArrowRight, CalendarCheck, Check, ChevronDown, CreditCard, Gift, Globe, LayoutDashboard, Menu, MessageSquare,
-  ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
+  MessagesSquare, ShieldCheck, Sparkles, UserCheck, Users, Wand2, X, Zap,
 } from "lucide-react";
 import { getToken, getRefreshToken, getSessionDeadline, clearToken } from "@/lib/api";
 import { estadoDelVisitante } from "@/lib/sesion";
@@ -19,7 +19,7 @@ import { clp, usarPrecios, type CatalogoInicial } from "@/lib/usar-precios";
  * funciona, preguntas— sin cerrar sesión. La sesión solo cambia el botón del menú.
  */
 
-export function Landing({ inicial }: { inicial: CatalogoInicial | null }) {
+export function Landing({ inicial, multicanal = false }: { inicial: CatalogoInicial | null; multicanal?: boolean }) {
   // Arranca SIEMPRE en "anónimo" y solo cambia en el efecto: leer localStorage para el primer
   // render rompería la hidratación (el servidor no lo tiene) — es el React #418 que ya nos costó
   // una pantalla. Como consecuencia, el botón del panel aparece un instante después del paint.
@@ -171,10 +171,13 @@ export function Landing({ inicial }: { inicial: CatalogoInicial | null }) {
             // M0 — "IA que no inventa" era un absoluto que no podemos sostener. Lo que SÍ es
             // comprobable es de dónde saca lo que dice y qué hace cuando no lo sabe.
             { Icon: ShieldCheck, t: "Responde con la información que tú le das", d: "Tus servicios, precios y horarios, los que tú cargas. Cuando no lo sabe o la cosa es urgente, deriva a tu equipo." },
-            // M0 — se cayó la tarjeta "Multicanal (WhatsApp, Instagram y Messenger)": el panel
-            // de Conversia conecta SOLO WhatsApp (su /canales es Embedded Signup y nada más), y
-            // los únicos canales de IG/Messenger conectados en producción son de marca TuBot.
-            // Para un cliente de Conversia era una promesa que no puede cumplir solo.
+            // M0 se cayó la tarjeta "Multicanal": el panel conectaba SOLO WhatsApp. C2 la
+            // devuelve, pero SOLO cuando Meta aprobó la App Review de mensajería
+            // (META_MESSAGING_REVIEW_APPROVED): antes de eso, los DM del público no llegan y
+            // prometerlo sería vender algo que el cliente no va a poder usar.
+            ...(multicanal
+              ? [{ Icon: MessagesSquare, t: "WhatsApp, Instagram y Messenger", d: "El mismo asistente responde los tres, y todo llega a la misma bandeja." }]
+              : []),
             { Icon: Globe, t: "Atiende cuando tú no puedes", d: "De noche, el fin de semana y mientras estás con otro cliente. El que escribe recibe respuesta al instante." },
             { Icon: CreditCard, t: "Cobra por WhatsApp", d: "Envía links de pago y cierra ventas sin salir del chat." },
             { Icon: Users, t: "Clientes ordenados", d: "Cada contacto con su historial, etiquetas y notas. Tu CRM, sin complicarte." },

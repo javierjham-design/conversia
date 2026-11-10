@@ -97,8 +97,18 @@ describe("la portada revalida con el mismo número que la lectura", () => {
     // La LLAMADA, no el import: con `expect(src).toContain("leerCatalogo")` el test seguía
     // verde después de reemplazar la llamada por `const inicial = null`, porque el import
     // seguía ahí. Un guardián que no se cae cuando rompés lo que vigila no vigila nada.
-    expect(src).toMatch(/await\s+leerCatalogo\(\)/);
+    // C2 — la llamada puede ir dentro de un `Promise.all` (ahora también se lee si Meta
+    // aprobó la mensajería), pero tiene que seguir siendo una llamada AWAITED.
+    expect(src).toMatch(/await[\s\S]{0,120}leerCatalogo\(\)/);
     expect(src).toMatch(/<Landing\s+inicial=\{inicial\}/);
     expect(src).not.toContain('"use client"');
+  });
+
+  it("la promesa de Instagram y Messenger se decide EN EL SERVIDOR", async () => {
+    // Igual que el precio: si la portada promete multicanal desde el cliente, el HTML que
+    // ve Google —y el revisor de anuncios de Meta— lo prometería siempre.
+    const src = (await import("node:fs")).readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/multicanalAprobado\(\)/);
+    expect(src).toMatch(/multicanal=\{multicanal\}/);
   });
 });

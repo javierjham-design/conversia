@@ -1,4 +1,4 @@
-import { leerCatalogo } from "@/lib/precios-servidor";
+import { leerCatalogo, multicanalAprobado } from "@/lib/precios-servidor";
 import { Landing } from "./landing";
 
 /**
@@ -23,6 +23,8 @@ import { Landing } from "./landing";
 export const revalidate = 300;
 
 export default async function Page() {
-  const inicial = await leerCatalogo();
-  return <Landing inicial={inicial} />;
+  // C2 — las dos lecturas van juntas: la portada se prerenderiza, así que tanto el precio
+  // como lo que se promete tienen que ser correctos EN EL HTML, no un instante después.
+  const [inicial, multicanal] = await Promise.all([leerCatalogo(), multicanalAprobado()]);
+  return <Landing inicial={inicial} multicanal={multicanal} />;
 }

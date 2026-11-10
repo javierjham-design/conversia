@@ -57,6 +57,12 @@ function crearEstado(inicial: Partial<ReporteDeCanal> = {}, opts: { canales?: Ca
     pasoHecho: opts.pasoHecho ?? true,
     agentes: opts.agentes ?? [{ id: "ag1", name: "Recepción" }],
     patchs: [] as Array<Record<string, unknown>>,
+    /** C2 — páginas de Facebook del cliente y lo que se conectó/desconectó. */
+    paginas: [] as Array<{ id: string; name: string; pictureUrl: string | null }>,
+    conectadas: [] as string[],
+    borrados: [] as string[],
+    /** Reporte propio de un canal (si no, se usa `reporte`). */
+    reportes: {} as Record<string, ReporteDeCanal>,
   };
 }
 type Estado = ReturnType<typeof crearEstado>;
@@ -104,7 +110,12 @@ async function montarApi(page: Page, estado: Estado): Promise<void> {
     if (p === "/agents/assignable") return responder(route, estado.agentes);
     if (p === "/public/meta-config") return responder(route, { appId: "0", configId: "0", graphVersion: "v26.0", ready: true, mode: "coexistence" });
     if (p === "/channels/connection-extras") return responder(route, { preVerifiedPhoneId: null });
-    if (p.endsWith("/status")) return responder(route, estado.reporte);
+    if (p.endsWith("/status")) {
+      // El reporte es POR CANAL: devolver el mismo para todos hacía que dos tarjetas
+      // distintas compartieran `data-reporte-canal` y el selector encontrara dos.
+      const idCanal = p.split("/")[2];
+      return responder(route, { ...(estado.reportes[idCanal] ?? estado.reporte), channelId: idCanal });
+    }
     if (p.startsWith("/channels") && req.method() === "PATCH") {
       const body = JSON.parse(req.postData() ?? "{}") as { defaultAgentId?: string };
       estado.patchs.push(body);
@@ -116,7 +127,21 @@ async function montarApi(page: Page, estado: Estado): Promise<void> {
       }
       return responder(route, { ok: true });
     }
-    if (p === "/channels") return responder(route, estado.canales);
+    if (p === "/channels" && req.method() === "GET") return responder(route, estado.canales);
+    // C2 — conexión de Instagram/Messenger.
+    if (p === "/integrations/meta-crm/oauth/authorize") return responder(route, { url: "https://www.facebook.com/dialog/oauth?mock=1", purpose: "messaging" });
+    if (p === "/integrations/meta-crm/pages") return responder(route, estado.paginas);
+    const conectar = /^\/integrations\/meta-crm\/pages\/([^/]+)\/connect$/.exec(p);
+    if (conectar) {
+      estado.conectadas.push(conectar[1]);
+      estado.canales = [...estado.canales, { id: "ig1", type: "INSTAGRAM", name: "Instagram · @barberiacentro", status: "active", displayPhone: null, defaultAgentName: "Recepción" }];
+      return responder(route, { ok: true, purpose: "messaging", agentesAsignados: 1 });
+    }
+    if (p.startsWith("/channels/") && req.method() === "DELETE") {
+      estado.borrados.push(p.split("/")[2]);
+      estado.canales = estado.canales.filter((c) => c.id !== p.split("/")[2]);
+      return responder(route, { ok: true });
+    }
     // Todo lo demás que la página consulte y este spec no modele.
     return responder(route, {});
   });
@@ -262,4 +287,108 @@ test("los chequeos con fallo muestran qué hacer; lo que no se pudo averiguar NO
   await expect(tarjeta(page)).toContainText("Vuelve a conectar tu WhatsApp");
   // El que no se pudo averiguar se muestra, pero sin "qué hacer" (no hay nada que hacer).
   await expect(tarjeta(page)).toContainText("Meta aún no reporta la calidad");
+});
+
+// ─────────────────────────── C2 — Instagram y Messenger ───────────────────────────
+
+/** Reporte de un canal de página (Instagram/Messenger): no tiene número ni calidad. */
+const REPORTE_IG: ReporteDeCanal = {
+  channelId: "ig1",
+  channelType: "INSTAGRAM",
+  channelName: "Instagram · @barberiacentro",
+  displayPhone: null,
+  verifiedName: null,
+  qualityRating: null,
+  mode: "dedicated",
+  coexVerified: false,
+  pendingNumber: false,
+  wabaId: null,
+  channelStatus: "active",
+  tokenHealthy: true,
+  accountAlert: null,
+  webhookSubscribed: true,
+  defaultAgent: { id: "ag1", name: "Recepción" },
+  lastInboundAt: null,
+  lastOutboundAt: null,
+  checks: [
+    { key: "pagina", label: "Tu página está conectada", ok: true, detail: "Barbería Centro" },
+    { key: "webhook", label: "Meta nos avisa de tus mensajes", ok: true, detail: "Avisos activos" },
+    { key: "asistente", label: "Un asistente atiende este canal", ok: true, detail: "Atiende Recepción" },
+  ],
+  reviewApproved: false,
+  pageName: "Barbería Centro",
+};
+
+test("sin conectar, Instagram y Messenger OFRECEN conectarse (ya no dicen «Próximamente»)", async ({ page }) => {
+  const estado = crearEstado();
+  await montarApi(page, estado);
+  await page.goto("/canales", { waitUntil: "domcontentloaded" });
+
+  await expect(page.locator('[data-accion="conectar-ig"]')).toBeVisible();
+  await expect(page.locator('[data-accion="conectar-msj"]')).toBeVisible();
+  await expect(page.getByText("Próximamente")).toBeHidden();
+  // El requisito se dice ANTES de que el cliente se meta en el diálogo de Meta.
+  await expect(page.getByText(/página de Facebook vinculada a tu cuenta de Instagram profesional/i)).toBeVisible();
+});
+
+test("al volver de Meta con una sola página, se conecta sola y la tarjeta queda activa", async ({ page }) => {
+  const estado = crearEstado();
+  estado.paginas = [{ id: "p1", name: "Barbería Centro", pictureUrl: null }];
+  estado.reportes.ig1 = REPORTE_IG;
+  await montarApi(page, estado);
+  await page.goto("/canales?meta=ok", { waitUntil: "domcontentloaded" });
+
+  await expect(page.locator('[data-reporte-canal="ig1"]')).toContainText("Instagram", { timeout: 15_000 });
+  await expect(page.locator('[data-reporte-canal="ig1"]')).toContainText("Atiende Recepción");
+  expect(estado.conectadas).toEqual(["p1"]);
+  // Y la marca `?meta=ok` se limpia de la URL: recargar no debe reconectar.
+  await expect(page).toHaveURL(/\/canales$/);
+});
+
+test("con varias páginas, el cliente elige cuál", async ({ page }) => {
+  const estado = crearEstado();
+  estado.paginas = [
+    { id: "p1", name: "Barbería Centro", pictureUrl: null },
+    { id: "p2", name: "Barbería Sur", pictureUrl: null },
+  ];
+  estado.reportes.ig1 = REPORTE_IG;
+  await montarApi(page, estado);
+  await page.goto("/canales?meta=ok", { waitUntil: "domcontentloaded" });
+
+  const seleccion = page.locator('[data-seleccion="paginas"]');
+  await expect(seleccion).toBeVisible({ timeout: 15_000 });
+  await expect(seleccion).toContainText("Barbería Sur");
+  expect(estado.conectadas).toEqual([]); // no conecta nada sin que elija
+
+  await seleccion.getByText("Barbería Sur").click();
+  await expect(page.locator('[data-reporte-canal="ig1"]')).toBeVisible({ timeout: 15_000 });
+  expect(estado.conectadas).toEqual(["p2"]);
+});
+
+test("mientras Meta revisa la app, la tarjeta lo dice con calma", async ({ page }) => {
+  const estado = crearEstado({}, {
+    canales: [{ id: "ig1", type: "INSTAGRAM", name: "Instagram · @barberiacentro", status: "active", displayPhone: null, defaultAgentName: "Recepción" }],
+  });
+  estado.reportes.ig1 = REPORTE_IG;
+  await montarApi(page, estado);
+  await page.goto("/canales", { waitUntil: "domcontentloaded" });
+
+  const aviso = page.locator('[data-aviso="revision-meta"]');
+  await expect(aviso).toContainText("Meta está revisando nuestra app");
+  await expect(aviso.getByText("Avísame cuando esté listo")).toBeVisible();
+  // Nada de prometer lo que todavía no llega.
+  await expect(aviso).toContainText("solo recibe los mensajes de cuentas de prueba");
+});
+
+test("se puede desconectar un canal de red social", async ({ page }) => {
+  const estado = crearEstado({}, {
+    canales: [{ id: "ig1", type: "INSTAGRAM", name: "Instagram · @barberiacentro", status: "active", displayPhone: null, defaultAgentName: "Recepción" }],
+  });
+  estado.reportes.ig1 = REPORTE_IG;
+  await montarApi(page, estado);
+  await page.goto("/canales", { waitUntil: "domcontentloaded" });
+
+  await page.locator('[data-reporte-canal="ig1"] [data-accion="desconectar"]').click();
+  await expect(page.locator('[data-accion="conectar-ig"]')).toBeVisible({ timeout: 15_000 });
+  expect(estado.borrados).toEqual(["ig1"]);
 });
