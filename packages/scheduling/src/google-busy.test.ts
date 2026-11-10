@@ -283,49 +283,69 @@ describe("makeExternalBusy", () => {
 // Integración con la agenda nativa: lo que termina viendo el cliente.
 // ---------------------------------------------------------------------------
 
+/**
+ * EL DIA DE REFERENCIA DE ESTA SECCION TIENE QUE ESTAR SIEMPRE EN EL FUTURO.
+ *
+ * Antes era el literal `2026-11-10`, escrito el 3-nov como "una semana mas adelante". El
+ * 10-nov, a las 09:30 de Chile, el reloj lo alcanzo: `getAvailableSlots` descarta lo que ya
+ * paso, el cupo de 09:30 desaparecio y el test se puso rojo EN MAIN, bloqueando todo merge.
+ * Al dia siguiente habrian caido TODOS los de esta seccion, con el dia entero en el pasado.
+ *
+ * Se calcula el proximo MARTES (el unico dia que trabaja PRO) a 8 dias o mas, y el offset
+ * sale de la zona, que es justo lo que el motor tiene que deducir.
+ */
+function proximoMartesFuturo(): string {
+  const d = new Date();
+  d.setUTCHours(12, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + 8);
+  while (d.getUTCDay() !== 2) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+const DIA = proximoMartesFuturo();
+const OFF = offsetForZoneOnDate(TZ, DIA);
+
 const PRO = { id: "p1", name: "Barbero A", workingHours: [{ day: 2, start: "09:00", end: "13:00" }] }; // martes
 const DATOS = {
   clinics: [{ id: "c1", name: "Local", timezone: TZ }],
   professionals: [PRO],
   services: [{ id: "corte", name: "Corte", durationMin: 30 }],
   busy: [] as Array<{ professionalId: string; start: string; end: string }>,
-  // nowMs no se puede inyectar desde acá: el rango es futuro para que `minAdvanceMin` no filtre.
+  // nowMs no se puede inyectar desde acá: por eso `DIA` se CALCULA siempre a futuro (ver arriba).
   // El offset NO se escribe: sale de la zona. Las horas esperadas más abajo son "-03:00"
   // porque en noviembre Chile está en -03:00, y eso lo tiene que deducir el motor.
   config: { slotStepMin: 30, bufferMin: 0, minAdvanceMin: 0, timeZone: TZ },
 };
-// 2026-11-10 es MARTES.
-const CONSULTA = { from: "2026-11-10", to: "2026-11-10", serviceId: "corte" };
+const CONSULTA = { from: DIA, to: DIA, serviceId: "corte" };
 
 describe("el bot NO ofrece una hora ocupada en Google", () => {
   it("sin Google, ofrece todo su horario", async () => {
     const p = new NativeSchedulingProvider(DATOS);
     const slots = await p.getAvailableSlots(CONSULTA);
-    expect(slots.map((s) => s.start)).toContain("2026-11-10T11:00:00-03:00");
+    expect(slots.map((s) => s.start)).toContain(`${DIA}T11:00:00${OFF}`);
   });
 
   it("con un evento de Google de 11:00 a 12:00, esas horas desaparecen", async () => {
     const p = new NativeSchedulingProvider({
       ...DATOS,
-      externalBusy: async () => [{ start: "2026-11-10T11:00:00-03:00", end: "2026-11-10T12:00:00-03:00" }],
+      externalBusy: async () => [{ start: `${DIA}T11:00:00${OFF}`, end: `${DIA}T12:00:00${OFF}` }],
     });
     const horas = (await p.getAvailableSlots(CONSULTA)).map((s) => s.start);
-    expect(horas).not.toContain("2026-11-10T11:00:00-03:00");
-    expect(horas).not.toContain("2026-11-10T11:30:00-03:00");
-    expect(horas).toContain("2026-11-10T10:30:00-03:00");
-    expect(horas).toContain("2026-11-10T12:00:00-03:00");
+    expect(horas).not.toContain(`${DIA}T11:00:00${OFF}`);
+    expect(horas).not.toContain(`${DIA}T11:30:00${OFF}`);
+    expect(horas).toContain(`${DIA}T10:30:00${OFF}`);
+    expect(horas).toContain(`${DIA}T12:00:00${OFF}`);
   });
 
   it("une lo de Google con las citas de la base de datos", async () => {
     const p = new NativeSchedulingProvider({
       ...DATOS,
-      busy: [{ professionalId: "p1", start: "2026-11-10T09:00:00-03:00", end: "2026-11-10T09:30:00-03:00" }],
-      externalBusy: async () => [{ start: "2026-11-10T11:00:00-03:00", end: "2026-11-10T11:30:00-03:00" }],
+      busy: [{ professionalId: "p1", start: `${DIA}T09:00:00${OFF}`, end: `${DIA}T09:30:00${OFF}` }],
+      externalBusy: async () => [{ start: `${DIA}T11:00:00${OFF}`, end: `${DIA}T11:30:00${OFF}` }],
     });
     const horas = (await p.getAvailableSlots(CONSULTA)).map((s) => s.start);
-    expect(horas).not.toContain("2026-11-10T09:00:00-03:00"); // cita de la BD
-    expect(horas).not.toContain("2026-11-10T11:00:00-03:00"); // evento de Google
-    expect(horas).toContain("2026-11-10T09:30:00-03:00");
+    expect(horas).not.toContain(`${DIA}T09:00:00${OFF}`); // cita de la BD
+    expect(horas).not.toContain(`${DIA}T11:00:00${OFF}`); // evento de Google
+    expect(horas).toContain(`${DIA}T09:30:00${OFF}`);
   });
 
   it("RESPALDO: si Google falla (lista vacía), sigue ofreciendo la agenda nativa", async () => {
@@ -343,17 +363,17 @@ describe("el bot NO ofrece una hora ocupada en Google", () => {
       },
     });
     await p.getAvailableSlots(CONSULTA);
-    expect(vistos).toEqual([{ professionalId: "p1", from: "2026-11-10", to: "2026-11-10" }]);
+    expect(vistos).toEqual([{ professionalId: "p1", from: DIA, to: DIA }]);
   });
 });
 
 describe("RE-VERIFICACIÓN antes de confirmar (anti doble reserva)", () => {
-  const cita = { clinicId: "c1", professionalId: "p1", serviceId: "corte", patient: { firstName: "Juan", phone: "+56911111111" }, start: "2026-11-10T11:00:00-03:00", end: "2026-11-10T11:30:00-03:00" };
+  const cita = { clinicId: "c1", professionalId: "p1", serviceId: "corte", patient: { firstName: "Juan", phone: "+56911111111" }, start: `${DIA}T11:00:00${OFF}`, end: `${DIA}T11:30:00${OFF}` };
 
   it("si la hora se ocupó en Google mientras el cliente contestaba, NO se agenda", async () => {
     const p = new NativeSchedulingProvider({
       ...DATOS,
-      externalBusy: async () => [{ start: "2026-11-10T11:00:00-03:00", end: "2026-11-10T12:00:00-03:00" }],
+      externalBusy: async () => [{ start: `${DIA}T11:00:00${OFF}`, end: `${DIA}T12:00:00${OFF}` }],
     });
     await expect(p.createAppointment(cita)).rejects.toThrow(/ya no está disponible/i);
   });
@@ -374,7 +394,7 @@ describe("RE-VERIFICACIÓN antes de confirmar (anti doble reserva)", () => {
   });
 
   it("si la hora sigue libre, agenda normal", async () => {
-    const p = new NativeSchedulingProvider({ ...DATOS, externalBusy: async () => [{ start: "2026-11-10T15:00:00-03:00", end: "2026-11-10T16:00:00-03:00" }] });
+    const p = new NativeSchedulingProvider({ ...DATOS, externalBusy: async () => [{ start: `${DIA}T15:00:00${OFF}`, end: `${DIA}T16:00:00${OFF}` }] });
     const appt = await p.createAppointment(cita);
     expect(appt.start).toBe(cita.start);
   });
@@ -412,7 +432,7 @@ describe("rendimiento: un tenant sin Google no paga nada", () => {
     const sinGancho = new NativeSchedulingProvider(DATOS);
     await expect(sinGancho.getAvailableSlots(CONSULTA)).resolves.toBeTruthy();
     await expect(
-      sinGancho.createAppointment({ clinicId: "c1", professionalId: "p1", patient: { firstName: "x", phone: "+5691" }, start: "2026-11-10T12:00:00-03:00", end: "2026-11-10T12:30:00-03:00" }),
+      sinGancho.createAppointment({ clinicId: "c1", professionalId: "p1", patient: { firstName: "x", phone: "+5691" }, start: `${DIA}T12:00:00${OFF}`, end: `${DIA}T12:30:00${OFF}` }),
     ).resolves.toBeTruthy();
   });
 });
