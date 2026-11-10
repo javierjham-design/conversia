@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from "@nestjs/common";
 import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
@@ -20,6 +21,8 @@ import { requirePermission } from "../tenancy/permissions";
 import { requireContext } from "../tenancy/context";
 import { assignPublishedAgentToChannelsSafe } from "../agents/assign-agent-to-channels";
 import { listWabaPhoneNumbers, subscribeAndRegisterWhatsapp, verifyPhoneNumberOwnership } from "./whatsapp-onboard";
+import { ChannelStatusService } from "./channel-status.service";
+import { consultarNumero } from "./channel-status";
 
 /**
  * §4.2 — Mensaje único cuando el canal del tenant no tiene token propio.
@@ -115,7 +118,26 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 @Controller("channels")
 export class ChannelsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private estado: ChannelStatusService,
+  ) {}
+
+  /**
+   * A1 — REPORTE DE CONEXIÓN del canal: número, nombre verificado, calidad, modo, quién
+   * atiende, si Meta nos avisa de los mensajes y la última actividad, con una lista de
+   * chequeos accionables.
+   *
+   * `?fresh=1` salta la caché de 60 s: lo usa el botón "Probar ahora", que tiene que leer el
+   * estado de este segundo y no el de hace un minuto.
+   */
+  @Get(":id/status")
+  async status(@Param("id") id: string, @Query("fresh") fresh?: string) {
+    const ctx = requireContext();
+    const sinCache = parse(z.object({ fresh: z.enum(["0", "1"]).optional() }), { fresh }).fresh === "1";
+    if (sinCache) await this.estado.invalidar(ctx.organizationId, id);
+    return this.estado.reporte(ctx.organizationId, id, { sinCache });
+  }
 
   /** Datos para configurar el webhook en Meta (por tenant es el mismo endpoint). */
   @Get("meta/webhook-info")
@@ -1036,18 +1058,17 @@ export class ChannelsController {
       // §4.2 — la prueba usa SOLO el token del canal. Antes reintentaba con el token
       // global y devolvía "ok ⚠ token vencido", lo que además dejaba la prueba en verde
       // con un token muerto. Ahora un token vencido es un FALLO con el motivo.
-      const { res, json, tokenVencido } = await this.graphFetch(
-        `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(data.phoneNumberId)}?fields=display_phone_number,verified_name,quality_rating`,
-        data.token,
-      );
-      if (!res.ok) {
-        if (tokenVencido) {
+      // A1 — la MISMA consulta que usa el reporte de conexión (`channel-status.ts`): un solo
+      // lugar que sabe qué campos pedirle a Meta y cómo leer un 190.
+      const num = await consultarNumero(data.phoneNumberId, data.token);
+      if (!num.ok) {
+        if (num.tokenVencido) {
           await this.setChannelHealth(ctx.organizationId, id, "error", "El token del canal está vencido o fue revocado. Reautoriza WhatsApp en Canales.");
           return { ok: false, detail: "El token del canal está vencido o fue revocado — reautoriza WhatsApp en Canales." };
         }
-        return { ok: false, detail: json?.error?.message ?? `Meta respondió ${res.status}` };
+        return { ok: false, detail: num.error ?? "Meta no respondió" };
       }
-      const detail = `Número verificado: ${json.display_phone_number ?? "?"} (${json.verified_name ?? "sin nombre"}) · calidad: ${json.quality_rating ?? "?"}`;
+      const detail = `Número verificado: ${num.displayPhone ?? "?"} (${num.verifiedName ?? "sin nombre"}) · calidad: ${num.qualityRating ?? "?"}`;
       await this.setChannelHealth(ctx.organizationId, id, "active");
       return { ok: true, detail };
     } catch (err) {
