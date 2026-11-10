@@ -378,6 +378,12 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // VARIOS profesionales distintos NO adivinamos (se deja sin fijar). La instrucción de prompt no
         // bastaba; esto lo blinda. createAppointment además RECHAZA agendar con otro profesional.
         let pinnedProfId: string | null = null;
+        // Al REAGENDAR, la hora nueva conserva la MISMA duración que la cita ORIGINAL (petición del
+        // dueño: una cita de 60 min se reagenda a 60, una de 15 a 15). Si el paciente tiene UNA sola
+        // cita futura activa, tomamos SU duración para consultar la disponibilidad CON esa duración
+        // (así el cupo ofrecido sí cabe). El "mover" de createAppointment además la fija de forma dura.
+        // Determinista; no depende de que el modelo acuerde pasar durationMin.
+        let pinnedDurMin: number | null = null;
         if (!input.professionalId) {
           try {
             const phoneP = (await services(ctx).contactInfo()).phone;
@@ -388,10 +394,16 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
               );
               const profIds = [...new Set(futuras.map((a) => a.professionalId))];
               if (profIds.length === 1) { resolvedProfId = profIds[0]; pinnedProfId = profIds[0]; }
+              if (futuras.length === 1) {
+                const f = futuras[0];
+                const sMs = new Date(f.start).getTime();
+                const eMs = new Date(f.end).getTime();
+                if (Number.isFinite(sMs) && Number.isFinite(eMs) && eMs > sMs) pinnedDurMin = Math.round((eMs - sMs) / 60000);
+              }
             }
           } catch { /* no se pudo consultar las citas → seguimos sin fijar (comportamiento anterior) */ }
         }
-        const query = { serviceId: input.serviceCode, professionalId: resolvedProfId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
+        const query = { serviceId: input.serviceCode, professionalId: resolvedProfId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin ?? pinnedDurMin ?? undefined };
         // FRANJA (hora de Chile): sin este filtro, el tope de opciones dejaba solo las horas más
         // tempranas y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
@@ -706,7 +718,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
               ? sameProf[0] // inequívoco → mover aunque sea otro día (reagendamiento, caso Rubén)
               : sameProf.find((a) => chileDay(a.start) === targetDay); // varias → conservador: solo el mismo día
           if (toMove) {
-            const endMove = slot.end ?? new Date(targetMs + 30 * 60000).toISOString();
+            // La hora nueva conserva la MISMA duración que la cita ORIGINAL (60→60, 15→15), sin importar
+            // la duración del slot ni lo que el modelo haya pasado: se calcula desde la cita que se mueve.
+            // Si por alguna razón el fin no es válido, se cae al defecto de 30 min (comportamiento previo).
+            const sMs = new Date(toMove.start).getTime();
+            const eMs = new Date(toMove.end).getTime();
+            const origDurMin = Number.isFinite(sMs) && Number.isFinite(eMs) && eMs > sMs ? Math.round((eMs - sMs) / 60000) : 30;
+            const endMove = new Date(targetMs + origDurMin * 60000).toISOString();
             const moved = await s.scheduling.updateAppointment(toMove.id, { start: slot.start, end: endMove });
             const cuandoMove = slotWhen.format(new Date(slot.start));
             bookedCache.set(convId, { appt: moved, cuando: cuandoMove, at: Date.now() });
