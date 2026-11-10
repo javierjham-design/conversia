@@ -461,6 +461,55 @@ model AssistedSetupGrant {
 // Estructura pensada para, a futuro, ENRUTAR los tickets a la bandeja de TuBot
 // (cuando TuBot sea tenant de sí mismo): guarda el tenant de origen, el usuario
 // que reporta, el contacto asociado si aplica y a qué conversación aterrizó.
+/// HILO DE CONVERSACIÓN CON CONVI (el copiloto del panel).
+///
+/// Tabla propia y no un JSON como `SupportTicket.thread` a propósito: acá hay que PAGINAR
+/// (el dueño vuelve a leer conversaciones viejas), buscar, y resumir lo antiguo cuando el
+/// hilo se alarga. Un arreglo JSON obliga a traer el hilo entero en cada turno y crece sin
+/// techo dentro de una fila.
+///
+/// Un solo hilo ABIERTO por usuario, garantizado por la base con un índice único parcial
+/// (ver la migración): "nueva conversación" archiva el actual y abre otro.
+model AssistantThread {
+  id             String             @id @default(cuid())
+  organizationId String             @map("organization_id")
+  /// Dueño del hilo. Lo ve él y los administradores de su organización.
+  userId         String             @map("user_id")
+  /// Primeras palabras del primer mensaje (lo pone el servidor, no el cliente).
+  title          String?
+  /// Resumen de lo viejo cuando el hilo pasa de 40 mensajes: el prompt usa summary + últimos 20.
+  summary        String?
+  status         String             @default("open") // open | archived
+  lastMessageAt  DateTime           @default(now()) @map("last_message_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  messages       AssistantMessage[]
+
+  @@index([organizationId, userId, lastMessageAt])
+  @@map("assistant_threads")
+}
+
+/// Un mensaje del hilo de Convi.
+model AssistantMessage {
+  id             String          @id @default(cuid())
+  organizationId String          @map("organization_id")
+  threadId       String          @map("thread_id")
+  role           String // user | assistant
+  content        String
+  /// Las acciones que Convi devolvió en ese turno (botones, navegación), para poder
+  /// repintar el hilo tal como se vio.
+  actions        Json?
+  /// SOLO metadatos del adjunto (tipo y nombre). El archivo NO se guarda acá.
+  adjuntos       Json?
+  /// Pantalla donde estaba el dueño al escribir (ayuda a entender el hilo después).
+  route          String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  thread         AssistantThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([organizationId])
+  @@map("assistant_messages")
+}
+
 model SupportTicket {
   id                   String    @id @default(cuid())
   organizationId       String    @map("organization_id") // tenant de origen
