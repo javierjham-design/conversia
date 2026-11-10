@@ -15,6 +15,18 @@ import { elegirPlanBase, type CatalogoInicial, type Pack, type Plan } from "@/li
  * sostener, no — y las reglas del lanzamiento lo prohíben explícitamente.
  */
 
+/**
+ * C2 — ¿Meta ya aprobó la App Review de mensajería?
+ *
+ * La portada solo puede prometer Instagram y Messenger cuando la respuesta es SÍ. Mientras
+ * no lo sea, decirlo sería vender algo que el cliente no va a poder usar — y las reglas del
+ * lanzamiento prohíben exactamente eso. Si no se puede confirmar, se asume que NO.
+ */
+export async function multicanalAprobado(): Promise<boolean> {
+  const cfg = await pedir<{ messagingReviewApproved?: boolean }>("/public/meta-config?brand=conversia");
+  return cfg?.messagingReviewApproved === true;
+}
+
 /** Tope de espera: la portada no se cuelga por una api lenta, se renderiza sin precio. */
 const ESPERA_MS = 2_500;
 /** Cada cuánto se vuelve a leer el catálogo (ISR). Un go-live se ve sin desplegar. */
