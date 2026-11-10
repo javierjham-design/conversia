@@ -1,16 +1,25 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
-import { fetchGraphWithProof, getEnv } from "@conversia/config";
+import { brandOf, fetchGraphWithProof, getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { decryptSecret, encryptSecret } from "../common/crypto";
 import { requirePermission } from "../tenancy/permissions";
 import { signState, verifyState } from "./oauth.controller";
+import { firmarEstado, rutaDeRetornoValida, urlDeVuelta, verificarEstado, type PropositoOAuth } from "./meta-oauth-state";
+import { assignPublishedAgentToChannelsSafe } from "../agents/assign-agent-to-channels";
 
 // Scopes que necesita el CRM de Lead Ads (acceso estándar alcanza para los
 // activos del propio Business del token).
 const REQUIRED_SCOPES = ["pages_show_list", "leads_retrieval"];
+/**
+ * C1 — permisos para MENSAJERÍA (Instagram DM + Messenger). `leads_retrieval` NO va: un
+ * cliente que solo quiere responder sus DM no tiene por qué autorizar sus formularios.
+ */
+const MESSAGING_SCOPES = ["pages_show_list", "pages_messaging", "pages_manage_metadata", "instagram_basic", "instagram_manage_messages"];
+/** Lo mínimo sin lo cual la conexión de mensajería no sirve para nada. */
+const MESSAGING_REQUIRED = ["pages_show_list", "pages_messaging"];
 const RECOMMENDED_SCOPES = ["pages_manage_metadata", "pages_manage_ads", "pages_read_engagement", "business_management"];
 
 /**
@@ -80,23 +89,36 @@ export class MetaCrmController {
   // ---------- OAuth "Conectar con Meta" (sin pegar tokens) ----------
 
   /** URL del diálogo de autorización de la app CRM (el tenant hace 1 clic). */
+  /**
+   * C1 — `purpose=messaging` pide SOLO los permisos de mensajería y vuelve a `return`.
+   *
+   * Un cliente de Conversia que quiere responder sus DM no tiene por qué autorizar sus
+   * formularios de leads ni terminar en el panel de otra marca. `return` es una ruta
+   * relativa FIRMADA dentro del `state` (ver meta-oauth-state.ts).
+   */
   @Get("oauth/authorize")
-  oauthAuthorize() {
+  oauthAuthorize(@Query("purpose") purpose?: string, @Query("return") retorno?: string) {
     const ctx = requirePermission("integrations:write");
     const env = getEnv();
     if (!env.META_CRM_APP_ID) {
       throw new BadRequestException("OAuth de Meta CRM no configurado en la plataforma (META_CRM_APP_ID). Usa el token manual mientras tanto.");
     }
+    const proposito: PropositoOAuth = purpose === "messaging" ? "messaging" : "leads";
+    // Una ruta que no pase la validación NO es un error que mostrarle al cliente: se vuelve
+    // al destino de siempre. Lo que no puede pasar es que viaje tal cual.
+    const rutaRetorno = rutaDeRetornoValida(retorno) ?? "";
     const params = new URLSearchParams({
       client_id: env.META_CRM_APP_ID,
       redirect_uri: `${env.API_URL}/public/oauth/meta-crm/callback`,
-      state: signState(ctx.organizationId),
+      state: firmarEstado({ orgId: ctx.organizationId, purpose: proposito, retorno: rutaRetorno }, env.JWT_SECRET),
       response_type: "code",
     });
     // Con configuración de Login for Business, los scopes los define la config.
-    if (env.META_CRM_CONFIG_ID) params.set("config_id", env.META_CRM_CONFIG_ID);
+    const configId = proposito === "messaging" ? env.META_CRM_CONFIG_ID_MESSAGING || env.META_CRM_CONFIG_ID : env.META_CRM_CONFIG_ID;
+    if (configId) params.set("config_id", configId);
+    else if (proposito === "messaging") params.set("scope", MESSAGING_SCOPES.join(","));
     else params.set("scope", [...REQUIRED_SCOPES, ...RECOMMENDED_SCOPES, "pages_messaging", "instagram_basic", "instagram_manage_messages"].join(","));
-    return { url: `https://www.facebook.com/${env.META_GRAPH_VERSION}/dialog/oauth?${params.toString()}` };
+    return { url: `https://www.facebook.com/${env.META_GRAPH_VERSION}/dialog/oauth?${params.toString()}`, purpose: proposito };
   }
 
   /** Valida un token contra Graph SIN guardarlo (dry-run con scopes de leads). */
@@ -292,9 +314,17 @@ export class MetaCrmController {
    * formularios como activos (ruteo del webhook) y suscribe la app CRM a la
    * página (`subscribed_apps` con leadgen, token de página derivado).
    */
+  /**
+   * C1 — `purpose: "messaging"` conecta la página SOLO para responder mensajes.
+   *
+   * No importa formularios de leads (un barbero que quiere contestar sus DM no tiene nada
+   * que ver con Lead Ads) y deja el canal YA atendido por el asistente publicado: un canal
+   * sin agente recibe mensajes y no contesta, que es la peor versión de "conectado".
+   */
   @Post("pages/:pageId/connect")
-  async connectPage(@Param("pageId") pageId: string) {
+  async connectPage(@Param("pageId") pageId: string, @Body() body?: unknown) {
     const ctx = requirePermission("integrations:write");
+    const soloMensajeria = z.object({ purpose: z.enum(["messaging", "leads"]).optional() }).safeParse(body ?? {}).data?.purpose === "messaging";
     const token = await this.crmToken(ctx.organizationId);
     const page = await this.graph(`${encodeURIComponent(pageId)}?fields=id,name,access_token,instagram_business_account`, token);
     // URL pública ESTABLE de la foto de página (no caduca como las firmadas de scontent)
@@ -307,9 +337,10 @@ export class MetaCrmController {
     }
     // leadgen (CRM de leads) + messages (omnicanal Messenger/IG). Si el token
     // aún no trae pages_messaging, Meta ignora esos campos sin romper leadgen.
-    const sub = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen,messages,messaging_postbacks`, pageToken, {
+    const campos = soloMensajeria ? "messages,messaging_postbacks" : "leadgen,messages,messaging_postbacks";
+    const sub = await this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=${campos}`, pageToken, {
       method: "POST",
-    }).catch(() => this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=leadgen`, pageToken, { method: "POST" }));
+    }).catch(() => this.graph(`${encodeURIComponent(pageId)}/subscribed_apps?subscribed_fields=${soloMensajeria ? "messages" : "leadgen"}`, pageToken, { method: "POST" }));
     const igId: string | null = page.instagram_business_account?.id ? String(page.instagram_business_account.id) : null;
     // El canal IG se nombra por su @usuario real (no por la página): la cuenta
     // que ve el cliente es @usuario, y así aparece en Canales y en la bandeja.
@@ -320,7 +351,10 @@ export class MetaCrmController {
       igUsername = ig?.username ? String(ig.username) : null;
       igPictureUrl = ig?.profile_picture_url ? String(ig.profile_picture_url) : null;
     }
-    const formsJson = await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
+    // Mensajería: ni se le pregunta a Meta por los formularios del cliente.
+    const formsJson = soloMensajeria
+      ? { data: [] }
+      : await this.graph(`${encodeURIComponent(pageId)}/leadgen_forms?fields=id,name,status&limit=100`, pageToken).catch(() => ({ data: [] }));
     const forms: Array<{ id: string; name: string; status: string }> = (formsJson.data ?? []).map((f: any) => ({
       id: String(f.id),
       name: String(f.name ?? f.id),
@@ -411,7 +445,9 @@ export class MetaCrmController {
           provider: "meta_crm",
           type: "page.connected",
           status: "ok",
-          message: `Página «${page.name ?? pageId}» conectada al CRM: app suscrita (leadgen) + ${forms.length} formulario(s)`,
+          message: soloMensajeria
+            ? `Página «${page.name ?? pageId}» conectada para mensajería: app suscrita (messages)`
+            : `Página «${page.name ?? pageId}» conectada al CRM: app suscrita (leadgen) + ${forms.length} formulario(s)`,
           payload: { pageId: String(page.id), forms: forms.length, subscribed: Boolean(sub?.success ?? true) } as object,
         },
       });
@@ -419,7 +455,16 @@ export class MetaCrmController {
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "meta_crm.page_connect", entityType: "meta_asset", entityId: String(page.id), after: { forms: forms.length } },
       });
     });
-    return { ok: true, page: { id: String(page.id), name: page.name ?? pageId }, forms };
+    // C1 — que el canal nazca ATENDIDO. Fuera de la transacción y fail-soft: si no hay
+    // agente publicado, el canal queda conectado igual y la pantalla ofrece asignarlo.
+    const asignacion = await assignPublishedAgentToChannelsSafe(this.prisma, ctx.organizationId, { actorId: ctx.userId });
+    return {
+      ok: true,
+      page: { id: String(page.id), name: page.name ?? pageId },
+      forms,
+      purpose: soloMensajeria ? "messaging" : "leads",
+      agentesAsignados: asignacion?.assigned ?? 0,
+    };
   }
 
   /**
@@ -597,10 +642,19 @@ export class MetaCrmOauthCallbackController {
   @Get("callback")
   async callback(@Query("code") code: string | undefined, @Query("state") state: string | undefined, @Res() res: Response) {
     const env = getEnv();
+    /** Destino de siempre: el panel de TuBot, con los parámetros que ese panel ya lee. */
     const back = (q: string) => res.redirect(`${env.WEB_URL}/integrations/meta-crm?${q}`);
-    const orgId = verifyState(state ?? "");
+    const estado = verificarEstado(state ?? "", env.JWT_SECRET);
+    const orgId = estado?.orgId ?? null;
+    // C1 — con `retorno` el viaje empezó en el panel de SU marca (p. ej. Conversia → /canales):
+    // volver a `WEB_URL` lo dejaría en el panel equivocado. Sin `retorno`, todo sigue igual.
+    const volver = async (resultado: "ok" | "permisos" | "error" | "invalid" | "denied", viejo: string) => {
+      if (!estado?.retorno || !orgId) return back(viejo);
+      const org = await this.prisma.admin.organization.findUnique({ where: { id: orgId }, select: { brand: true } }).catch(() => null);
+      return res.redirect(urlDeVuelta(brandOf(org).webUrl, estado.retorno, resultado));
+    };
     if (!orgId) return back("oauth=invalid");
-    if (!code) return back("oauth=denied");
+    if (!code) return volver("denied", "oauth=denied");
     try {
       const v = env.META_GRAPH_VERSION;
       const redirectUri = `${env.API_URL}/public/oauth/meta-crm/callback`;
@@ -621,7 +675,10 @@ export class MetaCrmOauthCallbackController {
         this.graph("me/permissions", accessToken).catch(() => ({ data: [] })),
       ]);
       const scopes: string[] = (perms.data ?? []).filter((p: any) => p.status === "granted").map((p: any) => String(p.permission));
-      if (REQUIRED_SCOPES.some((s) => !scopes.includes(s))) return back("oauth=permisos");
+      // Lo exigido depende de PARA QUÉ se conectó: pedirle `leads_retrieval` a quien solo
+      // quiere responder sus DM lo dejaría afuera por un permiso que no necesita.
+      const exigidos = estado?.purpose === "messaging" ? MESSAGING_REQUIRED : REQUIRED_SCOPES;
+      if (exigidos.some((s) => !scopes.includes(s))) return volver("permisos", "oauth=permisos");
 
       await this.prisma.withTenant(orgId, async (tx) => {
         const credential = await tx.integrationCredential.create({
@@ -636,10 +693,10 @@ export class MetaCrmOauthCallbackController {
           data: { organizationId: orgId, provider: "meta_crm", type: "connection.oauth", status: "ok", message: `Meta CRM conectado con OAuth (${scopes.length} permisos)` },
         });
       });
-      return back("oauth=connected");
+      return volver("ok", "oauth=connected");
     } catch (err) {
       console.error("✖ OAuth Meta CRM:", (err as Error).message);
-      return back("oauth=error");
+      return volver("error", "oauth=error");
     }
   }
 }

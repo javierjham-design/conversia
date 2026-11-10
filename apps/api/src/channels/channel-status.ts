@@ -57,6 +57,14 @@ export interface ReporteDeCanal {
   lastInboundAt: string | null;
   lastOutboundAt: string | null;
   checks: ChequeoDeCanal[];
+  /**
+   * C1 — canales de página (Instagram/Messenger): ¿Meta ya aprobó la App Review de
+   * mensajería? Con `false`, solo llegan los DM de cuentas CON ROL en la app. `null` en
+   * WhatsApp, donde no aplica.
+   */
+  reviewApproved?: boolean | null;
+  /** C1 — nombre de la página de Facebook (canales de página). */
+  pageName?: string | null;
 }
 
 /** Lo que Graph dice del número (una sola llamada, compartida con `POST /channels/:id/test`). */
@@ -143,6 +151,57 @@ export async function consultarSuscripcionWaba(wabaId: string, token: string, ap
   }
 }
 
+/** Lo que Graph dice de una página de Facebook (Messenger/Instagram). */
+export interface DatosDeLaPagina {
+  ok: boolean;
+  nombre: string | null;
+  /** null = no se pudo preguntar. */
+  suscrita: boolean | null;
+  campos: string[];
+  otras: string[];
+  error: string | null;
+}
+
+/**
+ * Acceso a la página + suscripción de la app, en dos llamadas. Es la MISMA comprobación que
+ * hace `POST /channels/:id/test` para estos canales: el token de página se deriva del token
+ * de la conexión de Meta del tenant, y sin el campo `messages` los DM no llegan nunca.
+ */
+export async function consultarPagina(pageId: string, crmToken: string, appId: string, fetchImpl: FetchLike = fetch): Promise<DatosDeLaPagina> {
+  const v = getEnv().META_GRAPH_VERSION;
+  const vacio = { ok: false, nombre: null, suscrita: null, campos: [], otras: [] };
+  try {
+    const pRes = await fetchImpl(
+      withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}?fields=name,access_token`, crmToken),
+      { headers: { authorization: `Bearer ${crmToken}` } },
+    );
+    const pJson = (await pRes.json().catch(() => ({}))) as Record<string, any>;
+    if (!pRes.ok || !pJson.access_token) {
+      return { ...vacio, error: pJson?.error?.message ?? "Sin acceso de administración a la página" };
+    }
+    const token = String(pJson.access_token);
+    const sRes = await fetchImpl(
+      withAppSecretProof(`https://graph.facebook.com/${v}/${encodeURIComponent(pageId)}/subscribed_apps`, token),
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    const sJson = (await sRes.json().catch(() => ({}))) as { data?: Array<Record<string, any>> };
+    if (!sRes.ok || !Array.isArray(sJson.data)) {
+      return { ok: true, nombre: String(pJson.name ?? ""), suscrita: null, campos: [], otras: [], error: null };
+    }
+    const mia = sJson.data.find((a) => String(a?.id ?? "") === String(appId));
+    return {
+      ok: true,
+      nombre: String(pJson.name ?? ""),
+      suscrita: Boolean(mia),
+      campos: Array.isArray(mia?.subscribed_fields) ? mia.subscribed_fields.map(String) : [],
+      otras: sJson.data.filter((a) => String(a?.id ?? "") !== String(appId)).map((a) => String(a?.name ?? a?.id ?? "")).filter(Boolean),
+      error: null,
+    };
+  } catch (err) {
+    return { ...vacio, error: `Error de red: ${(err as Error).message}` };
+  }
+}
+
 export interface EntradaDelReporte {
   canal: { id: string; type: string; name: string; status: string; config: Record<string, unknown> };
   defaultAgent: { id: string; name: string } | null;
@@ -158,6 +217,10 @@ export interface EntradaDelReporte {
   lastOutboundAt: string | null;
   /** El canal no tiene token propio cargado (§4.2: no se cae al token de la plataforma). */
   sinToken: boolean;
+  /** C1 — canales de página: lo que Graph dice de la página (null si no se pudo preguntar). */
+  pagina?: DatosDeLaPagina | null;
+  /** C1 — ¿Meta aprobó la App Review de mensajería? (solo canales de página). */
+  reviewApproved?: boolean;
 }
 
 const CALIDADES = new Set(["GREEN", "YELLOW", "RED"]);
@@ -176,7 +239,100 @@ function cuando(iso: string | null): string {
  * Arma el reporte. PURO: ninguna llamada, ninguna fecha "ahora", nada de azar — la misma
  * entrada da siempre el mismo reporte, que es lo que lo hace comprobable.
  */
+/** Canales que viven en una página de Facebook (sus chequeos son otros). */
+export function esCanalDePagina(tipo: string): boolean {
+  return tipo === "INSTAGRAM" || tipo === "MESSENGER";
+}
+
+/**
+ * C1 — reporte de un canal de Instagram o Messenger.
+ *
+ * Lo que puede fallar acá no es un número ni una calidad: es el ACCESO a la página, que la
+ * app esté suscrita al campo `messages` (sin eso los DM no llegan nunca), que haya alguien
+ * atendiendo, y que Meta haya aprobado la App Review — que no es un problema del cliente y
+ * por eso no se cuenta como fallo suyo.
+ */
+function reporteDePagina(e: EntradaDelReporte): ReporteDeCanal {
+  const cfg = e.canal.config ?? {};
+  const p = e.pagina ?? null;
+  const checks: ChequeoDeCanal[] = [];
+
+  if (!p) {
+    checks.push({ key: "pagina", label: "Tu página está conectada", ok: false, unknown: true, detail: "No pudimos comprobarlo ahora." });
+  } else if (!p.ok) {
+    checks.push({
+      key: "pagina",
+      label: "Tu página está conectada",
+      ok: false,
+      detail: p.error ?? "No tenemos acceso de administración a la página.",
+      fix: "Vuelve a conectar la página desde Canales y autorízala en la ventana de Meta.",
+    });
+  } else {
+    checks.push({ key: "pagina", label: "Tu página está conectada", ok: true, detail: p.nombre ?? e.canal.name });
+  }
+
+  if (!p || p.suscrita === null) {
+    checks.push({ key: "webhook", label: "Meta nos avisa de tus mensajes", ok: false, unknown: true, detail: "No pudimos comprobarlo ahora." });
+  } else if (!p.suscrita) {
+    checks.push({
+      key: "webhook",
+      label: "Meta nos avisa de tus mensajes",
+      ok: false,
+      detail: "Meta no nos está avisando de los mensajes de esta página, así que tu asistente no los ve.",
+      fix: "Vuelve a conectar la página: la reconexión deja el aviso configurado.",
+    });
+  } else if (!p.campos.includes("messages")) {
+    checks.push({
+      key: "webhook",
+      label: "Meta nos avisa de tus mensajes",
+      ok: false,
+      detail: `La página está conectada, pero sin el permiso de mensajes (${p.campos.join(", ") || "sin campos"}).`,
+      fix: "Vuelve a conectar la página aceptando los permisos de mensajería.",
+    });
+  } else {
+    const otras = p.otras.length ? ` · ⚠ otra app también está conectada (${p.otras.join(", ")}) y podría estar recibiendo los mensajes` : "";
+    checks.push({ key: "webhook", label: "Meta nos avisa de tus mensajes", ok: true, detail: `Avisos activos${otras}` });
+  }
+
+  if (e.defaultAgent) {
+    checks.push({ key: "asistente", label: "Un asistente atiende este canal", ok: true, detail: `Atiende ${e.defaultAgent.name}` });
+  } else {
+    checks.push({
+      key: "asistente",
+      label: "Un asistente atiende este canal",
+      ok: false,
+      detail: "Nadie está asignado a este canal, así que los mensajes llegan y quedan sin responder.",
+      fix: "Asigna tu asistente desde esta misma pantalla.",
+    });
+  }
+
+  return {
+    channelId: e.canal.id,
+    channelType: e.canal.type,
+    channelName: e.canal.name,
+    displayPhone: null,
+    verifiedName: null,
+    qualityRating: null,
+    mode: "dedicated",
+    coexVerified: false,
+    pendingNumber: false,
+    wabaId: null,
+    channelStatus: e.canal.status,
+    // Para estos canales el "acceso vigente" es el de la página.
+    tokenHealthy: p?.ok !== false,
+    accountAlert: e.accountAlert,
+    webhookSubscribed: p?.suscrita ?? null,
+    defaultAgent: e.defaultAgent,
+    lastInboundAt: e.lastInboundAt,
+    lastOutboundAt: e.lastOutboundAt,
+    checks,
+    reviewApproved: e.reviewApproved ?? false,
+    pageName: p?.nombre ?? (typeof cfg.pageName === "string" ? cfg.pageName : null),
+  };
+}
+
 export function armarReporte(e: EntradaDelReporte): ReporteDeCanal {
+  if (esCanalDePagina(e.canal.type)) return reporteDePagina(e);
   const cfg = e.canal.config ?? {};
   const pendingNumber = cfg.pendingNumber === true || (!e.numeroLocal && !e.graph?.displayPhone);
   const mode: ModoDeCanal = cfg.coexistence === true ? "coexistence" : "dedicated";

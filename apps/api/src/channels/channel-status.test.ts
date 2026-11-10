@@ -349,3 +349,60 @@ describe("POST /channels/:id/test sigue respondiendo IGUAL tras compartir la con
     }
   });
 });
+
+describe("C1 — el reporte cubre Instagram y Messenger", () => {
+  const CANAL_IG = { id: "ch9", type: "INSTAGRAM", name: "Instagram · @barberiacentro", status: "active", config: { pageId: "123", igId: "ig1" } };
+  const base = {
+    canal: CANAL_IG,
+    defaultAgent: { id: "ag1", name: "Recepción" },
+    numeroLocal: null,
+    wabaId: null,
+    graph: null,
+    suscripcion: null,
+    accountAlert: null,
+    lastInboundAt: null,
+    lastOutboundAt: null,
+    sinToken: false,
+    reviewApproved: false,
+  };
+
+  it("sano: página accesible y app suscrita a los mensajes", () => {
+    const r = armarReporte({ ...base, pagina: { ok: true, nombre: "Barbería Centro", suscrita: true, campos: ["messages"], otras: [], error: null } });
+    expect(fallosReales(r)).toEqual([]);
+    expect(r.pageName).toBe("Barbería Centro");
+    expect(r.displayPhone).toBeNull(); // no hay número que mostrar
+    expect(r.reviewApproved).toBe(false);
+  });
+
+  it("suscrita SIN el campo messages: los DM no llegan nunca, y se dice", () => {
+    const r = armarReporte({ ...base, pagina: { ok: true, nombre: "X", suscrita: true, campos: ["leadgen"], otras: [], error: null } });
+    expect(chequeo(r, "webhook").ok).toBe(false);
+    expect(chequeo(r, "webhook").detail).toMatch(/sin el permiso de mensajes/i);
+  });
+
+  it("sin acceso de administración a la página", () => {
+    const r = armarReporte({ ...base, pagina: { ok: false, nombre: null, suscrita: null, campos: [], otras: [], error: "Sin acceso de administración a la página" } });
+    expect(chequeo(r, "pagina").ok).toBe(false);
+    expect(r.tokenHealthy).toBe(false);
+    expect(chequeo(r, "pagina").fix).toMatch(/vuelve a conectar la página/i);
+  });
+
+  it("sin asistente asignado es el único pendiente", () => {
+    const r = armarReporte({ ...base, defaultAgent: null, pagina: { ok: true, nombre: "X", suscrita: true, campos: ["messages"], otras: [], error: null } });
+    expect(fallosReales(r).map((c) => c.key)).toEqual(["asistente"]);
+  });
+
+  it("si Meta no respondió, nada se pinta como culpa del cliente", () => {
+    const r = armarReporte({ ...base, pagina: null });
+    expect(fallosReales(r)).toEqual([]);
+    expect(chequeo(r, "pagina").unknown).toBe(true);
+  });
+
+  it("no inventa datos de WhatsApp en un canal de página", () => {
+    const r = armarReporte({ ...base, pagina: { ok: true, nombre: "X", suscrita: true, campos: ["messages"], otras: [], error: null } });
+    expect(r.qualityRating).toBeNull();
+    expect(r.wabaId).toBeNull();
+    expect(r.pendingNumber).toBe(false);
+    expect(r.checks.find((c) => c.key === "calidad")).toBeUndefined();
+  });
+});

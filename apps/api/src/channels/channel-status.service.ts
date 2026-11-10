@@ -3,7 +3,7 @@ import IORedis from "ioredis";
 import { getEnv } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 import { decryptSecret } from "../common/crypto";
-import { armarReporte, consultarNumero, consultarSuscripcionWaba, type ReporteDeCanal } from "./channel-status";
+import { armarReporte, consultarNumero, consultarPagina, consultarSuscripcionWaba, esCanalDePagina, type ReporteDeCanal } from "./channel-status";
 import { listWabaPhoneNumbers } from "./whatsapp-onboard";
 
 /**
@@ -51,6 +51,29 @@ export class ChannelStatusService {
 
     const datos = await this.cargarDeLaBase(organizationId, channelId);
     const env = getEnv();
+
+    // C1 — Instagram y Messenger: lo que puede fallar es el acceso a la PÁGINA y que la app
+    // esté suscrita a `messages`. El token de página se deriva del de la conexión de Meta.
+    if (esCanalDePagina(datos.canal.type)) {
+      const pageId = String((datos.canal.config as Record<string, unknown>)?.pageId ?? "");
+      const pagina = pageId && datos.tokenMetaCrm ? await consultarPagina(pageId, datos.tokenMetaCrm, env.META_CRM_APP_ID ?? "") : null;
+      const reporteDePagina = armarReporte({
+        canal: datos.canal,
+        defaultAgent: datos.defaultAgent,
+        numeroLocal: null,
+        wabaId: null,
+        graph: null,
+        suscripcion: null,
+        accountAlert: datos.accountAlert,
+        lastInboundAt: datos.lastInboundAt,
+        lastOutboundAt: datos.lastOutboundAt,
+        sinToken: !datos.tokenMetaCrm,
+        pagina,
+        reviewApproved: env.META_MESSAGING_REVIEW_APPROVED === true,
+      });
+      await this.redis.set(clave, JSON.stringify(reporteDePagina), "EX", 60).catch(() => undefined);
+      return reporteDePagina;
+    }
 
     // Graph: dos llamadas como máximo (los campos del número van juntos a propósito).
     let graph = datos.phoneNumberId && datos.token ? await consultarNumero(datos.phoneNumberId, datos.token) : null;
@@ -117,6 +140,16 @@ export class ChannelStatusService {
         ? await tx.integrationCredential.findUnique({ where: { id: cuenta.credentialId }, select: { ciphertext: true } })
         : null;
 
+      // C1 — token de la conexión de Meta del tenant (del que se deriva el de página).
+      let tokenMetaCrm: string | null = null;
+      if (esCanalDePagina(String(canal.type))) {
+        const conn = await tx.metaCrmConnection.findUnique({ where: { organizationId }, select: { status: true, credentialId: true } });
+        if (conn?.status === "CONNECTED" && conn.credentialId) {
+          const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId }, select: { ciphertext: true } });
+          tokenMetaCrm = cred ? safeDecrypt(cred.ciphertext) : null;
+        }
+      }
+
       const alerta = await tx.integrationEvent.findFirst({
         where: { provider: "whatsapp", status: { in: ["warning", "error"] }, createdAt: { gte: hace7dias } },
         orderBy: { createdAt: "desc" },
@@ -141,6 +174,7 @@ export class ChannelStatusService {
         phoneNumberId: numero?.phoneNumberId ?? null,
         wabaId: cuenta?.wabaId ?? null,
         token: credencial ? safeDecrypt(credencial.ciphertext) : null,
+        tokenMetaCrm,
         accountAlert: alerta ? { type: alerta.type, message: alerta.message, at: alerta.createdAt.toISOString() } : null,
         lastInboundAt: entrante?.createdAt.toISOString() ?? null,
         lastOutboundAt: saliente?.createdAt.toISOString() ?? null,
