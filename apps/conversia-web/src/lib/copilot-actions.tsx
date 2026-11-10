@@ -15,7 +15,9 @@ import { parseBlocks, type InlineToken } from "./copilot-markdown";
 export type AssistantAction =
   | { type: "navigate"; to: string }
   | { type: "highlight"; target: string; text: string }
-  | { type: "button"; label: string; kind: "whatsapp" | "pago" | "interno" | "externo"; payload?: string }
+  // `whatsapp_test` abre Canales YA probando (A3). Este tipo es la copia local del de
+  // `@conversia/types`: si allá se agrega un kind, acá también, o el widget no lo entiende.
+  | { type: "button"; label: string; kind: "whatsapp" | "whatsapp_test" | "pago" | "interno" | "externo"; payload?: string }
   | { type: "checklist_refresh" }
   | { type: "celebrate"; step: string };
 

@@ -236,6 +236,17 @@ test("«Probar ahora»: espera el mensaje, lo detecta y dice cuánto tardó la r
   await expect(tarjeta(page)).toContainText("tu asistente respondió en 7 s", { timeout: 20_000 });
 });
 
+test("A3 — el botón de Convi abre Canales YA probando (?probar=1)", async ({ page }) => {
+  // Convi entrega `{kind:"whatsapp_test"}` y el widget navega acá. Si la prueba no arrancara
+  // sola, el dueño llegaría a una pantalla cualquiera después de que le dijeron "probemos".
+  const estado = crearEstado();
+  await montarApi(page, estado);
+  await page.goto("/canales?probar=1", { waitUntil: "domcontentloaded" });
+
+  await expect(tarjeta(page)).toContainText("Escríbele «hola» a tu número desde otro celular");
+  await expect(page.getByRole("link", { name: /Abrir el chat/i })).toBeVisible();
+});
+
 test("los chequeos con fallo muestran qué hacer; lo que no se pudo averiguar NO se pinta como error", async ({ page }) => {
   const estado = crearEstado({
     webhookSubscribed: false,

@@ -16,6 +16,9 @@ import { AssistantService } from "./assistant.service";
  * y responde 200 con texto real de la IA, nunca un 500 con el fallback genérico. Registra
  * `✖ Asistente: contexto` en el log, igual que el fallo del proveedor de IA.
  */
+/** Doble del lector del reporte de canales (A3): estos tests prueban el contexto, no el reporte. */
+const estadoStub = () => ({ reporte: async () => ({}), invalidar: async () => undefined }) as never;
+
 describe("AssistantService.run — degradación de contexto (Bloque 3)", () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => { chatMock.mockClear(); providerMock.mockClear(); errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined); });
@@ -24,7 +27,7 @@ describe("AssistantService.run — degradación de contexto (Bloque 3)", () => {
   it("buildContext que lanza → responde con la IA (200) y loguea el error de contexto", async () => {
     // prisma falso: la PRIMERA consulta de buildContext (organization.findUnique) revienta.
     const prisma = { admin: { organization: { findUnique: vi.fn(async () => { throw new Error("db down"); }) } } } as any;
-    const svc = new AssistantService(prisma);
+    const svc = new AssistantService(prisma, estadoStub());
 
     const out = await svc.run({ organizationId: "org1", userId: "u1", role: "owner" }, "hola", []);
 

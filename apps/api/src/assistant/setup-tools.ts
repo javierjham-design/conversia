@@ -2,6 +2,7 @@ import type { AIToolSpec, AssistantAction } from "@conversia/types";
 import { fetchWebPageText } from "@conversia/agents";
 import type { PrismaService } from "../prisma.service";
 import { envolverContenidoAjeno } from "./adjuntos";
+import { resumirReporte, type ReporteDeCanal } from "../channels/channel-status";
 import { INDUSTRIES } from "../common/industries";
 import { RUBROS_VALIDOS, businessDataSchema, guardarDatosNegocio } from "../organizations/business-data";
 import { runAgentTest, DEFAULT_PROMPT, slugify } from "../agents/agent-test";
@@ -44,6 +45,14 @@ export interface SetupToolCtx {
   userId: string | null;
   /** Ruta donde está el cliente, para no navegarlo a donde ya está. */
   route?: string;
+  /**
+   * A3 — lector del REPORTE DE CONEXIÓN (A1). Lo inyecta el caller.
+   *
+   * Va como dependencia estructural y no como el servicio de Nest para que estas
+   * herramientas se puedan probar con un doble, y para que un caller que no lo tenga
+   * (un test, un script) siga funcionando con el diagnóstico de siempre.
+   */
+  estado?: { reporte(organizationId: string, channelId: string, opts?: { sinCache?: boolean }): Promise<ReporteDeCanal> };
 }
 
 export interface SetupToolResult {
@@ -69,6 +78,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
             yaAtiendePorWhatsapp: { type: "boolean", description: "true si el dueño dijo que ya atiende clientes por WhatsApp con su número actual" },
           },
         },
+      },
+      {
+        name: "estadoWhatsapp",
+        description:
+          "Estado REAL de la cuenta de WhatsApp del cliente, preguntándole a Meta: número, nombre verificado, calidad, modo (el número de siempre o uno dedicado), si Meta nos avisa de los mensajes, quién atiende y cuándo fue el último mensaje. Trae lo que esté pendiente con qué hacer en cada caso. Úsalo cuando pregunten si quedó conectado, si está funcionando, por qué no responde o qué calidad tiene su número.",
+        inputJsonSchema: { type: "object", properties: {} },
       },
       {
         name: "listarPlantillasAsistente",
@@ -300,6 +315,38 @@ async function plantillasDelRubro(
   return { rubro: key, agentes: Array.isArray(agentes) ? agentes.filter((a) => a && typeof a.slug === "string") : [] };
 }
 
+/** En una palabra, para que Convi no tenga que interpretar estados técnicos. */
+function estadoDelCanal(r: ReporteDeCanal): "activandose" | "interrumpido" | "activo" {
+  if (r.pendingNumber) return "activandose";
+  if (!r.tokenHealthy || r.channelStatus === "error") return "interrumpido";
+  return r.channelStatus === "active" ? "activo" : "activandose";
+}
+
+/**
+ * Reportes de los canales de WhatsApp de la organización (máximo 5: nadie tiene más
+ * números que eso en esta etapa, y cada uno cuesta una lectura cacheada).
+ *
+ * Devuelve [] si el caller no inyectó el lector: las herramientas siguen funcionando con
+ * el diagnóstico de siempre en vez de reventar.
+ */
+async function reportesDeWhatsapp(prisma: PrismaService, ctx: SetupToolCtx): Promise<ReporteDeCanal[]> {
+  if (!ctx.estado) return [];
+  const canales = await prisma.admin.channelConnection
+    .findMany({
+      where: { organizationId: ctx.organizationId, type: "WHATSAPP_CLOUD", status: { not: "inactive" } },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: 5,
+    })
+    .catch(() => [] as Array<{ id: string }>);
+  const out: ReporteDeCanal[] = [];
+  for (const c of canales) {
+    const r = await ctx.estado.reporte(ctx.organizationId, c.id).catch(() => null);
+    if (r) out.push(r);
+  }
+  return out;
+}
+
 /** El agente sobre el que trabaja el copiloto: el activo más reciente del tenant. */
 async function agenteDelNegocio(prisma: PrismaService, organizationId: string) {
   return prisma.admin.agent.findFirst({
@@ -322,7 +369,69 @@ export async function runSetupTool(
   if (!SETUP_TOOL_NAMES.has(name)) return null;
 
   // ---------------------------------- Diagnóstico ----------------------------------
+  /**
+   * A3 — ESTADO REAL de la cuenta de WhatsApp (el reporte de A1, uno por canal).
+   *
+   * Antes Convi solo sabía CONTAR canales: podía decir "tienes WhatsApp conectado" con el
+   * acceso de Meta vencido, el webhook sin suscribir o el número sin publicar. Ahora mira
+   * lo mismo que la pantalla de Canales, así que las dos cuentan la misma historia.
+   */
+  if (name === "estadoWhatsapp") {
+    const reportes = await reportesDeWhatsapp(prisma, ctx);
+    if (!reportes.length) {
+      return {
+        content: JSON.stringify({
+          conectado: false,
+          explicacion: ctx.estado
+            ? "Todavía no hay ningún número de WhatsApp conectado en esta cuenta."
+            : "No puedo mirar el estado del número ahora mismo; cuéntale al dueño que lo revise en Canales.",
+        }),
+        actions: ctx.estado ? [{ type: "button", label: "Conectar mi WhatsApp", kind: "whatsapp", payload: "coexistencia" }] : [],
+      };
+    }
+    const canales = reportes.map((r) => ({
+      numero: r.displayPhone,
+      nombreVerificado: r.verifiedName,
+      estado: estadoDelCanal(r),
+      calidad: r.qualityRating,
+      modo: r.mode === "coexistence" ? "el número de siempre del dueño" : "número dedicado",
+      atiende: r.defaultAgent?.name ?? null,
+      metaNosAvisaDeLosMensajes: r.webhookSubscribed,
+      ultimoMensajeRecibido: r.lastInboundAt,
+      ultimaRespuestaDelAsistente: r.lastOutboundAt,
+      avisoDeMeta: r.accountAlert?.message ?? null,
+      // Lo que está mal, con la explicación en una frase y qué hacer.
+      pendientes: r.checks
+        .filter((c) => !c.ok && !c.unknown)
+        .map((c) => ({ que: c.label, explicacion: c.detail, comoSeArregla: c.fix ?? null })),
+      // Lo que no se pudo comprobar NO es un problema del cliente: no lo alarmes con esto.
+      sinComprobar: r.checks.filter((c) => c.unknown).map((c) => c.label),
+    }));
+    return {
+      content: JSON.stringify({ conectado: true, resumen: reportes.map(resumirReporte).join(" "), canales }),
+      actions: [{ type: "button", label: "Probar mi WhatsApp", kind: "whatsapp_test" }],
+    };
+  }
+
   if (name === "diagnosticarWhatsapp") {
+    // A3 — con el reporte disponible, el diagnóstico sale del MISMO estado que ve la
+    // pantalla; sin él (tests, llamadores viejos) se queda con el conteo de siempre.
+    const reportes = await reportesDeWhatsapp(prisma, ctx);
+    if (reportes.length) {
+      const activos = reportes.filter((r) => r.channelStatus === "active").length;
+      const sinAgente = reportes.filter((r) => r.channelStatus === "active" && !r.defaultAgent).length;
+      const roto = reportes.find((r) => !r.tokenHealthy) ?? reportes.find((r) => r.accountAlert);
+      const ultimoError = roto ? (roto.checks.find((c) => c.key === "token" && !c.ok && !c.unknown)?.detail ?? roto.accountAlert?.message ?? null) : null;
+      const camino = diagnosticarCanal({ activos, sinAgente, yaAtiendePorWhatsapp: input?.yaAtiendePorWhatsapp === true, ultimoError });
+      const actions: AssistantAction[] = [];
+      if (camino === "coexistencia" || camino === "numero_nuevo") {
+        actions.push({ type: "button", label: "Conectar mi WhatsApp", kind: "whatsapp", payload: camino });
+      }
+      return {
+        content: JSON.stringify({ camino, explicacion: explicarCamino(camino), numerosConectados: activos, sinAsistenteAsignado: sinAgente, ultimoError }),
+        actions,
+      };
+    }
     const [activos, sinAgente, ultimoError] = await Promise.all([
       prisma.admin.channelConnection.count({ where: { organizationId: ctx.organizationId, status: "active" } }).catch(() => 0),
       prisma.admin.channelConnection
