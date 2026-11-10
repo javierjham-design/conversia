@@ -370,7 +370,40 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             resolvedProfId = m.length === 1 ? m[0].id : undefined;
           }
         }
-        const query = { serviceId: input.serviceCode, professionalId: resolvedProfId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin };
+        // REAGENDAMIENTO = MISMO PROFESIONAL. Si el modelo NO fijó profesional y el paciente YA tiene
+        // una cita activa futura, esto es casi siempre un reagendamiento: fijamos SU profesional para
+        // NO ofrecerle horas de otro. Bug real (Digital-Dent): a los pacientes de la Dra. Vargas / Dr.
+        // Aedo el bot les ofrecía y agendaba con otro profesional (Pabst) porque, sin profesional fijo,
+        // la consulta traía los cupos de cualquiera. Determinista; si el paciente tiene citas activas con
+        // VARIOS profesionales distintos NO adivinamos (se deja sin fijar). La instrucción de prompt no
+        // bastaba; esto lo blinda. createAppointment además RECHAZA agendar con otro profesional.
+        let pinnedProfId: string | null = null;
+        // Al REAGENDAR, la hora nueva conserva la MISMA duración que la cita ORIGINAL (petición del
+        // dueño: una cita de 60 min se reagenda a 60, una de 15 a 15). Si el paciente tiene UNA sola
+        // cita futura activa, tomamos SU duración para consultar la disponibilidad CON esa duración
+        // (así el cupo ofrecido sí cabe). El "mover" de createAppointment además la fija de forma dura.
+        // Determinista; no depende de que el modelo acuerde pasar durationMin.
+        let pinnedDurMin: number | null = null;
+        if (!input.professionalId) {
+          try {
+            const phoneP = (await services(ctx).contactInfo()).phone;
+            if (phoneP) {
+              const nowMs = Date.now();
+              const futuras = ((await sched.getPatientAppointments(phoneP)) ?? []).filter(
+                (a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.start).getTime() > nowMs && a.professionalId,
+              );
+              const profIds = [...new Set(futuras.map((a) => a.professionalId))];
+              if (profIds.length === 1) { resolvedProfId = profIds[0]; pinnedProfId = profIds[0]; }
+              if (futuras.length === 1) {
+                const f = futuras[0];
+                const sMs = new Date(f.start).getTime();
+                const eMs = new Date(f.end).getTime();
+                if (Number.isFinite(sMs) && Number.isFinite(eMs) && eMs > sMs) pinnedDurMin = Math.round((eMs - sMs) / 60000);
+              }
+            }
+          } catch { /* no se pudo consultar las citas → seguimos sin fijar (comportamiento anterior) */ }
+        }
+        const query = { serviceId: input.serviceCode, professionalId: resolvedProfId, clinicId: ctx.clinicId ?? undefined, durationMin: input.durationMin ?? pinnedDurMin ?? undefined };
         // FRANJA (hora de Chile): sin este filtro, el tope de opciones dejaba solo las horas más
         // tempranas y el modelo concluía "no hay tarde" aunque sí había.
         const hourChile = (iso: string) => parseInt(new Intl.DateTimeFormat("en-GB", { timeZone: "America/Santiago", hour: "2-digit", hour12: false }).format(new Date(iso)), 10);
@@ -469,7 +502,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           return {
             sinCupos: true,
             rangoConsultado: { desde: from, hasta: wide, ...(input.franja ? { franja: input.franja } : {}) },
-            nota: `No hay NINGUNA hora disponible entre ${from} y ${wide} (ya revisé todo el rango, horarios y días). Discúlpate con calidez y deriva a una persona con transferToHuman para coordinar.`,
+            nota: pinnedProfId
+              ? `No hay NINGUNA hora disponible con el profesional del paciente entre ${from} y ${wide}. Como está REAGENDANDO y su profesional no tiene horas, discúlpate con calidez y usa derivarReagendamiento (libera su hora actual y deriva al equipo para reagendarlo con su mismo profesional). NO le ofrezcas otro profesional.`
+              : `No hay NINGUNA hora disponible entre ${from} y ${wide} (ya revisé todo el rango, horarios y días). Discúlpate con calidez y deriva a una persona con transferToHuman para coordinar.`,
           };
         }
         // Orden cronológico garantizado (ISO ordena por fecha/hora).
@@ -518,6 +553,7 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // tenía que desdecirse ("ya no está disponible"). Regla: ofrecer SOLO las horas de ESTA lista
         // (la más reciente) y, si pasó un rato, volver a llamar getAvailability ANTES de confirmar.
         notas.push("IMPORTANTE: estas horas NO quedan reservadas; otra persona puede tomarlas mientras el paciente decide. Ofrece SOLO las horas de ESTA lista (la más reciente que consultaste). Si ya habías ofrecido horas en un mensaje anterior, o el paciente se demoró o preguntó otra cosa entremedio, vuelve a llamar getAvailability ANTES de confirmar y NO repitas horas de un mensaje anterior sin reconsultar.");
+        if (pinnedProfId) notas.push("REAGENDAMIENTO: estas horas son del MISMO profesional que ya atiende al paciente (su cita actual). Ofrécele SOLO estas y agéndala con ese profesional; NO le ofrezcas ni le agendes con otro. Si ninguna de estas horas le acomoda, discúlpate con calidez y usa derivarReagendamiento (libera su hora actual y deriva al equipo para reagendarlo con su mismo profesional).");
         if (diaPedido && !diaPedidoSinCupos) {
           notas.push(franjaRelajadaEnDia
             ? `El día que pidió el paciente (${fmtDia(diaPedido)}) no tiene horas en la franja/hora exacta que pidió, pero SÍ tiene estas otras horas ESE MISMO día: ofrécelas diciendo la hora exacta.`
@@ -661,6 +697,19 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             bookedCache.set(convId, { appt: sameExact, cuando: cuandoEx, at: Date.now() });
             return { ok: true, alreadyBooked: true, appointment: sameExact, cuando: cuandoEx, message: `El paciente ya tenía ESTA misma cita: ${cuandoEx}. No se creó otra; confírmasela tal cual.` };
           }
+          // REAGENDAMIENTO = MISMO PROFESIONAL (blindaje en código, no solo prompt). Si el paciente
+          // tiene cita(s) activa(s) FUTURA(S) y NO pidió una ADICIONAL, está reagendando: la hora nueva
+          // DEBE ser con el MISMO profesional. Si el slot elegido es de OTRO (p.ej. getAvailability le
+          // ofreció a Pabst a un paciente de la Dra. Vargas), NO se agenda con el equivocado ni se crea
+          // una 2ª cita: se devuelve para ofrecer horas del profesional correcto o derivar a una persona.
+          const futuras = active.filter((a) => new Date(a.start).getTime() > Date.now() - 60000 && a.professionalId);
+          if (!input.esCitaAdicional && futuras.length && !futuras.some((a) => a.professionalId === slot.professionalId)) {
+            return {
+              wrongProfessional: true,
+              professionalId: futuras[0].professionalId,
+              nota: "El paciente está REAGENDANDO y esta hora es de OTRO profesional, distinto al de su cita actual. NO agendes con otro profesional. Vuelve a llamar getAvailability pasando professionalId = el MISMO profesional de su cita (el que te dio getPatientAppointments) y ofrécele SOLO esas horas. Si ese profesional no tiene horas que le acomoden, discúlpate con calidez y usa derivarReagendamiento (libera su hora actual y deriva al equipo para reagendarlo con su mismo profesional). SOLO si el paciente pidió explícitamente una cita ADICIONAL con otro profesional, vuelve a llamar createAppointment con esCitaAdicional:true.",
+            };
+          }
           // ¿Cita a MOVER? Solo si NO es una cita adicional explícita.
           const sameProf = active.filter((a) => a.professionalId === slot.professionalId);
           const toMove = input.esCitaAdicional
@@ -669,7 +718,13 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
               ? sameProf[0] // inequívoco → mover aunque sea otro día (reagendamiento, caso Rubén)
               : sameProf.find((a) => chileDay(a.start) === targetDay); // varias → conservador: solo el mismo día
           if (toMove) {
-            const endMove = slot.end ?? new Date(targetMs + 30 * 60000).toISOString();
+            // La hora nueva conserva la MISMA duración que la cita ORIGINAL (60→60, 15→15), sin importar
+            // la duración del slot ni lo que el modelo haya pasado: se calcula desde la cita que se mueve.
+            // Si por alguna razón el fin no es válido, se cae al defecto de 30 min (comportamiento previo).
+            const sMs = new Date(toMove.start).getTime();
+            const eMs = new Date(toMove.end).getTime();
+            const origDurMin = Number.isFinite(sMs) && Number.isFinite(eMs) && eMs > sMs ? Math.round((eMs - sMs) / 60000) : 30;
+            const endMove = new Date(targetMs + origDurMin * 60000).toISOString();
             const moved = await s.scheduling.updateAppointment(toMove.id, { start: slot.start, end: endMove });
             const cuandoMove = slotWhen.format(new Date(slot.start));
             bookedCache.set(convId, { appt: moved, cuando: cuandoMove, at: Date.now() });
@@ -864,6 +919,39 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
       async execute(ctx, input: { reason: string }) {
         await services(ctx).requestHumanHandoff(input.reason);
         return { ok: true, message: "Conversación escalada al equipo humano" };
+      },
+    },
+    {
+      name: "derivarReagendamiento",
+      description:
+        "Deriva al equipo un REAGENDAMIENTO que NO pudiste completar. Úsalo SOLO cuando el paciente quiere reagendar (no puede venir a su hora actual) y NO hay horas que le acomoden con SU MISMO profesional (getAvailability devolvió sinCupos con su profesional, o te lo dijo el paciente). LIBERA (cancela) su hora actual con motivo 'reagendar' —para que el equipo lo reagende y quede en la lista de Pendientes de reagendar— y escala a una persona. NO lo uses si todavía puedes ofrecerle una hora con su profesional, ni para dudas generales o para agendar una PRIMERA cita (para esos casos usa transferToHuman).",
+      inputSchema: z.object({ motivo: z.string().optional().describe("Breve: por qué no se pudo reagendar (ej. 'sin horas con su profesional estas semanas')") }),
+      async execute(ctx, input: { motivo?: string }) {
+        const s = services(ctx);
+        const contact = await s.contactInfo();
+        let liberada: string | null = null;
+        if (contact.phone) {
+          try {
+            const now = Date.now();
+            const futuras = ((await s.scheduling.getPatientAppointments(contact.phone)) ?? []).filter(
+              (a) => (a.status === "pending" || a.status === "confirmed") && new Date(a.start).getTime() > now,
+            );
+            // Solo si es INEQUÍVOCO (una sola hora futura activa) liberamos; con varias no adivinamos
+            // cuál mover y dejamos que la persona del equipo lo resuelva (igual se deriva).
+            if (futuras.length === 1) {
+              await s.scheduling.cancelAppointment(futuras[0].id, "patient_reschedule");
+              liberada = slotWhen.format(new Date(futuras[0].start));
+            }
+          } catch { /* si no se pudo liberar, igual derivamos a una persona */ }
+        }
+        await s.requestHumanHandoff(input.motivo?.trim() || "Reagendamiento: sin horas con su profesional; derivar para reagendar manualmente");
+        return {
+          ok: true,
+          citaLiberada: liberada,
+          message: liberada
+            ? `Listo: liberé su hora (${liberada}) para reagendar y derivé el caso al equipo, que lo reagendará con su MISMO profesional. Dile al paciente con calidez que una persona lo contactará muy pronto para coordinar su nueva hora.`
+            : "Derivé el reagendamiento al equipo. Dile al paciente con calidez que una persona lo contactará muy pronto para coordinar su nueva hora con su mismo profesional.",
+        };
       },
     },
     {
