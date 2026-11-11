@@ -16,6 +16,19 @@ import { fileURLToPath } from "node:url";
 const prisma = new PrismaClient();
 const here = dirname(fileURLToPath(import.meta.url));
 
+// RETIRADOS el 11-nov-2026 por decisión del dueño: la oferta de Conversia queda en
+// **Prueba + Base** (los planes de créditos) más Custom para lo que se arma a mano. Estos dos
+// eran los tramos de servicio administrado del modelo anterior y ya no se venden.
+//
+// Se dejan en el archivo, inactivos, a propósito: borrarlos del seeder haría que un entorno
+// nuevo no los tuviera y que `plans` perdiera la fila a la que todavía apuntan suscripciones
+// viejas (un `plan_id` colgado deja al tenant sin límites resolubles). Inactivo + no público
+// es invisible en el catálogo y revivible con una línea si vuelve a hacer falta.
+//
+// OJO: este `active:false` rige para entornos NUEVOS. Más abajo el upsert se niega a apagar un
+// plan que ya está vivo (`activeFinal = vivo ? true : active`), que es la salvaguarda correcta
+// para un seeder que se corre muchas veces. Retirarlos en un entorno que ya los tiene vivos es
+// una operación aparte y explícita: `scripts/retirar-planes-conversia.mjs`.
 const PLANS = [
   {
     code: "conversia_funcionando",
@@ -25,6 +38,7 @@ const PLANS = [
     priceUsd: 159,
     order: 10,
     isPublic: false,
+    active: false, // retirado 11-nov-2026
     limits: { users: 5, clinics: 2, channels: 2, agents: 5, workflows: 20, aiTokensDaily: 3000000 },
     features: { managed: false, whiteLabel: false, api: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 1500, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
   },
@@ -36,6 +50,7 @@ const PLANS = [
     priceUsd: 319,
     order: 11,
     isPublic: false,
+    active: false, // retirado 11-nov-2026
     limits: { users: 15, clinics: 5, channels: 3, agents: 15, workflows: 50, aiTokensDaily: 8000000 },
     features: { managed: true, whiteLabel: true, api: true, whatsappTemplates: true, serviceDebitsWallet: true, templateMessages: 4000, conversationsPerPeriod: -1, conversationOverageClp: 0, conversationHardCap: false },
   },
