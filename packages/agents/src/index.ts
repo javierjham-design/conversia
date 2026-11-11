@@ -2,6 +2,7 @@ export * from "./pricing.js";
 export * from "./credit-formula.js";
 export * from "./credit-estimate.js";
 export * from "./credit-audit.js";
+export * from "./vigencia.js";
 export * from "./pack-bonus.js";
 export * from "./aviso-recarga.js";
 export * from "./pack-margen.js";
