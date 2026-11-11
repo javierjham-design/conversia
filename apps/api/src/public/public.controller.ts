@@ -130,9 +130,20 @@ export class PublicController {
     // número que ya se usa). Cualquier otro valor = Embedded Signup normal (número dedicado).
     const coex = (mode ?? "").toLowerCase() === "coexistence";
     const esConfigId = b === "conversia" ? env.META_ES_CONFIG_ID_CONVERSIA || env.META_CONFIG_ID : env.META_CONFIG_ID;
-    // El config_id de coexistencia cae a la config de ES de la marca si no se definió uno propio.
-    const coexConfigId = b === "conversia" ? env.META_ES_COEX_CONFIG_ID_CONVERSIA || esConfigId : esConfigId;
-    const configId = coex ? coexConfigId : esConfigId;
+    /**
+     * UNA SOLA config de inicio de sesión por marca para los DOS caminos (11-nov-2026).
+     *
+     * Había una `config_id` aparte solo para coexistencia en la marca conversia, y Meta
+     * confirmó que es la MISMA configuración para los dos flujos: lo único que cambia es el
+     * `featureType`. TuBot —que viene funcionando en producción— siempre usó una sola, y
+     * conversia era la única con dos; un diálogo lanzado con una config que no corresponde
+     * al flujo termina en la pantalla de configuración de Meta en vez de en "Finalizar".
+     *
+     * Por eso esto NO es un `||` con escape: dos configs es el estado que rompe, y dejar la
+     * puerta abierta es dejar que vuelva a pasar. Si algún día Meta exige separarlas, se
+     * agrega de nuevo A PROPÓSITO y con su motivo escrito acá.
+     */
+    const configId = esConfigId;
     const featureType = coex ? env.META_ES_COEX_FEATURE_TYPE : env.META_ES_FEATURE_TYPE;
     // Versión del "registro insertado": v4 (vigente) o v5 (GA futuro). La flag está APAGADA por
     // defecto; al encenderla por marca conversia, el front arma los extras del FB.login en v5
