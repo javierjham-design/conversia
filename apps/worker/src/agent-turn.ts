@@ -1,9 +1,11 @@
 import {
+  ESTADOS_DE_SUSCRIPCION_VIVA,
   ResilientAIProvider,
   ToolRegistry,
   assembleSystemPrompt,
   buildCoreTools,
   createAIRouter,
+  evaluarVigencia,
   orchestrate,
   type AgentRuntime,
   type OrchestrateResult,
@@ -352,8 +354,20 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     return;
   }
   // Vigencia vencida: el servicio del tenant expiró → la IA deja de operar.
-  const validUntil = orgSettings.validUntil;
-  if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
+  //
+  // La decisión NO se toma acá: `evaluarVigencia` (packages/agents) es la misma regla que el
+  // 403 del api, para que no puedan discrepar. Lo caro de este camino es que, al cortar, el
+  // bot queda MUDO y en ninguna pantalla se ve por qué: un `validUntil` viejo con la
+  // suscripción al día dejaba sin responder a un cliente que estaba pagando.
+  const vigencia = await withTenant(organizationId, async (tx) => {
+    const sub = await tx.subscription.findFirst({
+      where: { status: { in: ESTADOS_DE_SUSCRIPCION_VIVA as unknown as string[] } as never },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, periodEnd: true },
+    });
+    return evaluarVigencia({ validUntil: orgSettings.validUntil, suscripcion: sub });
+  });
+  if (!vigencia.vigente) {
     await withTenant(organizationId, (tx) =>
       tx.integrationEvent.create({
         data: { organizationId, provider: "ai", type: "ai.expired", status: "warning", message: "IA detenida: vigencia del servicio vencida" },

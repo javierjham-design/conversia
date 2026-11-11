@@ -1,5 +1,6 @@
 import { ForbiddenException } from "@nestjs/common";
 import type { TenantTx } from "@conversia/database";
+import { ESTADOS_DE_SUSCRIPCION_VIVA, evaluarVigencia, frasePorVigenciaVencida } from "@conversia/agents";
 import { getContext } from "../tenancy/context";
 
 /**
@@ -23,8 +24,9 @@ const LABELS: Record<string, string> = {
   clinics: "sedes",
 };
 
-// Estados de suscripción que otorgan entitlements. `as const` + cast al enum de Prisma.
-const ACTIVE_STATUSES = ["ACTIVE", "TRIALING"] as const;
+// Estados de suscripción que otorgan entitlements. Una sola lista para todo el sistema: la
+// vigencia (packages/agents) y los límites tienen que estar de acuerdo sobre qué es "al día".
+const ACTIVE_STATUSES = ESTADOS_DE_SUSCRIPCION_VIVA;
 
 export interface Entitlements {
   hasSubscription: boolean;
@@ -122,10 +124,17 @@ export async function assertOrgActive(tx: TenantTx): Promise<void> {
   if (org.status === "SUSPENDED" || org.status === "CANCELLED") {
     throw new ForbiddenException("Tu cuenta está suspendida. Regulariza tu plan para volver a crear o modificar recursos.");
   }
-  const validUntil = (org.settings as any)?.validUntil;
-  if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
-    throw new ForbiddenException("La vigencia de tu servicio venció. Renueva para seguir operando.");
-  }
+  // La vigencia NO se decide acá: la regla vive en `evaluarVigencia` (packages/agents) y es la
+  // MISMA que usa el worker para no apagar la IA. Una suscripción viva que cubre hoy manda
+  // sobre un `validUntil` viejo — sin esto, la ventana de prueba del día que se creó la cuenta
+  // bloqueaba para siempre a un tenant que ya estaba pagando (4 cuentas así el 11-nov-2026).
+  const sub = await tx.subscription.findFirst({
+    where: { status: { in: ESTADOS_DE_SUSCRIPCION_VIVA as unknown as string[] } as never },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, periodEnd: true },
+  });
+  const vigencia = evaluarVigencia({ validUntil: (org.settings as any)?.validUntil, suscripcion: sub });
+  if (!vigencia.vigente) throw new ForbiddenException(frasePorVigenciaVencida(vigencia));
 }
 
 /**
