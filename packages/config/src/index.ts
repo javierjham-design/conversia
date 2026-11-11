@@ -209,13 +209,13 @@ const envSchema = z.object({
   // nueva + número, o usar una existente). Otros: "only_waba_sharing" (solo
   // compartir una WABA existente), "whatsapp_business_app_onboarding".
   META_ES_FEATURE_TYPE: z.string().optional().default(""),
-  // COEXISTENCIA (conectar el WhatsApp Business que el cliente YA usa en su teléfono,
-  // sin perder la app ni los chats): Embedded Signup con el featureType de onboarding de
-  // la app de negocio. config_id propio (puede ser otra config dentro de la misma app de
-  // Meta); si vacío cae a la config de Embedded Signup de la marca. La sirve
-  // GET /public/meta-config?mode=coexistence por marca. El valor "coexistence" del
-  // featureType fue retirado por Meta (may-2025) → el vigente es whatsapp_business_app_onboarding.
-  META_ES_COEX_CONFIG_ID_CONVERSIA: z.string().optional().default(""),
+  // COEXISTENCIA (conectar el WhatsApp Business que el cliente YA usa en su teléfono, sin
+  // perder la app ni los chats): Embedded Signup con el featureType de onboarding de la app
+  // de negocio. Es la MISMA config_id del Embedded Signup normal — Meta lo confirmó el
+  // 11-nov-2026 y TuBot siempre funcionó así; lo ÚNICO que cambia entre los dos caminos es
+  // este featureType. (Hubo una `META_ES_COEX_CONFIG_ID_CONVERSIA` aparte: se eliminó, ver
+  // el comentario en public.controller.ts.) El valor "coexistence" del featureType fue
+  // retirado por Meta (may-2025) → el vigente es whatsapp_business_app_onboarding.
   META_ES_COEX_FEATURE_TYPE: z.string().optional().default("whatsapp_business_app_onboarding"),
   // MIGRACIÓN a v5 del "registro insertado" (Embedded Signup) — PREPARADA pero APAGADA.
   // Cuando Meta confirme GA de v5 para NUESTRA app, se enciende por marca y los extras del
