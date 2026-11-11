@@ -1,5 +1,5 @@
 import type { AIToolSpec, AssistantAction } from "@conversia/types";
-import { fetchWebPageText } from "@conversia/agents";
+import { ESTADOS_DE_SUSCRIPCION_VIVA, evaluarVigencia, fetchWebPageText } from "@conversia/agents";
 import type { PrismaService } from "../prisma.service";
 import { envolverContenidoAjeno } from "./adjuntos";
 import { resumirReporte, type ReporteDeCanal } from "../channels/channel-status";
@@ -11,6 +11,7 @@ import { defaultAgentModel } from "../agents/model-policy";
 import {
   accionesParaPaso,
   construirHorario,
+  diagnosticarCuenta,
   diagnosticarCanal,
   explicarCamino,
   pasoConocido,
@@ -89,6 +90,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         name: "estadoCanales",
         description:
           "Estado de TODOS los canales del cliente (WhatsApp, Instagram y Messenger): cuáles están conectados, quién atiende cada uno, qué está pendiente y, en las redes, si Meta todavía está revisando la app. Úsalo cuando pregunten por Instagram, Messenger, «dónde me pueden escribir» o quieran conectar otra red.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "estadoDeCuenta",
+        description:
+          "Por qué la cuenta no deja avanzar: si está vigente, en qué plan está, si el plan le corresponde y qué la está bloqueando para crear canales, asistentes o flujos. Úsalo SIEMPRE que digan que algo «no los deja», «no puedo», «no avanza», «me da error» o «no logro conectar», ANTES de responder: un bloqueo de la cuenta llega antes que cualquier revisión del canal y no se ve en la pantalla.",
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
@@ -455,6 +462,56 @@ export async function runSetupTool(
         nota: "El MISMO asistente atiende los tres y todo llega a la misma bandeja.",
       }),
       actions: faltan.length || canales.length ? [{ type: "button", label: "Ir a Canales", kind: "interno", payload: "/canales" }] : [],
+    };
+  }
+
+  /**
+   * «No me deja avanzar» — el bloqueo suele estar en la CUENTA, no en el canal, y el 403
+   * llega antes de mirar cualquier límite. Convi miraba solo los canales y por eso contestaba
+   * genérico. La vigencia se evalúa con la MISMA regla del api y del worker.
+   */
+  if (name === "estadoDeCuenta") {
+    const datos = await prisma.withTenant(ctx.organizationId, async (tx) => {
+      const org = await tx.organization.findUnique({
+        where: { id: ctx.organizationId },
+        select: { status: true, brand: true, settings: true },
+      });
+      const sub = await tx.subscription.findFirst({
+        where: { status: { in: ESTADOS_DE_SUSCRIPCION_VIVA as unknown as string[] } as never },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, periodEnd: true, planId: true },
+      });
+      const plan = sub ? await tx.plan.findUnique({ where: { id: sub.planId }, select: { code: true, name: true, brand: true, priceClp: true, active: true } }) : null;
+      return { org, sub, plan };
+    });
+
+    const vigencia = evaluarVigencia({
+      validUntil: (datos.org?.settings as Record<string, unknown> | null)?.validUntil,
+      suscripcion: datos.sub,
+    });
+    const diag = diagnosticarCuenta({
+      orgStatus: datos.org?.status ?? null,
+      orgBrand: datos.org?.brand ?? null,
+      vigencia,
+      plan: datos.plan ? { ...datos.plan, priceClp: datos.plan.priceClp === null ? null : Number(datos.plan.priceClp) } : null,
+      suscripcion: datos.sub ? { status: datos.sub.status, periodEnd: datos.sub.periodEnd?.toISOString() ?? null } : null,
+    });
+
+    return {
+      content: JSON.stringify({
+        puedeCrear: diag.puedeCrear,
+        resumen: diag.resumen,
+        bloqueos: diag.bloqueos,
+        avisos: diag.avisos,
+        plan: datos.plan ? { nombre: datos.plan.name, precioClp: datos.plan.priceClp === null ? null : Number(datos.plan.priceClp) } : null,
+        planPagadoHasta: datos.sub?.periodEnd?.toISOString() ?? null,
+      }),
+      // Sin botones a propósito. Si el bloqueo lo resuelve el equipo, lo ÚTIL es abrir el
+      // ticket, y para eso ya existe `escalarAHumano` (el prompt se lo indica). Un `kind`
+      // inventado acá no llegaría a ninguna parte: `sanitizeActions` lo descarta en SILENCIO
+      // contra su lista blanca. Y mandarlo a una pantalla a reintentar lo mismo que ya le
+      // falló es hacerle perder el tiempo.
+      actions: [],
     };
   }
 

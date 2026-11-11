@@ -211,3 +211,107 @@ export function resumirHorario(hours: Record<string, { from: string; to: string 
   );
   return partes.length ? partes.join(" · ") : "sin horario";
 }
+
+/**
+ * ¿POR QUÉ NO ME DEJA AVANZAR? — diagnóstico de la CUENTA, no del canal.
+ *
+ * El caso que lo pidió (11-nov-2026): el dueño no podía conectar su WhatsApp y le preguntó a
+ * Convi. Convi miró los canales —que es lo único que sabía mirar— no encontró nada raro y
+ * contestó algo genérico. El bloqueo no estaba en el canal: estaba en la CUENTA, que figuraba
+ * con la vigencia vencida pese a tener el plan pagado, y el 403 llegaba antes de siquiera
+ * mirar el límite de canales. Convi tenía los ojos en el lugar equivocado.
+ *
+ * La regla de vigencia NO se reimplementa acá: se recibe ya evaluada con `evaluarVigencia`,
+ * la misma que usan el 403 del api y el corte de IA del worker. Si Convi explicara con una
+ * copia de la regla, volvería a mentir el día que una de las dos cambie — que es exactamente
+ * cómo nació este bug.
+ */
+export interface CuentaEntrada {
+  /** Estado de la organización: SUSPENDED/CANCELLED cortan por su cuenta. */
+  orgStatus: string | null | undefined;
+  /** Marca de la organización, para detectar un plan de otra marca. */
+  orgBrand: string | null | undefined;
+  /** Vigencia YA evaluada (packages/agents). `null` si el caller no la trae. */
+  vigencia: { vigente: boolean; motivo: string; validUntil: string | null; cubiertoHasta: string | null } | null;
+  plan: { code: string; name: string; brand: string | null; priceClp: number | null; active: boolean } | null;
+  suscripcion: { status: string | null; periodEnd: string | null } | null;
+}
+
+export interface Bloqueo {
+  /** Qué está pasando, en una línea y sin jerga. */
+  que: string;
+  /** Por qué pasa. */
+  porque: string;
+  /** Qué hacer. `null` cuando no lo puede resolver el dueño solo. */
+  comoSeArregla: string | null;
+  /** true si lo tiene que resolver el equipo, no el cliente. */
+  loResuelveElEquipo: boolean;
+}
+
+export interface CuentaDiagnostico {
+  /** ¿Puede crear recursos (canales, asistentes, flujos) ahora mismo? */
+  puedeCrear: boolean;
+  bloqueos: Bloqueo[];
+  /** Cosas que no bloquean pero están mal y conviene decir. */
+  avisos: string[];
+  resumen: string;
+}
+
+export function diagnosticarCuenta(e: CuentaEntrada): CuentaDiagnostico {
+  const bloqueos: Bloqueo[] = [];
+  const avisos: string[] = [];
+
+  const status = (e.orgStatus ?? "").toUpperCase();
+  if (status === "SUSPENDED" || status === "CANCELLED") {
+    bloqueos.push({
+      que: "La cuenta está suspendida.",
+      porque: status === "CANCELLED" ? "La cuenta figura cancelada." : "La cuenta figura suspendida.",
+      comoSeArregla: "Regularizar el plan para volver a operar.",
+      loResuelveElEquipo: false,
+    });
+  }
+
+  // Vigencia. El caso interesante no es la vencida de verdad, sino la que CONTRADICE a la
+  // suscripción: ahí el dueño no tiene nada que regularizar y hay que decírselo así, porque
+  // mandarlo a pagar algo que ya pagó es la peor respuesta posible.
+  if (e.vigencia && !e.vigencia.vigente) {
+    const pagado = e.suscripcion?.periodEnd && new Date(e.suscripcion.periodEnd).getTime() > Date.now();
+    bloqueos.push(
+      pagado
+        ? {
+            que: "La cuenta figura con la vigencia vencida aunque el plan está al día.",
+            porque: "Quedó registrada una fecha de corte vieja que no se actualizó al renovar el plan.",
+            comoSeArregla: null,
+            loResuelveElEquipo: true,
+          }
+        : {
+            que: "La vigencia del servicio venció.",
+            porque: "La fecha de corte del servicio ya pasó y no hay un período pagado que la cubra.",
+            comoSeArregla: "Renovar el plan para seguir operando.",
+            loResuelveElEquipo: false,
+          },
+    );
+  }
+
+  if (!e.plan) {
+    avisos.push("La cuenta no tiene un plan asignado: se le aplican los límites del plan gratuito.");
+  } else {
+    if (e.plan.active === false) {
+      avisos.push(`La cuenta está en «${e.plan.name}», un plan que ya no está activo en el catálogo. Conviene moverla a uno vigente.`);
+    }
+    const marcaOrg = (e.orgBrand ?? "").toLowerCase();
+    const marcaPlan = (e.plan.brand ?? "").toLowerCase();
+    if (marcaOrg && marcaPlan && marcaOrg !== marcaPlan) {
+      avisos.push(`La cuenta está en un plan de otra marca («${e.plan.name}»), así que sus límites y su forma de cobro no son los que le corresponden.`);
+    }
+  }
+
+  const puedeCrear = bloqueos.length === 0;
+  const resumen = puedeCrear
+    ? "La cuenta está en condiciones de operar."
+    : bloqueos.some((b) => b.loResuelveElEquipo)
+      ? "Hay algo del lado nuestro que está bloqueando la cuenta; no es nada que el cliente tenga que pagar ni arreglar."
+      : "Hay un bloqueo en la cuenta que el cliente puede resolver.";
+
+  return { puedeCrear, bloqueos, avisos, resumen };
+}
