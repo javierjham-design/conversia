@@ -55,7 +55,10 @@ export async function getEntitlements(tx: TenantTx): Promise<Entitlements> {
   const settings = (org?.settings ?? {}) as Record<string, any>;
   const override = settings.limits && typeof settings.limits === "object" ? (settings.limits as Record<string, number>) : {};
   const validUntil = typeof settings.validUntil === "string" ? settings.validUntil : null;
-  const expired = validUntil ? new Date(validUntil).getTime() < Date.now() : false;
+  // E2.a — la MISMA regla que `assertOrgActive` y que el worker. Acá quedaba la comparación
+  // cruda contra `validUntil`: hoy nadie lee `expired`, pero el día que alguien lo lea
+  // volvería el bug de #639 (una cuenta pagada con la fecha de la prueba, bloqueada).
+  const expired = !evaluarVigencia({ validUntil, suscripcion: sub }).vigente;
 
   // Con suscripción → su plan. Sin suscripción → plan GRATUITO (nunca ilimitado).
   const plan = sub

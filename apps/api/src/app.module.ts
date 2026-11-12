@@ -110,7 +110,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, OAuthTokenService, GoogleBusyService, ChannelStatusService, AssistantThreadsService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
+  providers: [BillingController, PrismaService, OAuthTokenService, GoogleBusyService, ChannelStatusService, AssistantThreadsService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
