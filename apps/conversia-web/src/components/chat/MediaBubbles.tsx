@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { MessageMedia } from "../../lib/message-media";
 import { ICONO_DOCUMENTO, familiaDeMime, formatearTamaño } from "../../lib/chat-format";
 import { useMediaBlob } from "../../lib/media-blob";
@@ -19,19 +19,13 @@ import { Expirado } from "./AudioBubble";
 export function ImageBubble({
   media,
   onAbrir,
-  onLista,
 }: {
   media: MessageMedia;
-  onAbrir?: (url: string) => void;
-  /** Avisa el blob al hilo para que el visor pueda pasar entre todas las fotos. */
-  onLista?: (url: string) => void;
+  onAbrir?: () => void;
 }) {
   const { estado, url } = useMediaBlob(media.url);
   const [ratio, setRatio] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (url) onLista?.(url);
-  }, [url, onLista]);
 
   if (estado === "expired") return <Expirado texto="📷 Foto" saliente={false} />;
 
@@ -51,7 +45,7 @@ export function ImageBubble({
           justifyContent: "center",
           cursor: url ? "zoom-in" : "default",
         }}
-        onClick={() => url && onAbrir?.(url)}
+        onClick={() => onAbrir?.()}
       >
         {url ? (
           <img

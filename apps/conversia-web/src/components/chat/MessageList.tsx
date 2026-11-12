@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, useCallback, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useMemo, useState } from "react";
 import type { MessageMedia } from "../../lib/message-media";
 import {
   abreDia,
@@ -60,44 +60,29 @@ export function MessageList({
   /** Inyectable para poder probar «Hoy»/«Ayer» sin depender del día en que se corra. */
   ahora?: Date;
 }) {
-  const [visor, setVisor] = useState<{ fotos: FotoDelVisor[]; i: number } | null>(null);
-  // Las fotos del hilo, en orden, para que las flechas del visor pasen entre ellas.
-  // Los stickers quedan fuera a propósito: pasar de una foto a un sticker no tiene sentido.
-  /**
-   * Las fotos ya descargadas, EN UN REF y no en estado.
-   *
-   * `Burbuja` está memoizada y su comparador no mira las funciones (a propósito: compararlas
-   * obligaría a recrear todas las burbujas en cada render). Eso significa que la burbuja
-   * conserva el `abrirVisor` del PRIMER render, con su `urls` vacío: el visor se abría con
-   * una sola foto y las flechas no tenían a dónde ir. Un ref no tiene closure que envejecer.
-   */
-  const urls = useRef<Record<string, string>>({});
+  const [visor, setVisor] = useState<{ i: number } | null>(null);
 
-  const fotosDelHilo = useMemo(
-    () => mensajes.filter((m) => m.media?.kind === "image").map((m) => ({ id: m.id, caption: m.media?.caption ?? null })),
+  /**
+   * TODAS las fotos del hilo, en orden. Salen de los mensajes y no de lo que ya se descargó:
+   * las miniaturas son `lazy`, así que en una pantalla chica la mayoría no está bajada y el
+   * visor se quedaría sin fotos por las que pasar. Los stickers quedan fuera a propósito —
+   * pasar de una foto a una calcomanía no tiene sentido.
+   */
+  const fotosDelHilo = useMemo<FotoDelVisor[]>(
+    () =>
+      mensajes
+        .filter((m) => m.media?.kind === "image" && m.media?.url)
+        .map((m) => ({ id: m.id, ruta: m.media!.url, caption: m.media?.caption ?? null })),
     [mensajes],
   );
 
-  /**
-   * Cada foto avisa su blob al terminar de cargar. Sin esto, el visor solo conocería la que
-   * se abrió y las flechas no tendrían a dónde ir: las demás ya están descargadas, pero su
-   * `blob:` vive dentro de su propia burbuja.
-   */
-  const anotarFoto = useCallback((id: string, url: string) => {
-    urls.current[id] = url;
-  }, []);
-
-  const fotosRef = useRef(fotosDelHilo);
-  fotosRef.current = fotosDelHilo;
-
-  const abrirVisor = useCallback((id: string, url: string) => {
-    urls.current[id] = url;
-    const fotos: FotoDelVisor[] = fotosRef.current
-      .filter((f) => urls.current[f.id])
-      .map((f) => ({ id: f.id, url: urls.current[f.id], caption: f.caption }));
-    const i = Math.max(0, fotos.findIndex((f) => f.id === id));
-    setVisor({ fotos, i });
-  }, []);
+  const abrirVisor = useCallback(
+    (id: string) => {
+      const i = fotosDelHilo.findIndex((f) => f.id === id);
+      setVisor({ i: Math.max(0, i) });
+    },
+    [fotosDelHilo],
+  );
 
   const visibles = mensajes.filter((m) => m.visibility !== "INTERNAL" || m.type === "NOTE");
 
@@ -131,12 +116,11 @@ export function MessageList({
               cierraBloque={cierraBloque}
               acciones={soloLectura ? undefined : acciones}
               onAbrirFoto={abrirVisor}
-              onFotoLista={anotarFoto}
             />
           </Fragment>
         );
       })}
-      {visor ? <MediaViewer fotos={visor.fotos} indiceInicial={visor.i} onCerrar={() => setVisor(null)} /> : null}
+      {visor ? <MediaViewer fotos={fotosDelHilo} indiceInicial={visor.i} onCerrar={() => setVisor(null)} /> : null}
     </>
   );
 }
@@ -152,14 +136,12 @@ const Burbuja = memo(
     cierraBloque,
     acciones,
     onAbrirFoto,
-    onFotoLista,
   }: {
     m: MensajeDelHilo;
     continua: boolean;
     cierraBloque: boolean;
     acciones?: AccionesDeSugerencia;
-    onAbrirFoto: (id: string, url: string) => void;
-    onFotoLista: (id: string, url: string) => void;
+    onAbrirFoto: (id: string) => void;
   }) {
     const out = m.direction === "OUTBOUND";
     const nota = m.visibility === "INTERNAL";
@@ -203,7 +185,7 @@ const Burbuja = memo(
             border: sinFondo ? "none" : sugerida ? "1px dashed var(--acc)" : out || nota ? "none" : "1px solid var(--hairline)",
           }}
         >
-          <Contenido m={m} media={media} out={out} onAbrirFoto={onAbrirFoto} onFotoLista={onFotoLista} />
+          <Contenido m={m} media={media} out={out} onAbrirFoto={onAbrirFoto} />
 
           {media?.reactions?.length ? (
             <span
@@ -270,19 +252,17 @@ function Contenido({
   media,
   out,
   onAbrirFoto,
-  onFotoLista,
 }: {
   m: MensajeDelHilo;
   media: MessageMedia | null;
   out: boolean;
-  onAbrirFoto: (id: string, url: string) => void;
-  onFotoLista: (id: string, url: string) => void;
+  onAbrirFoto: (id: string) => void;
 }) {
   switch (media?.kind) {
     case "audio":
       return <AudioBubble media={media} saliente={out} />;
     case "image":
-      return <ImageBubble media={media} onAbrir={(url) => onAbrirFoto(m.id, url)} onLista={(url) => onFotoLista(m.id, url)} />;
+      return <ImageBubble media={media} onAbrir={() => onAbrirFoto(m.id)} />;
     case "sticker":
       return <StickerBubble media={media} />;
     case "video":

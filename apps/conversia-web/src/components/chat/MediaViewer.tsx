@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useMediaBlob } from "../../lib/media-blob";
 import { createPortal } from "react-dom";
 
 /**
@@ -17,8 +18,16 @@ import { createPortal } from "react-dom";
 
 export interface FotoDelVisor {
   id: string;
-  /** blob: URL ya descargada (el visor no baja nada por su cuenta). */
-  url: string;
+  /**
+   * RUTA del endpoint, no un blob ya descargado.
+   *
+   * Al principio el visor recibía blobs: solo podía mostrar las fotos que la pantalla ya
+   * había bajado. En móvil eso lo rompía — las miniaturas usan `loading="lazy"`, así que las
+   * de más abajo no estaban descargadas y las flechas se quedaban sin a dónde ir. Con la ruta,
+   * el visor baja la que muestra; `useMediaBlob` cachea, así que una ya vista aparece al
+   * instante y ninguna se baja dos veces.
+   */
+  ruta: string | null;
   caption?: string | null;
 }
 
@@ -43,6 +52,7 @@ export function MediaViewer({
   useEffect(() => setMontado(true), []);
 
   const foto = fotos[i];
+  const { estado, url } = useMediaBlob(foto?.ruta ?? null);
   const reset = useCallback(() => {
     setZoom(1);
     setPos({ x: 0, y: 0 });
@@ -85,8 +95,9 @@ export function MediaViewer({
   if (!montado || !foto) return null;
 
   const descargar = () => {
+    if (!url) return;
     const a = document.createElement("a");
-    a.href = foto.url;
+    a.href = url;
     a.download = `foto-${i + 1}.jpg`;
     document.body.appendChild(a);
     a.click();
@@ -125,7 +136,10 @@ export function MediaViewer({
       }}
     >
       {/* Barra superior: contador y acciones. */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", color: "#fff", gap: 10 }}>
+      {/* z-index explícito: en móvil la imagen ocupa TODO el ancho y, al ir después en el
+          DOM, se pinta encima y se come los clics de la barra y de las flechas. En escritorio
+          no se notaba porque la foto queda contenida y deja los bordes libres. */}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", color: "#fff", gap: 10 }}>
         <span data-testid="visor-contador" style={{ fontSize: 13, opacity: 0.85 }}>
           {fotos.length > 1 ? `${i + 1} / ${fotos.length}` : ""}
         </span>
@@ -142,8 +156,14 @@ export function MediaViewer({
         </>
       ) : null}
 
+      {!url ? (
+        <span style={{ color: "#fff", fontSize: 13, opacity: 0.8 }} data-testid="visor-cargando">
+          {estado === "expired" ? "Este archivo ya no está disponible." : estado === "error" ? "No se pudo cargar" : "Cargando…"}
+        </span>
+      ) : null}
       <img
-        src={foto.url}
+        src={url ?? ""}
+        hidden={!url}
         alt={foto.caption ?? `Foto ${i + 1}`}
         data-testid="visor-imagen"
         draggable={false}
@@ -226,6 +246,7 @@ const botonBarra: React.CSSProperties = {
 
 const flecha: React.CSSProperties = {
   position: "absolute",
+  zIndex: 2,
   top: "50%",
   transform: "translateY(-50%)",
   background: "rgba(255,255,255,.14)",
