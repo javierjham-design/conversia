@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Check, CreditCard, ExternalLink, FileText, History, Image as ImageIcon, Mic, Paperclip, MessageCircle, PenLine, Send, Square, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -53,7 +53,51 @@ function fechaCorta(iso: string): string {
 }
 
 /** Un hilo del historial (B2). */
-type Hilo = { id: string; title: string | null; status: string; lastMessageAt: string; preview: string | null; userName?: string | null };
+/**
+ * E1.c — la pista del hilo abierto, por usuario, en el navegador.
+ *
+ * Sirve para pintar al instante mientras llega la red; la VERDAD es el hilo abierto del
+ * usuario en la base, que es lo que permite retomar desde otro equipo. Va por usuario porque
+ * un mismo navegador puede cambiar de cuenta y heredar el hilo ajeno sería peor que no tener
+ * pista. Todo entre try: en modo privado `localStorage` lanza.
+ */
+const CLAVE_PISTA = "conversia:convi:thread";
+
+function idDeUsuarioDelToken(): string {
+  try {
+    const t = localStorage.getItem("conversia_token") ?? "";
+    const carga = JSON.parse(atob(t.split(".")[1] ?? "")) as { sub?: string };
+    return carga?.sub ?? "anon";
+  } catch {
+    return "anon";
+  }
+}
+
+function leerPista(): string | null {
+  try {
+    return localStorage.getItem(`${CLAVE_PISTA}:${idDeUsuarioDelToken()}`);
+  } catch {
+    return null;
+  }
+}
+
+function guardarPista(id: string): void {
+  try {
+    localStorage.setItem(`${CLAVE_PISTA}:${idDeUsuarioDelToken()}`, id);
+  } catch {
+    /* modo privado */
+  }
+}
+
+function limpiarPista(): void {
+  try {
+    localStorage.removeItem(`${CLAVE_PISTA}:${idDeUsuarioDelToken()}`);
+  } catch {
+    /* modo privado */
+  }
+}
+
+type Hilo = { id: string; title: string | null; status: string; lastMessageAt: string; preview: string | null; userId?: string; userName?: string | null };
 type Step = { key: string; label: string; href: string; done: boolean; blocking: boolean };
 type Ctx = (ConviCtx & { canConfigure: boolean; steps: Step[] }) | null;
 
@@ -103,9 +147,24 @@ export function SupportWidget() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   /** B3 — el hilo donde se está conversando. Lo manda el servidor; acá solo se arrastra. */
   const [threadId, setThreadId] = useState<string | null>(null);
+  /**
+   * E1.c — PISTA del hilo en el navegador para pintar al instante mientras llega la red. No
+   * es la verdad: la verdad es el hilo abierto del usuario en la base, que es lo que permite
+   * retomar desde otro equipo. Si la pista apunta a un hilo que ya no está, se limpia.
+   */
+  const pistaRef = useRef<string | null>(null);
   const [hilos, setHilos] = useState<Hilo[] | null>(null);
   const [verHistorial, setVerHistorial] = useState(false);
+  const [buscaHilos, setBuscaHilos] = useState("");
   const [cargandoHilo, setCargandoHilo] = useState(false);
+  /** E1.a — con qué pedir los mensajes ANTERIORES. null = ya se ve el principio del hilo. */
+  const [anteriores, setAnteriores] = useState<string | null>(null);
+  const [cargandoAnteriores, setCargandoAnteriores] = useState(false);
+  /**
+   * E1.e — que el historial falle deja de ser invisible. Antes se tragaba el error y el dueño
+   * veía una conversación vacía sin saber si Convi se olvidó o si no se pudo leer.
+   */
+  const [fallaHistorial, setFallaHistorial] = useState<null | "cargar" | "guardar">(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -256,7 +315,7 @@ export function SupportWidget() {
     setFalloAlgo(false);
     setOfrecerSoporte(false);
     try {
-      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean; threadId?: string }>("/assistant/message", {
+      const r = await api<{ reply: string; wrote?: boolean; qa?: { passed: boolean } | null; actions?: AssistantAction[]; degradado?: boolean; threadId?: string; guardado?: boolean }>("/assistant/message", {
         method: "POST",
         body: JSON.stringify({
           message: body,
@@ -273,7 +332,13 @@ export function SupportWidget() {
       let reply = r.reply;
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
       const actions = r.actions ?? [];
-      if (r.threadId) setThreadId(r.threadId);
+      if (r.threadId) {
+        setThreadId(r.threadId);
+        guardarPista(r.threadId);
+      }
+      // E1.e — el servidor avisa si NO pudo guardar el turno. Antes se perdía en silencio y
+      // el dueño lo descubría al reabrir y no encontrar nada.
+      setFallaHistorial(r.guardado === false ? "guardar" : null);
       setMsgs((m) => [
         ...m.map((x) => (x.id === idLocal ? { ...x, pendiente: false } : x)),
         { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button") },
@@ -312,18 +377,35 @@ export function SupportWidget() {
    * entera) deje de borrar la conversación. Si falla, se empieza de cero sin mostrar un
    * error: no tener historial no es un problema que el dueño tenga que resolver.
    */
+  /** E1.d — la carga EN VUELO, para que nadie escriba encima de ella. */
+  const cargaEnVueloRef = useRef<Promise<void> | null>(null);
+
   const cargarHilo = useCallback(async (id?: string) => {
     setCargandoHilo(true);
+    setFallaHistorial(null);
     try {
       let hiloId = id;
       if (!hiloId) {
-        const r = await api<{ hilos: Hilo[] }>("/assistant/threads?limit=20");
+        // E1.b — `mine=1`: solo MIS hilos. Un dueño es administrador y sin esto la lista traía
+        // los de toda la organización; tomar «el primer hilo abierto» podía ser el de otra
+        // persona, y al escribir el servidor respondía 404 (bien) mientras el widget decía
+        // «El asistente no está disponible en esta cuenta» (pésimo).
+        const r = await api<{ hilos: Hilo[] }>("/assistant/threads?limit=20&mine=1");
         setHilos(r.hilos);
         hiloId = r.hilos.find((h) => h.status === "open")?.id;
       }
-      if (!hiloId) return;
-      const r = await api<{ messages: Array<{ role: string; content: string; actions?: unknown }> }>(`/assistant/threads/${hiloId}/messages`);
+      if (!hiloId) {
+        limpiarPista();
+        return;
+      }
+      // E1.a — SIN cursor: la última página. Antes traía los 50 más antiguos, así que pasados
+      // ~25 turnos uno reabría y veía el principio de la conversación, nunca el final.
+      const r = await api<{ messages: Array<{ role: string; content: string; actions?: unknown }>; anteriores?: string | null }>(
+        `/assistant/threads/${hiloId}/messages`,
+      );
       setThreadId(hiloId);
+      guardarPista(hiloId);
+      setAnteriores(r.anteriores ?? null);
       setMsgs(
         r.messages.map((m) => ({
           role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
@@ -332,19 +414,95 @@ export function SupportWidget() {
         })),
       );
       setVerHistorial(false);
-    } catch {
-      /* sin historial se empieza de cero */
+    } catch (e) {
+      // E1.c — si el hilo ya no existe (lo archivaron, cambió de cuenta), la pista miente:
+      // se limpia y se vuelve a pedir la lista, en vez de dejar al dueño con un error.
+      const msg = String((e as Error)?.message ?? "");
+      if (/404|no encontrada/i.test(msg) && id) {
+        limpiarPista();
+        setThreadId(null);
+        await cargarHiloRef.current?.();
+        return;
+      }
+      setFallaHistorial("cargar");
     } finally {
       setCargandoHilo(false);
     }
   }, []);
+
+  /** Para poder reintentar desde dentro del propio `cargarHilo` sin pelear con las deps. */
+  const cargarHiloRef = useRef<((id?: string) => Promise<void>) | null>(null);
+  cargarHiloRef.current = cargarHilo;
+
+  /**
+   * E1.g — filtra por título, por lo primero que se dijo o por fecha. La fecha se compara
+   * contra varias formas de escribirla («11-11», «11/11», «noviembre») porque nadie recuerda
+   * el formato exacto con el que la pintamos.
+   */
+  const hilosFiltrados = useMemo(() => {
+    const q = buscaHilos.trim().toLowerCase();
+    if (!hilos) return [];
+    if (!q) return hilos;
+    return hilos.filter((h) => {
+      const d = new Date(h.lastMessageAt);
+      const fechas = [
+        fechaCorta(h.lastMessageAt).toLowerCase(),
+        d.toLocaleDateString("es-CL"),
+        d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" }),
+        d.toLocaleDateString("es-CL", { month: "long" }),
+      ].join(" ");
+      return `${h.title ?? ""} ${h.preview ?? ""} ${h.userName ?? ""} ${fechas}`.toLowerCase().includes(q);
+    });
+  }, [hilos, buscaHilos]);
+
+  /** E1.g — reabre un hilo archivado como el activo (el servidor archiva el que estaba). */
+  const retomarHilo = useCallback(
+    async (id: string) => {
+      try {
+        await api(`/assistant/threads/${id}`, { method: "PATCH", body: JSON.stringify({ status: "open" }) });
+      } catch {
+        /* si no se pudo reabrir, `cargarHilo` igual lo muestra en lectura */
+      }
+      await cargarHiloRef.current?.(id);
+    },
+    [],
+  );
+
+  /** E1.a — «Ver mensajes anteriores»: sube una página hacia atrás y la antepone. */
+  const cargarAnteriores = useCallback(async () => {
+    if (!threadId || !anteriores || cargandoAnteriores) return;
+    setCargandoAnteriores(true);
+    try {
+      const r = await api<{ messages: Array<{ role: string; content: string; actions?: unknown }>; anteriores?: string | null }>(
+        `/assistant/threads/${threadId}/messages?antesDe=${encodeURIComponent(anteriores)}`,
+      );
+      setAnteriores(r.anteriores ?? null);
+      setMsgs((prev) => [
+        ...r.messages.map((m) => ({
+          role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+          content: m.content,
+          actions: Array.isArray(m.actions) ? (m.actions as AssistantAction[]).filter((a) => a.type === "button") : undefined,
+        })),
+        ...prev,
+      ]);
+    } catch {
+      setFallaHistorial("cargar");
+    } finally {
+      setCargandoAnteriores(false);
+    }
+  }, [threadId, anteriores, cargandoAnteriores]);
 
   /** Una sola carga por montaje del widget, la primera vez que se abre. */
   const hiloCargadoRef = useRef(false);
   useEffect(() => {
     if (!open || hiloCargadoRef.current) return;
     hiloCargadoRef.current = true;
-    void cargarHilo();
+    // E1.d — se guarda la promesa: `ask` la espera antes de agregar nada, porque si no
+    // `setMsgs` de la carga PISA la pregunta recién escrita. Pasaba con el evento
+    // `conversia:assistant:open`, que dispara una pregunta 120 ms después de abrir.
+    cargaEnVueloRef.current = cargarHilo().finally(() => {
+      cargaEnVueloRef.current = null;
+    });
   }, [open, cargarHilo]);
 
   const nuevaConversacion = useCallback(async () => {
@@ -508,7 +666,18 @@ export function SupportWidget() {
       e.preventDefault();
       const detail = (e as CustomEvent).detail as { topic?: string; context?: string } | undefined;
       abrir();
-      if (detail?.context) setTimeout(() => void ask(`Necesito ayuda con esto: ${detail.context}`), 120);
+      if (detail?.context) {
+        // Antes: `setTimeout(..., 120)` y a ver si llegaba. Ahora se ESPERA a que el historial
+        // termine de cargar; si no hay carga en vuelo, sigue de inmediato.
+        void (async () => {
+          try {
+            await cargaEnVueloRef.current;
+          } catch {
+            /* si falló, igual dejamos preguntar */
+          }
+          void ask(`Necesito ayuda con esto: ${detail.context}`);
+        })();
+      }
     }
     window.addEventListener("conversia:assistant:open", onOpen as EventListener);
     return () => window.removeEventListener("conversia:assistant:open", onOpen as EventListener);
@@ -709,12 +878,23 @@ export function SupportWidget() {
             {verHistorial ? (
               <div data-convi="lista-historial" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <p className="text-dim" style={{ fontSize: 12.5, margin: "0 0 2px" }}>Tus conversaciones</p>
+                {/* E1.g — buscar. Con más de diez conversaciones, una lista por fecha deja de
+                    servir: uno recuerda DE QUÉ habló, no cuándo. */}
+                <input
+                  value={buscaHilos}
+                  onChange={(e) => setBuscaHilos(e.target.value)}
+                  placeholder="Buscar por texto o fecha (ej. 11-11)"
+                  data-testid="convi-buscar-hilos"
+                  style={{ border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", borderRadius: 9, padding: "6px 9px", fontSize: 12.5, marginBottom: 2 }}
+                />
                 {hilos === null ? (
                   <p className="text-dim" style={{ fontSize: 13 }}>Buscando…</p>
-                ) : hilos.length === 0 ? (
-                  <p className="text-dim" style={{ fontSize: 13 }}>Todavía no hay conversaciones guardadas.</p>
+                ) : hilosFiltrados.length === 0 ? (
+                  <p className="text-dim" style={{ fontSize: 13 }}>
+                    {buscaHilos.trim() ? "Nada que coincida con eso." : "Todavía no hay conversaciones guardadas."}
+                  </p>
                 ) : (
-                  hilos.map((h) => (
+                  hilosFiltrados.map((h) => (
                     <button
                       key={h.id}
                       onClick={() => void cargarHilo(h.id)}
@@ -726,6 +906,20 @@ export function SupportWidget() {
                       </span>
                       {h.preview ? <span className="text-dim" style={{ display: "block", fontSize: 12, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.preview}</span> : null}
                       {h.userName ? <span className="text-dim" style={{ display: "block", fontSize: 11, marginTop: 2 }}>de {h.userName}</span> : null}
+                      {/* E1.g — una conversación archivada se puede RETOMAR: vuelve a ser la
+                          activa y la de ahora se archiva. Antes solo se podía leer. */}
+                      {h.status !== "open" ? (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          data-testid="convi-retomar"
+                          onClick={(e) => { e.stopPropagation(); void retomarHilo(h.id); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); void retomarHilo(h.id); } }}
+                          style={{ display: "inline-block", marginTop: 6, fontSize: 11.5, color: "var(--acc)", textDecoration: "underline" }}
+                        >
+                          Retomar
+                        </span>
+                      ) : null}
                     </button>
                   ))
                 )}
@@ -733,6 +927,33 @@ export function SupportWidget() {
             ) : null}
             {!verHistorial && msgs.length === 0 && !cargandoHilo ? <p className="text-dim" style={{ fontSize: 13 }}>Escríbeme y te ayudo a dejar tu asistente andando o resuelvo tus dudas.</p> : null}
             {!verHistorial && cargandoHilo && msgs.length === 0 ? <p className="text-dim" style={{ fontSize: 13 }}>Recuperando nuestra conversación…</p> : null}
+            {/* E1.a — subir hacia atrás. Solo aparece cuando hay más arriba: un botón que no
+                hace nada es peor que ninguno. */}
+            {!verHistorial && anteriores ? (
+              <button
+                onClick={() => void cargarAnteriores()}
+                disabled={cargandoAnteriores}
+                data-testid="convi-anteriores"
+                style={{ alignSelf: "center", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink-dim)", borderRadius: 999, padding: "3px 12px", fontSize: 11.5, cursor: "pointer" }}
+              >
+                {cargandoAnteriores ? "Buscando…" : "Ver mensajes anteriores"}
+              </button>
+            ) : null}
+            {/* E1.e — que el historial falle deja de ser invisible. Discreto, con salida. */}
+            {!verHistorial && fallaHistorial ? (
+              <div
+                data-testid="convi-falla-historial"
+                style={{ alignSelf: "center", display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--ink-dim)" }}
+              >
+                <span>{fallaHistorial === "cargar" ? "No pude recuperar el historial." : "No pude guardar este mensaje."}</span>
+                <button
+                  onClick={() => void (fallaHistorial === "cargar" ? cargarHilo(threadId ?? undefined) : cargarHilo(threadId ?? undefined))}
+                  style={{ border: "none", background: "none", color: "var(--acc)", cursor: "pointer", fontSize: 11.5, textDecoration: "underline", padding: 0 }}
+                >
+                  Reintentar
+                </button>
+              </div>
+            ) : null}
             {(verHistorial ? [] : msgs).map((m, i) => {
               const mine = m.role === "user";
               return (
@@ -886,7 +1107,7 @@ export function SupportWidget() {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onPaste={alPegar}
-                placeholder={`Escríbele a ${CONVI_NAME}…`}
+                placeholder={cargandoHilo ? "Recuperando tu conversación…" : `Escríbele a ${CONVI_NAME}…`}
                 aria-label={`Mensaje para ${CONVI_NAME}`}
                 style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 999, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }}
               />

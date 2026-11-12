@@ -85,7 +85,9 @@ export class AssistantController {
       hilo.summary,
     );
     // Guardar NUNCA puede costarle la respuesta al dueño: si la base falla, ya la tiene.
-    await this.hilos.guardarTurno({
+    // E1.e — pero deja de ser invisible: se le avisa al widget con `guardado:false` para que
+    // lo diga y ofrezca reintentar, en vez de que el turno desaparezca en silencio.
+    const { guardado } = await this.hilos.guardarTurno({
       organizationId: ctx.organizationId,
       threadId: hilo.id,
       userMessage: parsed.data.message,
@@ -93,37 +95,52 @@ export class AssistantController {
       route: parsed.data.route,
       actions: r.actions,
       adjuntos: adjuntos.map((a) => ({ tipo: a.tipo, nombre: a.nombre })),
+      toolDigest: r.toolDigest,
     });
     // El resumen se recalcula DESPUÉS de responder (no hace esperar al dueño).
     void this.hilos.resumirSiHaceFalta(ctx.organizationId, hilo.id);
-    return { ...r, threadId: hilo.id };
+    return { ...r, threadId: hilo.id, guardado };
   }
 
   // ─────────────────────────── Historial (B2) ───────────────────────────
 
-  /** Los hilos del usuario. Un administrador ve los de toda su organización. */
+  /**
+   * Los hilos. Un administrador ve los de toda su organización, salvo con `mine=1`.
+   *
+   * E1.b — el widget pide SIEMPRE `mine=1`. Antes tomaba «el primer hilo abierto» de la lista
+   * y, para un dueño, ese hilo podía ser de otro usuario: al escribir, `hiloParaEscribir`
+   * devolvía 404 (correcto) y el widget decía «El asistente no está disponible en esta
+   * cuenta». La vista de toda la organización se queda donde tiene sentido: el historial.
+   */
   @Get("threads")
-  async threads(@Query("cursor") cursor?: string, @Query("limit") limit?: string) {
+  async threads(@Query("cursor") cursor?: string, @Query("limit") limit?: string, @Query("mine") mine?: string) {
     const ctx = requireContext();
     await this.assertConversia(ctx.organizationId);
     const q = z.object({ cursor: z.string().datetime().optional(), limit: z.coerce.number().int().min(1).max(50).optional() }).safeParse({ cursor, limit });
     if (!q.success) throw new BadRequestException("Parámetros inválidos");
     return this.hilos.listar(ctx.organizationId, ctx.userId ?? "", {
       esAdmin: isWebOwner(ctx.roleCode),
+      soloMios: mine === "1" || mine === "true",
       limite: q.data.limit,
       antesDe: q.data.cursor ? new Date(q.data.cursor) : undefined,
     });
   }
 
+  /**
+   * Los mensajes de un hilo. Sin parámetros devuelve la ÚLTIMA página — que es la que uno
+   * quiere ver al abrir un chat. `antesDe` sube hacia atrás; `cursor` (hacia adelante) se
+   * mantiene por compatibilidad del contrato.
+   */
   @Get("threads/:id/messages")
-  async threadMessages(@Param("id") id: string, @Query("cursor") cursor?: string) {
+  async threadMessages(@Param("id") id: string, @Query("cursor") cursor?: string, @Query("antesDe") antesDe?: string) {
     const ctx = requireContext();
     await this.assertConversia(ctx.organizationId);
-    const q = z.object({ cursor: z.string().datetime().optional() }).safeParse({ cursor });
+    const q = z.object({ cursor: z.string().datetime().optional(), antesDe: z.string().datetime().optional() }).safeParse({ cursor, antesDe });
     if (!q.success) throw new BadRequestException("Cursor inválido");
     return this.hilos.mensajes(ctx.organizationId, ctx.userId ?? "", id, {
       esAdmin: isWebOwner(ctx.roleCode),
       cursor: q.data.cursor ? new Date(q.data.cursor) : undefined,
+      antesDe: q.data.antesDe ? new Date(q.data.antesDe) : undefined,
     });
   }
 

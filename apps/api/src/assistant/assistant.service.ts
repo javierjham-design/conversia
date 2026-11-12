@@ -372,7 +372,7 @@ ${resumenDelHilo.trim()}`
     adjuntos: AdjuntoEntrada[] = [],
     /** B2 — resumen de lo viejo del hilo (cuando pasó de 40 mensajes). */
     resumenDelHilo?: string | null,
-  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[]; degradado: boolean }> {
+  ): Promise<{ reply: string; mode: string; wrote: boolean; qa?: { passed: boolean } | null; actions: AssistantAction[]; degradado: boolean; toolDigest: string | null }> {
     const env = getEnv();
     const owner = isWebOwner(ctx.role);
     // ROBUSTEZ (Bloque 3): el contexto se arma FUERA del loop de IA, pero un fallo suyo no debe
@@ -450,6 +450,8 @@ ${resumenDelHilo.trim()}`
     // ¿Esta respuesta es la de respaldo porque el proveedor de IA falló? La UI lo necesita para
     // ofrecer una persona de verdad; detectarlo comparando el texto sería frágil y se rompería
     // a la primera vez que alguien reescriba el mensaje.
+/** E1.f — qué tools se consultaron en ESTE turno, para la memoria del hilo. */
+    const consultado: string[] = [];
     let degradado = false;
     let wrote = false;
     let publicoAgente = false;
@@ -475,6 +477,11 @@ ${resumenDelHilo.trim()}`
           if (out.didWrite && call.name === "publicarAsistente") publicoAgente = true;
           if (out.actions?.length) acciones.push(...out.actions);
           results.push({ toolCallId: call.id, content: out.content, isError: out.isError });
+          // E1.f — se anota QUÉ se consultó y en qué quedó, recortado. Esto viaja al hilo y
+          // vuelve en el prompt la próxima vez, para que Convi no rediagnostique lo que ya
+          // miró. Las tools de ESCRITURA también entran: saber que ya creó el servicio evita
+          // que lo vuelva a crear.
+          consultado.push(`${call.name} → ${resumirResultado(out.content, out.isError)}`);
         }
         if (resp.text?.trim()) reply = resp.text;
         toolTranscript.push({ kind: "assistant_tool_calls", text: resp.text ?? undefined, calls: resp.toolCalls });
@@ -565,6 +572,24 @@ ${resumenDelHilo.trim()}`
       // Lo que sale hacia la UI pasa SIEMPRE por la lista blanca (rutas que existen,
       // `data-copilot` conocidos, enlaces https): la UI no vuelve a validar nada.
       actions: sanitizeActions(acciones),
+      /** E1.f — qué consultó este turno, para guardarlo con el mensaje y recordarlo después. */
+      toolDigest: digestDeTurno(consultado),
     };
   }
+}
+
+/** Un resultado de tool, recortado a algo que quepa en una línea de memoria. */
+export function resumirResultado(contenido: string, esError?: boolean): string {
+  const limpio = (contenido ?? "").replace(/\s+/g, " ").trim();
+  if (esError) return `error: ${limpio.slice(0, 80)}`;
+  // Los resultados son JSON: lo legible está en los valores, no en las llaves.
+  const corto = limpio.length > 120 ? `${limpio.slice(0, 120)}…` : limpio;
+  return corto || "sin datos";
+}
+
+/** Junta lo consultado del turno en una sola línea con tope. Vacío → null (no se guarda). */
+export function digestDeTurno(consultado: string[], tope = 300): string | null {
+  if (!consultado.length) return null;
+  const texto = consultado.join(" · ");
+  return texto.length > tope ? `${texto.slice(0, tope - 1)}…` : texto;
 }
