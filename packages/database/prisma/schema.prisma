@@ -2123,8 +2123,12 @@ model File {
   content        String?
   meta           Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
+  /// D4 — lo borró el barrido de retención. La FILA se conserva: el mensaje sigue en el chat
+  /// y el panel tiene que poder decir "ya no está disponible" en vez de un hueco sin explicar.
+  deletedAt      DateTime? @map("deleted_at")
 
   @@index([organizationId])
+  @@index([scope, createdAt])
   @@map("files")
 }
 
