@@ -160,3 +160,74 @@ para que un viaje a Meta que empezó antes del cambio no quede colgado a mitad d
 
 **Los permisos exigidos dependen del propósito**: pedirle `leads_retrieval` a quien solo
 quiere contestar sus DM lo dejaba afuera por un permiso que no necesita.
+
+## ADR-20 — Lo que cuesta dinero se confirma en el chat, y el `input` vive en el SERVIDOR
+
+**Contexto.** Convi pasa a poder cobrar: generar un enlace de pago, activar la recarga
+automática, reactivar una suscripción. Son acciones que mueven plata del cliente.
+
+**Decisión.** Cada una devuelve una acción `confirm` con un **texto exacto** que el dueño lee
+y confirma en la conversación. **Los argumentos de la acción no viajan al navegador**: quedan
+guardados del lado del servidor desde que se muestra el texto, y al confirmar viaja solo un
+`id`.
+
+**Por qué.** Si el `input` viajara, entre que se lee «1.000 créditos, tope $30.000» y se pulsa
+«Confirmar» cualquiera con la consola abierta podría cambiarlo. Con el input en el servidor,
+**lo que se ejecuta es exactamente lo que se leyó**.
+
+**Tres condiciones más, y las tres por una razón concreta:** se usa una sola vez (pulsar dos
+veces cobraría dos veces, que es el error que nadie perdona), caduca a los 10 minutos (una
+confirmación abierta ayer no puede ejecutarse hoy) y solo vale para el usuario y la
+organización que la pidieron (que alguien adivine un id no puede disparar un cobro ajeno).
+
+**La confirmación en el chat vale como consentimiento**: se guarda el texto exacto y la hora, y
+eso viaja al servicio de cobro, no un booleano suelto.
+
+**Consecuencia operativa:** la confirmación se guarda en Redis *y* en memoria. Con Redis
+configurado pero caído, el `set` falla en silencio y el dueño pulsaría «Confirmar» sin que
+pasara nada.
+
+## ADR-21 — El hilo de Convi recuerda lo que CONSULTÓ, no solo lo que se dijo
+
+**Contexto.** El historial guardaba `role` + `content`. Lo que Convi miró para decir lo que
+dijo se perdía, así que al retomar una conversación rediagnosticaba desde cero o repetía una
+pregunta que ya había respondido dos mensajes antes.
+
+**Decisión.** Cada turno del asistente guarda un `tool_digest`: qué herramienta se llamó y en
+qué quedó, recortado a 300 caracteres. Vuelve al prompt como `(consulté …)` y entra al
+resumen del hilo, que se pide **estructurado** en CONTEXTO / DECISIONES / PENDIENTES.
+
+**Por qué recortado y no el resultado entero.** Es una **pista** para que el modelo sepa qué ya
+miró, no una fuente de verdad. Guardar el resultado completo llenaría el prompt de ruido y, lo
+peor, invitaría a responder desde la memoria en vez de volver a consultar. La regla que
+acompaña: **la memoria es pista; antes de afirmar algo, se revalida con la herramienta.**
+
+## ADR-22 — Lista CERRADA de escalamiento
+
+**Contexto.** El prompt tenía, en tres lugares distintos, un comodín: «si no puedes resolver,
+escala». Con esa instrucción y sin herramientas para actuar, el modelo escalaba todo. Y
+`escalarAHumano` **no avisaba a nadie**: «He informado tu caso al equipo» era una frase.
+
+**Decisión.** Cinco motivos y nada más: verificación de Meta, restricción de WhatsApp, disputa
+de un cobro, inconsistencia interna nuestra, y que pidan una persona. Fuera de esa lista,
+Convi resuelve. Además hay que **haber ejecutado al menos una herramienta de diagnóstico**
+antes de escalar — salvo que pidan una persona, donde no hay nada que diagnosticar.
+
+**Por qué una lista cerrada y no un criterio.** Un criterio («escala si es complejo») lo
+interpreta el modelo, y lo interpreta distinto cada vez. Una lista se puede probar.
+
+**Y ahora avisa de verdad:** correo por el mismo `sendEmail` del formulario de soporte, con lo
+que Convi ya revisó — eso ahorra la primera media hora de ida y vuelta.
+
+## ADR-23 — Convi actúa con los permisos del usuario que le habla
+
+**Contexto.** A un usuario que no era dueño ni administrador, el prompt le decía «NO configures
+nada. Solo informa y, si hace falta, escala».
+
+**Decisión.** Convi hace **todo lo que el rol de quien le habla permita**, usando las mismas
+funciones de servicio y los mismos `requirePermission` que el panel. Para lo que no alcance,
+no dice «no puedo»: ofrece pedirle la autorización al dueño.
+
+**Por qué las mismas funciones y no una copia.** Una copia se desincroniza: el día que alguien
+agregue una validación al endpoint y no a la copia, Convi se convierte en el camino para
+saltarse esa validación. Llamar al mismo método hace que eso sea imposible por construcción.

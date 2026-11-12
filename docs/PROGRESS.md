@@ -556,3 +556,39 @@ Tres cosas que vale la pena recordar:
   nadie contesta. Por eso `connect` asigna el agente publicado.
 - **La ventana de 24 h de Meta no es un error**: es como funciona. Un flujo que se cae por eso
   es un defecto nuestro, no de Meta.
+
+## Convi deja de escalar y empieza a resolver (tanda E, 2026-11-12)
+
+El disparador fue una captura del 11-nov. Cuenta con la prueba vencida:
+
+> **Dueño:** el asistente no responde
+> **Convi:** He informado tu caso al equipo para que te ayuden con la renovación.
+> **Dueño:** ok
+> **Convi:** Parece que no puedo probar el asistente porque la vigencia del servicio ha vencido.
+
+Las dos respuestas están mal **por razones distintas**, y eso es lo que organizó la tanda.
+
+- **E1 (#648)** — el historial. `mensajes` devolvía los 50 **más antiguos**, así que pasados
+  ~25 turnos uno reabría y veía el principio de la conversación, nunca el final. El widget
+  podía tomar el hilo de **otro usuario** (un dueño es admin y la lista traía toda la
+  organización). Y lo que Convi consultaba no se guardaba: nueva columna `tool_digest`.
+  Además, una carrera entre `cargarHilo` y el evento de apertura **perdía preguntas enteras**.
+- **E2 (#649)** — «no puedo probar» **era un defecto**: `agent-test.ts` comparaba
+  `validUntil` crudo sin `evaluarVigencia`. Y «informé al equipo» era falta de herramientas:
+  `estadoDeCuenta` devolvía `actions: []` y no había forma de cobrar desde el chat. Seis
+  herramientas de cobro que llaman al mismo `BillingController` del panel, y la acción
+  `confirm` (ADR-20).
+- **E3a (#650)** — `explicarCamino` prometía «Lo asigno y queda andando» desde que existe, y
+  Convi no tenía con qué. Ahora asigna, prueba y pausa.
+- **E3b (#651)** — «¿por qué no respondió el bot?» tiene **seis causas** que desde afuera se
+  ven idénticas y se arreglan distinto. Regla pura, con el ORDEN como parte de la regla.
+- **E4 (#652)** — lista cerrada de escalamiento (ADR-22) y aviso real por correo.
+- **E5 (#653)** — arnés con los escenarios, incluidos los dos reales del documento.
+
+Tres cosas que vale la pena recordar:
+- **Un comodín en el prompt se come todas las reglas finas.** «Si no puedes, escala» estaba en
+  tres lugares y bastaba para que el modelo escalara una cuenta vencida.
+- **Una promesa en un texto es una deuda.** `explicarCamino` decía «lo asigno» desde hacía
+  meses sin que existiera la herramienta.
+- **Con Redis configurado pero caído**, la confirmación se guardaba en la nada: el dueño
+  pulsaba «Confirmar» y no pasaba absolutamente nada, sin error visible.
