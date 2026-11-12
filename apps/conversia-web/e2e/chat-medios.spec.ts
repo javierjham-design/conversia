@@ -150,7 +150,24 @@ test("el visor también cierra con el botón y con un clic en el fondo", async (
   await expect(page.getByTestId("visor")).toHaveCount(0);
 
   await page.getByTestId("imagen-miniatura").first().click();
-  await page.getByTestId("visor").click({ position: { x: 5, y: 300 } });
+  await expect(page.getByTestId("visor-imagen")).toBeVisible();
+  // Se toca la franja VACÍA de arriba, que con object-fit:contain es parte del <img> pero
+  // para el dueño es "el fondo". El punto se calcula: en un celular la foto es full-bleed y
+  // un {x,y} fijo cae encima de la imagen en unas pantallas y no en otras.
+  // El punto se CALCULA desde dónde quedó la foto. Un {x,y} fijo es fondo en una pantalla y
+  // cae encima de la imagen en otra: en escritorio sobra a los lados, en un celular arriba y
+  // abajo, y en un iPhone 13 la foto justo pasa por donde uno elegiría a ojo.
+  const punto = await page.getByTestId("visor-imagen").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (r.left > 12) return { x: Math.round(r.left / 2), y: Math.round(h / 2), hueco: Math.round(r.left) };
+    if (w - r.right > 12) return { x: Math.round((r.right + w) / 2), y: Math.round(h / 2), hueco: Math.round(w - r.right) };
+    // Franja de abajo: la de arriba la ocupa la barra con Descargar y ✕.
+    return { x: Math.round(w / 2), y: Math.round((r.bottom + h) / 2), hueco: Math.round(h - r.bottom) };
+  });
+  expect(punto.hueco, "sin fondo visible el test no probaría nada").toBeGreaterThan(12);
+  await page.mouse.click(punto.x, punto.y);
   await expect(page.getByTestId("visor")).toHaveCount(0);
 });
 
@@ -163,10 +180,15 @@ test("la nota de voz muestra su duración ANTES de reproducir, y play cambia a p
   // La duración sale de media.durationSec: no hizo falta bajar el archivo.
   await expect(page.getByTestId("audio-duracion")).toHaveText("0:42");
 
+  // El contrato que importa: el archivo NO se baja al montar, se baja al pulsar play. Afirmar
+  // que el botón queda "sonando" seria fragil — en un navegador sin salida de audio (o con un
+  // archivo de prueba que no es reproducible) `play()` rechaza y el botón vuelve atrás, sin
+  // que nada del producto esté mal.
   const play = page.getByTestId("audio-play");
   await expect(play).toHaveAttribute("data-sonando", "0");
+  expect(await page.locator("audio").count(), "no debe haber bajado nada todavía").toBe(0);
   await play.click();
-  await expect(play).toHaveAttribute("data-sonando", "1", { timeout: 10_000 });
+  await expect(page.locator("audio")).toHaveAttribute("src", /^blob:/, { timeout: 10_000 });
 });
 
 test("la CSP deja reproducir el blob del audio (si no, el botón responde y no suena nada)", async ({ page }) => {

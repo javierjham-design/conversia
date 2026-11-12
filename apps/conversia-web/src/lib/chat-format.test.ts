@@ -22,7 +22,20 @@ import {
 // Fecha fija: una etiqueta que dice «Hoy» es correcta o no SEGÚN EL DÍA en que se mire, y un
 // test con `new Date()` dentro deja de valer mañana — que es exactamente cómo una fecha
 // escrita a mano tumbó main el 10-nov.
-const AHORA = new Date("2026-11-11T15:00:00-03:00");
+//
+// Pero la fecha fija NO alcanza: `etiquetaDeDia` compara días LOCALES (que es lo correcto —
+// para el dueño «hoy» es su hoy), así que un ISO con offset escrito a mano cae en un día
+// distinto según la zona del que corre el test. En Chile «2026-11-10T23:59-03:00» es ayer; en
+// UTC es hoy, y el test se cae SOLO EN CI. Por eso los instantes se construyen RELATIVOS a
+// `AHORA` con aritmética local: así valen en cualquier zona.
+const AHORA = new Date(2026, 10, 11, 15, 0, 0); // 11-nov-2026, 15:00 hora local
+/** Un instante corrido en días y horas respecto de AHORA, siempre en hora local. */
+function cuando(dias: number, horas = 0, minutos = 0): string {
+  const d = new Date(AHORA);
+  d.setDate(d.getDate() + dias);
+  d.setHours(horas, minutos, 0, 0);
+  return d.toISOString();
+}
 
 describe("duración", () => {
   it("formato de minutos y de horas", () => {
@@ -41,13 +54,13 @@ describe("duración", () => {
 
 describe("separadores de día", () => {
   it("hoy, ayer y un día cualquiera", () => {
-    expect(etiquetaDeDia("2026-11-11T09:00:00-03:00", AHORA)).toBe("Hoy");
-    expect(etiquetaDeDia("2026-11-10T23:59:00-03:00", AHORA)).toBe("Ayer");
-    expect(etiquetaDeDia("2026-11-02T10:00:00-03:00", AHORA)).toMatch(/noviembre/);
+    expect(etiquetaDeDia(cuando(0, 9), AHORA)).toBe("Hoy");
+    expect(etiquetaDeDia(cuando(-1, 23, 59), AHORA)).toBe("Ayer");
+    expect(etiquetaDeDia(cuando(-9, 10), AHORA)).toMatch(/noviembre/);
   });
 
   it("un año distinto lo dice, para no confundir noviembre con noviembre", () => {
-    expect(etiquetaDeDia("2025-11-02T10:00:00-03:00", AHORA)).toMatch(/2025/);
+    expect(etiquetaDeDia(cuando(-374, 10), AHORA)).toMatch(/2025/);
   });
 
   it("una fecha ilegible no pinta un separador con basura", () => {
@@ -55,15 +68,15 @@ describe("separadores de día", () => {
   });
 
   it("el PRIMER mensaje del hilo siempre abre día", () => {
-    expect(abreDia("2026-11-11T09:00:00-03:00", null)).toBe(true);
+    expect(abreDia(cuando(0, 9), null)).toBe(true);
   });
 
   it("dos mensajes del mismo día no abren otro separador", () => {
-    expect(abreDia("2026-11-11T09:00:00-03:00", "2026-11-11T08:00:00-03:00")).toBe(false);
+    expect(abreDia(cuando(0, 9), cuando(0, 8))).toBe(false);
   });
 
   it("cruzar la medianoche SÍ abre día (aunque sean 2 minutos de diferencia)", () => {
-    expect(abreDia("2026-11-11T00:01:00-03:00", "2026-11-10T23:59:00-03:00")).toBe(true);
+    expect(abreDia(cuando(0, 0, 1), cuando(-1, 23, 59))).toBe(true);
   });
 });
 
@@ -102,7 +115,7 @@ describe("agrupar mensajes seguidos", () => {
   });
 
   it("cruzar la medianoche corta el bloque aunque sean minutos", () => {
-    expect(siguenJuntos(en("2026-11-11T00:01:00-03:00"), en("2026-11-10T23:59:00-03:00"))).toBe(false);
+    expect(siguenJuntos(en(cuando(0, 0, 1)), en(cuando(-1, 23, 59)))).toBe(false);
   });
 
   it("el primero nunca continúa nada", () => {
