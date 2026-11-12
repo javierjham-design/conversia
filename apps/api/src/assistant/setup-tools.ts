@@ -65,6 +65,16 @@ export interface SetupToolCtx {
    * desde el chat pase por exactamente las mismas validaciones, permisos y auditoría que uno
    * hecho desde la pantalla.
    */
+  /**
+   * E3.a - CANALES. El MISMO controlador que atiende /canales en el panel. Igual que con los
+   * cobros: no una copia, el mismo objeto, para que un cambio hecho desde el chat pase por
+   * los mismos permisos (`channels:write`), las mismas validaciones y la misma auditoria.
+   */
+  canales?: {
+    update(id: string, body: unknown): Promise<any>;
+    test(id: string): Promise<any>;
+    list(): Promise<any>;
+  };
   cobros?: {
     walletSummary(): Promise<any>;
     checkout(body: unknown): Promise<any>;
@@ -131,6 +141,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
+        name: "verPromptDelAsistente",
+        description:
+          "Muestra las instrucciones con las que responde el asistente publicado: su tono, que sabe y que no. Usalo cuando pregunten que tiene configurado, por que contesta de cierta forma, o antes de cambiarle algo.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
         name: "listarPlantillasAsistente",
         description: "Lista las plantillas de asistente disponibles para el rubro del negocio, con su nombre y para qué sirven. Úsalo antes de crear un asistente.",
         inputJsonSchema: { type: "object", properties: {} },
@@ -178,6 +194,35 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
       },
     ],
     write: [
+      {
+        name: "asignarAsistenteACanal",
+        description:
+          "Deja un asistente atendiendo un canal. Usalo cuando el canal este conectado pero sin asistente: los mensajes llegan y no contesta nadie. Si hay un solo canal no hace falta indicarlo.",
+        inputJsonSchema: {
+          type: "object",
+          properties: {
+            asistenteId: { type: "string", description: "Id del asistente que va a atender" },
+            canalId: { type: "string", description: "Id del canal. Si se omite, el unico que haya." },
+          },
+          required: ["asistenteId"],
+        },
+      },
+      {
+        name: "probarCanal",
+        description:
+          "Le pregunta a Meta si el canal responde: acceso al numero o a la pagina, suscripcion a los avisos y calidad. Usalo cuando digan que el bot no contesta, antes de culpar al asistente.",
+        inputJsonSchema: { type: "object", properties: { canalId: { type: "string" } } },
+      },
+      {
+        name: "pausarOReanudarBot",
+        description:
+          "Pausa o reanuda al asistente en un canal. Pausado, los mensajes siguen llegando a la Bandeja pero contesta una persona. Usalo cuando pidan atender a mano un rato.",
+        inputJsonSchema: {
+          type: "object",
+          properties: { canalId: { type: "string" }, pausar: { type: "boolean", description: "true pausa, false reanuda" } },
+          required: ["pausar"],
+        },
+      },
       {
         name: "generarEnlaceDePago",
         description:
@@ -541,6 +586,98 @@ export async function runSetupTool(
    * llega antes de mirar cualquier límite. Convi miraba solo los canales y por eso contestaba
    * genérico. La vigencia se evalúa con la MISMA regla del api y del worker.
    */
+  // --------------------- E3.a - CANALES ---------------------
+  //
+  // `explicarCamino("asignar_agente")` le PROMETIA al dueno "lo asigno y queda andando"
+  // desde que existe, y Convi no tenia como cumplirlo: habia que mandarlo a la pantalla.
+  // Eso es lo peor de los dos mundos — prometer y no poder.
+
+  if (name === "asignarAsistenteACanal") {
+    if (!ctx.canales) return { content: "No puedo tocar los canales desde aca ahora mismo.", isError: true };
+    const p = z.object({ asistenteId: z.string().trim().min(1), canalId: z.string().trim().optional() }).safeParse(input ?? {});
+    if (!p.success) return { content: "Necesito saber que asistente asignar.", isError: true };
+
+    const canalId = p.data.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) {
+      return { content: "No encontre un canal al que asignarlo. Si tienes varios, dime cual.", isError: true };
+    }
+    try {
+      await ctx.canales.update(canalId, { defaultAgentId: p.data.asistenteId });
+      return {
+        content: JSON.stringify({ asignado: true, canalId }),
+        didWrite: true,
+        actions: [{ type: "checklist_refresh" }],
+      };
+    } catch (e) {
+      return { content: `No pude asignarlo: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "probarCanal") {
+    if (!ctx.canales) return { content: "No puedo probar el canal desde aca ahora mismo.", isError: true };
+    const canalId = (input as { canalId?: string } | null)?.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) return { content: "No encontre un canal que probar.", isError: true };
+    try {
+      const r = await ctx.canales.test(canalId);
+      return { content: JSON.stringify(r ?? {}) };
+    } catch (e) {
+      // Un fallo de la prueba ES informacion: dice que el canal no responde y por que.
+      return { content: JSON.stringify({ ok: false, detalle: (e as Error).message?.slice(0, 200) }) };
+    }
+  }
+
+  if (name === "pausarOReanudarBot") {
+    if (!ctx.canales) return { content: "No puedo tocar los canales desde aca ahora mismo.", isError: true };
+    const p = z.object({ pausar: z.boolean(), canalId: z.string().trim().optional() }).safeParse(input ?? {});
+    if (!p.success) return { content: "Dime si lo pauso o lo reanudo.", isError: true };
+    const canalId = p.data.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) return { content: "No encontre el canal.", isError: true };
+    try {
+      // Pausar = dejar el canal SIN asistente por defecto. Es el mismo interruptor que usa
+      // la pantalla: los mensajes siguen llegando a la Bandeja y contesta una persona.
+      await ctx.canales.update(canalId, { defaultAgentId: p.data.pausar ? null : undefined });
+      return {
+        content: p.data.pausar
+          ? "Listo: el asistente queda pausado en ese canal. Los mensajes siguen llegando a la Bandeja."
+          : "Listo: el asistente vuelve a atender ese canal.",
+        didWrite: true,
+      };
+    } catch (e) {
+      return { content: `No pude cambiarlo: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "verPromptDelAsistente") {
+    // El prompt NO vive en `agent`: vive en la VERSION publicada (`agent.currentVersionId`).
+    // Pedirlo en el agente es el error facil, y es el que distingue "lo que el asistente dice
+    // hoy" de "lo que alguien dejo a medias en un borrador".
+    const datos = await prisma.withTenant(ctx.organizationId, async (tx) => {
+      const agente = await tx.agent.findFirst({
+        where: { deletedAt: null, active: true },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, name: true, currentVersionId: true, updatedAt: true },
+      });
+      if (!agente?.currentVersionId) return agente ? { agente, version: null } : null;
+      const version = await tx.agentVersion.findUnique({
+        where: { id: agente.currentVersionId },
+        select: { version: true, systemPrompt: true },
+      });
+      return { agente, version };
+    });
+    if (!datos) return { content: "Todavia no hay un asistente publicado." };
+    if (!datos.version) return { content: `El asistente "${datos.agente.name}" existe pero no tiene una version publicada todavia.` };
+    return {
+      content: JSON.stringify({
+        nombre: datos.agente.name,
+        version: datos.version.version,
+        // Recortado: el prompt completo puede ser larguisimo y lo que hace falta es que el
+        // modelo pueda HABLAR de el, no reproducirlo entero.
+        instrucciones: (datos.version.systemPrompt ?? "").slice(0, 1500),
+        actualizado: datos.agente.updatedAt,
+      }),
+    };
+  }
+
   // --------------------- E2.c - CUENTA, PAGOS Y CREDITOS ---------------------
   //
   // Todas pasan por `ctx.cobros`, que es el MISMO objeto que atiende /cobros: mismos
@@ -1260,4 +1397,13 @@ export function resumirCreditos(
     recargaAutomatica: auto?.enabled === true,
     topeMensualClp: typeof auto?.monthlyCapClp === "number" ? auto.monthlyCapClp : null,
   };
+}
+
+/** El unico canal de la org, si hay exactamente uno. Con varios, Convi pregunta cual. */
+async function unicoCanal(ctx: SetupToolCtx): Promise<string | null> {
+  if (!ctx.canales) return null;
+  const lista = await ctx.canales.list().catch(() => null);
+  const canales = Array.isArray(lista) ? lista : [];
+  const vivos = canales.filter((c: { status?: string }) => c?.status !== "inactive");
+  return vivos.length === 1 ? String((vivos[0] as { id: string }).id) : null;
 }

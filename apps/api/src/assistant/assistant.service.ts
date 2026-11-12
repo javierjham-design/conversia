@@ -5,6 +5,7 @@ import { ResilientAIProvider, computeCostUsd, createAIProvider, estimarAlcance, 
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
 import { BillingController } from "../billing/billing.controller";
+import { ChannelsController } from "../channels/channels.controller";
 import { runQaBattery } from "../agents/agent-qa";
 import { getSetupChecklist } from "../onboarding/setup-checklist";
 import { sanitizeActions } from "./actions";
@@ -65,6 +66,8 @@ export class AssistantService {
      * puedan construir el servicio sin levantar el modulo de facturacion entero.
      */
     @Optional() private cobros?: BillingController,
+    /** E3.a - el MISMO controlador de canales que usa el panel. */
+    @Optional() private canales?: ChannelsController,
   ) {}
 
   /**
@@ -323,7 +326,7 @@ export class AssistantService {
       if (isSetupWriteTool(name) && !isWebOwner(ctx.role)) {
         return { content: "Esta acción solo la puede hacer el dueño o un administrador.", isError: true };
       }
-      const out = await runSetupTool(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId, route, estado: this.estadoDeCanales, cobros: this.cobros }, name, input);
+      const out = await runSetupTool(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId, route, estado: this.estadoDeCanales, cobros: this.cobros, canales: this.canales }, name, input);
       if (out) return out;
     }
     // ---- Escrituras (solo owner; el caller ya filtró specs, revalidamos por defensa) ----
@@ -385,6 +388,12 @@ REGLAS:
 - CONEXIÓN DE WHATSAPP: hay dos caminos en "Canales". (1) RECOMENDADO — "Conecta el WhatsApp que ya usas" (coexistencia): el dueño escanea/ingresa un código desde su app WhatsApp Business, mantiene su teléfono y sus chats, y NO necesita página web ni cuenta de Facebook; el asistente atiende en paralelo y lo que el dueño responda a mano también aparece en la Bandeja. (2) "Número nuevo dedicado" para quien no quiere tocar su número. Si el dueño dice que ya atiende por WhatsApp y quiere seguir con ese número, guíalo al camino (1). Toma ~3 minutos. Si al armar un número NUEVO Meta pide "verificación del negocio", explícalo simple (es un trámite único de Meta para confirmar que el negocio existe; no es culpa suya) y ofrécele que una persona del equipo lo acompañe HOY a dejarlo listo — usa escalarAHumano. Recuérdale que el camino (1), conectar el número que ya usa, normalmente NO necesita esa verificación.
 - ACOMPAÑA, no dictes indicaciones: cuando propongas un paso o te pregunten dónde está algo, llama acompanarPaso con la clave del paso (negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio). Eso lo lleva a la pantalla y le resalta qué tocar, que es mucho mejor que explicarle la ruta.
 - Antes de hablar de WhatsApp, llama diagnosticarWhatsapp: puede estar conectado pero sin asistente asignado, y entonces el número recibe y nadie contesta.
+CANALES Y ASISTENTE (tambien lo haces TU):
+- Si un canal esta conectado pero SIN asistente, no expliques como asignarlo: ASIGNALO con asignarAsistenteACanal. Eso es lo que vienes prometiendo con "lo asigno y queda andando".
+- Si dicen que el bot no contesta, prueba el canal con probarCanal antes de culpar al asistente: casi siempre es el canal o la cuenta, no las instrucciones.
+- Si piden atender a mano un rato, usa pausarOReanudarBot. Explicales que los mensajes SIGUEN llegando a la Bandeja.
+- Si preguntan que tiene configurado el asistente o por que responde de cierta forma, mira verPromptDelAsistente antes de contestar. Nunca describas de memoria lo que dice su prompt.
+- CONECTAR WhatsApp, Instagram o Messenger sigue siendo un boton del dueno: tu lo acompanas, no lo haces por el.
 CUENTA Y PAGOS (esto lo resuelves TU, no se escala):
 - Ante vigencia vencida, prueba terminada, saldo en cero, suscripcion cancelada o cobro rechazado: DILO SIN RODEOS y con el dato concreto (desde cuando, cuanto cuesta, que pasa mientras tanto). Nada de "tuve un problema" ni "hay un inconveniente".
 - Despues OFRECE LA ACCION EXACTA, no una pantalla: llama generarEnlaceDePago y entrega el boton "Pagar ahora" con el monto real. Para saldo bajo, estadoDeCreditos primero y luego el pack. Para una suscripcion cancelada, reactivarSuscripcion. Para que no vuelva a quedarse sin creditos, ofrece activarRecargaAutomatica.
@@ -548,6 +557,7 @@ ${resumenDelHilo.trim()}`
     // a la primera vez que alguien reescriba el mensaje.
 /** E1.f — qué tools se consultaron en ESTE turno, para la memoria del hilo. */
     const consultado: string[] = [];
+    let cortarPorFallos = false;
     let degradado = false;
     let wrote = false;
     let publicoAgente = false;
@@ -561,8 +571,20 @@ ${resumenDelHilo.trim()}`
       // COP 1 — 8 rondas (antes 4): armar el asistente son varias herramientas seguidas
       // (ver el estado → listar plantillas → crearlo → probarlo → publicarlo) y con 4 el
       // copiloto se quedaba a mitad de camino sin decir por qué.
-      for (let round = 0; round < 8; round++) {
-        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route, resumenDelHilo), messages, tools: specs, maxTokens: 1200, toolTranscript });
+      /**
+       * E3.h - 12 rondas en vez de 8 y 1600 tokens en vez de 1200.
+       *
+       * Con las facultades completas, una tarea de verdad encadena varias herramientas:
+       * mirar la cuenta, mirar el canal, asignar el asistente, probar. Con 8 rondas se
+       * quedaba a mitad de camino y contestaba algo incompleto, que para el dueno se parece
+       * mucho a "no pudo".
+       *
+       * El corte por COSTO va aparte: si una misma herramienta falla dos veces con el mismo
+       * error, insistir solo gasta. Se para, se lo dice, y queda para escalar (E4).
+       */
+      const fallos = new Map<string, number>();
+      for (let round = 0; round < 12; round++) {
+        const resp = await ai.chat({ model, system: this.systemPrompt(context, owner, route, resumenDelHilo), messages, tools: specs, maxTokens: 1600, toolTranscript });
         inputTokens += resp.usage?.inputTokens ?? 0;
         outputTokens += resp.usage?.outputTokens ?? 0;
         if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
@@ -578,10 +600,21 @@ ${resumenDelHilo.trim()}`
           // miró. Las tools de ESCRITURA también entran: saber que ya creó el servicio evita
           // que lo vuelva a crear.
           consultado.push(`${call.name} → ${resumirResultado(out.content, out.isError)}`);
+          if (out.isError) {
+            const clave = `${call.name}:${(out.content ?? "").slice(0, 60)}`;
+            const veces = (fallos.get(clave) ?? 0) + 1;
+            fallos.set(clave, veces);
+            cortarPorFallos = veces >= 2;
+          }
         }
         if (resp.text?.trim()) reply = resp.text;
         toolTranscript.push({ kind: "assistant_tool_calls", text: resp.text ?? undefined, calls: resp.toolCalls });
         toolTranscript.push({ kind: "tool_results", results });
+        if (cortarPorFallos) {
+          // Mismo error dos veces: no es un tropiezo, es que no va a salir por ese camino.
+          reply = resp.text?.trim() || reply;
+          break;
+        }
       }
     } catch (e) {
       // El PROVEEDOR y el MODELO van en el log a propósito: con "proveedor de IA no disponible"
