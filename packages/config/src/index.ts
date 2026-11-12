@@ -120,6 +120,8 @@ const envSchema = z.object({
   MAIL_REPLY_TO: z.string().optional().default(""),
   // Destinatario de los avisos de soporte in-app (vacío = sin correo, solo panel).
   SUPPORT_NOTIFY_EMAIL: z.string().optional().default(""),
+  // E4 - numero de soporte para avisar un escalamiento tambien por WhatsApp. Opcional.
+  SUPPORT_NOTIFY_WHATSAPP: z.string().optional().default(""),
   // Fusible de mensajería: URL de alerta inmediata (BetterStack incoming webhook,
   // Slack, etc.) que se llama al cortar el fusible. Vacío = solo /health/fuse + log.
   OPS_ALERT_WEBHOOK_URL: z.string().optional().default(""),
