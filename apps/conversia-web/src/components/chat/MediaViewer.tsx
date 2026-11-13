@@ -218,8 +218,12 @@ export function MediaViewer({
         }}
       />
 
+      {/* Pie de foto. `pointerEvents: none` a propósito: es TEXTO, no un control, y ocupa toda
+          la franja de abajo. En el celular la foto va de borde a borde, así que esa franja es
+          casi el único "fondo" que queda para cerrar tocando fuera — con el pie capturándolo,
+          el toque moría en un div decorativo y el visor se quedaba abierto. */}
       {foto.caption ? (
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "14px 18px", color: "#fff", fontSize: 13, textAlign: "center", background: "linear-gradient(transparent, rgba(0,0,0,.6))" }}>
+        <div data-testid="visor-pie" style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "14px 18px", color: "#fff", fontSize: 13, textAlign: "center", background: "linear-gradient(transparent, rgba(0,0,0,.6))", pointerEvents: "none" }}>
           {foto.caption}
         </div>
       ) : null}
