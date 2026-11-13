@@ -15,6 +15,7 @@
     "@conversia/database": "workspace:*",
     "@conversia/notifications": "workspace:*",
     "@conversia/scheduling": "workspace:*",
+    "@conversia/storage": "workspace:*",
     "@conversia/types": "workspace:*",
     "@conversia/workflows": "workspace:*",
     "bullmq": "^5.34.0",

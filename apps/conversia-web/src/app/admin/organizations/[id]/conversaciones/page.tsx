@@ -1,9 +1,11 @@
 "use client";
 import { use, useCallback, useEffect, useState } from "react";
 import { padmin } from "@/lib/platform-api";
+import { MessageList } from "@/components/chat/MessageList";
+import type { MessageMedia } from "@/lib/message-media";
 
 type Conv = { id: string; status: string; aiEnabled: boolean; unreadCount: number; lastMessagePreview: string | null; lastMessageAt: string | null; contact: { name: string; phone: string | null } };
-type Msg = { id: string; direction: string; type: string; visibility: string; body: string | null; authorType: string; status: string; createdAt: string };
+type Msg = { id: string; direction: "INBOUND" | "OUTBOUND"; type: string; visibility: "PUBLIC" | "INTERNAL"; body: string | null; authorType: "USER" | "AGENT" | "SYSTEM"; authorName: string | null; status: string; createdAt: string; payload?: unknown; media?: MessageMedia | null };
 type Thread = { conversation: { id: string; status: string; aiEnabled: boolean; contact: { name: string; phone: string | null } }; messages: Msg[] };
 
 const STATUSES = [
@@ -81,18 +83,9 @@ export default function ConsoleConversations({ params }: { params: Promise<{ id:
               <b style={{ fontSize: 15 }}>{thread.conversation.contact.name}</b>
               <span className="text-dim" style={{ fontSize: 12 }}> · {thread.conversation.contact.phone ?? ""} · {thread.conversation.aiEnabled ? "IA activa" : "manual"}</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-                {thread.messages.filter((m) => m.visibility !== "INTERNAL" || m.type === "NOTE").map((m) => {
-                  const out = m.direction === "OUTBOUND";
-                  const note = m.visibility === "INTERNAL";
-                  return (
-                    <div key={m.id} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "76%" }}>
-                      <div style={{ padding: "9px 13px", borderRadius: 16, fontSize: 14, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word", background: note ? "var(--warn)" : out ? "var(--acc)" : "var(--surface-solid)", color: note ? "#2a1c02" : out ? "var(--acc-ink)" : "var(--ink)", border: out || note ? "none" : "1px solid var(--hairline)" }}>
-                        {m.body ?? (m.type !== "TEXT" ? `[${m.type.toLowerCase()}]` : "")}
-                      </div>
-                      <div className="text-dim" style={{ fontSize: 10, marginTop: 2, textAlign: out ? "right" : "left" }}>{m.authorType === "AGENT" ? "🤖 " : ""}{note ? "Nota · " : ""}{hhmm(m.createdAt)}</div>
-                    </div>
-                  );
-                })}
+                {/* D3.e — las MISMAS burbujas que ve el cliente, en solo lectura: si acá se
+                    viera distinto, el super admin no estaría mirando lo que mira el dueño. */}
+                <MessageList mensajes={thread.messages} soloLectura />
               </div>
             </>
           )}
