@@ -6,6 +6,8 @@ import { OperationBar, Avatar, type OpState, type OpStage } from "@/components/O
 import { FichaPanel } from "@/components/FichaPanel";
 import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
+import type { MessageMedia } from "@/lib/message-media";
+import { MessageList } from "@/components/chat/MessageList";
 
 type Contact = { id: string; firstName: string | null; lastName: string | null; profileName: string | null; phone: string | null; avatarUrl: string | null };
 type ConvItem = {
@@ -37,6 +39,9 @@ type Msg = {
   authorName: string | null;
   status: string;
   createdAt: string;
+  /** D3.f — el crudo del webhook (TuBot lo usa) y el medio ya derivado por la API (D2). */
+  payload?: unknown;
+  media?: MessageMedia | null;
 };
 type Thread = { conversation: { id: string; status: "OPEN" | "PENDING" | "CLOSED"; aiEnabled: boolean; contact: Contact }; messages: Msg[] };
 
@@ -500,46 +505,13 @@ export default function Conversaciones() {
                   {!thread ? (
                     <p className="text-dim" style={{ fontSize: 14 }}>Cargando mensajes…</p>
                   ) : (
-                    thread.messages
-                      .filter((m) => m.visibility !== "INTERNAL" || m.type === "NOTE")
-                      .map((m) => {
-                        const out = m.direction === "OUTBOUND";
-                        const note = m.visibility === "INTERNAL";
-                        // V2-5 copiloto: respuesta SUGERIDA por el bot, pendiente de aprobación.
-                        const suggested = m.status === "SUGGESTED";
-                        return (
-                          <div key={m.id} style={{ alignSelf: out ? "flex-end" : "flex-start", maxWidth: "80%" }}>
-                            <div
-                              style={{
-                                padding: "9px 13px",
-                                borderRadius: 16,
-                                fontSize: 14,
-                                lineHeight: 1.4,
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                                background: suggested ? "color-mix(in srgb, var(--acc) 12%, var(--surface-solid))" : note ? "color-mix(in srgb, var(--warn) 16%, var(--surface-solid))" : out ? "var(--acc)" : "var(--surface-solid)",
-                                color: suggested ? "var(--ink)" : note ? "var(--ink)" : out ? "var(--acc-ink)" : "var(--ink)",
-                                border: suggested ? "1px dashed var(--acc)" : out || note ? "none" : "1px solid var(--hairline)",
-                              }}
-                            >
-                              {m.body ?? (m.type !== "TEXT" ? (({ IMAGE: "[imagen]", DOCUMENT: "[documento]", AUDIO: "[audio de voz]", VIDEO: "[video]" } as Record<string, string>)[m.type] ?? "[adjunto]") : "")}
-                            </div>
-                            {suggested ? (
-                              <div style={{ display: "flex", gap: 6, marginTop: 4, justifyContent: "flex-end" }}>
-                                <button onClick={() => approveSuggestion(m.id)} className="btn-accent" style={{ fontSize: 12, padding: "4px 12px" }}>Aprobar y enviar</button>
-                                <button onClick={() => { const t = prompt("Editar la respuesta antes de enviar:", m.body ?? ""); if (t && t.trim()) approveSuggestion(m.id, t.trim()); }} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "transparent", color: "var(--ink)", cursor: "pointer" }}>Editar</button>
-                                <button onClick={() => discardSuggestion(m.id)} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", cursor: "pointer" }}>Descartar</button>
-                              </div>
-                            ) : null}
-                            <div className="text-dim" style={{ fontSize: 10, marginTop: 2, textAlign: out ? "right" : "left" }}>
-                              {suggested ? "Sugerencia del asistente · " : m.authorType === "AGENT" ? "IA · " : ""}
-                              {note ? "Nota · " : ""}
-                              {shortTime(m.createdAt)}
-                              {out && m.status === "FAILED" ? " · no se envió" : ""}
-                            </div>
-                          </div>
-                        );
-                      })
+                    <MessageList
+                      mensajes={thread.messages}
+                      acciones={{
+                        aprobar: (id, texto) => approveSuggestion(id, texto),
+                        descartar: (id) => discardSuggestion(id),
+                      }}
+                    />
                   )}
                   <div ref={bottomRef} />
                 </div>

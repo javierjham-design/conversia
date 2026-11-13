@@ -47,6 +47,7 @@ import { startRechargeReconcile } from "./recharge-reconcile-start";
 import { startTrialLifecycle } from "./trial-lifecycle";
 import { startV2TrialLifecycle } from "./v2-trial-lifecycle";
 import { startAnnualWalletRefill } from "./annual-wallet-refill";
+import { startMediaRetention } from "./media-retention";
 import { startRetentionPurge } from "./retention-purge";
 import { startCatalogSync } from "./catalog/scheduler";
 import { startOrphanWabaCheck } from "./orphan-waba-check";
@@ -274,6 +275,7 @@ async function main() {
   const stopTrialLifecycle = startTrialLifecycle(); // prueba 7+7: avisos + deshabilitar (solo lectura)
   const stopV2TrialLifecycle = startV2TrialLifecycle(); // V2: 30 gratis → copiloto 7d → pausa (sin purga)
   const stopAnnualRefill = startAnnualWalletRefill(); // anual: acredita el cupo mes a mes (no 12 de una)
+  const stopMediaRetention = startMediaRetention(); // D4: borra del bucket los medios vencidos
   const stopRetentionPurge = startRetentionPurge(); // purga por política de retención
   const stopCatalogSync = startCatalogSync(); // sync incremental del catálogo cada 6 h
   const stopOrphanWaba = startOrphanWabaCheck(); // alerta WABA huérfana tras baja de tenant
@@ -326,6 +328,7 @@ async function main() {
     stopTrialLifecycle();
     stopV2TrialLifecycle();
     stopAnnualRefill();
+    stopMediaRetention();
     stopRetentionPurge();
     stopCatalogSync();
     stopOrphanWaba();

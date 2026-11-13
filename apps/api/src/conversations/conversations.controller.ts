@@ -16,6 +16,9 @@ import { spawn } from "node:child_process";
 import type { TenantTx } from "@conversia/database";
 import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
+import { CACHE_DE_MEDIA, LIMITES_BYTES, descargarMediaDeMeta } from "./media-proxy";
+import { derivarMedia } from "./message-media";
+import { guardarMedio, leerGuardado, type KindDeMedio } from "./media-store";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { RealtimeService } from "../common/realtime.service";
@@ -40,6 +43,34 @@ function transcodeToMp3(input: Buffer): Promise<Buffer | null> {
       ff.on("error", () => { clearTimeout(timer); finish(null); }); // ffmpeg no instalado
       ff.on("close", (code) => { clearTimeout(timer); finish(code === 0 && chunks.length ? Buffer.concat(chunks) : null); });
       ff.stdin.on("error", () => { /* EPIPE si ffmpeg cierra antes */ });
+      ff.stdin.write(input);
+      ff.stdin.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Duración de un audio en segundos, con ffprobe. Devuelve null si ffprobe no está o falla:
+ * la duración es un lujo para pintar «0:42» antes de reproducir, nunca un requisito.
+ */
+function duracionEnSegundos(input: Buffer): Promise<number | null> {
+  return new Promise((resolve) => {
+    try {
+      const ff = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", "-i", "pipe:0"]);
+      let out = "";
+      let done = false;
+      const finish = (v: number | null) => { if (!done) { done = true; resolve(v); } };
+      const timer = setTimeout(() => { try { ff.kill("SIGKILL"); } catch { /* noop */ } finish(null); }, 8_000);
+      ff.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+      ff.on("error", () => { clearTimeout(timer); finish(null); });
+      ff.on("close", () => {
+        clearTimeout(timer);
+        const n = Number(out.trim());
+        finish(Number.isFinite(n) && n > 0 ? Math.round(n) : null);
+      });
+      ff.stdin.on("error", () => { /* EPIPE si ffprobe cierra antes */ });
       ff.stdin.write(input);
       ff.stdin.end();
     } catch {
@@ -717,9 +748,42 @@ export class ConversationsController {
       const contactAttrs = (conversation.contact.attributes as Record<string, unknown> | null) ?? {};
       return {
         conversation: { ...conversation, contact: { ...conversation.contact, avatarUrl: contactAttrs.avatarUrl ?? null } },
-        messages: messages.map((m) => ({ ...m, authorName: m.authorUserId ? (authors.get(m.authorUserId) ?? null) : null })),
+        // D2.c — `media` DERIVADO: el payload crudo se sigue devolviendo (TuBot lo usa),
+        // pero cada panel ya no tiene que saber que una imagen entrante vive en
+        // `payload.image.id` y una saliente en `payload.mediaId`.
+        messages: messages.map((m) => ({
+          ...m,
+          authorName: m.authorUserId ? (authors.get(m.authorUserId) ?? null) : null,
+          media: derivarMedia(id, m),
+        })),
       };
     });
+  }
+
+  /**
+   * D4 — SERVIR UN MEDIO: del bucket si ya está, y si no, de Meta guardando al pasar.
+   *
+   * El guardado es "al primer uso" por decisión del dueño: en una cuenta con tráfico la
+   * mayoría de las fotos no las abre nadie, y pagar almacenamiento por ellas es tirar plata.
+   * Sin bucket configurado, esto es exactamente lo de siempre: bajar de Meta cada vez.
+   */
+  private async servirMedio(
+    organizationId: string,
+    conversationId: string,
+    messageId: string,
+    kind: KindDeMedio,
+    bajarDeMeta: () => Promise<{ buffer: Buffer; mime: string }>,
+    nombre?: string | null,
+  ): Promise<{ buffer: Buffer; mime: string }> {
+    const guardado = await this.prisma
+      .withTenant(organizationId, (tx) => leerGuardado(tx, messageId, kind))
+      .catch(() => null);
+    if (guardado) return { buffer: guardado.body, mime: guardado.mime };
+    const bajado = await bajarDeMeta();
+    await this.prisma
+      .withTenant(organizationId, (tx) => guardarMedio(tx, organizationId, messageId, kind, bajado.buffer, bajado.mime, nombre))
+      .catch(() => undefined);
+    return bajado;
   }
 
   /**
@@ -747,36 +811,42 @@ export class ConversationsController {
       const message = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
       if (!message) return null;
       const payload = (message.payload ?? {}) as any;
-      const mediaId = payload?.audio?.id ?? payload?.voice?.id;
+      const mediaId = payload?.audio?.id ?? payload?.voice?.id ?? payload?.mediaId;
       if (!mediaId) return null;
       const token = await this.resolveConversationMediaToken(tx, id);
-      return { mediaId: String(mediaId), token };
+      const d = Number(payload?.audio?.duration ?? payload?.voice?.duration ?? 0);
+      return { mediaId: String(mediaId), token, durationSec: Number.isFinite(d) && d > 0 ? Math.round(d) : null };
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene audio");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
-      headers: { authorization: `Bearer ${found.token}` },
-    });
-    const meta: any = await metaRes.json().catch(() => ({}));
-    if (!meta?.url) throw new NotFoundException("Audio no disponible (puede haber expirado en Meta)");
-    const audioRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
-    if (!audioRes.ok) throw new NotFoundException("No se pudo obtener el audio");
-    const buf = Buffer.from(await audioRes.arrayBuffer());
-    // WhatsApp entrega OGG/Opus, que iOS Safari NO reproduce. Transcodificamos a MP3
-    // (reproducible en todos los navegadores). Si ffmpeg falla, servimos el OGG original.
-    const mime = String(meta.mime_type ?? "audio/ogg");
-    if (/ogg|opus/i.test(mime)) {
-      const mp3 = await transcodeToMp3(buf);
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "audio", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.audio }),
+    );
+
+    // D2.b — WhatsApp entrega OGG/Opus, que iOS Safari NO reproduce. Transcodificamos a MP3.
+    // Si YA viene en un formato que todos reproducen, no se toca: transcodificar un MP3 a MP3
+    // gasta CPU y pierde calidad para nada.
+    const yaSirve = /mpeg|mp3|mp4|m4a|aac/i.test(mime);
+    let salida = buffer;
+    let tipo = mime;
+    if (!yaSirve) {
+      const mp3 = await transcodeToMp3(buffer);
       if (mp3) {
-        res.setHeader("content-type", "audio/mpeg");
-        res.setHeader("cache-control", "private, max-age=3600");
-        res.send(mp3);
-        return;
+        salida = mp3;
+        tipo = "audio/mpeg";
       }
     }
-    res.setHeader("content-type", mime);
-    res.setHeader("cache-control", "private, max-age=3600");
-    res.send(buf);
+
+    // `content-length` de verdad: sin él el navegador no sabe cuánto dura el audio hasta
+    // terminar de bajarlo, y de ahí venía el parche `fixStreamedDuration` del panel de TuBot.
+    res.setHeader("content-type", tipo);
+    res.setHeader("content-length", String(salida.byteLength));
+    res.setHeader("cache-control", CACHE_DE_MEDIA);
+    // Duración para pintarla ANTES de reproducir. La del payload de Meta es gratis; si no
+    // viene, se la preguntamos a ffprobe. Si tampoco está, la UI se arregla sin ella.
+    const dur = found.durationSec ?? (await duracionEnSegundos(salida));
+    if (dur) res.setHeader("x-media-duration", String(dur));
+    res.send(salida);
   }
 
   /**
@@ -796,23 +866,56 @@ export class ConversationsController {
       // Entrante: payload.image.id / sticker.id. Saliente (lo que subimos): payload.mediaId.
       const mediaId = payload?.image?.id ?? payload?.sticker?.id ?? payload?.mediaId;
       if (!mediaId) return null;
+      // Un sticker se sirve por acá, pero se GUARDA como sticker: así el barrido y los
+      // reportes distinguen una foto del paciente de una calcomanía.
+      const kind: "image" | "sticker" = payload?.sticker?.id ? "sticker" : "image";
       // Token del canal de la conversación (WABA propia) → fallback plataforma.
       const token = await this.resolveConversationMediaToken(tx, id);
-      return { mediaId: String(mediaId), token };
+      return { mediaId: String(mediaId), token, kind };
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene imagen");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
-      headers: { authorization: `Bearer ${found.token}` },
+    // D4 — si ya lo guardamos, se sirve desde el bucket y Meta ni se entera.
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, found.kind, () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.image }),
+    );
+    res.setHeader("content-type", mime);
+    res.setHeader("content-length", String(buffer.byteLength));
+    res.setHeader("cache-control", CACHE_DE_MEDIA);
+    res.send(buffer);
+  }
+
+  /**
+   * D2.a — VIDEO. No existía: un video entrante se veía como «[video]» y no había forma de
+   * reproducirlo desde ningún panel. Mismo camino que la imagen, con el techo de 16 MB que
+   * aplica WhatsApp al recibirlo.
+   *
+   * `accept-ranges: none` a propósito: servimos el archivo completo desde memoria, así que no
+   * podemos responder peticiones por rango. Anunciar que sí las aceptamos haría que el
+   * navegador pidiera trozos y se quedara esperando.
+   */
+  @Get(":id/messages/:messageId/video")
+  async messageVideo(@Param("id") id: string, @Param("messageId") messageId: string, @Res() res: Response) {
+    const ctx = requireContext();
+    const found = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const message = await tx.message.findFirst({ where: { id: messageId, conversationId: id } });
+      if (!message) return null;
+      const payload = (message.payload ?? {}) as any;
+      const mediaId = payload?.video?.id ?? payload?.mediaId;
+      if (!mediaId) return null;
+      const token = await this.resolveConversationMediaToken(tx, id);
+      return { mediaId: String(mediaId), token };
     });
-    const meta: any = await metaRes.json().catch(() => ({}));
-    if (!meta?.url) throw new NotFoundException("Imagen no disponible (puede haber expirado en Meta)");
-    const imgRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
-    if (!imgRes.ok) throw new NotFoundException("No se pudo obtener la imagen");
-    const buf = Buffer.from(await imgRes.arrayBuffer());
-    res.setHeader("content-type", meta.mime_type ?? "image/jpeg");
-    res.setHeader("cache-control", "private, max-age=3600");
-    res.send(buf);
+    if (!found) throw new NotFoundException("Este mensaje no tiene video");
+    if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "video", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.video }),
+    );
+    res.setHeader("content-type", mime);
+    res.setHeader("content-length", String(buffer.byteLength));
+    res.setHeader("accept-ranges", "none");
+    res.setHeader("cache-control", CACHE_DE_MEDIA);
+    res.send(buffer);
   }
 
   /**
@@ -837,20 +940,16 @@ export class ConversationsController {
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene documento");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const metaRes = await fetch(withAppSecretProof(`https://graph.facebook.com/${env.META_GRAPH_VERSION}/${encodeURIComponent(found.mediaId)}`, found.token), {
-      headers: { authorization: `Bearer ${found.token}` },
-    });
-    const meta: any = await metaRes.json().catch(() => ({}));
-    if (!meta?.url) throw new NotFoundException("Documento no disponible (puede haber expirado en Meta)");
-    const docRes = await fetch(meta.url, { headers: { authorization: `Bearer ${found.token}` } });
-    if (!docRes.ok) throw new NotFoundException("No se pudo obtener el documento");
-    const buf = Buffer.from(await docRes.arrayBuffer());
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "document", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.document }), found.filename,
+    );
     // Nombre saneado para la cabecera (sin comillas ni saltos que rompan el header).
     const safeName = found.filename.replace(/[^\w.\-() ]+/g, "_").slice(0, 120) || "documento";
-    res.setHeader("content-type", meta.mime_type ?? found.mime ?? "application/octet-stream");
+    res.setHeader("content-type", mime ?? found.mime ?? "application/octet-stream");
     res.setHeader("content-disposition", `attachment; filename="${safeName}"`);
-    res.setHeader("cache-control", "private, max-age=3600");
-    res.send(buf);
+    res.setHeader("content-length", String(buffer.byteLength));
+    res.setHeader("cache-control", CACHE_DE_MEDIA);
+    res.send(buffer);
   }
 
   /**
