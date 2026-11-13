@@ -20,6 +20,12 @@ const csp = [
   // del cliente, en silencio y solo en producción. `blob:` cubre la vista previa del panel,
   // que pide la imagen con el token y la convierte en blob local.
   `img-src 'self' data: blob: ${api} ${prodApiFallback} https://graph.facebook.com https://*.fbcdn.net https://*.cdninstagram.com`,
+  // D3 — las notas de voz y los videos se reproducen desde un `blob:` que arma el panel con
+  // el archivo que baja de la API (el token va en la cabecera, así que no se puede poner la
+  // URL directo en el `<audio>`). Sin `media-src`, el navegador cae a `default-src 'self'` y
+  // BLOQUEA el blob: el reproductor se ve, el botón responde, y no suena nada. No da error
+  // visible: solo una línea en la consola que nadie mira.
+  "media-src 'self' blob:",
   "font-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   // 'unsafe-eval' SOLO en dev: el runtime de react-refresh de Next lo exige y sin él
