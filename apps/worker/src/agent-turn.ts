@@ -10,6 +10,7 @@ import {
   type AgentRuntime,
   type OrchestrateResult,
 } from "@conversia/agents";
+import { placeholderParaElAgente } from "./message-type";
 import { getEnv, brandOf } from "@conversia/config";
 import { getAdminPrisma, getPrisma, raiseException, resolveAgentByNameOrSlug, withTenant } from "@conversia/database";
 import { acquireConversationLock, newLockToken, releaseConversationLock } from "./conversation-lock";
@@ -502,7 +503,9 @@ async function runAgentTurnLocked(opts: AgentTurnOpts): Promise<void> {
     // Un OUTBOUND escrito por un HUMANO del equipo se marca con su nombre para que el
     // modelo lo distinga de sus propias respuestas y respete lo que ese humano pactó.
     const isHuman = m.direction === "OUTBOUND" && m.authorType === "USER";
-    let content = m.body ?? `[${m.type.toLowerCase()}]`;
+    // D1.d — lo que el agente LEE cuando el mensaje no trae texto. Antes era
+    // `[sticker]`/`[location]`: en inglés, sin sujeto y sin decirle qué puede hacer con eso.
+    let content = m.body ?? placeholderParaElAgente(m.type as never, m.payload);
     // Documento con TEXTO extraído (PDF, etc.): se lo damos al agente para que lo LEA.
     // El texto va en el payload (no en el body, para no ensuciar el hilo del humano).
     if (m.type === "DOCUMENT") {

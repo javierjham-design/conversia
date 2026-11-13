@@ -1,4 +1,5 @@
 import { fetchGraphWithProof, getEnv } from "@conversia/config";
+import { mapMessagingAttachmentType } from "./message-type";
 import { getAdminPrisma, withTenant } from "@conversia/database";
 import type { MessagingEvent } from "./messaging-events";
 import { emitPlatformEvent } from "./platform-events";
@@ -238,7 +239,9 @@ export async function processMessagingEvent(e: MessagingEvent): Promise<void> {
         organizationId,
         conversationId: conversation.id,
         direction: "INBOUND",
-        type: e.attachmentType === "image" ? "IMAGE" : e.attachmentType === "audio" ? "AUDIO" : "TEXT",
+        // D1.a — el mismo mapeo que WhatsApp: antes acá solo existían imagen y audio, así
+        // que un sticker o el corazón de Instagram se guardaban como TEXT.
+        type: mapMessagingAttachmentType(e.attachmentType) as never,
         body,
         payload: { platform: e.platform, senderId: e.senderId } as object,
         externalId: e.externalId,
