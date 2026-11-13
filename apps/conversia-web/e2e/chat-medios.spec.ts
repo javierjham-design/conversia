@@ -151,24 +151,45 @@ test("el visor también cierra con el botón y con un clic en el fondo", async (
 
   await page.getByTestId("imagen-miniatura").first().click();
   await expect(page.getByTestId("visor-imagen")).toBeVisible();
-  // Se toca la franja VACÍA de arriba, que con object-fit:contain es parte del <img> pero
-  // para el dueño es "el fondo". El punto se calcula: en un celular la foto es full-bleed y
-  // un {x,y} fijo cae encima de la imagen en unas pantallas y no en otras.
-  // El punto se CALCULA desde dónde quedó la foto. Un {x,y} fijo es fondo en una pantalla y
-  // cae encima de la imagen en otra: en escritorio sobra a los lados, en un celular arriba y
-  // abajo, y en un iPhone 13 la foto justo pasa por donde uno elegiría a ojo.
-  const punto = await page.getByTestId("visor-imagen").evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    if (r.left > 12) return { x: Math.round(r.left / 2), y: Math.round(h / 2), hueco: Math.round(r.left) };
-    if (w - r.right > 12) return { x: Math.round((r.right + w) / 2), y: Math.round(h / 2), hueco: Math.round(w - r.right) };
-    // Franja de abajo: la de arriba la ocupa la barra con Descargar y ✕.
-    return { x: Math.round(w / 2), y: Math.round((r.bottom + h) / 2), hueco: Math.round(h - r.bottom) };
+  // Cerrar tocando fuera de la foto. Lo que se prueba es la GARANTÍA: existe una zona de
+  // fondo que recibe el toque y cierra.
+  const fondo = await page.getByTestId("visor").evaluate((caja) => {
+    // Las medidas salen del RECT DEL VISOR, no de window.innerWidth. En un celular emulado el
+    // viewport visual (innerWidth) y el de maquetado no coinciden —en un iPhone 13, 412 contra
+    // 390— y un punto calculado con innerWidth cae FUERA de la página: el clic no llega a
+    // nadie y el visor se queda abierto como si el cierre estuviera roto.
+    const v = caja.getBoundingClientRect();
+    const r = (caja.querySelector("[data-testid=visor-imagen]") as HTMLElement).getBoundingClientRect();
+    // Un dedo. Un borde de 11 px no es "el fondo" para nadie, así que no vale como prueba.
+    const DEDO = 40;
+    const candidatos = [
+      { franja: "izquierda", hueco: r.left - v.left, x: (v.left + r.left) / 2, y: v.top + v.height / 2 },
+      { franja: "derecha", hueco: v.right - r.right, x: (r.right + v.right) / 2, y: v.top + v.height / 2 },
+      { franja: "abajo", hueco: v.bottom - r.bottom, x: v.left + v.width / 2, y: (r.bottom + v.bottom) / 2 },
+      { franja: "arriba", hueco: r.top - v.top, x: v.left + v.width / 2, y: (v.top + r.top) / 2 },
+    ];
+    // Y se pregunta QUIÉN recibe el toque: que el visor "se vea" no dice nada — lo que cierra
+    // es que el clic llegue al fondo, y una capa encima (un pie de foto, un degradado, la
+    // barra de abajo del panel) se lo come en silencio.
+    return candidatos
+      .filter((p) => p.hueco >= DEDO)
+      .map((p) => {
+        const t = document.elementFromPoint(Math.round(p.x), Math.round(p.y)) as HTMLElement | null;
+        return { franja: p.franja, x: Math.round(p.x), y: Math.round(p.y), hueco: Math.round(p.hueco), quien: t ? `${t.tagName.toLowerCase()}${t.dataset.testid ? `[${t.dataset.testid}]` : ""}` : "nada" };
+      });
   });
-  expect(punto.hueco, "sin fondo visible el test no probaría nada").toBeGreaterThan(12);
-  await page.mouse.click(punto.x, punto.y);
+  expect(fondo.length, "con la foto puesta no queda ni una franja de fondo de 40 px").toBeGreaterThan(0);
+  const tocable = fondo.find((p) => p.quien === "div[visor]");
+  expect(tocable, `el fondo no recibe el toque: ${fondo.map((p) => `${p.franja}(${p.hueco}px)→${p.quien}`).join(", ")}`).toBeTruthy();
+  await page.mouse.click(tocable!.x, tocable!.y);
   await expect(page.getByTestId("visor")).toHaveCount(0);
+
+  // El pie de foto se sienta ENCIMA de la franja de abajo, que en un celular es casi el único
+  // fondo que queda (la foto va de borde a borde). Es texto, no un control: si intercepta
+  // punteros, el toque muere en un div decorativo y el visor parece no cerrarse.
+  await page.getByTestId("imagen-miniatura").first().click();
+  await expect(page.getByTestId("visor-pie")).toHaveCSS("pointer-events", "none");
+  await page.keyboard.press("Escape");
 });
 
 test("la nota de voz muestra su duración ANTES de reproducir, y play cambia a pausa", async ({ page }) => {
