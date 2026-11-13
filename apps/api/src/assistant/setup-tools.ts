@@ -4,6 +4,7 @@ import type { PrismaService } from "../prisma.service";
 import { envolverContenidoAjeno } from "./adjuntos";
 import { z } from "zod";
 import { pedirConfirmacion } from "./confirmaciones";
+import { porQueNoRespondio } from "./diagnostico-conversacion";
 import { resumirReporte, type ReporteDeCanal } from "../channels/channel-status";
 import { INDUSTRIES } from "../common/industries";
 import { RUBROS_VALIDOS, businessDataSchema, guardarDatosNegocio } from "../organizations/business-data";
@@ -141,6 +142,24 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
+        name: "verUltimasConversaciones",
+        description:
+          "Las ultimas conversaciones con clientes: quien escribio, cuando, de que y si el asistente contesto. Usalo cuando pregunten que esta pasando, quien escribio hoy, o antes de revisar una conversacion puntual.",
+        inputJsonSchema: { type: "object", properties: { n: { type: "number", description: "Cuantas traer (por defecto 10, maximo 25)" } } },
+      },
+      {
+        name: "porQueNoRespondioElBot",
+        description:
+          "Diagnostica POR QUE el asistente no contesto en una conversacion concreta: cuenta vencida, sin creditos, bot pausado, alguien del equipo la tomo, canal sin asistente, fuera de la ventana de 24 h o un rechazo de Meta. Devuelve la causa exacta y que la arregla. Usalo SIEMPRE que digan que el bot no respondio a un cliente.",
+        inputJsonSchema: {
+          type: "object",
+          properties: {
+            conversacionId: { type: "string" },
+            telefono: { type: "string", description: "Alternativa: el telefono del cliente" },
+          },
+        },
+      },
+      {
         name: "verPromptDelAsistente",
         description:
           "Muestra las instrucciones con las que responde el asistente publicado: su tono, que sabe y que no. Usalo cuando pregunten que tiene configurado, por que contesta de cierta forma, o antes de cambiarle algo.",
@@ -194,6 +213,12 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
       },
     ],
     write: [
+      {
+        name: "retomarBotEnConversacion",
+        description:
+          "Vuelve a poner al asistente a cargo de una conversacion que estaba pausada o que habia tomado una persona. Usalo cuando terminen de atender a mano.",
+        inputJsonSchema: { type: "object", properties: { conversacionId: { type: "string" } }, required: ["conversacionId"] },
+      },
       {
         name: "asignarAsistenteACanal",
         description:
@@ -586,6 +611,126 @@ export async function runSetupTool(
    * llega antes de mirar cualquier límite. Convi miraba solo los canales y por eso contestaba
    * genérico. La vigencia se evalúa con la MISMA regla del api y del worker.
    */
+  // --------------------- E3.d - CONVERSACIONES ---------------------
+
+  if (name === "verUltimasConversaciones") {
+    const n = Math.min(Math.max(Number((input as { n?: number } | null)?.n ?? 10) || 10, 1), 25);
+    const filas = await prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.conversation.findMany({
+        orderBy: { lastMessageAt: "desc" },
+        take: n,
+        select: {
+          id: true,
+          status: true,
+          aiEnabled: true,
+          unreadCount: true,
+          lastMessageAt: true,
+          lastMessagePreview: true,
+          contact: { select: { firstName: true, lastName: true, profileName: true, phone: true } },
+        },
+      }),
+    );
+    return {
+      content: JSON.stringify({
+        conversaciones: filas.map((c) => ({
+          id: c.id,
+          cliente: nombreDeContacto(c.contact),
+          telefono: c.contact?.phone ?? null,
+          estado: c.status,
+          asistenteActivo: c.aiEnabled,
+          sinLeer: c.unreadCount,
+          ultimo: c.lastMessagePreview,
+          cuando: c.lastMessageAt,
+        })),
+      }),
+    };
+  }
+
+  if (name === "porQueNoRespondioElBot") {
+    const p = z
+      .object({ conversacionId: z.string().trim().optional(), telefono: z.string().trim().max(30).optional() })
+      .safeParse(input ?? {});
+    if (!p.success) return { content: "Necesito la conversacion o el telefono del cliente.", isError: true };
+
+    const datos = await prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conv = p.data.conversacionId
+        ? await tx.conversation.findUnique({ where: { id: p.data.conversacionId } })
+        : p.data.telefono
+          ? await tx.conversation.findFirst({
+              where: { contact: { phone: { contains: soloDigitos(p.data.telefono).slice(-8) } } },
+              orderBy: { lastMessageAt: "desc" },
+            })
+          : await tx.conversation.findFirst({ orderBy: { lastMessageAt: "desc" } });
+      if (!conv) return null;
+
+      const [entrante, saliente, fallido, canal, org] = await Promise.all([
+        tx.message.findFirst({ where: { conversationId: conv.id, direction: "INBOUND" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
+        tx.message.findFirst({ where: { conversationId: conv.id, direction: "OUTBOUND" }, orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
+        tx.message.findFirst({ where: { conversationId: conv.id, direction: "OUTBOUND", status: "FAILED" }, orderBy: { createdAt: "desc" }, select: { error: true, createdAt: true } }),
+        conv.channelConnectionId
+          ? tx.channelConnection.findUnique({ where: { id: conv.channelConnectionId }, select: { defaultAgentId: true } })
+          : Promise.resolve(null),
+        tx.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true, status: true } }),
+      ]);
+
+      const sub = await tx.subscription.findFirst({
+        where: { status: { in: ESTADOS_DE_SUSCRIPCION_VIVA as unknown as string[] } as never },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, periodEnd: true },
+      });
+      return { conv, entrante, saliente, fallido, canal, org, sub };
+    });
+
+    if (!datos) return { content: "No encontre esa conversacion.", isError: true };
+
+    const vigencia = evaluarVigencia({
+      validUntil: (datos.org?.settings as Record<string, unknown> | null)?.validUntil,
+      suscripcion: datos.sub,
+    });
+    // El error solo cuenta si es POSTERIOR al ultimo mensaje del cliente: uno de la semana
+    // pasada no explica el silencio de hoy.
+    const errorVigente =
+      datos.fallido?.error && (!datos.entrante || datos.fallido.createdAt >= datos.entrante.createdAt)
+        ? String(datos.fallido.error)
+        : null;
+
+    const d = porQueNoRespondio({
+      cuentaVigente: vigencia.vigente,
+      creditos: await saldoDeCreditos(ctx),
+      iaActiva: datos.conv.aiEnabled,
+      // "Tomada por una persona" se nota en que hay un humano a cargo (assignedUserId) y la
+      // IA quedo apagada: las dos cosas juntas, no una sola.
+      intervencionHumana: !!datos.conv.assignedUserId && !datos.conv.aiEnabled,
+      tieneAsistente: !!(datos.canal?.defaultAgentId ?? datos.conv.activeAgentId),
+      ultimoEntranteEn: datos.entrante?.createdAt ?? null,
+      ultimoSalienteEn: datos.saliente?.createdAt ?? null,
+      errorDelProveedor: errorVigente,
+    });
+
+    return {
+      content: JSON.stringify({ conversacionId: datos.conv.id, ...d }),
+      actions: [{ type: "button", label: "Ver la conversacion", kind: "interno", payload: "/conversaciones" }],
+    };
+  }
+
+  if (name === "retomarBotEnConversacion") {
+    const p = z.object({ conversacionId: z.string().trim().min(1) }).safeParse(input ?? {});
+    if (!p.success) return { content: "Necesito saber que conversacion.", isError: true };
+    try {
+      await prisma.withTenant(ctx.organizationId, (tx) =>
+        tx.conversation.update({
+          where: { id: p.data.conversacionId },
+          // Reanudar es encender la IA Y soltar al humano: dejar el `assignedUserId` puesto
+          // haria que el proximo diagnostico siguiera diciendo "la tomo una persona".
+          data: { aiEnabled: true, assignedUserId: null },
+        }),
+      );
+      return { content: "Listo: el asistente vuelve a atender esa conversacion.", didWrite: true };
+    } catch (e) {
+      return { content: `No pude reanudarlo: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
   // --------------------- E3.a - CANALES ---------------------
   //
   // `explicarCamino("asignar_agente")` le PROMETIA al dueno "lo asigno y queda andando"
@@ -1406,4 +1551,22 @@ async function unicoCanal(ctx: SetupToolCtx): Promise<string | null> {
   const canales = Array.isArray(lista) ? lista : [];
   const vivos = canales.filter((c: { status?: string }) => c?.status !== "inactive");
   return vivos.length === 1 ? String((vivos[0] as { id: string }).id) : null;
+}
+
+/** El nombre con el que el dueno conoce al cliente, con lo que haya. */
+function nombreDeContacto(c: { firstName?: string | null; lastName?: string | null; profileName?: string | null } | null): string {
+  const propio = [c?.firstName, c?.lastName].filter(Boolean).join(" ").trim();
+  return propio || c?.profileName || "Sin nombre";
+}
+
+function soloDigitos(t: string): string {
+  return t.replace(/\D+/g, "");
+}
+
+/** Saldo de creditos, o null si esta cuenta no se cobra por creditos. */
+async function saldoDeCreditos(ctx: SetupToolCtx): Promise<number | null> {
+  if (!ctx.cobros) return null;
+  const w = await ctx.cobros.walletSummary().catch(() => null);
+  const saldo = Number((w as { balance?: number; saldo?: number } | null)?.balance ?? (w as { saldo?: number } | null)?.saldo);
+  return Number.isFinite(saldo) ? saldo : null;
 }
