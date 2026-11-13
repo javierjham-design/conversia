@@ -332,6 +332,43 @@ tamaños de la consulta previa.
 
 ---
 
+## 8. Reparar el tipo de los mensajes de medios históricos (D1)
+
+**Qué pasa.** Hasta la tanda D, el worker conocía cuatro tipos de mensaje entrante (audio,
+imagen, documento, video) y **todo lo demás se guardaba como `TEXT` con el cuerpo
+`"[" + tipo + "]"`**. En la base quedaron, por tanto, stickers, ubicaciones y fichas de
+contacto registrados como textos que dicen `[sticker]`, `[location]`, `[contacts]`. Ningún
+panel puede dibujarlos: mirando `type` no hay forma de saber qué eran.
+
+**Por qué se puede reparar.** El `payload` crudo del webhook **sí** se guardó siempre, y trae
+`payload.type`. De ahí sale el tipo real, y de ahí también el cuerpo nuevo — una ubicación
+recupera el nombre y la dirección que estaban guardados y nunca se mostraron.
+
+**No es una migración de esquema.** No cambia ninguna tabla ni columna: solo reescribe
+`type` y `body` de filas existentes. Por eso va acá y no en `prisma/migrations`.
+
+```
+cd apps/worker
+npx tsx scripts/fix-media-types.ts              # simula TODAS las orgs
+npx tsx scripts/fix-media-types.ts --org=<id>   # simula una sola
+npx tsx scripts/fix-media-types.ts --aplicar    # escribe
+```
+
+**Riesgo: bajo.** Es **idempotente** (solo mira mensajes `type = TEXT`, así que correrlo dos
+veces deja el mismo resultado), va por tenant dentro de `withTenant`, y no toca `payload` ni
+`lastMessagePreview` — esa columna es la foto del ÚLTIMO mensaje de cada conversación y
+reescribirla para mensajes viejos cambiaría vistas previas que hoy son correctas. Los `[tipo]`
+históricos que queden en esas vistas los traduce la UI (D3.d).
+
+**Se puede correr en caliente**, sin ventana: no bloquea escrituras y el worker nuevo ya
+guarda bien los mensajes que llegan mientras corre.
+
+| | |
+|---|---|
+| Requiere cambio de código | no (ya está desplegado con D1) |
+| Bloquea escrituras | no |
+| Reversible | no automáticamente, pero el `payload` crudo queda intacto: siempre se puede recalcular |
+
 ## Resumen
 
 | # | Migración | Riesgo | Bloquea escrituras | Requiere cambio de código |
@@ -343,3 +380,4 @@ tamaños de la consulta previa.
 | 3 | `brand` en cupones | medio | no | sí |
 | 1 | Secuencia de facturas | **medio-alto** (datos tributarios) | no | sí |
 | 7 | Unique `(org, id)` | medio (costo de disco/escritura) | no (`CONCURRENTLY`) | sí |
+| 8 | Tipos de medios históricos (D1) | bajo (idempotente, no toca esquema) | no | no |
