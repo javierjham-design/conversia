@@ -1034,3 +1034,55 @@ export function decidirSenalCapi(input: {
 
 /** Proveedor con que se sella en `integration_events` que un hito ya se informó. */
 export const CAPI_FUNNEL_PROVIDER = "capi_funnel";
+
+// ============================================================
+// Medios de un mensaje (tanda D del chat) — contrato ÚNICO para los dos paneles
+// ============================================================
+
+/**
+ * QUÉ MEDIO TRAE UN MENSAJE, ya masticado por la API.
+ *
+ * El `payload` crudo del webhook se sigue devolviendo (TuBot lo usa y no se toca), pero
+ * obliga a cada panel a saber que una imagen entrante vive en `payload.image.id`, una saliente
+ * en `payload.mediaId` y un sticker en `payload.sticker.id`. Esa lógica estaba copiada en los
+ * endpoints de la API y faltaba entera en la bandeja de Conversia.
+ *
+ * `media` se DERIVA en la API a partir de `type` + `payload`: no se guarda en la base, así que
+ * no hay migración ni riesgo de quedar desincronizado con el crudo. Los dos paneles tipan
+ * contra este mismo esquema.
+ */
+export const MessageMediaKindSchema = z.enum([
+  "audio",
+  "image",
+  "sticker",
+  "video",
+  "document",
+  "location",
+  "contacts",
+]);
+export type MessageMediaKind = z.infer<typeof MessageMediaKindSchema>;
+
+export const MessageMediaSchema = z.object({
+  kind: MessageMediaKindSchema.nullable(),
+  /** Ruta RELATIVA del endpoint que sirve el archivo; null si este medio no se descarga. */
+  url: z.string().nullable(),
+  mime: z.string().nullable(),
+  filename: z.string().nullable(),
+  caption: z.string().nullable(),
+  /** Stickers de WhatsApp: los animados son webp con varios cuadros. */
+  animated: z.boolean().nullable(),
+  /** Duración del audio en segundos, para pintarla ANTES de descargar el archivo. */
+  durationSec: z.number().nullable(),
+  /** Solo audio: el texto que dejó la transcripción (= body cuando payload.transcribed). */
+  transcript: z.string().nullable(),
+  location: z
+    .object({ lat: z.number(), lng: z.number(), name: z.string().nullable(), address: z.string().nullable() })
+    .nullable(),
+  contacts: z.array(z.object({ name: z.string(), phones: z.array(z.string()) })).nullable(),
+  /** Reacciones recibidas SOBRE este mensaje (D1 las escribe en payload.reactions). */
+  reactions: z.array(z.object({ emoji: z.string(), at: z.string().nullable() })).nullable(),
+});
+export type MessageMedia = z.infer<typeof MessageMediaSchema>;
+
+/** Código que devuelve la API cuando Meta ya no tiene el archivo. La UI lo distingue de un error. */
+export const MEDIA_EXPIRED = "MEDIA_EXPIRED" as const;

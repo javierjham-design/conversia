@@ -219,6 +219,20 @@ const envSchema = z.object({
   // el comentario en public.controller.ts.) El valor "coexistence" del featureType fue
   // retirado por Meta (may-2025) → el vigente es whatsapp_business_app_onboarding.
   META_ES_COEX_FEATURE_TYPE: z.string().optional().default("whatsapp_business_app_onboarding"),
+
+  // ALMACENAMIENTO DE MEDIOS (D4). Los medios de WhatsApp viven en Meta 30 DÍAS y después
+  // desaparecen: sin esto, una conversación de hace dos meses queda con el chat lleno de
+  // archivos rotos. Son OPCIONALES: sin bucket ni llaves, todo sigue bajando de Meta como
+  // siempre (`crearStorage` devuelve null). Sirve cualquier S3: Cloudflare R2, el bucket de
+  // Railway, MinIO.
+  S3_ENDPOINT: z.string().optional().default(""),
+  S3_BUCKET: z.string().optional().default(""),
+  S3_ACCESS_KEY: z.string().optional().default(""),
+  S3_SECRET_KEY: z.string().optional().default(""),
+  S3_REGION: z.string().optional().default(""),
+  // Cuánto se conservan los medios guardados. Pasado el plazo se borran del bucket y el
+  // endpoint responde MEDIA_EXPIRED, igual que cuando los borra Meta.
+  MEDIA_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).optional().default(365),
   // MIGRACIÓN a v5 del "registro insertado" (Embedded Signup) — PREPARADA pero APAGADA.
   // Cuando Meta confirme GA de v5 para NUESTRA app, se enciende por marca y los extras del
   // FB.login pasan a {version:"v5", sessionInfoVersion:5} SIN featureType (v5 enruta solo por
