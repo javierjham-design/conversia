@@ -18,6 +18,7 @@ import { z } from "zod";
 import { getEnv, withAppSecretProof } from "@conversia/config";
 import { CACHE_DE_MEDIA, LIMITES_BYTES, descargarMediaDeMeta } from "./media-proxy";
 import { derivarMedia } from "./message-media";
+import { guardarMedio, leerGuardado, type KindDeMedio } from "./media-store";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { RealtimeService } from "../common/realtime.service";
@@ -760,6 +761,32 @@ export class ConversationsController {
   }
 
   /**
+   * D4 — SERVIR UN MEDIO: del bucket si ya está, y si no, de Meta guardando al pasar.
+   *
+   * El guardado es "al primer uso" por decisión del dueño: en una cuenta con tráfico la
+   * mayoría de las fotos no las abre nadie, y pagar almacenamiento por ellas es tirar plata.
+   * Sin bucket configurado, esto es exactamente lo de siempre: bajar de Meta cada vez.
+   */
+  private async servirMedio(
+    organizationId: string,
+    conversationId: string,
+    messageId: string,
+    kind: KindDeMedio,
+    bajarDeMeta: () => Promise<{ buffer: Buffer; mime: string }>,
+    nombre?: string | null,
+  ): Promise<{ buffer: Buffer; mime: string }> {
+    const guardado = await this.prisma
+      .withTenant(organizationId, (tx) => leerGuardado(tx, messageId, kind))
+      .catch(() => null);
+    if (guardado) return { buffer: guardado.body, mime: guardado.mime };
+    const bajado = await bajarDeMeta();
+    await this.prisma
+      .withTenant(organizationId, (tx) => guardarMedio(tx, organizationId, messageId, kind, bajado.buffer, bajado.mime, nombre))
+      .catch(() => undefined);
+    return bajado;
+  }
+
+  /**
    * Token de Meta del canal de una conversación (WABA propia) con fallback al de
    * plataforma. La descarga de media (audio/imagen) debe usar el MISMO token con el
    * que se recibió: si la WABA tiene credencial propia, el token global no accede al
@@ -792,7 +819,9 @@ export class ConversationsController {
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene audio");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const { buffer, mime } = await descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.audio });
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "audio", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.audio }),
+    );
 
     // D2.b — WhatsApp entrega OGG/Opus, que iOS Safari NO reproduce. Transcodificamos a MP3.
     // Si YA viene en un formato que todos reproducen, no se toca: transcodificar un MP3 a MP3
@@ -837,13 +866,19 @@ export class ConversationsController {
       // Entrante: payload.image.id / sticker.id. Saliente (lo que subimos): payload.mediaId.
       const mediaId = payload?.image?.id ?? payload?.sticker?.id ?? payload?.mediaId;
       if (!mediaId) return null;
+      // Un sticker se sirve por acá, pero se GUARDA como sticker: así el barrido y los
+      // reportes distinguen una foto del paciente de una calcomanía.
+      const kind: "image" | "sticker" = payload?.sticker?.id ? "sticker" : "image";
       // Token del canal de la conversación (WABA propia) → fallback plataforma.
       const token = await this.resolveConversationMediaToken(tx, id);
-      return { mediaId: String(mediaId), token };
+      return { mediaId: String(mediaId), token, kind };
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene imagen");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const { buffer, mime } = await descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.image });
+    // D4 — si ya lo guardamos, se sirve desde el bucket y Meta ni se entera.
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, found.kind, () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.image }),
+    );
     res.setHeader("content-type", mime);
     res.setHeader("content-length", String(buffer.byteLength));
     res.setHeader("cache-control", CACHE_DE_MEDIA);
@@ -873,7 +908,9 @@ export class ConversationsController {
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene video");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const { buffer, mime } = await descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.video });
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "video", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.video }),
+    );
     res.setHeader("content-type", mime);
     res.setHeader("content-length", String(buffer.byteLength));
     res.setHeader("accept-ranges", "none");
@@ -903,7 +940,9 @@ export class ConversationsController {
     });
     if (!found) throw new NotFoundException("Este mensaje no tiene documento");
     if (!found.token) throw new NotFoundException("El canal no tiene token de acceso");
-    const { buffer, mime } = await descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.document });
+    const { buffer, mime } = await this.servirMedio(ctx.organizationId, id, messageId, "document", () =>
+      descargarMediaDeMeta(found.mediaId, found.token, { limiteBytes: LIMITES_BYTES.document }), found.filename,
+    );
     // Nombre saneado para la cabecera (sin comillas ni saltos que rompan el header).
     const safeName = found.filename.replace(/[^\w.\-() ]+/g, "_").slice(0, 120) || "documento";
     res.setHeader("content-type", mime ?? found.mime ?? "application/octet-stream");

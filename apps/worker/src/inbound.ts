@@ -9,7 +9,9 @@ import { getWhatsappRatesOverride, getWhatsappRateSchedule } from "./cost-settin
 import { refundForMessage, normalizeCategory } from "./wallet";
 import { buildContactCreate, buildContactUpdate } from "./contact-capture";
 import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
+import { guardarMedioDeMensaje } from "@conversia/storage";
 import { transcribeWhatsappAudio } from "./audio";
+import { storageDelWorker } from "./media-store";
 import { aplicarReaccion, lastMessagePreview, leerReaccion, mapInboundType, mediaPlaceholder } from "./message-type";
 import { downloadWhatsappMedia } from "./media";
 
@@ -373,6 +375,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
     // agente (fuera de la transacción: es una llamada de red). Degrada a "[audio]".
     let text = msg.text;
     let transcribed = false;
+    let audioDescargado: { bytes: Buffer; mime: string } | null = null;
     if (!text && (msg.type === "audio" || msg.type === "voice")) {
       const mediaId = (msg.payload as any)?.audio?.id ?? (msg.payload as any)?.voice?.id;
       // Switch por tenant (org.settings.transcription.enabled; activada por defecto).
@@ -383,7 +386,12 @@ export async function processInbound(job: InboundJob): Promise<void> {
       if (mediaId && transcriptionOn) {
         // El media se descarga con el token de la WABA receptora (por-canal).
         const auth = await resolveChannelAuth(organizationId, { phoneNumberId: msg.phoneNumberId });
-        const t = await transcribeWhatsappAudio(String(mediaId), auth.accessToken);
+        // D4.c — los bytes se guardan AL INGRESO porque ya están en memoria para transcribir.
+        // No se puede guardar todavía: el mensaje aún no existe, así que se retienen acá y se
+        // escriben después de crearlo, con su id de verdad.
+        const t = await transcribeWhatsappAudio(String(mediaId), auth.accessToken, async (bytes, mime) => {
+          audioDescargado = { bytes, mime };
+        });
         if (t) {
           text = t;
           transcribed = true;
@@ -529,7 +537,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
         conversation = { ...conversation, channelConnectionId: tenant.channelConnectionId };
       }
 
-      await tx.message.create({
+      const mensajeCreado = await tx.message.create({
         data: {
           organizationId,
           conversationId: conversation.id,
@@ -549,6 +557,17 @@ export async function processInbound(job: InboundJob): Promise<void> {
           sentAt: new Date(),
         },
       });
+      // D4.c — el audio ya descargado se guarda ahora que el mensaje tiene id. Nunca lanza:
+      // si el bucket falla, el turno del cliente NO se cae por eso.
+      if (audioDescargado) {
+        await guardarMedioDeMensaje(storageDelWorker(), tx as never, {
+          organizationId,
+          messageId: mensajeCreado.id,
+          kind: "audio",
+          body: audioDescargado.bytes,
+          mime: audioDescargado.mime,
+        });
+      }
       if (transcribed) {
         // Registro de uso: cada transcripción tiene un costo (nota de voz → texto).
         await tx.usageEvent.create({

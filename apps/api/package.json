@@ -15,6 +15,7 @@
     "@conversia/database": "workspace:*",
     "@conversia/notifications": "workspace:*",
     "@conversia/scheduling": "workspace:*",
+    "@conversia/storage": "workspace:*",
     "@conversia/types": "workspace:*",
     "@conversia/workflows": "workspace:*",
     "@nestjs/common": "^11.0.0",
