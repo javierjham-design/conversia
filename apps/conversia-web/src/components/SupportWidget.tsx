@@ -36,6 +36,8 @@ type Msg = {
   role: "user" | "assistant";
   content: string;
   actions?: AssistantAction[];
+  /** E2.d - confirmacion pendiente de ESTE mensaje. Se apaga al responder. */
+  confirmacion?: { id: string; texto: string } | null;
   /** Lo que el dueño le mostró en ese turno (para que su mensaje no se vea vacío). */
   adjuntos?: { tipo: TipoAdjunto; nombre: string }[];
   /** B3 — se está enviando (aparece al instante, antes de que el servidor conteste). */
@@ -331,7 +333,11 @@ export function SupportWidget() {
       if (r.degradado) setOfrecerSoporte(true);
       let reply = r.reply;
       if (r.wrote && r.qa) reply += r.qa.passed ? "\n\n(Probé tu asistente con los escenarios clave: todo en orden ✔)" : "\n\n(Hice el cambio; en la prueba quedó algo por revisar — te aviso si hace falta.)";
-      const actions = r.actions ?? [];
+      const todas = r.actions ?? [];
+      // E2.d - la confirmacion se saca de las acciones y se dibuja como su propio bloque: un
+      // boton suelto que cobra se pulsa sin leer, y esto hay que LEERLO.
+      const confirmacion = todas.find((a) => a.type === "confirm") as { type: "confirm"; id: string; texto: string } | undefined;
+      const actions = todas.filter((a) => a.type !== "confirm");
       if (r.threadId) {
         setThreadId(r.threadId);
         guardarPista(r.threadId);
@@ -341,7 +347,7 @@ export function SupportWidget() {
       setFallaHistorial(r.guardado === false ? "guardar" : null);
       setMsgs((m) => [
         ...m.map((x) => (x.id === idLocal ? { ...x, pendiente: false } : x)),
-        { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button") },
+        { role: "assistant", content: reply, actions: actions.filter((a) => a.type === "button"), confirmacion: confirmacion ? { id: confirmacion.id, texto: confirmacion.texto } : null },
       ]);
       ejecutarAcciones(actions);
     } catch (e) {
@@ -466,6 +472,35 @@ export function SupportWidget() {
       await cargarHiloRef.current?.(id);
     },
     [],
+  );
+
+  /**
+   * E2.d - el dueno confirma. Viaja SOLO el id: los argumentos estan guardados del lado del
+   * servidor desde que se mostro el texto, asi que lo que se ejecuta es exactamente lo que se
+   * leyo. Al responder, la confirmacion se apaga en el mensaje (no se pulsa dos veces).
+   */
+  const responderConfirmacion = useCallback(
+    async (id: string, aceptar: boolean) => {
+      setMsgs((m) => m.map((x) => (x.confirmacion?.id === id ? { ...x, confirmacion: null } : x)));
+      if (!aceptar) {
+        setMsgs((m) => [...m, { role: "assistant", content: "Listo, no hago nada entonces. Si cambias de idea, me dices." }]);
+        return;
+      }
+      setBusy(true);
+      try {
+        const r = await api<{ ok: boolean; reply: string; actions?: AssistantAction[] }>("/assistant/confirm", {
+          method: "POST",
+          body: JSON.stringify({ id }),
+        });
+        setMsgs((m) => [...m, { role: "assistant", content: r.reply, actions: (r.actions ?? []).filter((a) => a.type === "button") }]);
+        ejecutarAcciones(r.actions ?? []);
+      } catch {
+        setMsgs((m) => [...m, { role: "assistant", content: "No pude completarlo. Puedes intentarlo desde Cobros o pedirmelo de nuevo." }]);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [ejecutarAcciones],
   );
 
   /** E1.a — «Ver mensajes anteriores»: sube una página hacia atrás y la antepone. */
@@ -997,6 +1032,34 @@ export function SupportWidget() {
                   ) : null}
                   {/* Botones del copiloto: pagar y conectar WhatsApp SOLO pasan por acá, con
                       el clic del dueño (el popup de Meta se bloquea si no nace de un clic). */}
+                  {/* E2.d - CONFIRMAR. Va antes que los botones y se ve distinto a proposito:
+                      esto cuesta plata o borra algo, y tiene que leerse, no pulsarse de paso. */}
+                  {m.confirmacion ? (
+                    <div
+                      data-testid="convi-confirmacion"
+                      style={{ marginTop: 7, border: "1px solid var(--acc)", borderRadius: 12, padding: "9px 11px", background: "var(--acc-dim)" }}
+                    >
+                      <p style={{ margin: "0 0 8px", fontSize: 12.5, lineHeight: 1.4 }}>{m.confirmacion.texto}</p>
+                      <div style={{ display: "flex", gap: 7 }}>
+                        <button
+                          onClick={() => void responderConfirmacion(m.confirmacion!.id, true)}
+                          disabled={busy}
+                          className="btn-accent"
+                          data-testid="convi-confirmar"
+                          style={{ border: "none", cursor: "pointer", fontSize: 12, padding: "5px 13px" }}
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          onClick={() => void responderConfirmacion(m.confirmacion!.id, false)}
+                          disabled={busy}
+                          style={{ border: "1px solid var(--line)", background: "transparent", color: "var(--ink-dim)", borderRadius: 999, cursor: "pointer", fontSize: 12, padding: "5px 11px" }}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   {m.actions?.length ? (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                       {m.actions.map((a, j) =>

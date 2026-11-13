@@ -18,6 +18,9 @@ export type AssistantAction =
   // `whatsapp_test` abre Canales YA probando (A3). Este tipo es la copia local del de
   // `@conversia/types`: si allá se agrega un kind, acá también, o el widget no lo entiende.
   | { type: "button"; label: string; kind: "whatsapp" | "whatsapp_test" | "pago" | "interno" | "externo"; payload?: string }
+  // E2.d - confirmar en el chat lo que cuesta dinero o borra datos. Solo viajan el id y el
+  // TEXTO: los argumentos quedan en el servidor, asi que lo que se ejecuta es lo que se leyo.
+  | { type: "confirm"; id: string; texto: string }
   | { type: "checklist_refresh" }
   | { type: "celebrate"; step: string };
 

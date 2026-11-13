@@ -6,8 +6,7 @@ import {
   buildCoreTools,
   createAIRouter,
   orchestrate,
-  type AgentRuntime,
-} from "@conversia/agents";
+  type AgentRuntime, ESTADOS_DE_SUSCRIPCION_VIVA, evaluarVigencia } from "@conversia/agents";
 import { getEnv } from "@conversia/config";
 import { resolveAgentByNameOrSlug } from "@conversia/database";
 import type { AIChatMessage, ToolContext } from "@conversia/types";
@@ -128,8 +127,24 @@ export async function runAgentTest(prisma: PrismaService, orgId: string, agentId
   if (org?.status === "SUSPENDED" || org?.status === "CANCELLED") {
     return { ok: false, blocked: true, error: `La organización está ${org.status}; la IA está detenida.` };
   }
-  const validUntil = orgSettings.validUntil;
-  if (typeof validUntil === "string" && new Date(validUntil).getTime() < Date.now()) {
+  /**
+   * E2.a — VIGENCIA con la regla ÚNICA (`evaluarVigencia`, #639).
+   *
+   * Acá quedaba la comparación cruda contra `settings.validUntil`. Consecuencia concreta: una
+   * cuenta que YA PAGÓ pero conserva el `validUntil` de la prueba no podía probar ni publicar
+   * su asistente desde Convi, que es exactamente el «no puedo probar el asistente porque la
+   * vigencia del servicio ha vencido» de la captura del 11-nov. El 403 del panel ya usaba la
+   * regla buena; este camino se había quedado atrás.
+   */
+  const suscripcionViva = await prisma.withTenant(orgId, (tx) =>
+    tx.subscription.findFirst({
+      where: { status: { in: ESTADOS_DE_SUSCRIPCION_VIVA as unknown as string[] } as never },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, periodEnd: true },
+    }),
+  );
+  const vigencia = evaluarVigencia({ validUntil: orgSettings.validUntil, suscripcion: suscripcionViva });
+  if (!vigencia.vigente) {
     return { ok: false, blocked: true, error: "La vigencia del servicio venció; la IA está detenida." };
   }
   const budget = await prisma.withTenant(orgId, async (tx) => {
