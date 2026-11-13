@@ -12,6 +12,7 @@ import { enqueueDebouncedAgentTurn } from "./agent-turn-queue";
 import { guardarMedioDeMensaje } from "@conversia/storage";
 import { transcribeWhatsappAudio } from "./audio";
 import { storageDelWorker } from "./media-store";
+import { aplicarReaccion, lastMessagePreview, leerReaccion, mapInboundType, mediaPlaceholder } from "./message-type";
 import { downloadWhatsappMedia } from "./media";
 
 import { resolveChannelAuth } from "./channel-auth";
@@ -324,6 +325,51 @@ export async function processInbound(job: InboundJob): Promise<void> {
       continue;
     }
     const { organizationId } = tenant;
+    const tipoDelMensaje = mapInboundType(msg.type);
+
+    /**
+     * D1.c — UNA REACCIÓN NO ES UN MENSAJE.
+     *
+     * Meta manda el ❤️ a un mensaje del bot como un `messages[]` más. Creado como mensaje,
+     * aparecía en el hilo como una burbuja suelta con body `[reaction]`, empujaba la
+     * conversación arriba en la lista y, lo peor, entraba al historial del agente, que
+     * contestaba como si el cliente hubiera escrito algo.
+     *
+     * Lo correcto es marcar el mensaje reaccionado y avisar por tiempo real. Si no lo
+     * encontramos (reacción a algo anterior a nosotros, o a un mensaje de otro canal) se
+     * ignora en silencio: no hay nada que mostrar y no es un error.
+     */
+    if (tipoDelMensaje === "REACTION") {
+      const r = leerReaccion(msg.payload);
+      if (!r) {
+        console.debug(`· Reacción sin message_id — ignorada (${msg.externalId})`);
+        continue;
+      }
+      const conversationId = await withTenant(organizationId, async (tx) => {
+        const target = await tx.message.findFirst({
+          where: { externalId: r.externalId },
+          select: { id: true, conversationId: true, payload: true },
+        });
+        if (!target) return null;
+        const { reactions } = aplicarReaccion(target.payload, {
+          emoji: r.emoji,
+          from: msg.from,
+          at: new Date().toISOString(),
+        });
+        await tx.message.update({
+          where: { id: target.id },
+          data: { payload: { ...((target.payload as object) ?? {}), reactions } as object },
+        });
+        return target.conversationId;
+      });
+      if (!conversationId) {
+        console.debug(`· Reacción a un mensaje que no tenemos (${r.externalId}) — ignorada`);
+        continue;
+      }
+      const { publishRealtime } = await import("./realtime.js");
+      await publishRealtime(organizationId, { type: "message.updated", conversationId });
+      continue;
+    }
 
     // Notas de voz: descargar y transcribir el audio para usarlo como texto del
     // agente (fuera de la transacción: es una llamada de red). Degrada a "[audio]".
@@ -496,13 +542,10 @@ export async function processInbound(job: InboundJob): Promise<void> {
           organizationId,
           conversationId: conversation.id,
           direction: "INBOUND",
-          type:
-            msg.type === "audio" || msg.type === "voice" ? "AUDIO"
-            : msg.type === "image" ? "IMAGE"
-            : msg.type === "document" ? "DOCUMENT"
-            : msg.type === "video" ? "VIDEO"
-            : "TEXT",
-          body: text ?? `[${msg.type}]`,
+          // D1 — el mapeo vive en `message-type.ts`, probado tipo por tipo. Antes acá
+          // conocíamos cuatro tipos y TODO lo demás caía en TEXT con body `[sticker]`.
+          type: tipoDelMensaje,
+          body: text ?? mediaPlaceholder(tipoDelMensaje, msg.payload),
           payload: {
             ...(msg.payload as object),
             ...(transcribed ? { transcribed: true } : {}),
@@ -535,7 +578,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
         where: { id: conversation.id },
         data: {
           lastMessageAt: new Date(),
-          lastMessagePreview: (text ?? `[${msg.type}]`).slice(0, 120),
+          lastMessagePreview: lastMessagePreview({ type: tipoDelMensaje, body: text, payload: msg.payload, transcribed }).slice(0, 120),
           unreadCount: { increment: 1 },
         },
       });
@@ -826,18 +869,16 @@ export async function processInbound(job: InboundJob): Promise<void> {
         });
       }
 
+      const tipoDelEco = mapInboundType(echo.type);
       await tx.message.create({
         data: {
           organizationId,
           conversationId: conversation.id,
           direction: "OUTBOUND",
-          type:
-            echo.type === "audio" || echo.type === "voice" ? "AUDIO"
-            : echo.type === "image" ? "IMAGE"
-            : echo.type === "document" ? "DOCUMENT"
-            : echo.type === "video" ? "VIDEO"
-            : "TEXT",
-          body: echo.text ?? `[${echo.type}]`,
+          // D1 — mismo mapeo que el entrante (antes era este ternario COPIADO, que es
+          // como los dos se fueron quedando sin sticker, ubicación ni contacto).
+          type: tipoDelEco,
+          body: echo.text ?? mediaPlaceholder(tipoDelEco, echo.payload),
           // authorType USER + origin:"app" = respuesta HUMANA escrita desde la app del dueño
           // (no la IA). No existe un AuthorType "APP" en el enum; se marca en el payload.
           payload: { ...(echo.payload as object), origin: "app" } as object,
@@ -850,7 +891,7 @@ export async function processInbound(job: InboundJob): Promise<void> {
       });
       await tx.conversation.update({
         where: { id: conversation.id },
-        data: { lastMessageAt: new Date(), lastMessagePreview: (echo.text ?? `[${echo.type}]`).slice(0, 120) },
+        data: { lastMessageAt: new Date(), lastMessagePreview: lastMessagePreview({ type: tipoDelEco, body: echo.text, payload: echo.payload }).slice(0, 120) },
       });
       return { conversationId: conversation.id };
     });
