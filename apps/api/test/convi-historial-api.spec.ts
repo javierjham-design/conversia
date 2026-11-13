@@ -191,7 +191,10 @@ describe("guardar el turno", () => {
   it("si la base falla, el turno NO se cae: el dueño ya tiene su respuesta", async () => {
     const { svc } = fakeDb([hilo()]);
     const roto = new AssistantThreadsService({ withTenant: async () => { throw new Error("base caída"); } } as unknown as PrismaService);
-    await expect(roto.guardarTurno({ organizationId: "org1", threadId: "h1", userMessage: "x", reply: "y" })).resolves.toBeUndefined();
+    // E1.e — sigue sin lanzar (la promesa de que un fallo de base no cueste la respuesta es
+    // literal), pero ahora DEVUELVE que no pudo, para que el widget lo diga en vez de que el
+    // turno desaparezca en silencio y el dueño lo descubra al reabrir.
+    await expect(roto.guardarTurno({ organizationId: "org1", threadId: "h1", userMessage: "x", reply: "y" })).resolves.toEqual({ guardado: false });
     expect(svc).toBeTruthy();
   });
 });
@@ -278,7 +281,7 @@ describe("el `history` del cuerpo se acepta y se IGNORA", () => {
     const hilos = {
       hiloParaEscribir: async () => ({ id: "h1", summary: "lo que ya habíamos acordado" }),
       historialParaElPrompt: async () => [{ role: "user", content: "lo que PASÓ de verdad" }],
-      guardarTurno: async () => undefined,
+      guardarTurno: async () => ({ guardado: true }),
       resumirSiHaceFalta: async () => undefined,
     };
     const rate = { custom: async () => ({ allowed: true }) };

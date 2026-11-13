@@ -498,6 +498,9 @@ model AssistantMessage {
   /// Las acciones que Convi devolvió en ese turno (botones, navegación), para poder
   /// repintar el hilo tal como se vio.
   actions        Json?
+  /// E1.f — qué CONSULTÓ Convi en este turno (nombre de la tool + resultado resumido). Es la
+  /// pista para que al retomar no vuelva a preguntar lo que ya miró; nunca el resultado entero.
+  toolDigest     String?            @map("tool_digest")
   /// SOLO metadatos del adjunto (tipo y nombre). El archivo NO se guarda acá.
   adjuntos       Json?
   /// Pantalla donde estaba el dueño al escribir (ayuda a entender el hilo después).
