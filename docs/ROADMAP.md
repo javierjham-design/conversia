@@ -91,3 +91,14 @@ Lo que quedó explícitamente fuera de alcance, anotado para no perderlo:
   `message_attachments` escribiéndose desde D4, los datos ya están: falta la pantalla.
 - **Transcripción y visión para Instagram/Messenger.** Hoy el agente sabe que llegó un adjunto
   y pide el detalle por escrito; no lo ve ni lo escucha.
+
+## Fuera de la tanda E de Convi — pendientes
+
+- **Que Convi opere la cuenta desde WhatsApp**, fuera del panel. Hoy vive en el widget; el
+  dueño tendría que poder pedirle las mismas cosas por mensaje.
+- **Voz**: dictarle a Convi y que conteste hablado.
+- **E3c — el resto del panel**: notificaciones, usuarios, flujos, plantillas, caja, Google
+  Calendar y `pedirAutorizacion`. El andamiaje está (las tools llaman a los controladores del
+  panel); falta recorrer cada pantalla.
+- **Métrica de escalamientos en el Super Admin** (E5.c): la regla y el cálculo existen en el
+  arnés; falta la pantalla semanal.

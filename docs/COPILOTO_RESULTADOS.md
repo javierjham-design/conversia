@@ -294,3 +294,29 @@ del job `dueno` (7 recorridos × desktop + iphone) contra el stack Docker. Los g
 nuevos de las dos etapas se rompieron a propósito uno por uno: **dos no agarraban** y se
 apretaron (uno buscaba `cartel.pancarta` a secas, que también aparece en el `aria-label`).
 **Sin migraciones.**
+
+## Tanda E — Convi resuelve (2026-11-12)
+
+**El arnés** (`apps/api/test/convi-arnes/`) es lo que vuelve medible todo lo anterior: 18
+escenarios con el estado de la cuenta y lo que Convi DEBE hacer en cada uno. Corre en cada PR.
+
+Lo que afirma cada escenario: qué herramienta corresponde, si escala o no, si la cuenta queda
+bloqueada, y que no aparezca ninguna **frase prohibida**. Las frases prohibidas no son una
+lista de estilo: cada una está por un caso real.
+
+| frase | por qué está prohibida |
+|---|---|
+| «he informado tu caso al equipo» | lo decía ante una cuenta vencida — y no avisaba a nadie |
+| «no puedo probar el asistente» | era un defecto de la regla de vigencia |
+| `[image]`, `[sticker]`… | marca de depuración que llegó al producto |
+| «no puedo ayudarte con eso» | deja al dueño sin salida; si falta permiso, se pide autorización |
+| «tuve un problema» | sin el dato concreto no se puede hacer nada con eso |
+
+**Lo que el arnés NO hace, a propósito:** no manda los escenarios al modelo real en cada PR.
+Sería caro, lento y no determinista — fallaría en días distintos sin que nadie toque una
+línea, y un test que falla al azar se termina ignorando. Lo que prueba son **las reglas con
+las que el modelo tiene que jugar**, que son decisiones nuestras y están en código.
+
+**Métrica para mirar si Convi mejora:** `tasaDeEscalamiento()` sobre los escenarios. Hoy, de
+los que intentan escalar, solo lo hacen los de la lista cerrada. Si alguien afloja la lista,
+el número sube y el test se cae.
