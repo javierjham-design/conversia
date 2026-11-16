@@ -161,14 +161,48 @@ export function brandFromOrigin(origin: string | undefined): string {
   // y asistente equivocados). Ahora: mismo dominio base (sin app./www.) → conversia.
   // Cualquier otro origen (tubot.cl incluido) sigue cayendo a tubot, como siempre.
   if (origin && env.WEB_URL_CONVERSIA) {
-    const baseHost = (u: string): string | null => {
-      try { return new URL(u.trim().toLowerCase()).hostname.replace(/^(app|www)\./, ""); } catch { return null; }
-    };
-    const o = baseHost(origin);
-    const c = baseHost(env.WEB_URL_CONVERSIA);
+    const o = baseHostOf(origin);
+    const c = baseHostOf(env.WEB_URL_CONVERSIA);
     if (o && c && o === c) return "conversia";
   }
   return "tubot";
+}
+
+/**
+ * DOMINIO BASE de una URL: su hostname sin `app.` ni `www.` — el dueño de la familia de
+ * dominios de una marca (`https://app.conversia.cl` → `conversia.cl`). Devuelve `null` si la
+ * URL no se puede leer, para que quien llame decida qué hacer en vez de inventar un dominio.
+ */
+export function baseHostOf(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url.trim().toLowerCase()).hostname.replace(/^(app|www)\./, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ORÍGENES LEGÍTIMOS de una URL de panel: la literal, más el apex y el `www` del mismo
+ * dominio (hallazgo prod 17-oct-2026: la landing vive en el apex y en www además de en app.).
+ *
+ * Existe UNA sola definición a propósito. La usan el CORS de la api (`main.ts`) y la
+ * verificación de passkeys: si fueran dos listas separadas, el día que alguien agregue un
+ * host a una, la otra empezaría a fallar **en silencio** — y en el caso de los passkeys el
+ * síntoma sería «el Face ID dejó de funcionar», sin un solo error que lo explique.
+ */
+export function allowedOriginsOf(url: string | null | undefined): string[] {
+  if (!url) return [];
+  const origins = new Set<string>([url.replace(/\/+$/, "")]);
+  try {
+    const parsed = new URL(url);
+    const apex = parsed.hostname.replace(/^(app|www)\./, "");
+    origins.add(`${parsed.protocol}//${apex}`);
+    origins.add(`${parsed.protocol}//www.${apex}`);
+  } catch {
+    /* URL inválida: queda solo la literal, como antes */
+  }
+  return [...origins];
 }
 
 /**
