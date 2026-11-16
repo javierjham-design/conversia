@@ -385,9 +385,54 @@ model User {
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")
   memberships  OrganizationUser[]
+  passkeys     WebauthnCredential[]
 
   @@unique([email, brand])
   @@map("users")
+}
+
+/// PASSKEY (WebAuthn): la llave PÚBLICA de UN aparato con el que un usuario entra usando
+/// Face ID, huella o Windows Hello. La llave privada nunca sale del chip seguro del equipo y
+/// la biometría solo sirve para destrabarla — acá no se guarda ningún dato biométrico.
+///
+/// NO lleva `organization_id`, y es a propósito por DOS razones: (1) la credencial es del
+/// USUARIO, que puede operar varias organizaciones (multi-org), y (2) `sql/setup.sql` pone
+/// RLS sobre TODA tabla que tenga esa columna. Una tabla que hay que consultar ANTES de saber
+/// en qué organización entra la persona no puede vivir detrás de un RLS por organización.
+model WebauthnCredential {
+  id String @id @default(cuid())
+  userId String @map("user_id")
+  /// `id` de la credencial en base64url, tal como lo entrega el autenticador. ÚNICO a nivel
+  /// global: la misma credencial no puede quedar inscrita dos veces, ni en dos cuentas.
+  credentialId String @unique @map("credential_id")
+  /// Llave pública en base64url (texto). Se guarda como texto y no como BYTEA para no
+  /// estrenar un tipo nuevo en este esquema; la librería la convierte en ambos sentidos.
+  publicKey String @map("public_key")
+  /// RP ID con el que se inscribió: el dominio dueño de la llave. Una credencial de
+  /// `tubot.cl` NO sirve en `conversia.cl`, así que las credenciales se filtran por acá.
+  rpId String @map("rp_id")
+  /// Contador anti-clonación del autenticador. Los de plataforma (Face ID, Hello) reportan
+  /// 0 siempre y el estándar dice ignorarlo: **0 es legítimo y no se rechaza por eso**.
+  /// `Int` y no `BigInt` porque el rango real es minúsculo (una llave física tendría que
+  /// usarse 2.000 millones de veces para desbordarlo) y este esquema no usa `BigInt`.
+  counter Int @default(0)
+  /// Cómo habla el autenticador ("internal", "hybrid"…). Json y no String[] para seguir el
+  /// precedente de `mfaRecoveryCodes` y no estrenar arreglos de Postgres.
+  transports Json @default("[]")
+  /// "singleDevice" | "multiDevice": una credencial sincronizada (iCloud / Google) es
+  /// multiDevice y se recupera en un teléfono nuevo; una de un solo aparato se pierde con él.
+  deviceType String? @map("device_type")
+  backedUp Boolean @default(false) @map("backed_up")
+  /// Lo que la persona ve en «Aparatos con acceso». Lo propone el panel y se puede editar.
+  label String
+  createdAt DateTime @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Las dos consultas que existen: "las credenciales de este usuario en esta marca" (para
+  /// ofrecerlas al entrar y para la pantalla de aparatos).
+  @@index([userId, rpId])
+  @@map("webauthn_credentials")
 }
 
 // --------------------------- Tenant core ---------------------------

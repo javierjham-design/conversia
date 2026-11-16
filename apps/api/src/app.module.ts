@@ -6,6 +6,7 @@ import { AgentsController } from "./agents/agents.controller";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
 import { RefreshSessionService } from "./auth/refresh-session.service";
+import { PasskeysService } from "./auth/passkeys.service";
 import { ChannelsController } from "./channels/channels.controller";
 import { ChannelStatusService } from "./channels/channel-status.service";
 import { AssistantThreadsService } from "./assistant/assistant-threads.service";
@@ -110,7 +111,7 @@ import { WorkflowsController } from "./workflows/workflows.controller";
     AgendaController,
     McpController, // MCP remoto (HTTP) para conectar Claude por URL — self-auth por token
   ],
-  providers: [PrismaService, OAuthTokenService, GoogleBusyService, ChannelStatusService, AssistantThreadsService, AuthService, RefreshSessionService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
+  providers: [PrismaService, OAuthTokenService, GoogleBusyService, ChannelStatusService, AssistantThreadsService, AuthService, RefreshSessionService, PasskeysService, QueueService, RateLimitService, TenancyMiddleware, RateLimitMiddleware, PlatformSessionService, PlatformGuard, PaymentSettingsService, RealtimeService, VerticalService, AssistantService, { provide: APP_GUARD, useClass: BillingSuspensionGuard }, { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

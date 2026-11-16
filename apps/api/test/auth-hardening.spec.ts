@@ -457,7 +457,24 @@ describe("§3.2 — el super admin impersonando no se apropia de la cuenta", () 
     admin: { user: { findUnique: async () => null, update: async () => null } },
     withTenant: (_o: string, fn: any) => fn({ auditLog: { create: async () => null } }),
   };
-  const controller = () => new AuthController({} as any, prisma, {} as any);
+  // El 4.º argumento es PasskeysService. Es un doble que EXPLOTA si lo llaman: estas pruebas
+  // comprueban que la impersonación se corta ANTES de tocar el servicio, así que si alguna
+  // llegara a invocarlo, el test tiene que caer en vez de pasar por casualidad.
+  const passkeys: any = {
+    opcionesDeRegistro: async () => {
+      throw new Error("no debería llegar acá: la impersonación tenía que cortar antes");
+    },
+    confirmarRegistro: async () => {
+      throw new Error("no debería llegar acá: la impersonación tenía que cortar antes");
+    },
+    quitar: async () => {
+      throw new Error("no debería llegar acá: la impersonación tenía que cortar antes");
+    },
+    renombrar: async () => {
+      throw new Error("no debería llegar acá: la impersonación tenía que cortar antes");
+    },
+  };
+  const controller = () => new AuthController({} as any, prisma, {} as any, passkeys);
   const impersonado: RequestContext = {
     userId: "u1",
     organizationId: "o1",
@@ -494,6 +511,19 @@ describe("§3.2 — el super admin impersonando no se apropia de la cuenta", () 
     await expect(c.mfaSetup(r, {})).rejects.toBeInstanceOf(ForbiddenException);
     await expect(c.mfaDisable(r, { code: "123456" })).rejects.toBeInstanceOf(ForbiddenException);
     await expect(c.mfaEnable(r, { code: "123456" })).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("no puede sumar ni quitar un aparato con Face ID / huella (passkeys)", async () => {
+    // Es la misma clase de abuso que el 2.º factor, y las dos direcciones importan:
+    // INSCRIBIR su propio aparato le daría al impersonador una llave permanente de la cuenta
+    // del cliente, y QUITAR el del cliente lo dejaría afuera de su propia cuenta.
+    const c = controller();
+    const bearer = signAppToken({ sub: "u1", orgId: "o1", role: "owner", perms: ["*"] }, { extra: { imp: "sa_1" } });
+    const r = req({ headers: { authorization: `Bearer ${bearer}` } });
+    await expect(c.passkeysOptions(r)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(c.passkeysRegistrar(r, { response: { id: "abc" } })).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(c.passkeysQuitar(r, "cred_1")).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(c.passkeysRenombrar(r, "cred_1", { label: "Mi teléfono" })).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it("con una sesión NORMAL esas mismas rutas no se bloquean por este motivo", async () => {
