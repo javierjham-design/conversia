@@ -45,6 +45,40 @@ export function mapClarivaEvent(
   }
 }
 
+/** Margen para tolerar el marcado de asistencia justo al inicio de la cita / desfase de reloj:
+ *  solo se protege una cita que esté AL MENOS esto en el futuro. */
+export const FUTURE_TERMINAL_GRACE_MS = 2 * 60 * 60 * 1000; // 2 h
+
+/**
+ * Guard de estado: una cita AÚN futura no puede estar "atendida"/"no asistió" — es imposible
+ * haber asistido (o faltado) a algo que todavía no ocurre. Cláriva puede emitir un
+ * `appointment.attendance` (o un `appointment.updated` que mueve la cita al futuro) que dejaría la
+ * proyección local en un estado terminal-pasado (COMPLETED/NO_SHOW) con `startsAt` en el futuro.
+ * Esa cita "fantasma-completada" se cae de TODAS las vistas de citas activas (el recordatorio la
+ * recuerda igual, pero `listContactAppointments` y el fast-path de confirmación filtran
+ * CANCELLED/COMPLETED) → el paciente recibe "confirma tu hora" y al confirmar el bot responde
+ * "no encuentro una cita a tu nombre" (caso Marcia Aninat, 16-nov-2026).
+ *
+ * Si el estado entrante es COMPLETED/NO_SHOW pero la cita es CLARAMENTE futura, NO se aplica
+ * (`status: null` = no cambiar el estado; se mantiene activa) y se marca `anomaly` para dejar
+ * rastro. Cuando la cita realmente pase, un `appointment.attendance` posterior sí la cerrará.
+ * Puro y determinista.
+ */
+export function guardFutureTerminalStatus(
+  status: string | null,
+  startsAt: Date | null,
+  now: Date,
+): { status: string | null; anomaly: boolean } {
+  if (
+    (status === "COMPLETED" || status === "NO_SHOW") &&
+    startsAt &&
+    startsAt.getTime() > now.getTime() + FUTURE_TERMINAL_GRACE_MS
+  ) {
+    return { status: null, anomaly: true };
+  }
+  return { status, anomaly: false };
+}
+
 export async function processClarivaWebhook(
   organizationId: string,
   data: ClarivaWebhookData,
@@ -52,6 +86,7 @@ export async function processClarivaWebhook(
 ): Promise<void> {
   const { event, payload } = data;
   const mapped = mapClarivaEvent(event, payload);
+  const now = new Date();
 
   const result = await withTenant(organizationId, async (tx) => {
     await tx.integrationEvent.create({
@@ -157,12 +192,25 @@ export async function processClarivaWebhook(
 
     if (existing) {
       const upd: Record<string, unknown> = {};
+      // Guard: no cerrar (COMPLETED/NO_SHOW) una cita AÚN futura. `startsAt` efectivo = el entrante
+      // (si el evento lo trae) o el ya guardado. Si se descarta el cierre, se deja rastro.
+      const effStart = payload.start ? new Date(payload.start) : existing.startsAt;
+      const guarded = guardFutureTerminalStatus(mapped.status, effStart, now);
+      if (guarded.anomaly) {
+        await tx.integrationEvent.create({
+          data: {
+            organizationId, provider: "clariva", type: "clariva.future_terminal_ignored", status: "warn",
+            message: `Ignorado ${mapped.status} sobre cita FUTURA (${effStart.toISOString()}): se mantiene activa`,
+            payload: { externalId, event, incomingStatus: mapped.status, startsAt: effStart.toISOString() } as object,
+          },
+        });
+      }
       // No DEGRADAR el estado: un appointment.created RE-ENVIADO por Cláriva (sync o reenvío manual
       // "por el bot") trae status PENDING. Si la cita ya está resuelta (CONFIRMED/COMPLETED/CANCELLED/
       // NO_SHOW) — p. ej. el paciente confirmó por WhatsApp — volver a PENDING borraría esa decisión.
       // Por eso solo aplicamos el status entrante si NO es un downgrade a PENDING de un estado resuelto.
       const resolved = new Set(["CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
-      if (mapped.status && !(mapped.status === "PENDING" && resolved.has(String(existing.status)))) upd.status = mapped.status;
+      if (guarded.status && !(guarded.status === "PENDING" && resolved.has(String(existing.status)))) upd.status = guarded.status;
       if (payload.start) upd.startsAt = new Date(payload.start);
       if (payload.end) upd.endsAt = new Date(payload.end);
       if (payload.notes !== undefined) upd.notes = payload.notes ?? null;
@@ -178,6 +226,19 @@ export async function processClarivaWebhook(
 
     // Cita nueva (o desconocida): necesita horario y un contacto (por teléfono).
     if (!payload.start || !payload.end) return null;
+    // Mismo guard que arriba: una cita NUEVA que llegara ya "atendida"/"no asistió" pero con hora
+    // futura no se crea en estado terminal (quedaría invisible para el bot). Se crea activa.
+    const newStart = new Date(payload.start);
+    const guardedNew = guardFutureTerminalStatus(mapped.status, newStart, now);
+    if (guardedNew.anomaly) {
+      await tx.integrationEvent.create({
+        data: {
+          organizationId, provider: "clariva", type: "clariva.future_terminal_ignored", status: "warn",
+          message: `Ignorado ${mapped.status} sobre cita FUTURA nueva (${newStart.toISOString()}): se crea activa`,
+          payload: { externalId, event, incomingStatus: mapped.status, startsAt: newStart.toISOString() } as object,
+        },
+      });
+    }
     const phone = geoFromPhone(String(payload.patient?.phone ?? "")).phone;
     if (!phone) return null;
     let contact = await tx.contact.findFirst({ where: { organizationId, phone, deletedAt: null } });
@@ -201,8 +262,8 @@ export async function processClarivaWebhook(
         contactId: contact.id,
         provider: "CLARIVA",
         externalId,
-        status: (mapped.status ?? "PENDING") as any,
-        startsAt: new Date(payload.start),
+        status: (guardedNew.status ?? "PENDING") as any,
+        startsAt: newStart,
         endsAt: new Date(payload.end),
         notes: payload.notes ?? null,
         meta: apptMeta as object,

@@ -77,3 +77,17 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
 
 ## Criterios de aceptación del MVP (sección 45 del brief)
 Cumplidos por diseño/seed: 1,2,3,4(mock),5,6,7,8,9,10,11,12,17(textual),21,23,24,29(mock vs clariva),30. Pendientes de infraestructura levantada y verificación: el resto (requieren BD corriendo y panel ampliado).
+
+## Fuera de la tanda D del chat (multimedia) — pendientes
+
+Lo que quedó explícitamente fuera de alcance, anotado para no perderlo:
+
+- **Enviar notas de voz desde el panel.** Hoy el panel sube imagen y documento
+  (`POST /conversations/:id/attachments`); grabar y mandar audio no existe. Es lo que más se
+  pide después de poder escucharlos.
+- **Enviar video desde el panel.** Mismo endpoint, falta el tipo y el límite de 16 MB.
+- **Stickers salientes.** Requiere un catálogo propio o subir webp a Meta.
+- **Búsqueda de medios por conversación** («mostrame todas las fotos de este paciente»). Con
+  `message_attachments` escribiéndose desde D4, los datos ya están: falta la pantalla.
+- **Transcripción y visión para Instagram/Messenger.** Hoy el agente sabe que llegó un adjunto
+  y pide el detalle por escrito; no lo ve ni lo escucha.
