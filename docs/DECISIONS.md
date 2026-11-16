@@ -160,3 +160,67 @@ para que un viaje a Meta que empezó antes del cambio no quede colgado a mitad d
 
 **Los permisos exigidos dependen del propósito**: pedirle `leads_retrieval` a quien solo
 quiere contestar sus DM lo dejaba afuera por un permiso que no necesita.
+
+## ADR-17 — Los medios de un mensaje se DERIVAN en la API, no se guardan
+
+**Contexto.** El `payload` de un mensaje es el JSON crudo del webhook. Saber dónde está la foto
+exige conocer que una imagen entrante vive en `payload.image.id`, una saliente en
+`payload.mediaId`, un sticker en `payload.sticker.id` y una nota de voz en `audio.id` **o** en
+`voice.id`. Esa lógica estaba copiada dentro de los tres endpoints de media y faltaba entera en
+la bandeja de Conversia, que por eso mostraba «[imagen]».
+
+**Decisión.** `GET /conversations/:id/messages` agrega a cada mensaje un objeto `media`
+**calculado** a partir de `type` + `payload`, con esquema zod `MessageMedia` en
+`@conversia/types`. El `payload` crudo se sigue devolviendo intacto.
+
+**Por qué derivado y no una columna.** Una columna exigiría migración, backfill de todo el
+histórico y un camino nuevo que mantener sincronizado con el crudo; el día que se
+desincronicen, la columna miente y el crudo tiene razón. Derivarlo es gratis: el crudo sigue
+siendo la única fuente de verdad y el cálculo se arregla con un deploy, sin tocar datos.
+
+**Costo.** Se recalcula en cada lectura del hilo. Es aritmética sobre un JSON que ya está en
+memoria: irrelevante al lado de la consulta que lo trajo.
+
+**Consecuencia.** Los dos paneles tipan contra el mismo esquema. Como ninguna de las dos apps
+Next depende de paquetes del monorepo, cada una lleva un **espejo** del tipo, con un test en la
+suite de la API que compara los campos y falla si alguien agrega uno de un solo lado.
+
+## ADR-18 — Los medios se guardan AL PRIMER USO, no al ingresar
+
+**Contexto.** Meta conserva los medios **30 días**. Pasado ese plazo, cada vista que los baja
+en el momento queda con archivos rotos: el dueño abre la foto que le mandó un paciente hace dos
+meses y no hay nada.
+
+**Decisión.** Cuando un endpoint de media baja un archivo de Meta y hay bucket configurado, lo
+sube y lo registra (`File` + `MessageAttachment`). Las siguientes peticiones se sirven del
+bucket. **Excepción:** el worker guarda al ingreso los audios que transcribe, porque esos bytes
+ya están en memoria para Whisper.
+
+**Por qué no guardar todo al ingresar.** En una cuenta con tráfico la mayoría de las fotos no
+las abre nadie. Guardarlas todas es pagar almacenamiento por archivos que nadie va a ver. Al
+primer uso, se paga exactamente por lo que alguien miró.
+
+**Por qué la excepción.** Si el worker ya descargó el audio para transcribirlo, esperar al
+primer uso significa pedirle el archivo a Meta **otra vez entero**. La regla no es «al primer
+uso» por sí misma: es «no bajar dos veces lo mismo».
+
+**Sin bucket configurado nada de esto ocurre** y el comportamiento es idéntico al anterior. Es
+una mejora, no un requisito para operar.
+
+## ADR-19 — Retención de medios: se borra el objeto y se MARCA la fila
+
+**Contexto.** Guardar los medios resuelve que Meta los borre, pero crea el problema opuesto:
+guardarlos para siempre es una cuenta que sube sola y nunca baja.
+
+**Decisión.** Un barrido diario borra del bucket los medios de mensajes con más de
+`MEDIA_RETENTION_DAYS` (365 por defecto) y marca `File.deletedAt`. **La fila se conserva.**
+
+**Por qué conservar la fila.** El mensaje sigue existiendo en el chat. Si la fila desapareciera,
+el panel no tendría forma de distinguir «este archivo venció» de «este mensaje nunca tuvo
+archivo», y mostraría un hueco sin explicación. Con la marca puede decir «este archivo ya no
+está disponible», que es el mismo texto que cuando lo borra Meta — para el dueño es la misma
+situación.
+
+**Orden obligatorio: primero el bucket, después la marca.** Si el borrado del objeto falla, la
+fila queda sin marcar y la próxima pasada reintenta. Al revés quedaría un objeto pagándose para
+siempre sin ninguna fila que lo recuerde.
