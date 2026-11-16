@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ToolRegistry, buildCoreTools } from "./index.js";
+import { ToolRegistry, buildCoreTools, diaDelMesPedido } from "./index.js";
 
 // CASO REAL (Digital-Dent, nov-2026): el paciente pide "lunes 9"; el bot descartaba el número
 // del día (solo miraba "lunes"), abanicaba TODOS los lunes y, si el 9 estaba lleno, ofrecía el
@@ -194,5 +194,76 @@ describe("createAppointment — misma hora en varios días: desambiguar, no deci
     expect(out.needsDayClarification).toBe(true);
     expect(out.slotExpired).toBeUndefined();
     expect(out.ok).toBeUndefined();
+  });
+});
+
+// CASO REAL (Claudio Quintana, Digital-Dent, 16-nov-2026 — un LUNES): pidió "lunes 23 18:15"
+// (el PRÓXIMO lunes) y el bot agendó HOY (lunes 16) 18:15, con OTRO profesional. getSlot resolvió
+// DIRECTO el id de HOY (la lista que ve el modelo trae cupos de días que el paciente no pidió), así
+// que la desambiguación por día —que solo corre cuando getSlot da null— nunca entró. La GUARDA DE
+// DÍA valida el día del slot contra el día que el paciente nombró y NUNCA agenda otro.
+describe("createAppointment — GUARDA DE DÍA: nunca agenda un día que el paciente no pidió (caso Claudio)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function lunes16() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-16T12:00:00-03:00")); // hoy = lunes 16-nov-2026 (Chile)
+  }
+
+  it("'lunes 23 18:15' pero el modelo manda el id de HOY (misma hora) → agenda el 23, NO hoy", async () => {
+    lunes16();
+    // 18:15 Chile (UTC-3 en noviembre) = 21:15 UTC. El MISMO horario HOY (lun 16) y el próximo lunes (23).
+    const sched = makeSched({ "2026-11-16": ["21:15"], "2026-11-23": ["21:15"] });
+    const r = reg();
+    const ctx = makeCtx(sched, "en la tarde");
+    ctx.lastUserText = "en la tarde";
+    await r.execute("getAvailability", { professionalId: "p1", franja: "tarde" }, ctx); // cachea hoy Y el 23
+    ctx.lastUserText = "Lunes 23 18:15";
+    const out = JSON.parse((await r.execute("createAppointment", { slotId: "h1611-1815" }, ctx)).content); // id de HOY
+    expect(out.ok).toBe(true);
+    expect(out.appointment.start).toBe("2026-11-23T21:15:00.000Z"); // el 23, NO hoy (16)
+  });
+
+  it("mismo caso pero el día 23 NO está en el caché → PIDE aclarar, jamás agenda hoy", async () => {
+    lunes16();
+    const sched = makeSched({ "2026-11-16": ["21:15"] }); // solo HOY a esa hora
+    const r = reg();
+    const ctx = makeCtx(sched, "en la tarde");
+    ctx.lastUserText = "en la tarde";
+    await r.execute("getAvailability", { professionalId: "p1", franja: "tarde" }, ctx);
+    ctx.lastUserText = "Lunes 23 18:15";
+    const out = JSON.parse((await r.execute("createAppointment", { slotId: "h1611-1815" }, ctx)).content);
+    expect(out.needsDayClarification).toBe(true);
+    expect(out.ok).toBeUndefined();
+    expect(out.appointment).toBeUndefined();
+  });
+
+  it("si el id YA es del día pedido (23), la guarda no estorba y agenda normal", async () => {
+    lunes16();
+    const sched = makeSched({ "2026-11-16": ["21:15"], "2026-11-23": ["21:15"] });
+    const r = reg();
+    const ctx = makeCtx(sched, "en la tarde");
+    ctx.lastUserText = "en la tarde";
+    await r.execute("getAvailability", { professionalId: "p1", franja: "tarde" }, ctx);
+    ctx.lastUserText = "Lunes 23 18:15";
+    const out = JSON.parse((await r.execute("createAppointment", { slotId: "h2311-1815" }, ctx)).content); // id correcto
+    expect(out.ok).toBe(true);
+    expect(out.appointment.start).toBe("2026-11-23T21:15:00.000Z");
+  });
+});
+
+// Unidad del extractor (lo usa la guarda de día). Fija que distingue un DÍA de una HORA: si confundiera
+// "a las 3" o "18:15" con un día, bloquearía agendamientos legítimos.
+describe("diaDelMesPedido — distingue el día del mes de una hora", () => {
+  it("toma el día cuando el paciente lo nombra", () => {
+    expect(diaDelMesPedido("Lunes 23 18:15")).toEqual({ day: 23, month: null });
+    expect(diaDelMesPedido("me sirve el 9")).toEqual({ day: 9, month: null });
+    expect(diaDelMesPedido("quiero el 23 de diciembre")).toEqual({ day: 23, month: 11 });
+  });
+  it("NO confunde una hora con un día", () => {
+    expect(diaDelMesPedido("a las 3")).toBeNull();
+    expect(diaDelMesPedido("la de las 18:15")).toBeNull();
+    expect(diaDelMesPedido("miércoles 15:15")).toBeNull(); // 15:15 es hora, no el día 15
+    expect(diaDelMesPedido("jueves 9 hrs")).toBeNull();
   });
 });
