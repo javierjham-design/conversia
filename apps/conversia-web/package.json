@@ -12,6 +12,7 @@
     "test:e2e:pwa": "playwright test pwa admin-login aviso-cookies canales-reporte convi-historial chat-medios"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
     "lucide-react": "^1.27.0",
     "next": "^15.1.4",
     "qrcode.react": "^4.2.0",
