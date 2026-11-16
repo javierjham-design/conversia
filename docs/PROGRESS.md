@@ -556,3 +556,35 @@ Tres cosas que vale la pena recordar:
   nadie contesta. Por eso `connect` asigna el agente publicado.
 - **La ventana de 24 h de Meta no es un error**: es como funciona. Un flujo que se cae por eso
   es un defecto nuestro, no de Meta.
+
+## El chat se ve como un chat: audios, fotos y stickers (tanda D, 2026-11-12)
+
+La bandeja de Conversia mostraba SOLO texto. Un audio aparecía como su transcripción, una foto
+como «[imagen]» y un sticker como «[sticker]» — y ese `[sticker]` no era un problema de la
+pantalla: el worker **lo guardaba como `type: TEXT`**, teniendo el enum `STICKER` disponible
+desde siempre.
+
+- **D1 (#643)** — el mapeo de tipos vivía en TRES ternarios (entrante, ecos de coexistencia e
+  Instagram/Messenger) que conocían cuatro tipos y mandaban todo lo demás a TEXT. Pasa a un
+  módulo puro con tests. Los cuerpos quedan en castellano y con ícono («🎤 Nota de voz»,
+  «📍 Clínica Norte — Av. Alemania 01»), sin corchetes. Una **reacción deja de crear un
+  mensaje**: marca el mensaje reaccionado. Antes entraba al historial del agente, que
+  contestaba a un corazón.
+- **D2 (#644)** — el par de llamadas a Meta estaba copiado en tres endpoints; se unifica y se
+  agrega `/video`, que no existía. El audio pasa a llevar `content-length` de verdad y
+  `x-media-duration`. `GET /messages` agrega un objeto `media` **derivado** (ADR-17).
+- **D3 (#645)** — las burbujas, el visor de imágenes propio, los separadores de día, la
+  agrupación y los ticks. La caché de blobs por módulo es lo que impide que el refetch del SSE
+  vuelva a bajar todas las fotos con cada mensaje nuevo.
+- **D4 (#646)** — almacenamiento S3 al primer uso (ADR-18) y retención (ADR-19).
+- **D5 (#647)** — el panel de TuBot suma sticker, video, ubicación y contacto. Aditivo: lo que
+  ya funcionaba no se toca.
+
+Tres cosas que vale la pena recordar:
+- **La CSP bloqueaba los `blob:` de medio.** `media-src` no estaba declarado, así que el
+  navegador caía a `default-src 'self'`: el reproductor se veía, el botón respondía y **no
+  sonaba nada**. Sin error visible, solo una línea en consola que nadie mira.
+- **`test:e2e:pwa` corre una LISTA FILTRADA de specs.** Un spec nuevo no se ejecuta en CI hasta
+  que se lo agrega a esa lista, y mientras tanto da verde sin haber corrido.
+- **Envolver una burbuja en un `<div>` rompe `alignSelf`**: deja de ser hija directa del flex y
+  los mensajes salientes se van a la izquierda. Va en `Fragment`.

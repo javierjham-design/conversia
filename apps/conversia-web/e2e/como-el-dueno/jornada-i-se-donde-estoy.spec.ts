@@ -174,8 +174,13 @@ test.describe("Jornada I — sé en qué menú estoy", () => {
         await expect(page.locator(destino), `${ruta}: el ancla ${destino} no existe`).toHaveCount(1);
       }
     }
-    // Ajustes siempre tiene sus cuatro bloques (no dependen de datos del servidor).
-    await expect(page.locator("nav.indice a")).toHaveCount(4);
+    // Ajustes siempre tiene sus bloques, y ninguno depende de datos del servidor. Se comparan
+    // POR NOMBRE y no por cantidad: un número suelto falla diciendo "esperaba 4 y hay 5" y deja
+    // a quien lo lee adivinando cuál se agregó, cuál se fue, o si solo se renombró uno.
+    expect(
+      await page.locator("nav.indice a").evaluateAll((as) => as.map((a) => a.getAttribute("href") ?? "")),
+      "cambiaron los atajos del índice de /ajustes",
+    ).toEqual(["#negocio", "#apariencia", "#avisos", "#perfil", "#acceso"]);
   });
 
   test("el logo vuelve al inicio y la campana lleva a lo que anuncia", async ({ page, request }) => {

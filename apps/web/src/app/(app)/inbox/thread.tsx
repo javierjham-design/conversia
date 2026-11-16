@@ -12,6 +12,13 @@ import { avatarColor, displayName, initials, type ChannelInfo, type ConvContext,
  * Fuerza a Chromium a calcular la duración real de un OGG/Opus en streaming (las notas
  * de voz de WhatsApp): sin esto reporta duration=Infinity, la barra queda en 0:00 y a
  * veces no arranca. Truco: saltar a un tiempo enorme y volver a 0 al recibir timeupdate.
+ *
+ * D5.b — SE QUEDA, a propósito. D2 ya manda `content-length` y `x-media-duration`, que es la
+ * causa de raíz de este parche, pero el documento pide quitarlo SOLO después de comprobarlo en
+ * staging con un número real, y eso no se hizo. Para retirarlo: abrir una nota de voz en el
+ * panel de TuBot, confirmar en la pestaña de red que la respuesta trae `content-length`, y que
+ * la barra marca la duración sin este truco. Hasta entonces, un parche de más no rompe nada;
+ * quitarlo sin comprobar devolvería la barra en 0:00.
  */
 function fixStreamedDuration(el: HTMLAudioElement) {
   if (el.duration !== Infinity && el.duration > 0) return;
@@ -127,6 +134,114 @@ function DocumentBubble({ conversationId, messageId, filename, caption, outbound
 }
 
 /** Miniatura de imagen del hilo: baja el binario de Meta (vía backend) con token y lo muestra. Clic → visor dentro del chat. */
+/**
+ * D5 — PARIDAD CON CONVERSIA. Sticker, video, ubicación y contacto: los tipos que el panel de
+ * TuBot mostraba como texto entre corchetes porque el worker ni siquiera los tipaba bien
+ * (eso lo arregla D1). Es aditivo: lo que ya funcionaba —audio, imagen, documento— no se toca.
+ *
+ * Estos usan el `media` que deriva la API (D2) cuando está, y caen al `payload` crudo cuando
+ * no, para que un panel nuevo contra una API vieja no se quede en blanco.
+ */
+/**
+ * Espejo mínimo del `media` que deriva la API (contrato en `@conversia/types`). `apps/web`
+ * tampoco depende de paquetes del monorepo: es una app Next independiente, igual que
+ * conversia-web. Solo se declaran los campos que este panel usa.
+ */
+interface MediaDerivado {
+  kind: string | null;
+  caption: string | null;
+  location: { lat: number; lng: number; name: string | null; address: string | null } | null;
+  contacts: Array<{ name: string; phones: string[] }> | null;
+}
+
+function useBlobDeMedio(conversationId: string, messageId: string, tipo: "image" | "video", activo = true) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    if (!activo) return;
+    let alive = true;
+    let objUrl: string | null = null;
+    (async () => {
+      try {
+        const res = await fetch(`/backend/conversations/${conversationId}/messages/${messageId}/${tipo}`, {
+          headers: { authorization: `Bearer ${getToken() ?? ""}` },
+        });
+        if (!res.ok) throw new Error();
+        objUrl = URL.createObjectURL(await res.blob());
+        if (alive) setUrl(objUrl);
+        else URL.revokeObjectURL(objUrl);
+      } catch {
+        if (alive) setErr(true);
+      }
+    })();
+    return () => {
+      alive = false;
+      if (objUrl) URL.revokeObjectURL(objUrl);
+    };
+  }, [conversationId, messageId, tipo, activo]);
+  return { url, err };
+}
+
+/** Sticker: 140 px, SIN burbuja ni borde (son recortes con fondo transparente). */
+function StickerBubble({ conversationId, messageId }: { conversationId: string; messageId: string }) {
+  const { url, err } = useBlobDeMedio(conversationId, messageId, "image");
+  if (err) return <p className="text-2xs opacity-70">Sticker (ya no disponible)</p>;
+  return (
+    <div className="flex h-[140px] w-[140px] items-center justify-center">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {url ? <img src={url} alt="Sticker" className="max-h-full max-w-full object-contain" /> : <span className="text-2xs opacity-60">…</span>}
+    </div>
+  );
+}
+
+/** Video: se descarga al pulsar, no al montar (bajar lo que nadie ve gasta datos). */
+function VideoBubble({ conversationId, messageId, caption }: { conversationId: string; messageId: string; caption: string | null }) {
+  const [pedido, setPedido] = useState(false);
+  const { url, err } = useBlobDeMedio(conversationId, messageId, "video", pedido);
+  if (err) return <p className="text-2xs opacity-70">🎬 Video (ya no disponible)</p>;
+  return (
+    <div>
+      {url ? (
+        <video src={url} controls preload="metadata" playsInline className="mb-1 max-h-80 w-auto max-w-full rounded-card bg-black" />
+      ) : (
+        <button onClick={() => setPedido(true)} className="mb-1 h-28 w-56 rounded-card border border-line text-sm">
+          {pedido ? "Cargando video…" : "▶ Ver video"}
+        </button>
+      )}
+      {caption ? <p className="whitespace-pre-wrap">{caption}</p> : null}
+    </div>
+  );
+}
+
+/** Ubicación: sin mapa embebido (una imagen estática de Google cuesta por carga y clave). */
+function LocationBubble({ lat, lng, nombre, direccion }: { lat: number; lng: number; nombre: string | null; direccion: string | null }) {
+  return (
+    <div>
+      <p className="text-sm">📍 {nombre ?? "Ubicación compartida"}</p>
+      {direccion ? <p className="text-2xs opacity-80">{direccion}</p> : null}
+      <a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noopener noreferrer" className="text-2xs underline">
+        Abrir en Google Maps
+      </a>
+    </div>
+  );
+}
+
+/** Contacto compartido. */
+function ContactsBubble({ contactos }: { contactos: Array<{ name: string; phones: string[] }> }) {
+  return (
+    <div className="space-y-1">
+      {contactos.map((c, i) => (
+        <div key={i}>
+          <p className="text-sm">👤 {c.name}</p>
+          {c.phones.map((t) => (
+            <p key={t} className="text-2xs opacity-80">{t}</p>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ImageBubble({ conversationId, messageId, caption, outbound, onLoaded }: { conversationId: string; messageId: string; caption: string | null; outbound: boolean; onLoaded?: () => void }) {
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState(false);
@@ -694,6 +809,9 @@ export function Thread({
             }
             const outbound = m.direction === "OUTBOUND";
             const payload = (m.payload ?? {}) as Record<string, any>;
+            // D5 — el `media` que deriva la API (D2). Se usa cuando está y se cae al payload
+            // crudo cuando no: un panel nuevo contra una API vieja no puede quedarse en blanco.
+            const media = (m as { media?: MediaDerivado | null }).media ?? null;
             const failed = m.status === "FAILED";
             return (
               <div key={m.id}>
@@ -735,6 +853,23 @@ export function Thread({
                         caption={payload.document?.caption ?? (m.body && !/^\[.*\]$/.test(m.body) ? m.body : null)}
                         outbound={outbound}
                       />
+                    ) : m.type === "STICKER" ? (
+                      <StickerBubble conversationId={conversation.id} messageId={m.id} />
+                    ) : m.type === "VIDEO" ? (
+                      <VideoBubble
+                        conversationId={conversation.id}
+                        messageId={m.id}
+                        caption={media?.caption ?? payload.video?.caption ?? null}
+                      />
+                    ) : m.type === "LOCATION" && (media?.location || payload.location) ? (
+                      <LocationBubble
+                        lat={media?.location?.lat ?? Number(payload.location?.latitude)}
+                        lng={media?.location?.lng ?? Number(payload.location?.longitude)}
+                        nombre={media?.location?.name ?? payload.location?.name ?? null}
+                        direccion={media?.location?.address ?? payload.location?.address ?? null}
+                      />
+                    ) : m.type === "CONTACTS" && media?.contacts?.length ? (
+                      <ContactsBubble contactos={media.contacts} />
                     ) : m.type === "TEMPLATE" ? (
                       <div>
                         <p className="mb-0.5 text-2xs opacity-70">📄 Plantilla {payload.templateName ?? ""}</p>
