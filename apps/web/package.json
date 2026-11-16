@@ -11,6 +11,7 @@
     "test:e2e": "node e2e/robustness/probe.mjs"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
     "@xyflow/react": "^12.11.2",
     "exceljs": "^4.4.0",
     "jspdf": "^4.2.1",
