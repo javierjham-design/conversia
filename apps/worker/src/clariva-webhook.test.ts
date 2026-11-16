@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapClarivaEvent } from "./clariva-webhook";
+import { FUTURE_TERMINAL_GRACE_MS, guardFutureTerminalStatus, mapClarivaEvent } from "./clariva-webhook";
 
 describe("mapClarivaEvent", () => {
   it("appointment.created → PENDING + trigger appointment_created", () => {
@@ -66,5 +66,54 @@ describe("mapClarivaEvent", () => {
       publicEvent: null,
       trigger: "treatment_pending",
     });
+  });
+});
+
+describe("guardFutureTerminalStatus", () => {
+  const now = new Date("2026-11-16T12:00:00Z");
+  const future = (ms: number) => new Date(now.getTime() + ms);
+
+  it("ignora COMPLETED sobre una cita claramente futura (no se puede haber asistido aún)", () => {
+    // Caso Marcia: asistencia 16-nov sobre cita del 17-nov.
+    expect(guardFutureTerminalStatus("COMPLETED", future(24 * 60 * 60 * 1000), now)).toEqual({
+      status: null,
+      anomaly: true,
+    });
+  });
+
+  it("ignora NO_SHOW sobre una cita claramente futura", () => {
+    expect(guardFutureTerminalStatus("NO_SHOW", future(5 * 24 * 60 * 60 * 1000), now)).toEqual({
+      status: null,
+      anomaly: true,
+    });
+  });
+
+  it("SÍ aplica COMPLETED en una cita pasada (lo normal)", () => {
+    expect(guardFutureTerminalStatus("COMPLETED", future(-60 * 60 * 1000), now)).toEqual({
+      status: "COMPLETED",
+      anomaly: false,
+    });
+  });
+
+  it("SÍ aplica COMPLETED dentro del margen (marcado al inicio de la cita / desfase de reloj)", () => {
+    expect(guardFutureTerminalStatus("COMPLETED", future(FUTURE_TERMINAL_GRACE_MS - 1), now)).toEqual({
+      status: "COMPLETED",
+      anomaly: false,
+    });
+  });
+
+  it("no toca estados NO terminales aunque la cita sea futura (CONFIRMED/PENDING/RESCHEDULED pasan)", () => {
+    expect(guardFutureTerminalStatus("CONFIRMED", future(24 * 60 * 60 * 1000), now)).toEqual({
+      status: "CONFIRMED",
+      anomaly: false,
+    });
+    expect(guardFutureTerminalStatus(null, future(24 * 60 * 60 * 1000), now)).toEqual({
+      status: null,
+      anomaly: false,
+    });
+  });
+
+  it("sin startsAt no rompe: devuelve el estado tal cual", () => {
+    expect(guardFutureTerminalStatus("COMPLETED", null, now)).toEqual({ status: "COMPLETED", anomaly: false });
   });
 });
