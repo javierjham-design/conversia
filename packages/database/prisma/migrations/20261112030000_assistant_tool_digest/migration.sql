@@ -1,0 +1,11 @@
+-- E1.f — MEMORIA DE HERRAMIENTAS DE CONVI.
+--
+-- El historial guardaba solo lo que se dijo: `role` + `content`. Lo que Convi CONSULTÓ para
+-- decirlo se perdía. Resultado: al retomar una conversación volvía a preguntar lo mismo, o
+-- repetía un diagnóstico que ya había hecho dos mensajes antes, porque para el modelo esa
+-- información nunca existió.
+--
+-- `tool_digest` guarda un resumen compacto de lo que devolvieron las tools de ese turno
+-- (nombre + resultado recortado). NO es el resultado completo: es la pista para que el modelo
+-- sepa qué ya miró. Aditiva y opcional: los turnos viejos quedan en NULL y nada cambia.
+ALTER TABLE "assistant_messages" ADD COLUMN IF NOT EXISTS "tool_digest" TEXT;

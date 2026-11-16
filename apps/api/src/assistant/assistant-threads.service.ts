@@ -21,6 +21,20 @@ import { configEfectiva, readAssistantConfig, resolveAssistantModel } from "./as
 export const MENSAJES_EN_EL_PROMPT = 20;
 /** A partir de cuántos mensajes se resume lo viejo (y deja de viajar entero). */
 export const UMBRAL_DE_RESUMEN = 40;
+
+/** Tope del resumen de herramientas por turno. Es una PISTA, no el resultado entero. */
+export const LARGO_TOOL_DIGEST = 300;
+
+/** Salto de línea, aparte para que las instrucciones del resumen se lean en el código. */
+const SALTO = String.fromCharCode(10);
+
+/** El turno se respondió pero NO se pudo guardar. El widget lo dice y ofrece reintentar. */
+export class ErrorAlGuardarTurno extends Error {
+  constructor(detalle: string) {
+    super(detalle);
+    this.name = "ErrorAlGuardarTurno";
+  }
+}
 /** Página del historial. */
 export const MENSAJES_POR_PAGINA = 50;
 
@@ -71,11 +85,20 @@ export class AssistantThreadsService {
   /** Los últimos mensajes del hilo, en orden cronológico, listos para el prompt. */
   async historialParaElPrompt(organizationId: string, threadId: string, limite = MENSAJES_EN_EL_PROMPT): Promise<AIChatMessage[]> {
     const filas = await this.prisma.withTenant(organizationId, (tx) =>
-      tx.assistantMessage.findMany({ where: { threadId }, orderBy: { createdAt: "desc" }, take: limite, select: { role: true, content: true } }),
+      tx.assistantMessage.findMany({
+        where: { threadId },
+        orderBy: { createdAt: "desc" },
+        take: limite,
+        select: { role: true, content: true, toolDigest: true },
+      }),
     );
-    return filas
-      .reverse()
-      .map((m) => ({ role: m.role === "assistant" ? ("assistant" as const) : ("user" as const), content: m.content }));
+    return filas.reverse().map((m) => ({
+      role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      // E1.f — lo CONSULTADO va pegado al turno, entre paréntesis. Sin esto el modelo no sabe
+      // que ya miró el estado de la cuenta hace dos mensajes y lo vuelve a preguntar.
+      content: m.toolDigest ? `${m.content}
+(consulté ${m.toolDigest})` : m.content,
+    }));
   }
 
   /**
@@ -93,7 +116,15 @@ export class AssistantThreadsService {
     actions?: AssistantAction[];
     /** SOLO metadatos: tipo y nombre. El archivo no se guarda. */
     adjuntos?: Array<{ tipo: string; nombre?: string }>;
-  }): Promise<void> {
+    /** E1.f — qué consultó Convi en este turno, resumido. */
+    toolDigest?: string | null;
+    /**
+     * E1.e — DEVUELVE si pudo guardar en vez de tragárselo. Sigue sin lanzar NUNCA: la
+     * promesa de que un fallo de base no le cueste la respuesta al dueño es literal. Lo que
+     * cambia es que el widget se entera y puede decirlo, en vez de que el turno desaparezca
+     * en silencio y el dueño lo descubra al reabrir.
+     */
+  }): Promise<{ guardado: boolean }> {
     try {
       await this.prisma.withTenant(input.organizationId, async (tx) => {
         const hilo = await tx.assistantThread.findUnique({ where: { id: input.threadId }, select: { title: true } });
@@ -114,6 +145,7 @@ export class AssistantThreadsService {
             role: "assistant",
             content: input.reply,
             actions: input.actions?.length ? (input.actions as unknown as object) : undefined,
+            toolDigest: input.toolDigest?.trim() ? input.toolDigest.trim().slice(0, LARGO_TOOL_DIGEST) : undefined,
           },
         });
         await tx.assistantThread.update({
@@ -126,8 +158,14 @@ export class AssistantThreadsService {
         });
       });
     } catch (e) {
-      console.error(`✖ Convi: no se pudo guardar el turno (${(e as Error).message?.slice(0, 120)})`);
+      // E1.e — se registra con org y usuario para poder perseguirlo, NUNCA con el contenido
+      // del mensaje: el hilo de Convi tiene datos del negocio y no van a los logs.
+      console.error(
+        `✖ Convi: no se pudo guardar el turno — org=${input.organizationId} hilo=${input.threadId} (${(e as Error).message?.slice(0, 120)})`,
+      );
+      return { guardado: false };
     }
+    return { guardado: true };
   }
 
   /**
@@ -149,7 +187,7 @@ export class AssistantThreadsService {
           where: { threadId },
           orderBy: { createdAt: "asc" },
           take: total - MENSAJES_EN_EL_PROMPT,
-          select: { role: true, content: true },
+          select: { role: true, content: true, toolDigest: true },
         });
         return { resumenPrevio: hilo?.summary ?? null, viejos };
       });
@@ -166,7 +204,15 @@ export class AssistantThreadsService {
       const resp = await ai.chat({
         model: modelo,
         system:
-          "Resume en español de Chile, en 6 líneas como máximo, lo que el dueño de un negocio y su copiloto acordaron o dejaron pendiente. Guarda DATOS concretos (nombres, precios, horarios, decisiones) y descarta la charla. No inventes nada que no esté.",
+          // E1.f — el resumen se pide ESTRUCTURADO. Un resumen en prosa se lee lindo y no
+          // sirve para retomar: lo que hace falta al reabrir es saber qué quedó decidido y
+          // qué quedó a medias, para poder decir "quedamos en el pago del plan, ¿seguimos?".
+          "Resume en español de Chile lo que el dueño de un negocio y su copiloto hablaron. " +
+          "Responde EXACTAMENTE con estas tres secciones y nada más:" + SALTO +
+          "CONTEXTO: 3 líneas como máximo con los datos concretos (nombres, precios, horarios)." + SALTO +
+          "DECISIONES: lo que quedó resuelto, una por línea. Si no hay, escribe «ninguna»." + SALTO +
+          "PENDIENTES: lo que quedó a medias o para después, una por línea, empezando por el verbo. Si no hay, escribe «ninguno»." + SALTO +
+          "No inventes nada que no esté en la conversación.",
         messages: [
           { role: "user", content: `${datos.resumenPrevio ? `Resumen anterior:\n${datos.resumenPrevio}\n\n` : ""}Conversación:\n${transcripcion}` },
         ],
@@ -183,11 +229,21 @@ export class AssistantThreadsService {
   }
 
   /** Los hilos del usuario. Un administrador ve los de toda su organización. */
-  async listar(organizationId: string, userId: string, opts: { esAdmin: boolean; limite?: number; antesDe?: Date }): Promise<{ hilos: HiloResumen[]; siguiente: string | null }> {
+  /**
+   * Los hilos. Un administrador ve los de toda la organización, EXCEPTO cuando pide `mine`.
+   *
+   * El widget pide `mine` siempre: antes tomaba «el primer hilo abierto» de la lista y, para
+   * un dueño, ese hilo podía ser de OTRO usuario. Después `hiloParaEscribir` respondía 404 —
+   * correctamente, un hilo ajeno no se escribe— y el widget mostraba «El asistente no está
+   * disponible en esta cuenta». La vista de toda la organización queda para la página de
+   * historial, que es donde tiene sentido.
+   */
+  async listar(organizationId: string, userId: string, opts: { esAdmin: boolean; soloMios?: boolean; limite?: number; antesDe?: Date }): Promise<{ hilos: HiloResumen[]; siguiente: string | null }> {
     const limite = Math.min(Math.max(opts.limite ?? 20, 1), 50);
+    const verTodos = opts.esAdmin && !opts.soloMios;
     return this.prisma.withTenant(organizationId, async (tx) => {
       const hilos = await tx.assistantThread.findMany({
-        where: { ...(opts.esAdmin ? {} : { userId }), ...(opts.antesDe ? { lastMessageAt: { lt: opts.antesDe } } : {}) },
+        where: { ...(verTodos ? {} : { userId }), ...(opts.antesDe ? { lastMessageAt: { lt: opts.antesDe } } : {}) },
         orderBy: { lastMessageAt: "desc" },
         take: limite + 1,
         select: { id: true, title: true, status: true, lastMessageAt: true, createdAt: true, userId: true },
@@ -195,7 +251,7 @@ export class AssistantThreadsService {
       const pagina = hilos.slice(0, limite);
       // Primera línea de cada hilo y, si quien mira es administrador, de quién es.
       const nombres = new Map<string, string | null>();
-      if (opts.esAdmin && pagina.length) {
+      if (verTodos && pagina.length) {
         const ids = [...new Set(pagina.map((h) => h.userId))];
         const usuarios = await this.prisma.admin.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }).catch(() => []);
         for (const u of usuarios) nombres.set(u.id, u.name ?? null);
@@ -213,31 +269,53 @@ export class AssistantThreadsService {
           lastMessageAt: h.lastMessageAt,
           createdAt: h.createdAt,
           preview: previews.get(h.id) ?? null,
-          ...(opts.esAdmin ? { userName: nombres.get(h.userId) ?? null } : {}),
+          // `userId` siempre: el widget necesita saber cuál hilo es SUYO.
+          userId: h.userId,
+          ...(verTodos ? { userName: nombres.get(h.userId) ?? null } : {}),
         })),
         siguiente: hilos.length > limite ? pagina[pagina.length - 1].lastMessageAt.toISOString() : null,
       };
     });
   }
 
-  /** Los mensajes de un hilo, cronológicos y paginados por cursor. */
-  async mensajes(organizationId: string, userId: string, threadId: string, opts: { esAdmin: boolean; cursor?: Date }) {
+  /**
+   * Los mensajes de un hilo. Devuelve la ÚLTIMA página, no la primera.
+   *
+   * Antes traía los 50 más antiguos en orden ascendente. Con 25 turnos de conversación eso
+   * significa que al reabrir el widget el dueño veía el principio de lo que habló —y nunca lo
+   * último—, que es exactamente la queja de «Convi se olvida». El cursor `antesDe` sirve para
+   * subir hacia atrás, que es como se lee un chat.
+   *
+   * `cursor` (hacia adelante) se mantiene por compatibilidad del contrato.
+   */
+  async mensajes(organizationId: string, userId: string, threadId: string, opts: { esAdmin: boolean; cursor?: Date; antesDe?: Date }) {
     return this.prisma.withTenant(organizationId, async (tx) => {
       const hilo = await tx.assistantThread.findFirst({ where: { id: threadId }, select: { id: true, userId: true, title: true, status: true, summary: true } });
       if (!hilo) throw new NotFoundException("Conversación no encontrada");
       // Un usuario no lee el hilo de otro, aunque sea de su misma organización.
       if (!opts.esAdmin && hilo.userId !== userId) throw new NotFoundException("Conversación no encontrada");
+      // `cursor` (hacia adelante, contrato viejo) sigue funcionando; sin él se trae la cola.
+      const haciaAdelante = !!opts.cursor;
       const filas = await tx.assistantMessage.findMany({
-        where: { threadId, ...(opts.cursor ? { createdAt: { gt: opts.cursor } } : {}) },
-        orderBy: { createdAt: "asc" },
+        where: {
+          threadId,
+          ...(opts.cursor ? { createdAt: { gt: opts.cursor } } : {}),
+          ...(opts.antesDe ? { createdAt: { lt: opts.antesDe } } : {}),
+        },
+        orderBy: { createdAt: haciaAdelante ? "asc" : "desc" },
         take: MENSAJES_POR_PAGINA + 1,
-        select: { id: true, role: true, content: true, actions: true, adjuntos: true, createdAt: true },
+        select: { id: true, role: true, content: true, actions: true, adjuntos: true, createdAt: true, toolDigest: true },
       });
-      const pagina = filas.slice(0, MENSAJES_POR_PAGINA);
+      const recorte = filas.slice(0, MENSAJES_POR_PAGINA);
+      const pagina = haciaAdelante ? recorte : [...recorte].reverse();
+      const hayMas = filas.length > MENSAJES_POR_PAGINA;
       return {
         thread: { id: hilo.id, title: hilo.title, status: hilo.status },
         messages: pagina,
-        siguiente: filas.length > MENSAJES_POR_PAGINA ? pagina[pagina.length - 1].createdAt.toISOString() : null,
+        // Compatibilidad: `siguiente` sigue siendo el cursor hacia adelante del contrato viejo.
+        siguiente: haciaAdelante && hayMas ? recorte[recorte.length - 1].createdAt.toISOString() : null,
+        // Hacia atrás: con qué pedir los mensajes ANTERIORES a los que vienen acá.
+        anteriores: !haciaAdelante && hayMas && pagina.length ? pagina[0].createdAt.toISOString() : null,
       };
     });
   }
