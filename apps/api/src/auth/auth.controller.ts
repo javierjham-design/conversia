@@ -2,9 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpException,
   HttpStatus,
+  Param,
   Patch,
   Post,
   Req,
@@ -20,6 +22,7 @@ import { assertNotImpersonating, requireContext } from "../tenancy/context";
 import { verifyAppToken, verifyInviteToken, verifyMfaToken } from "./jwt";
 import { resolvePersonalization } from "../common/industries";
 import { AuthService } from "./auth.service";
+import { PasskeysService, LARGO_MAX_ETIQUETA } from "./passkeys.service";
 
 const registerSchema = z.object({
   email: z.string().email().max(200),
@@ -86,6 +89,7 @@ export class AuthController {
     private auth: AuthService,
     private prisma: PrismaService,
     private rateLimit: RateLimitService,
+    private passkeys: PasskeysService,
   ) {}
 
   @Post("register")
@@ -384,6 +388,75 @@ export class AuthController {
     settings.security = { ...(settings.security ?? {}), requireMfaForAdmins: input.enabled };
     await this.prisma.admin.organization.update({ where: { id: claims.orgId }, data: { settings: settings as object } });
     return { ok: true, requireMfaForAdmins: input.enabled };
+  }
+
+  // ───────────────── Passkeys: entrar con Face ID / huella / Hello ─────────────────
+  //
+  // P1 — inscribir, listar, renombrar y quitar aparatos. **TODAS autenticadas**: para sumar
+  // un aparato hay que estar DENTRO (contraseña + 2.º factor), y ninguna puede quedar pública.
+  //
+  // Entrar CON el passkey es P2 y vivirá bajo `/auth/passkey-login`, un prefijo distinto a
+  // propósito: `PUBLIC_PREFIXES` (tenancy.middleware) compara con `startsWith`, así que un
+  // prefijo público `/auth/passkey` abriría de regalo TODAS estas rutas de gestión. El test
+  // `passkeys-rutas.spec.ts` se pone rojo si algún día pasa.
+  //
+  // La marca sale del Origin y de ahí el dominio dueño de la llave sale de NUESTRA config
+  // (ver `rpDeLaMarca`): un passkey de tubot.cl no sirve en conversia.cl y al revés.
+
+  /** Paso 1 de sumar este aparato: las opciones para `navigator.credentials.create()`. */
+  @Post("passkeys/options")
+  async passkeysOptions(@Req() req: Request) {
+    const userId = this.actorPropio(req, undefined, "registrar un aparato en esta cuenta");
+    return this.passkeys.opcionesDeRegistro(userId, brandFromOrigin(req.headers.origin as string | undefined));
+  }
+
+  /** Paso 2: verifica lo que firmó el aparato y guarda su llave pública. */
+  @Post("passkeys")
+  async passkeysRegistrar(@Req() req: Request, @Body() body: unknown) {
+    // La forma profunda de `response` la valida la librería de WebAuthn (es su trabajo y lo
+    // hace criptográficamente); acá solo se exige que venga un objeto con su `id`.
+    const input = parse(
+      z.object({
+        response: z.object({ id: z.string().min(1).max(3000) }).passthrough(),
+        label: z.string().max(LARGO_MAX_ETIQUETA * 4).optional(),
+      }),
+      body,
+    );
+    const userId = this.actorPropio(req, undefined, "registrar un aparato en esta cuenta");
+    return this.passkeys.confirmarRegistro(
+      userId,
+      brandFromOrigin(req.headers.origin as string | undefined),
+      input.response,
+      input.label,
+    );
+  }
+
+  /** «Aparatos con acceso» de la cuenta, en esta marca. */
+  @Get("passkeys")
+  async passkeysListar(@Req() req: Request) {
+    const claims = this.claimsFromBearer(req);
+    return this.passkeys.listar(claims.sub, brandFromOrigin(req.headers.origin as string | undefined));
+  }
+
+  /** Renombra un aparato ("iPhone del mostrador"). */
+  @Patch("passkeys/:id")
+  async passkeysRenombrar(@Req() req: Request, @Param("id") id: string, @Body() body: unknown) {
+    const input = parse(z.object({ label: z.string().min(1).max(LARGO_MAX_ETIQUETA * 4) }), body);
+    const userId = this.actorPropio(req, undefined, "renombrar un aparato de esta cuenta");
+    return this.passkeys.renombrar(userId, id, input.label);
+  }
+
+  /**
+   * Quita un aparato (teléfono perdido, aparato que ya no se usa).
+   *
+   * Lo bloquea `actorPropio`: un super admin impersonando NO puede sacarle a un cliente el
+   * aparato con el que entra —eso sería dejarlo afuera de su propia cuenta—, igual que no
+   * puede tocarle el 2.º factor.
+   */
+  @Delete("passkeys/:id")
+  async passkeysQuitar(@Req() req: Request, @Param("id") id: string) {
+    const userId = this.actorPropio(req, undefined, "quitar un aparato de esta cuenta");
+    return this.passkeys.quitar(userId, id);
   }
 
   private claimsFromBearer(req: Request) {

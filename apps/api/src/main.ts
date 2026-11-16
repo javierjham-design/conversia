@@ -3,7 +3,7 @@ import helmet from "helmet";
 import { json } from "express";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { getEnv } from "@conversia/config";
+import { getEnv, allowedOriginsOf } from "@conversia/config";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 
@@ -47,16 +47,13 @@ async function bootstrap() {
   // Para cada WEB_URL se permiten también el APEX y www del mismo dominio (hallazgo prod
   // 17-oct-2026: la landing/generador viven en conversia.cl y www.conversia.cl además de
   // app.conversia.cl, y sus fetch públicos quedaban bloqueados por CORS en silencio).
+  // La expansión apex/www vive en `allowedOriginsOf` (@conversia/config) y NO está duplicada
+  // acá a propósito: la misma lista decide qué orígenes acepta la verificación de passkeys.
+  // Con dos listas separadas, agregar un host a una dejaría la otra rota EN SILENCIO — y del
+  // lado de los passkeys el síntoma sería «el Face ID dejó de funcionar», sin ningún error.
   const corsOrigins = new Set<string>();
   for (const u of [env.WEB_URL, env.WEB_URL_CONVERSIA]) {
-    if (!u) continue;
-    corsOrigins.add(u.replace(/\/+$/, ""));
-    try {
-      const h = new URL(u);
-      const apex = h.hostname.replace(/^(app|www)\./, "");
-      corsOrigins.add(`${h.protocol}//${apex}`);
-      corsOrigins.add(`${h.protocol}//www.${apex}`);
-    } catch { /* URL inválida: se queda solo la literal */ }
+    for (const o of allowedOriginsOf(u)) corsOrigins.add(o);
   }
   app.enableCors({ origin: [...corsOrigins], credentials: true });
 

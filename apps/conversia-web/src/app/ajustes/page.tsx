@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { BusinessSettings } from "@/components/BusinessSettings";
 import { NotificationsSettings } from "@/components/NotificationsSettings";
+import { PasskeysSettings } from "@/components/PasskeysSettings";
 import { api, logout } from "@/lib/api";
 
 // Hex canónicos de CONVERSIA_DISENO.md §3 (deben coincidir con --acc de globals.css).
@@ -116,6 +117,7 @@ export default function Ajustes() {
             { id: "apariencia", label: "Apariencia" },
             { id: "avisos", label: "Avisos" },
             { id: "perfil", label: "Perfil" },
+            { id: "acceso", label: "Acceso" },
           ]}
         />
         {msg ? <p style={{ color: "var(--ok)", fontSize: 13 }}>{msg}</p> : null}
@@ -170,7 +172,13 @@ export default function Ajustes() {
           </button>
         </form>
 
-        <div className="card" style={{ padding: 20, marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+        {/* Cómo se ENTRA va justo antes de cómo se SALE. El orden no es casual: quien viene a
+            esta pantalla a cerrar sesión se topa primero con la forma de no volver a teclear. */}
+        <section id="acceso" style={{ marginTop: 16 }}>
+          <PasskeysSettings />
+        </section>
+
+        <div className="card" style={{ padding: 20, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
           <div>
             <h2 className="display" style={{ fontSize: 18, margin: "0 0 4px" }}>Sesión</h2>
             <p className="text-dim" style={{ fontSize: 13, margin: 0 }}>Cierra la sesión en este dispositivo. Volverás a la pantalla de entrada.</p>
