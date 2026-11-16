@@ -8,6 +8,7 @@ import { Button, Skeleton, cn, useToast } from "@/components/ui";
 import { useMe } from "../../layout";
 import { ImageUpload } from "../image-upload";
 import { MfaCard } from "./mfa-card";
+import { PasskeysCard } from "./passkeys-card";
 
 export default function ProfilePage() {
   const toast = useToast();
@@ -121,6 +122,8 @@ export default function ProfilePage() {
       </div>
 
       <MfaCard />
+
+      <PasskeysCard />
     </div>
   );
 }
