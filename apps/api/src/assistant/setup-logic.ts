@@ -235,6 +235,11 @@ export interface CuentaEntrada {
   vigencia: { vigente: boolean; motivo: string; validUntil: string | null; cubiertoHasta: string | null } | null;
   plan: { code: string; name: string; brand: string | null; priceClp: number | null; active: boolean } | null;
   suscripcion: { status: string | null; periodEnd: string | null } | null;
+  /**
+   * E2.b — hay un pago registrado y la suscripción no quedó activa. Es la ÚNICA forma en que
+   * una vigencia vencida es culpa nuestra, y por eso es el único caso que se escala.
+   */
+  pagoRegistradoSinSuscripcion?: boolean;
 }
 
 export interface Bloqueo {
@@ -275,12 +280,21 @@ export function diagnosticarCuenta(e: CuentaEntrada): CuentaDiagnostico {
   // suscripción: ahí el dueño no tiene nada que regularizar y hay que decírselo así, porque
   // mandarlo a pagar algo que ya pagó es la peor respuesta posible.
   if (e.vigencia && !e.vigencia.vigente) {
-    const pagado = e.suscripcion?.periodEnd && new Date(e.suscripcion.periodEnd).getTime() > Date.now();
+    /**
+     * E2.b — la vigencia vencida es, salvo una inconsistencia NUESTRA, algo que el cliente
+     * resuelve pagando. Y desde #639 no puede estar vencida "aunque el plan esté al día":
+     * `evaluarVigencia` ya hace mandar a la suscripción viva sobre un `validUntil` viejo.
+     *
+     * Queda una sola excepción real y vale la pena distinguirla: que exista un PAGO
+     * registrado y la suscripción no se haya creado. Eso es un error de nuestro lado, el
+     * cliente no tiene nada que arreglar, y hay que decírselo con esas palabras.
+     */
+    const pagoSinSuscripcion = e.pagoRegistradoSinSuscripcion === true;
     bloqueos.push(
-      pagado
+      pagoSinSuscripcion
         ? {
-            que: "La cuenta figura con la vigencia vencida aunque el plan está al día.",
-            porque: "Quedó registrada una fecha de corte vieja que no se actualizó al renovar el plan.",
+            que: "Tenemos tu pago registrado pero la suscripción no quedó activa.",
+            porque: "Es una inconsistencia nuestra, no tuya: el pago entró y la activación no se completó.",
             comoSeArregla: null,
             loResuelveElEquipo: true,
           }

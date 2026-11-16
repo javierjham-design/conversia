@@ -1,9 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import type { AIChatMessage, AIToolCall, AIToolResult, AIToolSpec, AssistantAction } from "@conversia/types";
 import { getEnv } from "@conversia/config";
 import { ResilientAIProvider, computeCostUsd, createAIProvider, estimarAlcance, frasePorSaldo } from "@conversia/agents";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
+import { BillingController } from "../billing/billing.controller";
 import { runQaBattery } from "../agents/agent-qa";
 import { getSetupChecklist } from "../onboarding/setup-checklist";
 import { sanitizeActions } from "./actions";
@@ -55,7 +56,94 @@ export class AssistantService {
   constructor(
     private prisma: PrismaService,
     private estadoDeCanales: ChannelStatusService,
+    /**
+     * E2.c - COBROS. Es el MISMO controlador que atiende /cobros, inyectado.
+     *
+     * No es una copia ni un servicio paralelo: un cobro hecho desde el chat pasa por
+     * exactamente las mismas validaciones, el mismo `requirePermission("billing:write")` y
+     * la misma auditoria que uno hecho desde la pantalla. Opcional para que los tests
+     * puedan construir el servicio sin levantar el modulo de facturacion entero.
+     */
+    @Optional() private cobros?: BillingController,
   ) {}
+
+  /**
+   * E2.d - EJECUTA una accion que el dueno confirmo en el chat.
+   *
+   * Esto NO pasa por el modelo: el modelo ya decidio, el dueno ya leyo el texto exacto y
+   * dijo que si. Meter otra ronda de IA aca seria darle una oportunidad mas de cambiar de
+   * opinion sobre algo que ya esta consentido, y ademas costaria una llamada por cada
+   * confirmacion.
+   *
+   * La confirmacion en el chat VALE COMO CONSENTIMIENTO (decision del dueno): se guarda el
+   * texto exacto que se leyo y la hora, y eso es lo que viaja al servicio de cobro.
+   */
+  async ejecutarConfirmada(
+    ctx: { organizationId: string; userId?: string | null; role?: string | null },
+    tool: string,
+    input: Record<string, unknown>,
+    textoConfirmado: string,
+  ): Promise<{ ok: boolean; reply: string; actions: AssistantAction[] }> {
+    const consentAt = new Date().toISOString();
+    try {
+      if (tool === "activarRecargaAutomatica") {
+        if (!this.cobros) return { ok: false, reply: "No pude activarla ahora mismo. Intentalo desde Cobros, por favor.", actions: [] };
+        await this.cobros.setAutoRecharge({
+          enabled: true,
+          packCode: input.packCode,
+          thresholdRemaining: input.umbral,
+          monthlyCapClp: input.topeMensualClp,
+          // El texto EXACTO que leyo el dueno viaja como consentimiento, no un booleano suelto.
+          consent: true,
+          consentText: textoConfirmado,
+          consentAt,
+        } as never);
+        await this.auditarConfirmada(ctx, tool, { ...input, consentText: textoConfirmado, consentAt });
+        return {
+          ok: true,
+          reply: "Listo: la recarga automatica quedo activa. Te aviso cada vez que se recargue, y puedes apagarla cuando quieras.",
+          actions: [{ type: "button", label: "Ver en Cobros", kind: "interno", payload: "/cobros" }],
+        };
+      }
+
+      if (tool === "reactivarSuscripcion") {
+        if (!this.cobros) return { ok: false, reply: "No pude reactivarla ahora mismo. Intentalo desde Cobros, por favor.", actions: [] };
+        await this.cobros.subscriptionReactivate();
+        await this.auditarConfirmada(ctx, tool, { consentText: textoConfirmado, consentAt });
+        return { ok: true, reply: "Listo: tu suscripcion quedo activa de nuevo.", actions: [] };
+      }
+
+      return { ok: false, reply: "Esa confirmacion ya no corresponde a nada que pueda hacer.", actions: [] };
+    } catch (e) {
+      // El error del proveedor se le dice al dueno tal cual (recortado): "no se pudo" a
+      // secas no le permite hacer nada, y casi siempre es algo que el puede arreglar
+      // (tarjeta vencida, fondos, tope).
+      return { ok: false, reply: `No pude completarlo: ${(e as Error).message?.slice(0, 200)}`, actions: [] };
+    }
+  }
+
+  /** Deja la confirmacion en la bitacora: quien, que, con que texto y cuando. */
+  private async auditarConfirmada(
+    ctx: { organizationId: string; userId?: string | null },
+    tool: string,
+    datos: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma
+      .withTenant(ctx.organizationId, (tx) =>
+        tx.auditLog.create({
+          data: {
+            organizationId: ctx.organizationId,
+            actorType: "user",
+            actorId: ctx.userId ?? null,
+            action: `convi.confirm.${tool}`,
+            entityType: "assistant",
+            entityId: tool,
+            after: datos as object,
+          },
+        }),
+      )
+      .catch(() => undefined);
+  }
 
   /** Marca de la org (para gatear el asistente a conversia). Fail-safe a "tubot". */
   async orgBrand(organizationId: string): Promise<string> {
@@ -235,7 +323,7 @@ export class AssistantService {
       if (isSetupWriteTool(name) && !isWebOwner(ctx.role)) {
         return { content: "Esta acción solo la puede hacer el dueño o un administrador.", isError: true };
       }
-      const out = await runSetupTool(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId, route, estado: this.estadoDeCanales }, name, input);
+      const out = await runSetupTool(this.prisma, { organizationId: ctx.organizationId, userId: ctx.userId, route, estado: this.estadoDeCanales, cobros: this.cobros }, name, input);
       if (out) return out;
     }
     // ---- Escrituras (solo owner; el caller ya filtró specs, revalidamos por defensa) ----
@@ -297,7 +385,15 @@ REGLAS:
 - CONEXIÓN DE WHATSAPP: hay dos caminos en "Canales". (1) RECOMENDADO — "Conecta el WhatsApp que ya usas" (coexistencia): el dueño escanea/ingresa un código desde su app WhatsApp Business, mantiene su teléfono y sus chats, y NO necesita página web ni cuenta de Facebook; el asistente atiende en paralelo y lo que el dueño responda a mano también aparece en la Bandeja. (2) "Número nuevo dedicado" para quien no quiere tocar su número. Si el dueño dice que ya atiende por WhatsApp y quiere seguir con ese número, guíalo al camino (1). Toma ~3 minutos. Si al armar un número NUEVO Meta pide "verificación del negocio", explícalo simple (es un trámite único de Meta para confirmar que el negocio existe; no es culpa suya) y ofrécele que una persona del equipo lo acompañe HOY a dejarlo listo — usa escalarAHumano. Recuérdale que el camino (1), conectar el número que ya usa, normalmente NO necesita esa verificación.
 - ACOMPAÑA, no dictes indicaciones: cuando propongas un paso o te pregunten dónde está algo, llama acompanarPaso con la clave del paso (negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio). Eso lo lleva a la pantalla y le resalta qué tocar, que es mucho mejor que explicarle la ruta.
 - Antes de hablar de WhatsApp, llama diagnosticarWhatsapp: puede estar conectado pero sin asistente asignado, y entonces el número recibe y nadie contesta.
-- "NO ME DEJA", "NO PUEDO", "NO AVANZA", "ME DA ERROR", "NO LOGRO CONECTAR", "NO ME DEJA GUARDAR": llama estadoDeCuenta ANTES de responder y antes de revisar el canal. Un bloqueo de la CUENTA (cuenta suspendida, vigencia vencida) corta la operacion completa —no deja crear canales, asistentes ni flujos— llega antes de cualquier revision del canal y NO se ve en la pantalla: el dueno solo ve que no avanza. Si "puedeCrear" es false, dile exactamente que lo esta bloqueando usando "bloqueos" y no lo mandes a revisar otra cosa. Si el bloqueo trae "loResuelveElEquipo", es nuestro: NO le pidas que pague ni que renueve nada —puede ser algo que ya pago—, dile que lo estas derivando y usa escalarAHumano con el detalle. Los "avisos" no bloquean: mencionalos solo si vienen al caso. Si "puedeCrear" es true, el problema es otro y sigue con estadoCanales o estadoWhatsapp.
+CUENTA Y PAGOS (esto lo resuelves TU, no se escala):
+- Ante vigencia vencida, prueba terminada, saldo en cero, suscripcion cancelada o cobro rechazado: DILO SIN RODEOS y con el dato concreto (desde cuando, cuanto cuesta, que pasa mientras tanto). Nada de "tuve un problema" ni "hay un inconveniente".
+- Despues OFRECE LA ACCION EXACTA, no una pantalla: llama generarEnlaceDePago y entrega el boton "Pagar ahora" con el monto real. Para saldo bajo, estadoDeCreditos primero y luego el pack. Para una suscripcion cancelada, reactivarSuscripcion. Para que no vuelva a quedarse sin creditos, ofrece activarRecargaAutomatica.
+- NUNCA inventes precios ni montos: los trae la herramienta. Si no viene monto, no lo menciones.
+- NUNCA digas "no puedo probar el asistente porque la vigencia vencio". Si la cuenta esta vencida, el camino es pagar: ofrece el pago. Si NO esta vencida, prueba y ya.
+- NUNCA escales por esto. "He informado tu caso al equipo" ante una cuenta vencida es mentira y ademas no resuelve nada. La UNICA excepcion es que estadoDeCuenta traiga un bloqueo con "loResuelveElEquipo": ahi el pago esta registrado y la suscripcion no quedo activa, es error NUESTRO, se lo dices con esas palabras y escalas.
+- Si quien te habla no es quien paga (no tiene permiso de cobros), no te rindas: ofrecele avisarle al dueno.
+- Tras cobrar o activar algo, REVALIDA con la herramienta antes de afirmar que quedo listo. La memoria del hilo es una pista, no la verdad.
+- "NO ME DEJA", "NO PUEDO", "NO AVANZA", "ME DA ERROR", "NO LOGRO CONECTAR", "NO ME DEJA GUARDAR": llama estadoDeCuenta ANTES de responder y antes de revisar el canal. Un bloqueo de la CUENTA corta la operacion completa, llega antes de cualquier revision del canal y NO se ve en la pantalla: el dueno solo ve que no avanza. Si "puedeCrear" es false, dile exactamente que lo esta bloqueando usando "bloqueos" y RESUELVELO con la herramienta que corresponda (ver CUENTA Y PAGOS). Si "puedeCrear" es true, el problema es otro y sigue con estadoCanales o estadoWhatsapp.
 - "¿QUEDÓ CONECTADO?", "¿ESTÁ FUNCIONANDO?", "¿POR QUÉ NO RESPONDE?", "¿QUÉ CALIDAD TIENE MI NÚMERO?": llama estadoWhatsapp y contesta con lo que diga, nunca de memoria. Dile el número, en qué estado está y quién atiende, en una frase. Si está "activandose", explícale que Meta está publicando el número, que suele tardar unos minutos y que la pantalla se actualiza sola — no es un error ni tiene que hacer nada. Si falta asignar el asistente, ofrécele hacerlo. Si hay un aviso de Meta, cuéntaselo con calma y en palabras simples; si es una restricción de la cuenta, escala con escalarAHumano. Lo que venga en "sinComprobar" NO se lo menciones como problema: es que Meta no contestó esa parte, no que su cuenta esté mal.
 - Para que lo compruebe él mismo, ofrécele el botón de probar: estadoWhatsapp ya lo entrega y abre Canales listo para la prueba (le escribe a su número desde otro teléfono y ve la respuesta de su asistente).
 - INSTAGRAM Y MESSENGER: el cliente los conecta SOLO, desde Canales, con un botón. Para Instagram necesita una página de Facebook vinculada a su cuenta de Instagram profesional; para Messenger, ser administrador de la página. Si pregunta por sus redes, o dice que le escriben por Instagram, llama estadoCanales y cuéntale lo que hay. El MISMO asistente atiende los tres canales y todo llega a la misma bandeja: no hay que configurar nada aparte.
