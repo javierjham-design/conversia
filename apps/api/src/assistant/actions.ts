@@ -75,6 +75,19 @@ const buttonSchema = z.object({
   kind: z.enum(["whatsapp", "whatsapp_test", "pago", "interno", "externo"]),
   payload: z.string().trim().max(300).optional(),
 });
+/**
+ * E2.d — CONFIRMAR en el chat lo que cuesta dinero o borra datos.
+ *
+ * Solo viajan el `id` y el TEXTO que el dueño va a leer. Los argumentos de la tool quedan en
+ * el servidor (`confirmaciones.ts`): si viajaran, cualquiera podría cambiar «1.000 créditos,
+ * tope $30.000» por otra cosa entre que se muestra y se confirma. Lo que se ejecuta es
+ * exactamente lo que se leyó.
+ */
+const confirmSchema = z.object({
+  type: z.literal("confirm"),
+  id: z.string().min(8).max(64),
+  texto: z.string().trim().min(5).max(400),
+});
 const refreshSchema = z.object({ type: z.literal("checklist_refresh") });
 const celebrateSchema = z.object({ type: z.literal("celebrate"), step: z.string().trim().min(1).max(40) });
 
@@ -82,6 +95,7 @@ export const assistantActionSchema = z.discriminatedUnion("type", [
   navigateSchema,
   highlightSchema,
   buttonSchema,
+  confirmSchema,
   refreshSchema,
   celebrateSchema,
 ]);
@@ -89,6 +103,8 @@ export const assistantActionSchema = z.discriminatedUnion("type", [
 /** Clave de identidad de una acción (para no repetir la misma dos veces en un turno). */
 function actionKey(a: AssistantAction): string {
   switch (a.type) {
+    case "confirm":
+      return `confirm:${a.id}`;
     case "navigate":
       return `navigate:${a.to}`;
     case "highlight":
@@ -108,7 +124,10 @@ const ORDER: Record<AssistantAction["type"], number> = {
   highlight: 1,
   celebrate: 2,
   button: 3,
-  checklist_refresh: 4,
+  // La confirmación va DESPUÉS de los botones: es lo último que se le pide al dueño y tiene
+  // que quedar al pie del mensaje, no entremedio.
+  confirm: 4,
+  checklist_refresh: 5,
 };
 
 /**

@@ -4,6 +4,7 @@ import { requireContext } from "../tenancy/context";
 import { RateLimitService } from "../common/rate-limit";
 import { AssistantService, isWebOwner } from "./assistant.service";
 import { AssistantThreadsService } from "./assistant-threads.service";
+import { confirmaciones, confirmacionValida } from "./confirmaciones";
 import { adjuntosSchema } from "./adjuntos";
 
 /**
@@ -112,6 +113,50 @@ export class AssistantController {
    * devolvía 404 (correcto) y el widget decía «El asistente no está disponible en esta
    * cuenta». La vista de toda la organización se queda donde tiene sentido: el historial.
    */
+  /**
+   * E2.d - EJECUTA lo que el dueno confirmo en el chat.
+   *
+   * Recibe SOLO el id. Los argumentos estaban guardados del lado del servidor desde que se
+   * mostro la confirmacion: si viajaran al navegador, entre que se lee "1.000 creditos, tope
+   * $30.000" y se pulsa Confirmar cualquiera podria cambiarlos. Lo que se ejecuta es
+   * exactamente lo que se leyo.
+   *
+   * La confirmacion se consume (una sola vez), caduca a los 10 minutos y solo vale para el
+   * usuario y la organizacion que la pidieron.
+   */
+  @Post("confirm")
+  async confirmar(@Body() body: unknown) {
+    const ctx = requireContext();
+    await this.assertConversia(ctx.organizationId);
+    const p = z.object({ id: z.string().min(8).max(64) }).safeParse(body);
+    if (!p.success) throw new BadRequestException("Confirmacion invalida");
+
+    const c = await confirmaciones.tomar(p.data.id);
+    if (!confirmacionValida(c, { organizationId: ctx.organizationId, userId: ctx.userId ?? "" })) {
+      // Un texto, no un error tecnico: para el dueno esto es "se me paso el tiempo".
+      return { ok: false, reply: "Esa confirmacion ya no esta disponible (pasaron mas de 10 minutos o ya la usaste). Pidemela de nuevo y la preparo al tiro." };
+    }
+
+    const out = await this.assistant.ejecutarConfirmada(
+      { organizationId: ctx.organizationId, userId: ctx.userId, role: ctx.roleCode },
+      c.tool,
+      c.input,
+      c.texto,
+    );
+
+    // Queda en el hilo: lo confirmado es parte de la conversacion, no un evento invisible.
+    const hilo = await this.hilos.hiloParaEscribir(ctx.organizationId, ctx.userId ?? "");
+    await this.hilos.guardarTurno({
+      organizationId: ctx.organizationId,
+      threadId: hilo.id,
+      userMessage: `(confirmado) ${c.texto}`,
+      reply: out.reply,
+      actions: out.actions,
+      toolDigest: `${c.tool} confirmada`,
+    });
+    return { ok: out.ok, reply: out.reply, actions: out.actions, threadId: hilo.id };
+  }
+
   @Get("threads")
   async threads(@Query("cursor") cursor?: string, @Query("limit") limit?: string, @Query("mine") mine?: string) {
     const ctx = requireContext();

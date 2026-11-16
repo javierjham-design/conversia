@@ -2,6 +2,8 @@ import type { AIToolSpec, AssistantAction } from "@conversia/types";
 import { ESTADOS_DE_SUSCRIPCION_VIVA, evaluarVigencia, fetchWebPageText } from "@conversia/agents";
 import type { PrismaService } from "../prisma.service";
 import { envolverContenidoAjeno } from "./adjuntos";
+import { z } from "zod";
+import { pedirConfirmacion } from "./confirmaciones";
 import { resumirReporte, type ReporteDeCanal } from "../channels/channel-status";
 import { INDUSTRIES } from "../common/industries";
 import { RUBROS_VALIDOS, businessDataSchema, guardarDatosNegocio } from "../organizations/business-data";
@@ -54,6 +56,34 @@ export interface SetupToolCtx {
    * (un test, un script) siga funcionando con el diagnóstico de siempre.
    */
   estado?: { reporte(organizationId: string, channelId: string, opts?: { sinCache?: boolean }): Promise<ReporteDeCanal> };
+  /**
+   * E2.c — COBROS. Es el MISMO objeto que atiende `/cobros` en el panel, no una copia.
+   *
+   * Va inyectado y no importado para que estas tools se puedan probar con un doble, y para
+   * que un llamador que no lo tenga (un test, un script) simplemente no ofrezca las tools de
+   * pago en vez de reventar. Que sea el mismo objeto es lo que garantiza que un cobro hecho
+   * desde el chat pase por exactamente las mismas validaciones, permisos y auditoría que uno
+   * hecho desde la pantalla.
+   */
+  /**
+   * E3.a - CANALES. El MISMO controlador que atiende /canales en el panel. Igual que con los
+   * cobros: no una copia, el mismo objeto, para que un cambio hecho desde el chat pase por
+   * los mismos permisos (`channels:write`), las mismas validaciones y la misma auditoria.
+   */
+  canales?: {
+    update(id: string, body: unknown): Promise<any>;
+    test(id: string): Promise<any>;
+    list(): Promise<any>;
+  };
+  cobros?: {
+    walletSummary(): Promise<any>;
+    checkout(body: unknown): Promise<any>;
+    buyPackage(body: unknown): Promise<any>;
+    getAutoRecharge(): Promise<any>;
+    setAutoRecharge(body: unknown): Promise<any>;
+    subscriptionHistory(): Promise<any>;
+    subscriptionReactivate(): Promise<any>;
+  };
 }
 
 export interface SetupToolResult {
@@ -96,6 +126,24 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
         name: "estadoDeCuenta",
         description:
           "Por qué la cuenta no deja avanzar: si está vigente, en qué plan está, si el plan le corresponde y qué la está bloqueando para crear canales, asistentes o flujos. Úsalo SIEMPRE que digan que algo «no los deja», «no puedo», «no avanza», «me da error» o «no logro conectar», ANTES de responder: un bloqueo de la cuenta llega antes que cualquier revisión del canal y no se ve en la pantalla.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "estadoDeCreditos",
+        description:
+          "Saldo de créditos del cliente, cuánto consume por día, para cuántos días le alcanza y si tiene recarga automática activa. Úsalo cuando pregunten por el saldo, por cuánto les queda, o antes de ofrecer una recarga: nunca des un número de memoria.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "verHistorialDeCobros",
+        description:
+          "Los últimos cobros y recargas de la cuenta, con fecha, monto y si salieron bien. Úsalo cuando pregunten «¿me cobraron?», «¿cuándo pagué?» o reclamen un cargo.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "verPromptDelAsistente",
+        description:
+          "Muestra las instrucciones con las que responde el asistente publicado: su tono, que sabe y que no. Usalo cuando pregunten que tiene configurado, por que contesta de cierta forma, o antes de cambiarle algo.",
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
@@ -146,6 +194,74 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
       },
     ],
     write: [
+      {
+        name: "asignarAsistenteACanal",
+        description:
+          "Deja un asistente atendiendo un canal. Usalo cuando el canal este conectado pero sin asistente: los mensajes llegan y no contesta nadie. Si hay un solo canal no hace falta indicarlo.",
+        inputJsonSchema: {
+          type: "object",
+          properties: {
+            asistenteId: { type: "string", description: "Id del asistente que va a atender" },
+            canalId: { type: "string", description: "Id del canal. Si se omite, el unico que haya." },
+          },
+          required: ["asistenteId"],
+        },
+      },
+      {
+        name: "probarCanal",
+        description:
+          "Le pregunta a Meta si el canal responde: acceso al numero o a la pagina, suscripcion a los avisos y calidad. Usalo cuando digan que el bot no contesta, antes de culpar al asistente.",
+        inputJsonSchema: { type: "object", properties: { canalId: { type: "string" } } },
+      },
+      {
+        name: "pausarOReanudarBot",
+        description:
+          "Pausa o reanuda al asistente en un canal. Pausado, los mensajes siguen llegando a la Bandeja pero contesta una persona. Usalo cuando pidan atender a mano un rato.",
+        inputJsonSchema: {
+          type: "object",
+          properties: { canalId: { type: "string" }, pausar: { type: "boolean", description: "true pausa, false reanuda" } },
+          required: ["pausar"],
+        },
+      },
+      {
+        name: "generarEnlaceDePago",
+        description:
+          "Genera el enlace REAL de pago del proveedor para contratar el plan o comprar un pack de créditos, y lo devuelve como botón. Úsalo cuando la cuenta esté vencida, sin saldo o el cliente quiera pagar. Nunca inventes montos: los trae esta herramienta.",
+        inputJsonSchema: {
+          type: "object",
+          properties: {
+            tipo: { type: "string", enum: ["plan", "pack"], description: "plan = contratar/renovar el plan; pack = comprar créditos" },
+            packCode: { type: "string", description: "Código del pack de créditos, solo si tipo=pack" },
+            planCode: { type: "string", description: "Código del plan, solo si tipo=plan. Si no se indica, el plan público de la marca." },
+          },
+          required: ["tipo"],
+        },
+      },
+      {
+        name: "activarRecargaAutomatica",
+        description:
+          "Deja la recarga automática activa: cuando el saldo baje del umbral, se compra el pack indicado sin que el cliente tenga que hacer nada, hasta un tope de gasto mensual. PIDE CONFIRMACIÓN en el chat antes de ejecutarse.",
+        inputJsonSchema: {
+          type: "object",
+          properties: {
+            packCode: { type: "string", description: "Pack que se comprará automáticamente" },
+            umbral: { type: "number", description: "Saldo por debajo del cual se recarga" },
+            topeMensualClp: { type: "number", description: "Máximo a gastar por mes, en pesos. Obligatorio." },
+          },
+          required: ["topeMensualClp"],
+        },
+      },
+      {
+        name: "desactivarRecargaAutomatica",
+        description: "Apaga la recarga automática. Úsalo si el cliente lo pide.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "reactivarSuscripcion",
+        description:
+          "Vuelve a activar una suscripción que estaba cancelada, cuando ya hay una tarjeta registrada. PIDE CONFIRMACIÓN: vuelve a cobrar.",
+        inputJsonSchema: { type: "object", properties: {} },
+      },
       {
         name: "completarDatosNegocio",
         description: `Completa los datos del negocio que el asistente usa al atender: nombre, rubro, dirección y descripción. Manda solo los campos que tengas. Rubros válidos: ${rubros}. CONFIRMA con el dueño antes de llamar.`,
@@ -470,6 +586,226 @@ export async function runSetupTool(
    * llega antes de mirar cualquier límite. Convi miraba solo los canales y por eso contestaba
    * genérico. La vigencia se evalúa con la MISMA regla del api y del worker.
    */
+  // --------------------- E3.a - CANALES ---------------------
+  //
+  // `explicarCamino("asignar_agente")` le PROMETIA al dueno "lo asigno y queda andando"
+  // desde que existe, y Convi no tenia como cumplirlo: habia que mandarlo a la pantalla.
+  // Eso es lo peor de los dos mundos — prometer y no poder.
+
+  if (name === "asignarAsistenteACanal") {
+    if (!ctx.canales) return { content: "No puedo tocar los canales desde aca ahora mismo.", isError: true };
+    const p = z.object({ asistenteId: z.string().trim().min(1), canalId: z.string().trim().optional() }).safeParse(input ?? {});
+    if (!p.success) return { content: "Necesito saber que asistente asignar.", isError: true };
+
+    const canalId = p.data.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) {
+      return { content: "No encontre un canal al que asignarlo. Si tienes varios, dime cual.", isError: true };
+    }
+    try {
+      await ctx.canales.update(canalId, { defaultAgentId: p.data.asistenteId });
+      return {
+        content: JSON.stringify({ asignado: true, canalId }),
+        didWrite: true,
+        actions: [{ type: "checklist_refresh" }],
+      };
+    } catch (e) {
+      return { content: `No pude asignarlo: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "probarCanal") {
+    if (!ctx.canales) return { content: "No puedo probar el canal desde aca ahora mismo.", isError: true };
+    const canalId = (input as { canalId?: string } | null)?.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) return { content: "No encontre un canal que probar.", isError: true };
+    try {
+      const r = await ctx.canales.test(canalId);
+      return { content: JSON.stringify(r ?? {}) };
+    } catch (e) {
+      // Un fallo de la prueba ES informacion: dice que el canal no responde y por que.
+      return { content: JSON.stringify({ ok: false, detalle: (e as Error).message?.slice(0, 200) }) };
+    }
+  }
+
+  if (name === "pausarOReanudarBot") {
+    if (!ctx.canales) return { content: "No puedo tocar los canales desde aca ahora mismo.", isError: true };
+    const p = z.object({ pausar: z.boolean(), canalId: z.string().trim().optional() }).safeParse(input ?? {});
+    if (!p.success) return { content: "Dime si lo pauso o lo reanudo.", isError: true };
+    const canalId = p.data.canalId ?? (await unicoCanal(ctx));
+    if (!canalId) return { content: "No encontre el canal.", isError: true };
+    try {
+      // Pausar = dejar el canal SIN asistente por defecto. Es el mismo interruptor que usa
+      // la pantalla: los mensajes siguen llegando a la Bandeja y contesta una persona.
+      await ctx.canales.update(canalId, { defaultAgentId: p.data.pausar ? null : undefined });
+      return {
+        content: p.data.pausar
+          ? "Listo: el asistente queda pausado en ese canal. Los mensajes siguen llegando a la Bandeja."
+          : "Listo: el asistente vuelve a atender ese canal.",
+        didWrite: true,
+      };
+    } catch (e) {
+      return { content: `No pude cambiarlo: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "verPromptDelAsistente") {
+    // El prompt NO vive en `agent`: vive en la VERSION publicada (`agent.currentVersionId`).
+    // Pedirlo en el agente es el error facil, y es el que distingue "lo que el asistente dice
+    // hoy" de "lo que alguien dejo a medias en un borrador".
+    const datos = await prisma.withTenant(ctx.organizationId, async (tx) => {
+      const agente = await tx.agent.findFirst({
+        where: { deletedAt: null, active: true },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, name: true, currentVersionId: true, updatedAt: true },
+      });
+      if (!agente?.currentVersionId) return agente ? { agente, version: null } : null;
+      const version = await tx.agentVersion.findUnique({
+        where: { id: agente.currentVersionId },
+        select: { version: true, systemPrompt: true },
+      });
+      return { agente, version };
+    });
+    if (!datos) return { content: "Todavia no hay un asistente publicado." };
+    if (!datos.version) return { content: `El asistente "${datos.agente.name}" existe pero no tiene una version publicada todavia.` };
+    return {
+      content: JSON.stringify({
+        nombre: datos.agente.name,
+        version: datos.version.version,
+        // Recortado: el prompt completo puede ser larguisimo y lo que hace falta es que el
+        // modelo pueda HABLAR de el, no reproducirlo entero.
+        instrucciones: (datos.version.systemPrompt ?? "").slice(0, 1500),
+        actualizado: datos.agente.updatedAt,
+      }),
+    };
+  }
+
+  // --------------------- E2.c - CUENTA, PAGOS Y CREDITOS ---------------------
+  //
+  // Todas pasan por `ctx.cobros`, que es el MISMO objeto que atiende /cobros: mismos
+  // permisos (`billing:write` lo exige el propio metodo), mismas validaciones y misma
+  // auditoria. Convi no tiene un camino de cobro propio, que es justo lo que no queremos.
+
+  if (name === "estadoDeCreditos") {
+    if (!ctx.cobros) return { content: "No puedo ver el saldo desde aca ahora mismo.", isError: true };
+    const w = await ctx.cobros.walletSummary().catch(() => null);
+    if (!w) return { content: "No pude leer el saldo.", isError: true };
+    const auto = await ctx.cobros.getAutoRecharge().catch(() => null);
+    const resumen = resumirCreditos(w, auto);
+    return {
+      content: JSON.stringify(resumen),
+      // Si el saldo da para poco, el boton de recargar va de una: preguntar "<<quieres
+      // recargar?>>" cuando quedan dos dias es hacerle perder un paso al dueno.
+      actions:
+        resumen.diasQueAlcanzan !== null && resumen.diasQueAlcanzan <= 7
+          ? [{ type: "button", label: "Recargar creditos", kind: "interno", payload: "/cobros" }]
+          : [],
+    };
+  }
+
+  if (name === "verHistorialDeCobros") {
+    if (!ctx.cobros) return { content: "No puedo ver los cobros desde aca ahora mismo.", isError: true };
+    const h = await ctx.cobros.subscriptionHistory().catch(() => null);
+    if (!h) return { content: "No pude leer el historial de cobros.", isError: true };
+    const lista = Array.isArray(h) ? h : ((h as { items?: unknown[] })?.items ?? []);
+    return { content: JSON.stringify({ cobros: lista.slice(0, 10) }) };
+  }
+
+  if (name === "generarEnlaceDePago") {
+    if (!ctx.cobros) return { content: "No puedo generar el pago desde aca ahora mismo.", isError: true };
+    const p = z
+      .object({
+        tipo: z.enum(["plan", "pack"]),
+        packCode: z.string().trim().max(60).optional(),
+        planCode: z.string().trim().max(60).optional(),
+      })
+      .safeParse(input ?? {});
+    if (!p.success) return { content: "Necesito saber si es el plan o un pack de creditos.", isError: true };
+
+    try {
+      const r =
+        p.data.tipo === "pack"
+          ? await ctx.cobros.buyPackage({ packCode: p.data.packCode })
+          : await ctx.cobros.checkout({ planCode: p.data.planCode ?? PLAN_PUBLICO_CONVERSIA });
+      const url = typeof r?.url === "string" ? r.url : null;
+      const monto = Number(r?.amount ?? 0);
+      if (!url) {
+        // Sin proveedor configurado para la moneda: se dice y se lleva a la pantalla, que es
+        // donde el dueno puede registrar una tarjeta o ver las otras formas de pago.
+        return {
+          content: JSON.stringify({
+            sinEnlace: true,
+            motivo: "No hay un medio de pago en linea configurado para esta cuenta.",
+            monto,
+          }),
+          actions: [{ type: "button", label: "Ir a Cobros", kind: "interno", payload: "/cobros" }],
+        };
+      }
+      return {
+        content: JSON.stringify({
+          url,
+          monto,
+          moneda: r?.currency ?? "CLP",
+          proveedor: r?.provider ?? null,
+          intervalo: r?.interval ?? null,
+        }),
+        actions: [{ type: "button", label: "Pagar ahora", kind: "externo", payload: url }],
+        didWrite: true,
+      };
+    } catch (e) {
+      return { content: `No pude generar el pago: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "activarRecargaAutomatica") {
+    const p = z
+      .object({
+        packCode: z.string().trim().max(60).optional(),
+        umbral: z.coerce.number().int().min(1).max(10000).optional(),
+        topeMensualClp: z.coerce.number().int().min(1).max(100000000),
+      })
+      .safeParse(input ?? {});
+    // El tope es OBLIGATORIO y lo exige tambien el endpoint: sin tope no se activa. Es el
+    // mismo criterio del panel, y el que usan OpenAI o Lovable para lo mismo.
+    if (!p.success) return { content: "Para activarla necesito un tope de gasto mensual en pesos.", isError: true };
+
+    const texto = textoDeRecargaAutomatica(p.data);
+    const c = await pedirConfirmacion({
+      organizationId: ctx.organizationId,
+      userId: ctx.userId ?? "",
+      tool: "activarRecargaAutomatica",
+      args: { ...p.data, consent: true, enabled: true },
+      texto,
+    });
+    return {
+      content: JSON.stringify({ esperandoConfirmacion: true, texto }),
+      actions: [{ type: "confirm", id: c.id, texto: c.texto }],
+    };
+  }
+
+  if (name === "desactivarRecargaAutomatica") {
+    if (!ctx.cobros) return { content: "No puedo cambiar la recarga desde aca ahora mismo.", isError: true };
+    try {
+      await ctx.cobros.setAutoRecharge({ enabled: false });
+      return { content: "Listo: la recarga automatica quedo apagada.", didWrite: true };
+    } catch (e) {
+      return { content: `No pude apagarla: ${(e as Error).message?.slice(0, 160)}`, isError: true };
+    }
+  }
+
+  if (name === "reactivarSuscripcion") {
+    const texto = "Reactivar tu suscripcion: vuelve a cobrarse en tu tarjeta registrada segun el plan actual. Confirmas?";
+    const c = await pedirConfirmacion({
+      organizationId: ctx.organizationId,
+      userId: ctx.userId ?? "",
+      tool: "reactivarSuscripcion",
+      args: {},
+      texto,
+    });
+    return {
+      content: JSON.stringify({ esperandoConfirmacion: true, texto }),
+      actions: [{ type: "confirm", id: c.id, texto: c.texto }],
+    };
+  }
+
   if (name === "estadoDeCuenta") {
     const datos = await prisma.withTenant(ctx.organizationId, async (tx) => {
       const org = await tx.organization.findUnique({
@@ -506,12 +842,20 @@ export async function runSetupTool(
         plan: datos.plan ? { nombre: datos.plan.name, precioClp: datos.plan.priceClp === null ? null : Number(datos.plan.priceClp) } : null,
         planPagadoHasta: datos.sub?.periodEnd?.toISOString() ?? null,
       }),
-      // Sin botones a propósito. Si el bloqueo lo resuelve el equipo, lo ÚTIL es abrir el
-      // ticket, y para eso ya existe `escalarAHumano` (el prompt se lo indica). Un `kind`
-      // inventado acá no llegaría a ninguna parte: `sanitizeActions` lo descarta en SILENCIO
-      // contra su lista blanca. Y mandarlo a una pantalla a reintentar lo mismo que ya le
-      // falló es hacerle perder el tiempo.
-      actions: [],
+      /**
+       * E2.b — ya NO devuelve `actions: []`.
+       *
+       * Ese vacío era la razón de fondo por la que Convi escalaba: sin una acción que
+       * ofrecer, el modelo caía en las reglas generales de "si no puedes, escala". Ahora,
+       * cuando el bloqueo lo resuelve el cliente pagando, se le ofrece ir a Cobros — y el
+       * prompt le dice que genere el enlace real con `generarEnlaceDePago`.
+       *
+       * Si el bloqueo es NUESTRO (pago registrado sin suscripción), sigue sin botón: mandarlo
+       * a pagar algo que ya pagó es la peor respuesta posible.
+       */
+      actions: diag.bloqueos.some((b) => !b.loResuelveElEquipo)
+        ? [{ type: "button", label: "Ver mi plan", kind: "interno", payload: "/cobros" }]
+        : [],
     };
   }
 
@@ -1011,4 +1355,55 @@ export async function runSetupTool(
   }
 
   return { content: "No reconozco esa acción.", isError: true };
+}
+
+/** El plan publico de Conversia. Sale del catalogo; el PRECIO nunca se escribe en el codigo. */
+const PLAN_PUBLICO_CONVERSIA = "conversia_creditos_base";
+
+/**
+ * El texto EXACTO que el dueno va a leer y confirmar. Es lo que se guarda como
+ * consentimiento, asi que tiene que decir las tres cifras que importan: cuanto se compra,
+ * cuando, y cuanto es lo maximo que puede gastar en un mes.
+ */
+export function textoDeRecargaAutomatica(d: { packCode?: string; umbral?: number; topeMensualClp: number }): string {
+  const cuanto = d.packCode ? `el pack ${d.packCode}` : "tu pack de creditos habitual";
+  const cuando = d.umbral ? `cuando el saldo baje de ${d.umbral} creditos` : "cuando se te acaben los creditos";
+  return `Activar la recarga automatica: comprar ${cuanto} ${cuando}, con un tope de $${d.topeMensualClp.toLocaleString("es-CL")} al mes. Confirmas?`;
+}
+
+/**
+ * Saldo, ritmo y cuantos dias alcanza. El ritmo sale del consumo de los ULTIMOS 7 DIAS: un
+ * promedio sobre toda la vida de la cuenta no sirve para avisar a tiempo.
+ */
+export function resumirCreditos(
+  wallet: { balance?: number; saldo?: number; consumo7d?: number; usados7d?: number } | null,
+  auto?: { enabled?: boolean; monthlyCapClp?: number } | null,
+): {
+  saldo: number;
+  consumoDiario: number | null;
+  diasQueAlcanzan: number | null;
+  recargaAutomatica: boolean;
+  topeMensualClp: number | null;
+} {
+  const saldo = Number(wallet?.balance ?? wallet?.saldo ?? 0);
+  const enSieteDias = Number(wallet?.consumo7d ?? wallet?.usados7d ?? 0);
+  const consumoDiario = enSieteDias > 0 ? Math.round((enSieteDias / 7) * 10) / 10 : null;
+  return {
+    saldo,
+    consumoDiario,
+    // Sin consumo medido NO se inventa un pronostico: decir "te alcanza para 40 dias" con
+    // cero datos es peor que no decir nada.
+    diasQueAlcanzan: consumoDiario && consumoDiario > 0 ? Math.floor(saldo / consumoDiario) : null,
+    recargaAutomatica: auto?.enabled === true,
+    topeMensualClp: typeof auto?.monthlyCapClp === "number" ? auto.monthlyCapClp : null,
+  };
+}
+
+/** El unico canal de la org, si hay exactamente uno. Con varios, Convi pregunta cual. */
+async function unicoCanal(ctx: SetupToolCtx): Promise<string | null> {
+  if (!ctx.canales) return null;
+  const lista = await ctx.canales.list().catch(() => null);
+  const canales = Array.isArray(lista) ? lista : [];
+  const vivos = canales.filter((c: { status?: string }) => c?.status !== "inactive");
+  return vivos.length === 1 ? String((vivos[0] as { id: string }).id) : null;
 }

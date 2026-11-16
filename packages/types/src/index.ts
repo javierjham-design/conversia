@@ -948,6 +948,14 @@ export type AssistantAction =
   | { type: "highlight"; target: string; text: string }
   /** Botón dentro del chat, para lo que REQUIERE un clic del dueño. */
   | { type: "button"; label: string; kind: AssistantButtonKind; payload?: string }
+  /**
+   * E2.d — pide confirmar en el chat algo que cuesta dinero o borra datos.
+   *
+   * Solo viajan el id y el TEXTO que se le muestra al dueño: los argumentos de la acción
+   * quedan guardados en el servidor. Lo que se ejecuta al confirmar es exactamente lo que se
+   * leyó, no lo que mande el navegador.
+   */
+  | { type: "confirm"; id: string; texto: string }
   /** La UI recarga el avance del montaje (tras un cambio que lo mueve). */
   | { type: "checklist_refresh" }
   /** Celebración corta al completar un paso del montaje. */

@@ -49,19 +49,23 @@ describe("el caso que lo pidió: vigencia vencida con el plan PAGADO", () => {
     expect(d.puedeCrear).toBe(true);
   });
 
-  it("si AÚN estuviera bloqueada, NO le pide pagar algo que ya pagó", () => {
+  it("si AÚN estuviera bloqueada por un error NUESTRO, no le pide pagar algo que ya pagó", () => {
+    // E2.b — la rama «vencida pero con el plan al día» quedó inalcanzable con #639 (la
+    // suscripción viva manda). Lo que SÍ puede pasar, y es culpa nuestra, es que el pago esté
+    // registrado y la suscripción no se haya creado: ese es el caso que no se cobra de nuevo.
     const d = diagnosticarCuenta({
       orgStatus: "ACTIVE",
       orgBrand: "conversia",
       vigencia: { vigente: false, motivo: "vencida", validUntil: "2026-11-02T23:57:37.944Z", cubiertoHasta: null },
       plan: PLAN_OK,
       suscripcion: { status: "ACTIVE", periodEnd: new Date(Date.now() + 30 * 86400000).toISOString() },
+      pagoRegistradoSinSuscripcion: true,
     });
     expect(d.puedeCrear).toBe(false);
     const b = d.bloqueos[0];
     expect(b.loResuelveElEquipo).toBe(true);
     expect(b.comoSeArregla).toBeNull(); // nada que hacer del lado del cliente
-    expect(b.que).toContain("plan está al día");
+    expect(b.que).toMatch(/pago registrado/i);
     // Lo que importa es que NINGUNA instrucción al cliente le pida pagar o renovar. La causa
     // sí puede nombrar la renovación («no se actualizó al renovar el plan»): eso es explicar
     // por qué pasó, no mandarlo a pagar de nuevo.
@@ -156,8 +160,11 @@ describe("el prompt manda llamarla (si no, la herramienta existe y nadie la usa)
   });
 
   it("prohíbe mandarlo a pagar cuando el bloqueo es nuestro", () => {
+    // E2.e — la regla se mudó al bloque CUENTA Y PAGOS: ahí la vigencia vencida se RESUELVE
+    // con el enlace de pago, y lo único que se escala es el error nuestro.
     expect(PROMPT_COPILOTO).toContain("loResuelveElEquipo");
-    expect(PROMPT_COPILOTO).toMatch(/NO le pidas que pague/);
+    expect(PROMPT_COPILOTO).toMatch(/CUENTA Y PAGOS/);
+    expect(PROMPT_COPILOTO).toMatch(/error NUESTRO|es error NUESTRO/i);
   });
 
   it("si la cuenta está bien, deriva al diagnóstico del canal", () => {
