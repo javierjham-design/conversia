@@ -4,6 +4,8 @@ import { getEnv } from "@conversia/config";
 import { ResilientAIProvider, computeCostUsd, createAIProvider, estimarAlcance, frasePorSaldo } from "@conversia/agents";
 import { leerMuestraConsumoCreditos, leerPromedioDelRubro } from "@conversia/database";
 import { PrismaService } from "../prisma.service";
+import { sendEmail } from "../common/email";
+import { decidirEscalamiento, mensajeDeEscalamiento, SLA_POR_DEFECTO } from "./escalamiento";
 import { BillingController } from "../billing/billing.controller";
 import { ChannelsController } from "../channels/channels.controller";
 import { runQaBattery } from "../agents/agent-qa";
@@ -148,6 +150,51 @@ export class AssistantService {
       .catch(() => undefined);
   }
 
+  /**
+   * E4.b — avisa al equipo POR CORREO, con el mismo `sendEmail` del formulario de soporte.
+   *
+   * Lleva lo que hace falta para no tener que reconstruir el caso: de quién es, qué pidió,
+   * y QUÉ YA MIRÓ CONVI. Eso último es lo que ahorra la primera media hora de ida y vuelta.
+   */
+  private async avisarAlEquipo(a: {
+    ctx: { organizationId: string; userId?: string | null };
+    code: string;
+    motivo: string;
+    detalle: string;
+    consultado: string[];
+  }): Promise<void> {
+    const env = getEnv();
+    const to = env.SUPPORT_NOTIFY_EMAIL;
+    if (!to) return;
+    const [org, user] = await Promise.all([
+      this.prisma.admin.organization.findUnique({ where: { id: a.ctx.organizationId }, select: { name: true } }),
+      a.ctx.userId ? this.prisma.admin.user.findUnique({ where: { id: a.ctx.userId }, select: { name: true, email: true } }) : Promise.resolve(null),
+    ]);
+    const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+    await sendEmail({
+      to,
+      subject: `🤖 Convi escaló — ${org?.name ?? a.ctx.organizationId} (${a.code})`,
+      replyTo: user?.email,
+      html: `<p><b>Organización:</b> ${esc(org?.name ?? a.ctx.organizationId)}</p>
+<p><b>De:</b> ${esc(user?.name ?? "—")} (${esc(user?.email ?? "sin correo")})</p>
+<p><b>Motivo:</b> ${esc(a.motivo)}</p>
+<hr/><p style="white-space:pre-wrap">${esc(a.detalle)}</p>
+<p><b>Lo que Convi ya revisó:</b></p>
+<ul>${a.consultado.slice(-5).map((c) => `<li>${esc(c)}</li>`).join("") || "<li>nada</li>"}</ul>`,
+    });
+  }
+
+  /** Plazo de respuesta, desde `platform_settings.support.sla`. Nunca escrito a mano. */
+  private async slaDeSoporte(): Promise<string> {
+    const fila = await this.prisma.admin.platformSetting.findUnique({ where: { key: "support" } }).catch(() => null);
+    try {
+      const v = JSON.parse(fila?.value ?? "{}") as { sla?: string };
+      return typeof v.sla === "string" && v.sla.trim() ? v.sla.trim() : SLA_POR_DEFECTO;
+    } catch {
+      return SLA_POR_DEFECTO;
+    }
+  }
+
   /** Marca de la org (para gatear el asistente a conversia). Fail-safe a "tubot". */
   async orgBrand(organizationId: string): Promise<string> {
     const o = await this.prisma.admin.organization.findUnique({ where: { id: organizationId }, select: { brand: true } }).catch(() => null);
@@ -263,6 +310,9 @@ export class AssistantService {
     name: string,
     input: any,
     route?: string,
+    /** E4 — lo que Convi YA consultó en este turno. Sin esto no puede escalar: escalar sin
+     *  haber mirado nada es rendirse con otro nombre. */
+    consultado: string[] = [],
   ): Promise<{ content: string; isError?: boolean; didWrite?: boolean; actions?: AssistantAction[] }> {
     const admin = this.prisma.admin;
     if (name === "verEstado") {
@@ -309,14 +359,44 @@ export class AssistantService {
       };
     }
     if (name === "escalarAHumano") {
+      /**
+       * E4 — ESCALAR DE VERDAD, y solo cuando corresponde.
+       *
+       * Antes esto creaba un ticket y respondía "dejé tu caso en manos del equipo"… sin
+       * avisarle a NADIE. El formulario de soporte del panel sí manda correo; este camino no.
+       * O sea que la frase era literalmente falsa: el caso quedaba en una tabla que nadie
+       * mira hasta que alguien entra a buscarlo.
+       *
+       * Ahora: lista cerrada de motivos, hay que haber diagnosticado antes, y el aviso sale
+       * por el MISMO `sendEmail` que usa el formulario.
+       */
+      const motivoCrudo = String((input as { motivo?: string } | null)?.motivo ?? "");
+      const decision = decidirEscalamiento({ motivo: motivoCrudo, consultado });
+      if (!decision.escala) {
+        // No es un error: es una corrección de rumbo. Al modelo se le dice qué hacer en vez.
+        return { content: `NO escales esto. ${decision.enVezDe}` };
+      }
+
       const code = `CV-${Math.floor(1000 + Math.random() * 9000)}`;
       await this.prisma.withTenant(ctx.organizationId, async (tx) => {
         const open = await tx.supportTicket.findFirst({ where: { status: "open", ...(ctx.userId ? { userId: ctx.userId } : {}) }, orderBy: { createdAt: "desc" } });
-        const msg = { author: "agent" as const, body: `Escalado por el asistente: ${String(input?.motivo ?? "")}`.slice(0, 1000), at: new Date().toISOString() };
+        const msg = { author: "agent" as const, body: `Escalado por el asistente (${decision.motivo}): ${motivoCrudo}`.slice(0, 1000), at: new Date().toISOString() };
         if (open) await tx.supportTicket.update({ where: { id: open.id }, data: { thread: [...((open.thread as unknown as ThreadMsg[]) ?? []), msg] as object } });
-        else await tx.supportTicket.create({ data: { organizationId: ctx.organizationId, userId: ctx.userId ?? null, message: String(input?.motivo ?? "Soporte"), code, thread: [msg] as object } });
+        else await tx.supportTicket.create({ data: { organizationId: ctx.organizationId, userId: ctx.userId ?? null, message: motivoCrudo || "Soporte", code, thread: [msg] as object } });
       });
-      return { content: `Listo, dejé tu caso en manos del equipo. Puedes seguirlo por aquí o por WhatsApp.` };
+
+      // El aviso NUNCA puede costarle la respuesta al dueño: si el correo falla, el ticket ya
+      // está creado y él ya tiene su código.
+      await this.avisarAlEquipo({ ctx, code, motivo: decision.motivo!, detalle: motivoCrudo, consultado }).catch(() => undefined);
+
+      return {
+        content: mensajeDeEscalamiento({
+          motivo: decision.motivo!,
+          codigo: code,
+          consultado,
+          sla: await this.slaDeSoporte(),
+        }),
+      };
     }
     // ---- COP 1 — herramientas de MONTAJE (módulo aparte, `setup-tools.ts`) ----
     // El gate de dueño se vuelve a comprobar ACÁ: el caller ya no ofrece las de escritura a
@@ -388,6 +468,11 @@ REGLAS:
 - CONEXIÓN DE WHATSAPP: hay dos caminos en "Canales". (1) RECOMENDADO — "Conecta el WhatsApp que ya usas" (coexistencia): el dueño escanea/ingresa un código desde su app WhatsApp Business, mantiene su teléfono y sus chats, y NO necesita página web ni cuenta de Facebook; el asistente atiende en paralelo y lo que el dueño responda a mano también aparece en la Bandeja. (2) "Número nuevo dedicado" para quien no quiere tocar su número. Si el dueño dice que ya atiende por WhatsApp y quiere seguir con ese número, guíalo al camino (1). Toma ~3 minutos. Si al armar un número NUEVO Meta pide "verificación del negocio", explícalo simple (es un trámite único de Meta para confirmar que el negocio existe; no es culpa suya) y ofrécele que una persona del equipo lo acompañe HOY a dejarlo listo — usa escalarAHumano. Recuérdale que el camino (1), conectar el número que ya usa, normalmente NO necesita esa verificación.
 - ACOMPAÑA, no dictes indicaciones: cuando propongas un paso o te pregunten dónde está algo, llama acompanarPaso con la clave del paso (negocio, servicios, agenda, asistente, whatsapp, prueba, pago, mini_sitio). Eso lo lleva a la pantalla y le resalta qué tocar, que es mucho mejor que explicarle la ruta.
 - Antes de hablar de WhatsApp, llama diagnosticarWhatsapp: puede estar conectado pero sin asistente asignado, y entonces el número recibe y nadie contesta.
+CUANDO SE ESCALA (lista CERRADA, nada mas):
+- Verificacion del negocio en Meta. Restriccion o apelacion de la cuenta de WhatsApp. Disputa o devolucion de un cobro. Algo que este mal de NUESTRO lado (pago registrado sin suscripcion, una herramienta que falla dos veces igual). Y que te pidan hablar con una persona.
+- Fuera de esa lista NO se escala. Una cuenta vencida, un saldo en cero, un canal sin asistente o un bot pausado los resuelves TU.
+- Antes de escalar tienes que haber ejecutado al menos una herramienta de diagnostico. Escalar sin haber mirado nada es rendirse con otro nombre.
+- Al escalar, di QUE INTENTASTE, QUE ENCONTRASTE y QUE SIGUE PASANDO mientras tanto. Entrega el codigo del ticket. Nunca digas "informe al equipo" sin tener el codigo.
 CUANDO DICEN QUE EL BOT NO LE RESPONDIO A UN CLIENTE:
 - Llama porQueNoRespondioElBot ANTES de opinar. Hay SEIS causas que se ven iguales desde afuera y cada una se arregla distinto: cuenta vencida, sin creditos, bot pausado, la tomo una persona del equipo, canal sin asistente, fuera de la ventana de 24 h, o un rechazo de Meta.
 - Di la causa EXACTA con sus palabras y ofrece la herramienta que la arregla. Nada de "puede ser que...".
@@ -417,7 +502,7 @@ CUENTA Y PAGOS (esto lo resuelves TU, no se escala):
 - Lo que ves en una IMAGEN es lo que ves: no adivines precios ni horarios borrosos. Si no se lee, dilo y pídele el dato.`;
     const modeBlock = ctx.mode === "implementacion"
       ? `\n\nMODO IMPLEMENTACIÓN (avance < 100%): LIDERA. Saluda proponiendo el siguiente paso pendiente ("${ctx.nextStep?.label ?? ""}") y ofrécete a hacerlo juntos.`
-      : `\n\nMODO ASISTENCIA (todo listo): resuelve dudas; si no puedes, escala a un humano.`;
+      : `\n\nMODO ASISTENCIA (todo listo): resuelve las dudas y HAZ lo que te pidan con tus herramientas. Escalar solo por la lista cerrada de abajo.`;
     // COP 3 — MOMENTOS DE PAGO. Nunca agresivos, pero siempre presentes y SIEMPRE con el
     // precio y el saldo leídos del catálogo (ofrecerRecarga/verEstado), nunca inventados.
     const pagoBlock = `\n\nCUÁNDO HABLAR DE PAGAR (una vez cada uno, sin insistir; si dice que no, lo dejas y sigues ayudando):
@@ -436,7 +521,7 @@ AUTONOMÍA:
 - Pagar y conectar WhatsApp: SIEMPRE con su clic en el botón. Tú diagnosticas y le das el botón.
 - NUNCA cambias el modelo de IA del asistente: eso lo fija Conversia.
 - Después de crear el asistente, pruébalo con un mensaje realista de su rubro ANTES de ofrecer publicarlo: que el dueño vea cómo atiende.`
-      : `\n\nEste usuario NO es dueño ni administrador: NO configures nada. Solo informa y, si hace falta, escala a un humano.`;
+      : `\n\nEste usuario NO es dueño ni administrador: haz todo lo que SU rol permita. Para lo que no alcance, no digas \"no puedo\": ofrécele pedirle la autorización al dueño.`;
     // B2 — lo que ya conversaron antes de los últimos 20 mensajes. Va en el prompt del
     // sistema y no como un mensaje más para que no se confunda con algo que el dueño acaba
     // de decir: es memoria, no una instrucción nueva.
@@ -595,7 +680,7 @@ ${resumenDelHilo.trim()}`
         if (resp.stopReason !== "tool_use" || !resp.toolCalls.length) { reply = resp.text || reply; break; }
         const results: AIToolResult[] = [];
         for (const call of resp.toolCalls as AIToolCall[]) {
-          const out = await this.executeTool(ctx, call.name, call.input, route).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false, actions: undefined }));
+          const out = await this.executeTool(ctx, call.name, call.input, route, consultado).catch((e) => ({ content: `Error: ${(e as Error).message}`, isError: true, didWrite: false, actions: undefined }));
           if (out.didWrite) wrote = true;
           if (out.didWrite && call.name === "publicarAsistente") publicoAgente = true;
           if (out.actions?.length) acciones.push(...out.actions);
