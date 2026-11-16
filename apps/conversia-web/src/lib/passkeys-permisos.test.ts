@@ -60,6 +60,18 @@ describe("la pantalla de aparatos está realmente enganchada", () => {
     expect(ajustes).toMatch(/id: "acceso"/);
     expect(ajustes).toMatch(/id="acceso"/);
   });
+
+  it("CADA atajo del índice apunta a un ancla que existe en la página", () => {
+    // Version barata de lo que `jornada-i` comprueba en el navegador: un atajo a un ancla
+    // inexistente no lleva a ninguna parte y la pantalla se ve perfecta. Vale tenerlo acá
+    // porque el e2e necesita Docker y el sim, y esto corre en cada `pnpm test`.
+    const delIndice = [...ajustes.matchAll(/\{ id: "([a-z-]+)", label:/g)].map((m) => m[1]);
+    const anclas = new Set([...ajustes.matchAll(/id="([a-z-]+)"/g)].map((m) => m[1]));
+    expect(delIndice.length, "no se pudo leer el índice (si no, este test no prueba nada)").toBeGreaterThan(1);
+    for (const id of delIndice) {
+      expect(anclas.has(id), `el índice ofrece "#${id}" y en la página no hay ningún id="${id}"`).toBe(true);
+    }
+  });
 });
 
 describe("el componente usa la API de WebAuthn como corresponde", () => {
