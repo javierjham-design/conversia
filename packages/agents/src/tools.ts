@@ -146,6 +146,40 @@ export class ToolRegistry {
   }
 }
 
+/**
+ * DÍA DEL MES que el paciente nombró EXPLÍCITAMENTE en su texto ("lunes 23", "el 23", "23 de
+ * noviembre"). Devuelve `{ day, month }` o null. Misma extracción cuidadosa que usa `getAvailability`
+ * (`specificDay`): EXCLUYE las horas a propósito —"a las 3", "18:15", "9 hrs" NO son un día— para no
+ * bloquear un agendamiento legítimo. Vive a nivel de módulo porque la usa también la GUARDA DE DÍA de
+ * `createAppointment` (caso Claudio): si el paciente pidió un día y el cupo resuelto cae en otro, no
+ * se agenda el equivocado. No resuelve la fecha completa (eso depende de HOY); solo el día (y el mes
+ * si lo dijo), que es lo que la guarda necesita para comparar contra el día civil del slot.
+ */
+export function diaDelMesPedido(text: string | undefined | null): { day: number; month: number | null } | null {
+  const t = (text ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+  if (!t) return null;
+  const WD = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
+  const MESES: Record<string, number> = { enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5, julio: 6, agosto: 7, septiembre: 8, setiembre: 8, octubre: 9, noviembre: 10, diciembre: 11 };
+  let day: number | null = null;
+  let month: number | null = null;
+  const m1 = t.match(/\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/);
+  if (m1) { day = parseInt(m1[1], 10); month = MESES[m1[2]]; }
+  if (day == null) {
+    for (const name of WD) {
+      // "<weekday> <número>" pelado — una HORA tras el día NO cuenta ("miércoles 15:15", "jueves 9 hrs").
+      const mm = t.match(new RegExp(`\\b${name}s?\\s+(\\d{1,2})\\b(?!\\s*[:.]\\d|\\s*(?:hrs?|horas?|h\\b))`));
+      if (mm) { day = parseInt(mm[1], 10); break; }
+    }
+  }
+  if (day == null) {
+    // "el 9", "para el 16" — pero NO una hora ("a las 9", "9:30", "9 de la tarde").
+    const mm = t.match(/\b(?:el|para el|del)\s+(?:dia\s+)?(\d{1,2})\b(?!\s*[:.h]|\s*(?:hrs?|horas?|am|pm|de la|y media|y cuarto))/);
+    if (mm) day = parseInt(mm[1], 10);
+  }
+  if (day == null || day < 1 || day > 31) return null;
+  return { day, month };
+}
+
 /** Tools estándar de la plataforma (sección 29). */
 export function buildCoreTools(): ToolDefinition<any, any>[] {
   const isoDate = z.string().describe("Fecha ISO YYYY-MM-DD");
@@ -666,6 +700,32 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
             error:
               "No pude confirmar esa hora exacta (la lista pudo vencer o pudo tomarla otra persona). Discúlpate BREVEMENTE SOLO por esa hora puntual, vuelve a llamar getAvailability y ofrécele ÚNICAMENTE las horas nuevas que devuelva. NO repitas ni confirmes las horas de un mensaje anterior sin reconsultar.",
           };
+        }
+        // GUARDA DE DÍA DURA (caso Claudio, 16-nov-2026): el id que manda el modelo puede caer en
+        // OTRO día a la MISMA hora. La lista que VE el modelo trae cupos de días que el paciente NO
+        // pidió (incluso HOY, de un getAvailability intermedio); Claudio dijo "lunes 23 18:15" y el
+        // bot agendó HOY 18:15 (con otro profesional) porque getSlot resolvió el id DIRECTO, saltándose
+        // la desambiguación por día (que solo corre cuando getSlot da null). Regla: si el paciente
+        // nombró un DÍA concreto y el slot resuelto cae en OTRO día, JAMÁS se agenda el día equivocado:
+        // se busca ese MISMO horario en el día pedido y, si no queda inequívoco, se PREGUNTA (reconsulta).
+        const pedidoDia = diaDelMesPedido(ctx.lastUserText);
+        if (pedidoDia) {
+          const domCl = (iso: string) => Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", day: "2-digit" }).format(new Date(iso)));
+          const mesCl = (iso: string) => Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", month: "2-digit" }).format(new Date(iso))) - 1;
+          const diaEquivocado = domCl(slot.start) !== pedidoDia.day || (pedidoDia.month != null && mesCl(slot.start) !== pedidoDia.month);
+          if (diaEquivocado) {
+            const enElDiaPedido = slotsSameHour(convId, String(input.slotId ?? "")).filter(
+              (sl) => domCl(sl.start) === pedidoDia.day && (pedidoDia.month == null || mesCl(sl.start) === pedidoDia.month),
+            );
+            if (enElDiaPedido.length === 1) {
+              slot = enElDiaPedido[0];
+            } else {
+              return {
+                needsDayClarification: true,
+                nota: `El paciente pidió el día ${pedidoDia.day}${pedidoDia.month != null ? ` del mes ${pedidoDia.month + 1}` : ""}, pero el horario que se iba a agendar cae en OTRO día (${slotWhen.format(new Date(slot.start))}). NO agendes ese día. Vuelve a llamar getAvailability para el día EXACTO que pidió el paciente y ofrécele SOLO ese día; si de verdad ese día no tiene esa hora, díselo con calidez y ofrécele lo más cercano con cupo. Jamás confirmes un día distinto al que pidió.`,
+              };
+            }
+          }
         }
         // GUARDIA PERSISTENTE anti doble-agendamiento (sobrevive reinicios del worker y
         // ventanas largas, al revés que bookedCache que es memoria por 3 min). Consulta las
