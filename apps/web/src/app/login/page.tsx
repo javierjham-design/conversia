@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Fingerprint } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
-import { api, setToken } from "@/lib/api";
+import { api, setSession, setToken, type SesionDelServidor } from "@/lib/api";
 
 type LoginResp =
   | { token: string }
@@ -119,8 +119,10 @@ export default function LoginPage() {
         { method: "POST", body: "{}" },
       );
       const response = await startAuthentication({ optionsJSON: opciones });
-      const res = await api<{ token: string }>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
-      setToken(res.token);
+      // Entrar por passkey crea una SESIÓN DE APARATO (P3): trae `refreshToken` y sin techo. Se
+      // guarda con `setSession` (no `setToken`), para conservar el refresh que renovará con Face ID.
+      const res = await api<SesionDelServidor>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
+      setSession(res);
       router.push("/inbox");
     } catch (err) {
       const nombre = (err as { name?: string })?.name ?? "";
