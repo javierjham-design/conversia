@@ -146,11 +146,22 @@ export class AuthController {
    * 401 → el frontend cae al flujo de "sesión expirada" (Bloque 1). Rate-limit por el refresh.
    */
   @Post("refresh")
-  async refresh(@Body() body: unknown) {
-    const input = parse(z.object({ refreshToken: z.string().min(10).max(400) }), body);
+  async refresh(@Req() req: Request, @Body() body: unknown) {
+    // P3 — una sesión de APARATO exige una aserción fresca del passkey para renovar. `loginId` +
+    // `assertion` llegan solo en la 2.ª fase (tras firmar el desafío que devolvió la 1.ª); un
+    // refresh normal (sin credentialId en la sesión) los ignora y rota como siempre.
+    const input = parse(
+      z.object({
+        refreshToken: z.string().min(10).max(400),
+        loginId: z.string().min(1).max(200).optional(),
+        assertion: z.object({ id: z.string().min(1).max(3000) }).passthrough().optional(),
+      }),
+      body,
+    );
     const rl = await this.rateLimit.login(`refresh:${input.refreshToken.slice(0, 24)}`);
     if (!rl.allowed) throw new HttpException("Demasiados intentos. Espera unos segundos.", HttpStatus.TOO_MANY_REQUESTS);
-    return this.auth.refresh(input.refreshToken);
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    return this.auth.refresh(input.refreshToken, { brand, assertion: input.assertion, loginId: input.loginId });
   }
 
   /**
@@ -436,8 +447,10 @@ export class AuthController {
       body,
     );
     const brand = brandFromOrigin(req.headers.origin as string | undefined);
-    const { userId } = await this.passkeys.verificarLogin(brand, input.response, input.loginId);
-    return this.auth.emitirSesionDePasskey(userId, sessionMode(req));
+    const { userId, credentialId } = await this.passkeys.verificarLogin(brand, input.response, input.loginId);
+    // El `credentialId` ata la sesión a ESTE passkey: en Conversia nace SIN techo de 24 h (P3) y su
+    // refresh exigirá la firma; en TuBot no cambia nada (no hay refresh).
+    return this.auth.emitirSesionDePasskey(userId, sessionMode(req), credentialId);
   }
 
   /** Paso 1 de sumar este aparato: las opciones para `navigator.credentials.create()`. */
@@ -552,7 +565,9 @@ export class AuthController {
     // El techo de la sesión en curso viaja al token nuevo: cambiar de organización CONTINÚA
     // la sesión. Si estrenara techo, cambiarse de org (aun a la misma) cada 23 h daría una
     // sesión eterna y el máximo de 24 h sería de mentira.
-    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId, sessionMode(req), ctx.sessionExpiresAt);
+    // El `credentialId` (sesión de aparato) también viaja: sin él, cambiar de org degradaría una
+    // sesión sin techo a una normal de 24 h (3.er agujero de #609, ahora al revés).
+    return this.auth.switchOrg(ctx.userId!, parsed.data.organizationId, sessionMode(req), ctx.sessionExpiresAt, ctx.deviceCredentialId);
   }
 
   @Get("me")

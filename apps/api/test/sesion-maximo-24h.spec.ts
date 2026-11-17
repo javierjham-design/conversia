@@ -40,12 +40,12 @@ function expEnMs(token: string): number {
   return ((jwt.decode(token) as { exp: number }).exp ?? 0) * 1000;
 }
 
-function makeAuth(opts: { brand?: string; techo?: number; creadaHace?: number } = {}) {
+function makeAuth(opts: { brand?: string; techo?: number; creadaHace?: number; credentialId?: string; passkeys?: any } = {}) {
   const brand = opts.brand ?? "conversia";
   const techo = opts.techo ?? Date.now() + DIA;
   const creadaHace = opts.creadaHace ?? 0;
-  /** Lo que se le pidió a Redis: sirve para probar qué techo se HEREDÓ en cada caso. */
-  const creadas: Array<{ userId: string; orgId: string; hereda?: number }> = [];
+  /** Lo que se le pidió a Redis: sirve para probar qué techo/credentialId se HEREDÓ en cada caso. */
+  const creadas: Array<{ userId: string; orgId: string; hereda?: number; credentialId?: string }> = [];
 
   const memberships = [{ organizationId: "o1", roleId: "r1", active: true }];
   const user = {
@@ -62,18 +62,27 @@ function makeAuth(opts: { brand?: string; techo?: number; creadaHace?: number } 
     organization: { findUnique: async () => ({ settings: {}, deletedAt: null }) },
     organizationUser: { findUnique: async () => ({ organizationId: "o1", userId: "u1", roleId: "r1", active: true }) },
   };
-  const sesion = { userId: "u1", orgId: "o1", createdAt: Date.now() - creadaHace, absoluteExpiresAt: techo };
+  // Sesión de aparato (P3): con `credentialId` y SIN techo (`absoluteExpiresAt` ausente).
+  const sesion: any = opts.credentialId
+    ? { userId: "u1", orgId: "o1", createdAt: Date.now() - creadaHace, credentialId: opts.credentialId }
+    : { userId: "u1", orgId: "o1", createdAt: Date.now() - creadaHace, absoluteExpiresAt: techo };
   const refreshSessions: any = {
-    create: async (userId: string, orgId: string, hereda?: number) => {
-      creadas.push({ userId, orgId, hereda });
-      return { token: "rt_nuevo", absoluteExpiresAt: hereda ?? Date.now() + DIA };
+    create: async (userId: string, orgId: string, hereda?: number, credentialId?: string) => {
+      creadas.push({ userId, orgId, hereda, credentialId });
+      // Con credentialId = sesión de aparato → sin `absoluteExpiresAt` (sin techo).
+      return credentialId ? { token: "rt_device" } : { token: "rt_nuevo", absoluteExpiresAt: hereda ?? Date.now() + DIA };
     },
     resolve: async () => sesion,
     rotate: async (_usado: string, data: any) => ({ token: "rt_rotado", absoluteExpiresAt: techoDeLaSesion(data, DIA) }),
     revoke: async () => undefined,
   };
-  const service = new AuthService({ admin } as any, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);
-  return { service, creadas, techo };
+  // Fake del portón de passkey: por defecto benigno (las pruebas de sesión NORMAL nunca lo tocan).
+  const passkeys: any = opts.passkeys ?? {
+    opcionesDeRefresh: async () => ({ needsAssertion: true, loginId: "lg", opciones: {} }),
+    verificarRefreshAssertion: async () => undefined,
+  };
+  const service = new AuthService({ admin } as any, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any, passkeys);
+  return { service, creadas, techo, sesion };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,5 +273,99 @@ describe("REGRESIÓN TuBot: su login sigue idéntico", () => {
     const horas = (sxp! * 1000 - Date.now()) / HORA;
     expect(horas).toBeGreaterThan(23.9);
     expect(horas).toBeLessThanOrEqual(24);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. SESIÓN DE APARATO (passkeys P3): sin techo, sostenida por la firma del passkey
+// ─────────────────────────────────────────────────────────────────────────────
+// El eje es la PRESENCIA de `credentialId`, NUNCA "parece un celular". Con él → sin techo; sin
+// él → las 24 h de siempre pida lo que pida por cabecera. Y el portón: el refresh de una sesión
+// de aparato SIN una firma fresca del passkey NO entrega sesión (devuelve un desafío) → un refresh
+// token robado no sirve sin la cara/dedo del dueño.
+describe("sesión de aparato (passkey P3): sin techo y con el portón del refresh", () => {
+  it("el techo es propiedad de la sesión: con credentialId → sin techo; sin él → desde createdAt", () => {
+    const login = Date.now() - 2 * DIA;
+    // «Sin techo» sale de la PRESENCIA de credentialId, no de la ausencia de absoluteExpiresAt.
+    expect(techoDeLaSesion({ createdAt: login, credentialId: "cred_1" }, DIA)).toBeUndefined();
+    expect(techoDeLaSesion({ createdAt: login }, DIA)).toBe(login + DIA); // vieja sin techo: 24 h, no eterna
+  });
+
+  it("vidaDelAccessToken sin techo (undefined) = 12 h limpias, sin recorte", () => {
+    expect(vidaDelAccessToken("12h", undefined)).toBe(12 * 3600);
+  });
+
+  it("login por passkey en Conversia → sesión SIN techo: sin sxp, con claim dev, access 12 h", async () => {
+    const { service } = makeAuth({ brand: "conversia" });
+    const r: any = await service.emitirSesionDePasskey("u1", undefined, "cred_1");
+    expect(r.refreshToken).toBe("rt_device");
+    expect(r.sessionExpiresAt).toBeUndefined(); // sin techo
+    expect(verifyAppToken(r.token).sxp).toBeUndefined();
+    expect(verifyAppToken(r.token).dev).toBe("cred_1");
+    const horas = (expEnMs(r.token) - Date.now()) / HORA;
+    expect(horas).toBeGreaterThan(11.9);
+    expect(horas).toBeLessThan(12.1);
+  });
+
+  it("una sesión NORMAL (sin credentialId) sigue con techo: el refresh trae sxp y NO dev", async () => {
+    const { service } = makeAuth({ brand: "conversia", techo: Date.now() + 2 * HORA });
+    const r: any = await service.refresh("rt_viejo");
+    expect(verifyAppToken(r.token).sxp).toBeTruthy();
+    expect(verifyAppToken(r.token).dev).toBeUndefined();
+  });
+
+  it("EL PORTÓN: refresh de una sesión de aparato SIN aserción → devuelve desafío, NO sesión (no rota)", async () => {
+    const { service } = makeAuth({
+      brand: "conversia",
+      credentialId: "cred_1",
+      passkeys: {
+        opcionesDeRefresh: async () => ({ needsAssertion: true as const, loginId: "lg_1", opciones: { challenge: "ch" } }),
+        verificarRefreshAssertion: async () => { throw new Error("no debe llamarse sin aserción"); },
+      },
+    });
+    // Un ladrón solo tiene el refresh token (de localStorage), no el passkey.
+    const r: any = await service.refresh("rt_robado");
+    expect(r.needsAssertion).toBe(true);
+    expect(r.loginId).toBe("lg_1");
+    expect(r.token).toBeUndefined(); // NO se emitió ninguna sesión
+  });
+
+  it("EL PORTÓN: con una aserción válida → rota y emite otra sesión de aparato (sin techo)", async () => {
+    let verificado = false;
+    const { service } = makeAuth({
+      brand: "conversia",
+      credentialId: "cred_1",
+      passkeys: {
+        opcionesDeRefresh: async () => ({ needsAssertion: true as const, loginId: "lg_1", opciones: {} }),
+        verificarRefreshAssertion: async () => { verificado = true; },
+      },
+    });
+    const r: any = await service.refresh("rt_dispositivo", { brand: "conversia", loginId: "lg_1", assertion: { id: "cred_1" } });
+    expect(verificado).toBe(true);
+    expect(r.token).toBeTruthy();
+    expect(verifyAppToken(r.token).sxp).toBeUndefined(); // sigue sin techo
+    expect(verifyAppToken(r.token).dev).toBe("cred_1");
+  });
+
+  it("EL PORTÓN: si la aserción NO verifica, el refresh FALLA (sin firma no se renueva)", async () => {
+    const { service } = makeAuth({
+      brand: "conversia",
+      credentialId: "cred_1",
+      passkeys: {
+        opcionesDeRefresh: async () => ({ needsAssertion: true as const, loginId: "lg_1", opciones: {} }),
+        verificarRefreshAssertion: async () => { throw new UnauthorizedException("No se pudo validar la sesión."); },
+      },
+    });
+    await expect(
+      service.refresh("rt_dispositivo", { brand: "conversia", loginId: "lg_1", assertion: { id: "cred_1" } }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("switch-org HEREDA el credentialId: cambiar de org no degrada la sesión de aparato a una normal", async () => {
+    const { service, creadas } = makeAuth({ brand: "conversia" });
+    const r: any = await service.switchOrg("u1", "o1", undefined, undefined, "cred_1");
+    expect(creadas[0].credentialId).toBe("cred_1");
+    expect(r.sessionExpiresAt).toBeUndefined(); // sigue sin techo
+    expect(verifyAppToken(r.token).dev).toBe("cred_1");
   });
 });
