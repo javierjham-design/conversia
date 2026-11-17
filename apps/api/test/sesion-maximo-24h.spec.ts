@@ -250,14 +250,30 @@ describe("el middleware rechaza un token cuya sesión ya murió", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. REGRESIÓN TuBot — su sesión no cambió en nada
 // ─────────────────────────────────────────────────────────────────────────────
-describe("REGRESIÓN TuBot: su login sigue idéntico", () => {
-  it("no recibe refresh, ni techo, ni `sxp`, y su access sigue durando 12 h", async () => {
+describe("REGRESIÓN TuBot: el login por CONTRASEÑA sigue idéntico; el de PASSKEY gana la sesión de aparato", () => {
+  it("por contraseña: no recibe refresh, ni techo, ni `sxp`, y su access sigue durando 12 h", async () => {
     const { service, creadas } = makeAuth({ brand: "tubot" });
     const r: any = await service.login({ email: "d@x.cl", password: "clave-correcta-1", brand: "tubot" });
     expect(r.refreshToken).toBeUndefined();
     expect(r.sessionExpiresAt).toBeUndefined();
     expect(creadas.length).toBe(0); // no se creó sesión en Redis
     expect(verifyAppToken(r.token).sxp).toBeUndefined();
+    const horas = (expEnMs(r.token) - Date.now()) / HORA;
+    expect(horas).toBeGreaterThan(11.9);
+    expect(horas).toBeLessThan(12.1);
+  });
+
+  it("por PASSKEY sí: TuBot recibe una SESIÓN DE APARATO (refresh, sin techo, con dev) — es lo ÚNICO que cambia (P3)", async () => {
+    // El eje es la PRESENCIA del credentialId (wantsSlidingSession), no la marca: por eso TuBot,
+    // que por contraseña nunca tuvo refresh, por passkey sí tiene la sesión de aparato sin techo.
+    const { service, creadas } = makeAuth({ brand: "tubot" });
+    const r: any = await service.emitirSesionDePasskey("u1", undefined, "cred_1");
+    expect(r.refreshToken).toBe("rt_device");
+    expect(creadas.length).toBe(1);
+    expect(creadas[0].credentialId).toBe("cred_1");
+    expect(r.sessionExpiresAt).toBeUndefined(); // sin techo
+    expect(verifyAppToken(r.token).sxp).toBeUndefined();
+    expect(verifyAppToken(r.token).dev).toBe("cred_1");
     const horas = (expEnMs(r.token) - Date.now()) / HORA;
     expect(horas).toBeGreaterThan(11.9);
     expect(horas).toBeLessThan(12.1);

@@ -24,7 +24,7 @@ import {
   Smartphone,
   Workflow,
 } from "lucide-react";
-import { api, clearToken, getToken, setToken } from "@/lib/api";
+import { api, getToken, logout, setSession, type SesionDelServidor } from "@/lib/api";
 import { disablePush, enablePush, permissionState, pushSupport, registerServiceWorker } from "@/lib/push";
 import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
@@ -354,10 +354,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const targetOrg = new URLSearchParams(NOTIF_DEEP_LINK.split("?")[1] ?? "").get("org");
     if (!targetOrg || targetOrg === orgId) return;
     let cancelled = false;
-    void api<{ token: string }>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: targetOrg }) })
+    void api<SesionDelServidor>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: targetOrg }) })
       .then((res) => {
         if (cancelled) return;
-        setToken(res.token);
+        setSession(res); // conserva el refresh si la sesión es de aparato (passkey)
+
         window.location.assign(NOTIF_DEEP_LINK); // recarga con ?c= y ?org= → abre la conversación en la cuenta correcta
       })
       .catch(() => undefined);
@@ -551,7 +552,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={async () => {
                     await disablePush().catch(() => {});
-                    clearToken();
+                    await logout(); // revoca el refresh en el servidor (mata la sesión de aparato) + limpia local
                     window.location.href = "/login";
                   }}
                   title="Cerrar sesión"

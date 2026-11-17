@@ -74,12 +74,14 @@ export interface SessionHint {
 /**
  * §10.2 — ¿esta sesión lleva refresh token?
  *
- * Solo quien usa la sesión deslizante lo recibe: el panel de Conversia (que en un 401
- * refresca y reintenta) y cualquier cliente que lo pida explícitamente con la cabecera
- * `x-session-mode: sliding`. El panel de TuBot no lo lee, así que emitirle uno solo creaba
- * credenciales de 30 días que nadie revoca ni usa.
+ * Lo reciben: (a) una SESIÓN DE APARATO (passkey P3) — EN CUALQUIER MARCA, TuBot incluido: la
+ * sostiene la biometría y por definición es deslizante y sin techo; (b) el panel de Conversia
+ * (que en un 401 refresca y reintenta); (c) cualquier cliente que lo pida con `x-session-mode:
+ * sliding`. Un login NORMAL de TuBot (contraseña/Google/MFA) NO trae `credentialId` → sigue sin
+ * refresh, con su access de 12 h de siempre (lo encierran los tests de regresión de §5).
  */
 export function wantsSlidingSession(hint?: SessionHint): boolean {
+  if (hint?.credentialId) return true; // sesión de aparato: deslizante aunque la marca sea TuBot
   if ((hint?.sessionMode ?? "").trim().toLowerCase() === "sliding") return true;
   return (hint?.brand ?? "").trim().toLowerCase() === "conversia";
 }

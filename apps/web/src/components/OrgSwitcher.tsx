@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Building2, Check, ChevronsUpDown } from "lucide-react";
-import { api, setToken } from "@/lib/api";
+import { api, setSession, type SesionDelServidor } from "@/lib/api";
 import { roleLabel } from "@/lib/labels";
 
 interface Org {
@@ -43,8 +43,10 @@ export function OrgSwitcher({ currentName }: { currentName?: string | null }) {
     }
     setSwitching(id);
     try {
-      const res = await api<{ token: string }>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: id }) });
-      setToken(res.token);
+      // switch-org puede devolver una SESIÓN DE APARATO (refresh nuevo) si la sesión es de passkey:
+      // se guarda con `setSession` para no perder el refresh (setToken lo borraría → caería a 12 h).
+      const res = await api<SesionDelServidor>("/auth/switch", { method: "POST", body: JSON.stringify({ organizationId: id }) });
+      setSession(res);
       // Recarga completa: todos los datos se recargan para el nuevo tenant.
       window.location.href = "/inbox";
     } catch {
