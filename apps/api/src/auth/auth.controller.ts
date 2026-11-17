@@ -395,13 +395,50 @@ export class AuthController {
   // P1 — inscribir, listar, renombrar y quitar aparatos. **TODAS autenticadas**: para sumar
   // un aparato hay que estar DENTRO (contraseña + 2.º factor), y ninguna puede quedar pública.
   //
-  // Entrar CON el passkey es P2 y vivirá bajo `/auth/passkey-login`, un prefijo distinto a
+  // Entrar CON el passkey es P2 y vive bajo `/auth/passkey-login` (abajo), un prefijo distinto a
   // propósito: `PUBLIC_PREFIXES` (tenancy.middleware) compara con `startsWith`, así que un
-  // prefijo público `/auth/passkey` abriría de regalo TODAS estas rutas de gestión. El test
-  // `passkeys-rutas.spec.ts` se pone rojo si algún día pasa.
+  // prefijo público `/auth/passkey` abriría de regalo TODAS las rutas de gestión. Por eso el
+  // login va con sufijo `-login`. El test `passkeys-rutas.spec.ts` se pone rojo si algún día
+  // una ruta de gestión queda pública.
   //
   // La marca sale del Origin y de ahí el dominio dueño de la llave sale de NUESTRA config
   // (ver `rpDeLaMarca`): un passkey de tubot.cl no sirve en conversia.cl y al revés.
+
+  // ── P2: ENTRAR con el passkey (PÚBLICO — el usuario todavía no tiene sesión) ──
+  // La sesión la emite `this.auth.emitirSesionDePasskey` → el MISMO `issueForUser` que usan el
+  // 2.º factor y Google, así que hereda TuBot (sin refresh) / Conversia (deslizante). NO pide
+  // TOTP: un passkey con userVerification=required ya es dos factores (aparato + cara/dedo/PIN).
+  // Rate-limit por IP, como el login por contraseña.
+
+  /** Paso 1 de ENTRAR: el desafío para `navigator.credentials.get()` (sin teclear el correo). */
+  @Post("passkey-login/options")
+  async passkeyLoginOptions(@Req() req: Request) {
+    const porIp = await this.rateLimit.loginByIp(clientIp(req));
+    if (!porIp.allowed) {
+      throw new HttpException("Demasiados intentos de inicio de sesión. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    return this.passkeys.opcionesDeLogin(brandFromOrigin(req.headers.origin as string | undefined));
+  }
+
+  /** Paso 2 de ENTRAR: verifica la firma del aparato y emite la sesión. */
+  @Post("passkey-login")
+  async passkeyLogin(@Req() req: Request, @Body() body: unknown) {
+    const porIp = await this.rateLimit.loginByIp(clientIp(req));
+    if (!porIp.allowed) {
+      throw new HttpException("Demasiados intentos de inicio de sesión. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
+    }
+    const input = parse(
+      z.object({
+        loginId: z.string().min(1).max(200),
+        // La forma profunda de `response` la valida la librería de WebAuthn; acá solo se exige su `id`.
+        response: z.object({ id: z.string().min(1).max(3000) }).passthrough(),
+      }),
+      body,
+    );
+    const brand = brandFromOrigin(req.headers.origin as string | undefined);
+    const { userId } = await this.passkeys.verificarLogin(brand, input.response, input.loginId);
+    return this.auth.emitirSesionDePasskey(userId, sessionMode(req));
+  }
 
   /** Paso 1 de sumar este aparato: las opciones para `navigator.credentials.create()`. */
   @Post("passkeys/options")

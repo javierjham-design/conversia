@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Fingerprint } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
 import { api, setToken } from "@/lib/api";
 
 type LoginResp =
@@ -17,6 +19,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleReady, setGoogleReady] = useState(false);
+  // Passkeys (P2): entrar con Face ID / huella. `browserSupportsWebAuthn` corre solo en cliente.
+  const [pkSupported, setPkSupported] = useState(false);
+  const [pkBusy, setPkBusy] = useState(false);
+
+  useEffect(() => {
+    setPkSupported(browserSupportsWebAuthn());
+  }, []);
 
   // Estado del 2.º factor.
   const [mfaMode, setMfaMode] = useState<"verify" | "setup" | null>(null);
@@ -95,6 +104,31 @@ export default function LoginPage() {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function entrarConPasskey() {
+    setError(null);
+    setPkBusy(true);
+    try {
+      // Paso 1: el servidor arma el desafío (sin saber aún quién entra). Paso 2: el SISTEMA pide
+      // la cara o el dedo y el teléfono elige la cuenta. Paso 3: el servidor verifica y emite la
+      // sesión — idéntica a la del login por contraseña.
+      const { loginId, opciones } = await api<{ loginId: string; opciones: Parameters<typeof startAuthentication>[0]["optionsJSON"] }>(
+        "/auth/passkey-login/options",
+        { method: "POST", body: "{}" },
+      );
+      const response = await startAuthentication({ optionsJSON: opciones });
+      const res = await api<{ token: string }>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
+      setToken(res.token);
+      router.push("/inbox");
+    } catch (err) {
+      const nombre = (err as { name?: string })?.name ?? "";
+      // Cancelar el diálogo del sistema no es un error: no se muestra nada.
+      if (nombre === "NotAllowedError" || nombre === "AbortError") return;
+      setError(mensajeDeErrorPasskey(err));
+    } finally {
+      setPkBusy(false);
     }
   }
 
@@ -184,7 +218,18 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-ink-muted">Conversa. Automatiza. Crece.</p>
         </div>
         <div id="google-btn" className="flex justify-center" />
-        {googleReady && (
+        {pkSupported && (
+          <button
+            type="button"
+            onClick={() => void entrarConPasskey()}
+            disabled={pkBusy}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-line-strong bg-panel px-4 py-2 text-sm font-medium text-ink hover:bg-app disabled:opacity-50"
+          >
+            <Fingerprint size={16} aria-hidden />
+            {pkBusy ? "Abriendo…" : "Entrar con Face ID o huella"}
+          </button>
+        )}
+        {(googleReady || pkSupported) && (
           <div className="flex items-center gap-3 text-xs text-ink-subtle">
             <span className="h-px flex-1 bg-line" />o<span className="h-px flex-1 bg-line" />
           </div>
@@ -214,4 +259,13 @@ export default function LoginPage() {
       </form>
     </main>
   );
+}
+
+/** Los errores de WebAuthn llegan con nombres del estándar; no se muestran crudos. */
+function mensajeDeErrorPasskey(e: unknown): string {
+  const nombre = (e as { name?: string })?.name ?? "";
+  if (nombre === "InvalidStateError") return "Este aparato no está activado en ninguna cuenta. Entra con tu contraseña y actívalo en Mi perfil.";
+  const msg = (e as Error)?.message;
+  if (msg && msg.length < 200) return msg;
+  return "No se pudo entrar con este aparato. Usa tu correo y contraseña.";
 }

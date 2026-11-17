@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Fingerprint } from "lucide-react";
+import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
 import { api, setSession, type SesionDelServidor } from "@/lib/api";
 
 /** Solo acepta rutas internas ("/algo"), nunca absolutas ("//host") → anti open-redirect. */
@@ -19,6 +21,13 @@ export default function Login() {
   const [expired, setExpired] = useState(false);
   const [volver, setVolver] = useState<string | null>(null);
   const [googleReady, setGoogleReady] = useState(false);
+  // Passkeys (P2): entrar con Face ID / huella. `browserSupportsWebAuthn` corre solo en cliente.
+  const [pkSupported, setPkSupported] = useState(false);
+  const [pkBusy, setPkBusy] = useState(false);
+
+  useEffect(() => {
+    setPkSupported(browserSupportsWebAuthn());
+  }, []);
 
   // Lee el motivo (?expirada=1) y la ruta a la que volver (?volver=) del querystring. Vía
   // window.location para no exigir un <Suspense> alrededor de useSearchParams (Next 15).
@@ -81,6 +90,30 @@ export default function Login() {
     };
   }, [router]);
 
+  async function entrarConPasskey() {
+    setError(null);
+    setPkBusy(true);
+    try {
+      // El servidor arma el desafío (sin saber aún quién entra); el SISTEMA pide la cara/dedo y
+      // el teléfono elige la cuenta; el servidor verifica y emite la MISMA sesión deslizante.
+      const { loginId, opciones } = await api<{ loginId: string; opciones: Parameters<typeof startAuthentication>[0]["optionsJSON"] }>(
+        "/auth/passkey-login/options",
+        { method: "POST", body: "{}" },
+      );
+      const response = await startAuthentication({ optionsJSON: opciones });
+      const res = await api<SesionDelServidor>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
+      setSession(res);
+      router.replace(volver ?? "/inicio");
+    } catch (err) {
+      const nombre = (err as { name?: string })?.name ?? "";
+      if (nombre === "NotAllowedError" || nombre === "AbortError") return; // canceló: sin ruido
+      const msg = (err as Error)?.message;
+      setError(msg && msg.length < 200 ? msg : "No se pudo entrar con este aparato. Usa tu correo y contraseña.");
+    } finally {
+      setPkBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -125,7 +158,18 @@ export default function Login() {
           </p>
         ) : null}
         <div id="google-btn" style={{ display: "flex", justifyContent: "center" }} />
-        {googleReady ? (
+        {pkSupported ? (
+          <button
+            type="button"
+            onClick={() => void entrarConPasskey()}
+            disabled={pkBusy}
+            style={{ width: "100%", marginTop: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "11px 13px", borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14, cursor: pkBusy ? "default" : "pointer", opacity: pkBusy ? 0.6 : 1 }}
+          >
+            <Fingerprint size={16} aria-hidden />
+            {pkBusy ? "Abriendo…" : "Entrar con Face ID o huella"}
+          </button>
+        ) : null}
+        {googleReady || pkSupported ? (
           <div className="text-dim" style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0", fontSize: 12 }}>
             <span style={{ height: 1, flex: 1, background: "var(--line)" }} />o<span style={{ height: 1, flex: 1, background: "var(--line)" }} />
           </div>

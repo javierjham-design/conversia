@@ -94,3 +94,23 @@ describe("el componente usa la API de WebAuthn como corresponde", () => {
     expect(componente).toContain("NotAllowedError");
   });
 });
+
+// P2 — ENTRAR con Face ID/huella: el botón va en la pantalla de LOGIN, no solo en los Ajustes.
+// Un botón importado pero no renderizado no deja entrar a nadie, y el typecheck no lo caza.
+describe("la pantalla de login ofrece entrar con passkey (P2)", () => {
+  const login = readFileSync(join(__dirname, "..", "app", "login", "page.tsx"), "utf8");
+
+  it("usa startAuthentication y pega al endpoint de login por passkey", () => {
+    expect(login).toContain("startAuthentication");
+    expect(login).toContain("/auth/passkey-login");
+  });
+
+  it("pregunta si el navegador puede ANTES de ofrecer el botón", () => {
+    expect(login).toContain("browserSupportsWebAuthn");
+  });
+
+  it("el botón está RENDERIZADO y dispara el login por passkey", () => {
+    expect(login).toMatch(/onClick=\{\(\)\s*=>\s*void entrarConPasskey\(\)\}/);
+    expect(login).toContain("Entrar con Face ID o huella");
+  });
+});
