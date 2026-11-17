@@ -30,6 +30,7 @@ import { HealthDot, ToastProvider, cn } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme";
 import { BillingBanner } from "@/components/BillingBanner";
 import { OnboardingBanner } from "@/components/OnboardingBanner";
+import { SugerirPasskey } from "@/components/SugerirPasskey";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
 import { NotificationsPrompt } from "@/components/NotificationsPrompt";
@@ -602,6 +603,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
             <BillingBanner onLocked={setBillingLocked} />
             {!billingLocked && <OnboardingBanner />}
+            {/* P4 — en el flujo, como los dos de arriba; flotando taparía la navegación. */}
+            {!billingLocked && <SugerirPasskey />}
             <main className="min-h-0 flex-1 overflow-hidden bg-app text-ink">{children}</main>
           </div>
           <SupportWidget />

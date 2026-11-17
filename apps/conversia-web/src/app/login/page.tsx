@@ -2,8 +2,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Fingerprint } from "lucide-react";
-import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
+import { browserSupportsWebAuthn, browserSupportsWebAuthnAutofill, startAuthentication, WebAuthnAbortService } from "@simplewebauthn/browser";
 import { api, setSession, type SesionDelServidor } from "@/lib/api";
+import { hayPasskeyEnEsteAparato, recordarPasskeyEnEsteAparato } from "@/lib/passkey-aparato";
 
 /** Solo acepta rutas internas ("/algo"), nunca absolutas ("//host") → anti open-redirect. */
 function safeVolver(raw: string | null): string | null {
@@ -24,9 +25,12 @@ export default function Login() {
   // Passkeys (P2): entrar con Face ID / huella. `browserSupportsWebAuthn` corre solo en cliente.
   const [pkSupported, setPkSupported] = useState(false);
   const [pkBusy, setPkBusy] = useState(false);
+  // P4 — ¿este aparato ya entró con Face ID? Solo cambia la PRESENTACIÓN (ver `passkey-aparato`).
+  const [pkEnEsteAparato, setPkEnEsteAparato] = useState(false);
 
   useEffect(() => {
     setPkSupported(browserSupportsWebAuthn());
+    setPkEnEsteAparato(hayPasskeyEnEsteAparato());
   }, []);
 
   // Lee el motivo (?expirada=1) y la ruta a la que volver (?volver=) del querystring. Vía
@@ -90,20 +94,69 @@ export default function Login() {
     };
   }, [router]);
 
+  /** Paso 1 del login por passkey: el desafío del servidor para ESTA marca. */
+  function pedirDesafio() {
+    return api<{ loginId: string; opciones: Parameters<typeof startAuthentication>[0]["optionsJSON"] }>(
+      "/auth/passkey-login/options",
+      { method: "POST", body: "{}" },
+    );
+  }
+
+  /** Paso 3: canjea la firma por la sesión y entra. Compartido por el botón y el autocompletado. */
+  async function canjearPasskey(loginId: string, response: Awaited<ReturnType<typeof startAuthentication>>) {
+    const res = await api<SesionDelServidor>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
+    setSession(res);
+    recordarPasskeyEnEsteAparato();
+    // Igual que el callback de Google: la ruta se relee del querystring en vez de confiar en el
+    // estado, porque este camino puede resolverse mucho después de montar la pantalla.
+    router.replace(safeVolver(new URLSearchParams(window.location.search).get("volver")) ?? "/inicio");
+  }
+
+  // P4 — AUTOCOMPLETADO (mediación condicional): el passkey aparece DENTRO del campo de correo,
+  // como aparece una contraseña guardada. Es lo que hace que entrar no parezca un login: no hay
+  // que tocar ningún botón ni teclear nada, se elige la cuenta en la lista del propio navegador.
+  //
+  // Por qué no abrimos la hoja del sistema sola al cargar la pantalla: `credentials.get()` en
+  // modo modal EXIGE un gesto de la persona en Safari/iOS. Dispararlo desde un `useEffect`
+  // funciona en Android y tira `NotAllowedError` en iPhone — o sea, se rompe en la mitad de los
+  // teléfonos y sin dejar rastro. La mediación condicional no exige gesto en ninguno de los dos.
+  //
+  // El campo de correo DEBE llevar `autocomplete` terminado en `webauthn` o la propia librería
+  // tira error (`verifyBrowserAutofillInput`); lo encierra `passkeys-permisos.test.ts`.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      if (!(await browserSupportsWebAuthnAutofill().catch(() => false))) return;
+      try {
+        const { loginId, opciones } = await pedirDesafio();
+        if (!vivo) return;
+        // Queda ESPERANDO (no abre nada) hasta que se elija el passkey en el autocompletado.
+        const response = await startAuthentication({ optionsJSON: opciones, useBrowserAutofill: true });
+        if (!vivo) return;
+        await canjearPasskey(loginId, response);
+      } catch {
+        // Abortada porque se tocó el botón o se dejó la pantalla, o este dominio no tiene
+        // passkeys en el aparato: nada que la persona tenga que leer.
+      }
+    })();
+    return () => {
+      vivo = false;
+      // Sin esto la ceremonia queda viva tras salir de la pantalla y la siguiente falla.
+      WebAuthnAbortService.cancelCeremony();
+    };
+    // Corre una sola vez al montar: re-ejecutarla abortaría su propia ceremonia.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function entrarConPasskey() {
     setError(null);
     setPkBusy(true);
     try {
       // El servidor arma el desafío (sin saber aún quién entra); el SISTEMA pide la cara/dedo y
       // el teléfono elige la cuenta; el servidor verifica y emite la MISMA sesión deslizante.
-      const { loginId, opciones } = await api<{ loginId: string; opciones: Parameters<typeof startAuthentication>[0]["optionsJSON"] }>(
-        "/auth/passkey-login/options",
-        { method: "POST", body: "{}" },
-      );
+      const { loginId, opciones } = await pedirDesafio();
       const response = await startAuthentication({ optionsJSON: opciones });
-      const res = await api<SesionDelServidor>("/auth/passkey-login", { method: "POST", body: JSON.stringify({ loginId, response }) });
-      setSession(res);
-      router.replace(volver ?? "/inicio");
+      await canjearPasskey(loginId, response);
     } catch (err) {
       const nombre = (err as { name?: string })?.name ?? "";
       if (nombre === "NotAllowedError" || nombre === "AbortError") return; // canceló: sin ruido
@@ -134,6 +187,35 @@ export default function Login() {
     }
   }
 
+  /** El botón de Face ID. `destacado` lo pinta con el acento y lo deja arriba de todo (P4). */
+  function botonPasskey(destacado: boolean) {
+    return (
+      <button
+        type="button"
+        onClick={() => void entrarConPasskey()}
+        disabled={pkBusy}
+        className={destacado ? "btn-accent" : undefined}
+        style={{
+          width: "100%",
+          marginTop: destacado ? 0 : 12,
+          marginBottom: destacado ? 12 : 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          cursor: pkBusy ? "default" : "pointer",
+          opacity: pkBusy ? 0.6 : 1,
+          ...(destacado
+            ? {}
+            : { padding: "11px 13px", borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14 }),
+        }}
+      >
+        <Fingerprint size={16} aria-hidden />
+        {pkBusy ? "Abriendo…" : "Entrar con Face ID o huella"}
+      </button>
+    );
+  }
+
   const field: React.CSSProperties = {
     width: "100%",
     padding: "11px 13px",
@@ -157,18 +239,12 @@ export default function Login() {
             Tu sesión expiró por seguridad. Entra de nuevo y seguimos donde estabas.
           </p>
         ) : null}
+        {/* P4 — en el aparato que YA entró con Face ID, el botón va PRIMERO y acentuado: esa es
+            la puerta de esta persona, no una alternativa escondida abajo de Google. En un
+            aparato nuevo queda después, como una opción más entre otras. */}
+        {pkSupported && pkEnEsteAparato ? botonPasskey(true) : null}
         <div id="google-btn" style={{ display: "flex", justifyContent: "center" }} />
-        {pkSupported ? (
-          <button
-            type="button"
-            onClick={() => void entrarConPasskey()}
-            disabled={pkBusy}
-            style={{ width: "100%", marginTop: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "11px 13px", borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface-solid)", color: "var(--ink)", fontSize: 14, cursor: pkBusy ? "default" : "pointer", opacity: pkBusy ? 0.6 : 1 }}
-          >
-            <Fingerprint size={16} aria-hidden />
-            {pkBusy ? "Abriendo…" : "Entrar con Face ID o huella"}
-          </button>
-        ) : null}
+        {pkSupported && !pkEnEsteAparato ? botonPasskey(false) : null}
         {googleReady || pkSupported ? (
           <div className="text-dim" style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0", fontSize: 12 }}>
             <span style={{ height: 1, flex: 1, background: "var(--line)" }} />o<span style={{ height: 1, flex: 1, background: "var(--line)" }} />
@@ -176,7 +252,22 @@ export default function Login() {
         ) : null}
         <label style={{ fontSize: 13 }} className="text-dim">
           Correo
-          <input style={field} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+          {/* P4 — `webauthn` al final del `autocomplete` es lo que hace que el navegador ofrezca
+              el passkey DENTRO de este campo (mediación condicional). Sin ese token la librería
+              aborta la ceremonia y el autocompletado desaparece sin ningún error a la vista.
+              `username` en vez de `email`: es el token que documentan Chrome y Safari para esto,
+              y los gestores de contraseñas lo rellenan igual (sigue siendo `type="email"`).
+              El foco va en este campo cuando el aparato ya tiene passkey: en iPhone y Android
+              enfocarlo es lo que despliega la hoja de Face ID, sin tocar ningún botón. */}
+          <input
+            style={field}
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="username webauthn"
+            autoFocus={pkEnEsteAparato}
+          />
         </label>
         <label style={{ fontSize: 13, display: "block", marginTop: 14 }} className="text-dim">
           Contraseña

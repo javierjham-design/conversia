@@ -421,10 +421,18 @@ export class AuthController {
   // TOTP: un passkey con userVerification=required ya es dos factores (aparato + cara/dedo/PIN).
   // Rate-limit por IP, como el login por contraseña.
 
-  /** Paso 1 de ENTRAR: el desafío para `navigator.credentials.get()` (sin teclear el correo). */
+  /**
+   * Paso 1 de ENTRAR: el desafío para `navigator.credentials.get()` (sin teclear el correo).
+   *
+   * Cupo PROPIO (`passkeyChallengeByIp`), no el del login: desde P4 la pantalla pide este
+   * desafío SOLA al cargar, para ofrecer el passkey dentro del campo de correo. Con el cupo
+   * del login compartido, una oficina detrás de un NAT recargando /login se quedaba sin poder
+   * entrar por «demasiados intentos» que nunca hizo. Acuñar un desafío no comprueba ninguna
+   * credencial; el freno al spraying sigue íntegro en `/auth/login` y en `/auth/passkey-login`.
+   */
   @Post("passkey-login/options")
   async passkeyLoginOptions(@Req() req: Request) {
-    const porIp = await this.rateLimit.loginByIp(clientIp(req));
+    const porIp = await this.rateLimit.passkeyChallengeByIp(clientIp(req));
     if (!porIp.allowed) {
       throw new HttpException("Demasiados intentos de inicio de sesión. Espera unos minutos.", HttpStatus.TOO_MANY_REQUESTS);
     }

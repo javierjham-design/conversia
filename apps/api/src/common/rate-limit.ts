@@ -142,6 +142,27 @@ export class RateLimitService implements OnModuleDestroy {
     return this.allow(`rl:login:ip:${ip}`, env.LOGIN_MAX_PER_WINDOW * 5, env.LOGIN_WINDOW_SECONDS, true);
   }
 
+  /**
+   * P4 — DESAFÍO de passkey (`/auth/passkey-login/options`), con su propia cuenta y no la del
+   * login.
+   *
+   * Por qué separado: desde P4 la pantalla de login pide un desafío **sola, al cargar**, para
+   * ofrecer el passkey dentro del campo de correo (mediación condicional). Si eso gastara el
+   * cupo de `loginByIp` (20×5 = 100 por 15 min, COMPARTIDO con `/auth/login`), una oficina
+   * detrás de un NAT recargando la pantalla se quedaría sin poder entrar con un
+   * «Demasiados intentos de inicio de sesión» que nadie provocó: no hubo ningún intento.
+   *
+   * Por qué es legítimo que sea más laxo: este endpoint NO verifica ninguna credencial ni
+   * revela si existe una cuenta — solo acuña un desafío aleatorio con TTL de 5 minutos. El
+   * freno al "password spraying" vive donde se comprueba algo: `/auth/login` y
+   * `/auth/passkey-login`, que siguen con el cupo de siempre. El límite igual existe para que
+   * nadie llene Redis de desafíos: ×20 del cupo base en la misma ventana.
+   */
+  async passkeyChallengeByIp(ip: string): Promise<RateResult> {
+    const env = getEnv();
+    return this.allow(`rl:pkchal:ip:${ip}`, env.LOGIN_MAX_PER_WINDOW * 20, env.LOGIN_WINDOW_SECONDS, true);
+  }
+
   async register(bucket: string): Promise<RateResult> {
     const env = getEnv();
     return this.allow(`rl:register:${bucket}`, Math.max(env.LOGIN_MAX_PER_WINDOW, 30), env.LOGIN_WINDOW_SECONDS);
