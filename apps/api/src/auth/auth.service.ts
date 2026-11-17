@@ -642,6 +642,18 @@ export class AuthService {
     return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms, { brand: user.brand, sessionMode });
   }
 
+  /**
+   * P2 — emite la sesión de un usuario YA autenticado por un passkey. El caller
+   * (`AuthController.passkeyLogin`) DEBE haber verificado la firma del aparato con
+   * `PasskeysService.verificarLogin` ANTES de llamar acá: este método NO valida identidad, solo
+   * emite. Reusa el MISMO `issueForUser` que el 2.º factor y Google, así que hereda la sesión por
+   * marca (TuBot sin refresh / Conversia deslizante) sin ningún camino de emisión paralelo. Un
+   * passkey con `userVerification: required` ya es 2FA, por eso este login no pide además TOTP.
+   */
+  async emitirSesionDePasskey(userId: string, sessionMode?: string | null) {
+    return this.issueForUser(userId, sessionMode);
+  }
+
   /** Verifica el 2.º factor (TOTP o código de recuperación) y emite la sesión. */
   async verifyMfaLogin(userId: string, code: string, sessionMode?: string | null) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId } });

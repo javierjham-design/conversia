@@ -1,22 +1,27 @@
 import { BadRequestException, Injectable, OnModuleDestroy, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import IORedis from "ioredis";
 import {
+  generateAuthenticationOptions,
   generateRegistrationOptions,
+  verifyAuthenticationResponse,
   verifyRegistrationResponse,
+  type VerifiedAuthenticationResponse,
   type VerifiedRegistrationResponse,
 } from "@simplewebauthn/server";
 import { getEnv, allowedOriginsOf, baseHostOf, brandOf } from "@conversia/config";
 import { PrismaService } from "../prisma.service";
 
 /**
- * PASSKEYS (WebAuthn) — P1: inscribir, listar y quitar aparatos.
+ * PASSKEYS (WebAuthn) — P1: inscribir, listar y quitar aparatos. P2: ENTRAR con el passkey
+ * (autenticación), ver `opcionesDeLogin` / `verificarLogin` más abajo.
  *
  * Qué es un passkey, en una línea: una llave privada que vive en el chip seguro del aparato y
  * que la biometría solo DESTRABA. Acá se guarda nada más que la llave pública, así que no hay
  * ningún dato biométrico en la base ni viajando por la red.
  *
- * Lo que este archivo NO hace todavía: entrar con el passkey (P2) y sostener una sesión sin
- * techo de 24 h (P3). Ver `docs/PROMPT_PASSKEYS_BIOMETRIA.md`.
+ * Lo que este archivo NO hace todavía: sostener una sesión sin techo de 24 h en el móvil (P3).
+ * Ver `docs/PROMPT_PASSKEYS_BIOMETRIA.md`.
  */
 
 /** Cuánto vive un desafío sin usarse. Corto a propósito: es de un solo uso y de un solo rato. */
@@ -83,7 +88,7 @@ export class PasskeysService implements OnModuleDestroy {
     await this.redis.quit().catch(() => undefined);
   }
 
-  private claveDesafio(proposito: "reg", quien: string, rpId: string) {
+  private claveDesafio(proposito: "reg" | "auth", quien: string, rpId: string) {
     return `pkch:${proposito}:${rpId}:${quien}`;
   }
 
@@ -268,6 +273,90 @@ export class PasskeysService implements OnModuleDestroy {
     if (r.count === 0) throw new BadRequestException("Ese aparato no está en tu lista.");
     const fila = await this.prisma.admin.webauthnCredential.findUnique({ where: { id } });
     return { ok: true as const, aparato: aVista(fila!) };
+  }
+
+  // ----------------------------- P2: ENTRAR con el passkey -----------------------------
+  //
+  // Paso 1: el servidor arma un desafío de AUTENTICACIÓN (no de registro). No se sabe todavía
+  // QUIÉN está entrando —ese es justo el punto de un passkey descubrible: el teléfono elige la
+  // cuenta—, así que el desafío se guarda bajo un `loginId` aleatorio que el cliente nos
+  // devuelve al verificar. `userVerification: "required"` obliga a cara/dedo/PIN: eso es lo que
+  // hace que entrar con el passkey sea DOS factores (posesión del aparato + verificación de la
+  // persona), y por eso este login no pide además un código TOTP.
+  async opcionesDeLogin(brand: string | null | undefined): Promise<{ loginId: string; opciones: Awaited<ReturnType<typeof generateAuthenticationOptions>> }> {
+    const rp = rpDeLaMarca(brand);
+    const opciones = await generateAuthenticationOptions({
+      rpID: rp.rpId,
+      userVerification: "required",
+      // `allowCredentials` vacío = credencial DESCUBRIBLE: el aparato ofrece las cuentas que
+      // tiene para este dominio sin que tecleemos el correo (para eso P1 inscribió con
+      // `residentKey: "required"`).
+      allowCredentials: [],
+    });
+    const loginId = randomUUID();
+    await this.guardarDesafio(this.claveDesafio("auth", loginId, rp.rpId), opciones.challenge);
+    return { loginId, opciones };
+  }
+
+  /**
+   * Paso 2: verifica la firma del aparato y, si cuadra, devuelve el `userId` dueño de la
+   * credencial para que el controller emita la sesión (con el MISMO emisor que el login por
+   * contraseña). `response` es dato NO confiable: lo único que decide es la verificación
+   * criptográfica contra el desafío que guardamos nosotros.
+   *
+   * Un passkey pertenece a UNA marca (su `rpId`): una llave de conversia.cl no entra en
+   * tubot.cl ni al revés. Se exige explícitamente antes de verificar; además la propia
+   * verificación fallaría por el `expectedRPID`.
+   */
+  async verificarLogin(
+    brand: string | null | undefined,
+    response: unknown,
+    loginId: string,
+  ): Promise<{ userId: string }> {
+    const rp = rpDeLaMarca(brand);
+    if (!loginId || typeof loginId !== "string") throw new BadRequestException("Falta el identificador del inicio de sesión.");
+    const desafio = await this.consumirDesafio(this.claveDesafio("auth", loginId, rp.rpId));
+
+    const credId = typeof (response as { id?: unknown })?.id === "string" ? (response as { id: string }).id : "";
+    if (!credId) throw new BadRequestException("Respuesta de passkey inválida.");
+
+    const credencial = await this.prisma.admin.webauthnCredential.findUnique({ where: { credentialId: credId } });
+    // Mensaje UNIFORME a propósito: no revelamos si la credencial no existe, es de otra marca o
+    // la firma no cuadra — todo es "no se pudo iniciar sesión con este aparato".
+    if (!credencial || credencial.rpId !== rp.rpId) {
+      throw new UnauthorizedException("No se pudo iniciar sesión con este aparato.");
+    }
+
+    let verificacion: VerifiedAuthenticationResponse;
+    try {
+      verificacion = await verifyAuthenticationResponse({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lo valida la librería
+        response: response as any,
+        expectedChallenge: desafio,
+        expectedOrigin: rp.origins,
+        expectedRPID: rp.rpId,
+        // Explícito: garantiza que hubo cara, dedo o PIN. Es lo que convierte esto en 2FA.
+        requireUserVerification: true,
+        credential: {
+          id: credencial.credentialId,
+          publicKey: new Uint8Array(Buffer.from(credencial.publicKey, "base64url")),
+          counter: credencial.counter,
+          transports: transportesDe(credencial.transports),
+        },
+      });
+    } catch {
+      throw new UnauthorizedException("No se pudo iniciar sesión con este aparato.");
+    }
+    if (!verificacion.verified) throw new UnauthorizedException("No se pudo iniciar sesión con este aparato.");
+
+    // Anti-clonación: el contador del autenticador debe avanzar. Lo persistimos junto con
+    // `lastUsedAt` (best-effort: si la escritura falla, la sesión igual se emite — no vamos a
+    // dejar a la persona afuera por no poder anotar la marca de tiempo).
+    await this.prisma.admin.webauthnCredential
+      .update({ where: { id: credencial.id }, data: { counter: verificacion.authenticationInfo.newCounter, lastUsedAt: new Date() } })
+      .catch(() => undefined);
+
+    return { userId: credencial.userId };
   }
 }
 

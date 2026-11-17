@@ -130,6 +130,17 @@ describe("las rutas de passkeys exigen sesión", () => {
     }
   });
 
+  it("ENTRAR con passkey (P2) SÍ es público — pero solo por el sufijo -login", () => {
+    // El login por passkey no tiene sesión todavía, así que es público. Lo crítico es que el
+    // prefijo sea "/auth/passkey-login" y NO "/auth/passkey": con el segundo, "/auth/passkeys"
+    // (gestión) también empezaría por él y quedaría abierta. Este test exige las DOS cosas a la
+    // vez: que el login entre sin token Y que la gestión siga protegida.
+    expect(() => correr("/auth/passkey-login/options"), "el login por passkey debe ser público").not.toThrow();
+    expect(() => correr("/auth/passkey-login"), "el login por passkey debe ser público").not.toThrow();
+    expect(() => correr("/auth/passkeys"), "la gestión NO puede quedar pública").toThrowError(UnauthorizedException);
+    expect(() => correr("/auth/passkeys/options"), "la gestión NO puede quedar pública").toThrowError(UnauthorizedException);
+  });
+
   it("el detector sirve: una ruta que SÍ es pública pasa sin token", () => {
     // Sin esta comprobación, el test de arriba pasaría igual si el middleware rechazara TODO
     // (por ejemplo si `PUBLIC_PREFIXES` quedara vacío por accidente).

@@ -14,7 +14,10 @@ import { runWithContext, type RequestContext } from "./context";
  * Sin esto el middleware cortaba con "Falta token Bearer" y el link de invitación no servía.
  * Se autentican por el token del propio link (`verifyInviteToken`, audiencia `:invite`).
  */
-const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/verify-email", "/auth/forgot", "/auth/reset", "/auth/invite", "/auth/accept-invite", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
+// `/auth/passkey-login` (ENTRAR con passkey, P2) es público: quien lo usa todavía NO tiene
+// sesión. El sufijo `-login` es deliberado: `/auth/passkeys*` (gestión de aparatos) NO empieza
+// con `/auth/passkey-login`, así que esas rutas SIGUEN exigiendo Bearer (lo fija passkeys.spec.ts).
+const PUBLIC_PREFIXES = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout", "/auth/google", "/auth/mfa", "/auth/passkey-login", "/auth/verify-email", "/auth/forgot", "/auth/reset", "/auth/invite", "/auth/accept-invite", "/webhooks", "/billing/webhooks", "/public", "/health", "/hooks"];
 
 /** @deprecated usar AppTokenClaims de auth/jwt */
 export type JwtPayload = AppTokenClaims;
