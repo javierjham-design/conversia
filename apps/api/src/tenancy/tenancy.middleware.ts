@@ -58,6 +58,8 @@ export class TenancyMiddleware implements NestMiddleware {
       ...(payload.imp ? { impersonatedBy: payload.imp } : {}),
       // Techo de la sesión en curso: `switchOrg` lo hereda para no estrenar uno nuevo.
       ...(typeof payload.sxp === "number" ? { sessionExpiresAt: payload.sxp * 1000 } : {}),
+      // Sesión de aparato (passkey): `switchOrg` hereda el credentialId para no degradarla.
+      ...(payload.dev ? { deviceCredentialId: String(payload.dev) } : {}),
     };
     // El contexto envuelve TODO el manejo del request (controllers incluidos)
     runWithContext(ctx, () => next());

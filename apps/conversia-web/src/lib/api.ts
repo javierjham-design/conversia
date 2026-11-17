@@ -1,4 +1,5 @@
 /** Cliente HTTP mínimo contra la MISMA API de la plataforma (un backend, dos frontends). */
+import { startAuthentication } from "@simplewebauthn/browser";
 import { apiBase } from "./api-base";
 const API = apiBase();
 
@@ -158,16 +159,31 @@ async function tryRefresh(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     try {
-      const res = await fetch(`${API}/auth/refresh`, {
+      let res = await fetch(`${API}/auth/refresh`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ refreshToken: rt }),
       });
       if (!res.ok) return false;
-      const data = (await res.json()) as Partial<SesionDelServidor>;
+      let data = (await res.json()) as Partial<SesionDelServidor> & { needsAssertion?: boolean; loginId?: string; opciones?: unknown };
+      // SESIÓN DE APARATO (passkeys P3): el servidor NO renueva sin una firma fresca del passkey.
+      // Mostramos el Face ID / huella (esto es el prompt "una vez cada ~12 h" al morir el access) y
+      // reintentamos con la aserción. Si la persona lo cancela, `startAuthentication` lanza → cae al
+      // catch → re-login, que es lo correcto (sin la cara/dedo no se entra).
+      if (data?.needsAssertion && data.loginId && data.opciones) {
+        const assertion = await startAuthentication({ optionsJSON: data.opciones as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+        res = await fetch(`${API}/auth/refresh`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ refreshToken: rt, loginId: data.loginId, assertion }),
+        });
+        if (!res.ok) return false;
+        data = (await res.json()) as typeof data;
+      }
       if (!data?.token) return false;
-      // El plazo se vuelve a guardar en cada renovación: el servidor manda SIEMPRE el mismo
-      // (el del login), porque renovar corre la ventana deslizante pero nunca el techo.
+      // El plazo se vuelve a guardar en cada renovación: el servidor manda SIEMPRE el mismo (el del
+      // login) en sesiones con techo, o nada en una sesión de aparato (sin techo) → setSession lo
+      // borra y `plazoVencido` deja de cortar el refresh. Quien manda es el servidor.
       setSession({ token: data.token, refreshToken: data.refreshToken, sessionExpiresAt: data.sessionExpiresAt });
       return true;
     } catch {

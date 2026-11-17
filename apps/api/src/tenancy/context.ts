@@ -20,6 +20,12 @@ export interface RequestContext {
    * sesión deslizante (TuBot, token MCP).
    */
   sessionExpiresAt?: number;
+  /**
+   * SESIÓN DE APARATO (passkeys P3): `credentialId` del passkey que la sostiene (claim `dev`).
+   * Lo usa `switchOrg` para que cambiar de organización NO degrade una sesión de aparato a una
+   * normal de 24 h. Ausente en todas las sesiones que no nacieron de un login por passkey.
+   */
+  deviceCredentialId?: string;
 }
 
 /**

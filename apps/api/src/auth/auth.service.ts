@@ -10,6 +10,7 @@ import { VerticalService } from "../organizations/vertical.service";
 import { applyDraftToOrganization, type ApplyDraftTx } from "./apply-draft";
 import { signAppToken, signMfaToken, signEmailVerifyToken, verifyEmailVerifyToken, signPasswordResetToken, verifyPasswordResetToken, passwordFingerprint } from "./jwt";
 import { RefreshSessionService, vidaDelAccessToken } from "./refresh-session.service";
+import { PasskeysService } from "./passkeys.service";
 import { sendEmail } from "../common/email";
 import { encryptSecret, decryptSecret } from "../common/crypto";
 import { consumeRecoveryCode, generateRecoveryCodes, generateTotpSecret, hashRecoveryCode, otpauthUri, verifyTotp } from "./totp";
@@ -62,6 +63,12 @@ export interface SessionHint {
    * nuevos, y si estrenara techo bastaría cambiarse de org cada 23 h para no caducar nunca.
    */
   techoHeredado?: number | null;
+  /**
+   * SESIÓN DE APARATO (passkeys P3): `credentialId` del passkey que la sostiene. Si viene (y la
+   * marca usa sesión deslizante, o sea Conversia), la sesión nace SIN techo de 24 h. Lo pone el
+   * login por passkey; `switchOrg` lo HEREDA. Ausente en todo login normal (contraseña/Google/MFA).
+   */
+  credentialId?: string | null;
 }
 
 /**
@@ -121,6 +128,8 @@ export class AuthService {
     private refreshSessions: RefreshSessionService,
     // COP 4 — cola para la señal "cuenta creada" hacia Meta Ads (apagada por bandera).
     private queues: QueueService,
+    // P3 — el portón del refresh de una sesión de aparato exige una aserción de passkey.
+    private passkeys: PasskeysService,
   ) {}
 
   /**
@@ -631,15 +640,20 @@ export class AuthService {
     return this.issueTokens(user.id, membership.organizationId, roleCode, perms, { brand, sessionMode: input.sessionMode });
   }
 
-  /** Emite la sesión completa de un usuario ya validado (2.º factor o Google). */
-  private async issueForUser(userId: string, sessionMode?: string | null) {
+  /**
+   * Emite la sesión completa de un usuario ya validado (2.º factor o Google o passkey).
+   * `credentialId` → SESIÓN DE APARATO (passkey P3): solo lo pasa `emitirSesionDePasskey`; MFA y
+   * Google lo dejan `undefined` (sesión normal con techo). Solo surte efecto en una marca con
+   * sesión deslizante (Conversia); en TuBot `issueTokens` corta antes (no hay refresh).
+   */
+  private async issueForUser(userId: string, sessionMode?: string | null, credentialId?: string | null) {
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, include: { memberships: { where: { active: true } } } });
     const membership = user?.memberships[0];
     if (!user || !membership) throw new UnauthorizedException("Sesión inválida");
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     await this.touchLastLogin(user.id);
-    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms, { brand: user.brand, sessionMode });
+    return this.issueTokens(user.id, membership.organizationId, role?.code ?? "viewer", perms, { brand: user.brand, sessionMode, credentialId });
   }
 
   /**
@@ -649,9 +663,12 @@ export class AuthService {
    * emite. Reusa el MISMO `issueForUser` que el 2.º factor y Google, así que hereda la sesión por
    * marca (TuBot sin refresh / Conversia deslizante) sin ningún camino de emisión paralelo. Un
    * passkey con `userVerification: required` ya es 2FA, por eso este login no pide además TOTP.
+   *
+   * P3 — `credentialId` hace que, en Conversia, la sesión nazca SIN techo de 24 h (sesión de
+   * aparato): se renueva con una aserción fresca del passkey en cada refresh, no con la contraseña.
    */
-  async emitirSesionDePasskey(userId: string, sessionMode?: string | null) {
-    return this.issueForUser(userId, sessionMode);
+  async emitirSesionDePasskey(userId: string, sessionMode?: string | null, credentialId?: string | null) {
+    return this.issueForUser(userId, sessionMode, credentialId);
   }
 
   /** Verifica el 2.º factor (TOTP o código de recuperación) y emite la sesión. */
@@ -789,7 +806,7 @@ export class AuthService {
    * `techoHeredado` es el techo de la sesión con la que viene (el claim `sxp` de su token).
    * Se hereda a propósito: esta emisión CONTINÚA la sesión, no empieza otra.
    */
-  async switchOrg(userId: string, organizationId: string, sessionMode?: string | null, techoHeredado?: number | null) {
+  async switchOrg(userId: string, organizationId: string, sessionMode?: string | null, techoHeredado?: number | null, credentialId?: string | null) {
     const membership = await this.prisma.admin.organizationUser.findUnique({
       where: { organizationId_userId: { organizationId, userId } },
     });
@@ -800,7 +817,9 @@ export class AuthService {
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     // La marca sale de la CUENTA (no del org destino): define si la sesión es deslizante (§10.2).
     const user = await this.prisma.admin.user.findUnique({ where: { id: userId }, select: { brand: true } });
-    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms, { brand: user?.brand, sessionMode, techoHeredado });
+    // Hereda el `credentialId` (sesión de aparato): sin esto, cambiar de org convertiría una
+    // sesión sin techo en una normal de 24 h. Solo lo trae una sesión nacida de un login por passkey.
+    return this.issueTokens(userId, organizationId, role?.code ?? "viewer", perms, { brand: user?.brand, sessionMode, techoHeredado, credentialId });
   }
 
   /** Marca la última conexión — best-effort, jamás bloquea el login. */
@@ -821,16 +840,32 @@ export class AuthService {
       return { token: signAppToken({ sub: userId, orgId, role: roleCode, perms }), organizationId: orgId, role: roleCode };
     }
     // `techoHeredado` llega desde switchOrg: cambiar de organización no estrena sesión.
-    const refresh = await this.refreshSessions.create(userId, orgId, session?.techoHeredado ?? undefined);
-    const techo = refresh.absoluteExpiresAt;
+    // `credentialId` → SESIÓN DE APARATO (passkey P3): sin techo. `techo` queda `undefined` y
+    // entonces el access sale SIN `sxp` y con sus 12 h limpias; el claim `dev` hace que switchOrg
+    // conserve la vida larga, y `sessionExpiresAt` se omite (el cliente lo trata como "sin plazo").
+    const refresh = await this.refreshSessions.create(userId, orgId, session?.techoHeredado ?? undefined, session?.credentialId ?? undefined);
+    const techo = refresh.absoluteExpiresAt; // number | undefined (undefined = sesión de aparato)
     const token = signAppToken(
-      { sub: userId, orgId, role: roleCode, perms, sxp: Math.floor(techo / 1000) },
+      {
+        sub: userId,
+        orgId,
+        role: roleCode,
+        perms,
+        ...(techo !== undefined ? { sxp: Math.floor(techo / 1000) } : {}),
+        ...(session?.credentialId ? { dev: session.credentialId } : {}),
+      },
       { expiresIn: vidaDelAccessToken(getEnv().JWT_EXPIRES_IN, techo) },
     );
     // `sessionExpiresAt` va al cliente para que el panel sepa cuándo deja de servir la sesión
     // sin tener que descubrirlo con un 401 (y para no ofrecer "Ir a mi panel" en la landing a
-    // quien ya no entra). Es informativo: quien manda es el servidor.
-    return { token, refreshToken: refresh.token, sessionExpiresAt: new Date(techo).toISOString(), organizationId: orgId, role: roleCode };
+    // quien ya no entra). Es informativo: quien manda es el servidor. Sin techo → se omite.
+    return {
+      token,
+      refreshToken: refresh.token,
+      ...(techo !== undefined ? { sessionExpiresAt: new Date(techo).toISOString() } : {}),
+      organizationId: orgId,
+      role: roleCode,
+    };
   }
 
   /**
@@ -840,7 +875,7 @@ export class AuthService {
    * techo absoluto (`JWT_REFRESH_ABSOLUTE_MAX`): pasado el techo hay que volver a entrar con la
    * contraseña, por muy seguido que se use el panel. 401 = re-login.
    */
-  async refresh(refreshToken: string) {
+  async refresh(refreshToken: string, opts?: { brand?: string | null; assertion?: unknown; loginId?: string | null }) {
     const session = await this.refreshSessions.resolve(refreshToken);
     if (!session) throw new UnauthorizedException("Sesión expirada o revocada");
     const membership = await this.prisma.admin.organizationUser.findUnique({
@@ -850,24 +885,43 @@ export class AuthService {
       await this.refreshSessions.revoke(refreshToken); // la membresía ya no existe → el refresh no sirve
       throw new UnauthorizedException("La sesión ya no es válida");
     }
+    // PORTÓN DE APARATO (P3): una sesión con `credentialId` SOLO se renueva con una aserción
+    // FRESCA de ese passkey. Sin firma, el servidor entrega un desafío (fase 1) y NO rota todavía;
+    // con la firma válida, la verifica y recién entonces rota (fase 2). Es lo que hace que un
+    // refresh token robado no sirva de nada sin la cara/dedo del dueño en el aparato, y que un
+    // script inyectado pueda usar el access vivo pero no RENOVARLO (no sabe firmar).
+    if (session.credentialId) {
+      if (!opts?.assertion || !opts?.loginId) {
+        return this.passkeys.opcionesDeRefresh(opts?.brand, session.credentialId);
+      }
+      await this.passkeys.verificarRefreshAssertion(opts.brand, session.credentialId, opts.assertion, opts.loginId);
+    }
     const role = await this.prisma.admin.role.findUnique({ where: { id: membership.roleId } });
     const perms = Array.isArray(role?.permissions) ? (role.permissions as string[]) : [];
     // Rotación: el token usado deja de valer y entregamos uno nuevo (anti-replay). `rotate`
-    // conserva el TECHO ABSOLUTO de la sesión: renovar corre la ventana deslizante, nunca el
-    // techo, o la sesión no caducaría jamás mientras se la siga usando.
+    // conserva el TECHO ABSOLUTO y el `credentialId` de la sesión: renovar corre la ventana
+    // deslizante, nunca el techo, o la sesión no caducaría jamás mientras se la siga usando.
     const nextRefresh = await this.refreshSessions.rotate(refreshToken, session);
-    const techo = nextRefresh.absoluteExpiresAt;
-    // Y el access token se RECORTA al techo. Sin esto el techo era de mentira: un refresh
-    // pedido 10 minutos antes del techo entregaba un token de 12 h, y el access no se puede
-    // revocar (es stateless, sin denylist) → la sesión real llegaba a 36 h con techo de 24.
+    const techo = nextRefresh.absoluteExpiresAt; // number | undefined (undefined = sesión de aparato)
+    // Y el access token se RECORTA al techo. Sin esto el techo era de mentira: un refresh pedido
+    // 10 minutos antes del techo entregaba un token de 12 h, y el access no se puede revocar (es
+    // stateless, sin denylist) → la sesión real llegaba a 36 h con techo de 24. Sin techo (aparato):
+    // 12 h limpias, sin `sxp`, con el claim `dev` para que `switchOrg` conserve la vida larga.
     const token = signAppToken(
-      { sub: session.userId, orgId: session.orgId, role: role?.code ?? "viewer", perms, sxp: Math.floor(techo / 1000) },
+      {
+        sub: session.userId,
+        orgId: session.orgId,
+        role: role?.code ?? "viewer",
+        perms,
+        ...(techo !== undefined ? { sxp: Math.floor(techo / 1000) } : {}),
+        ...(session.credentialId ? { dev: session.credentialId } : {}),
+      },
       { expiresIn: vidaDelAccessToken(getEnv().JWT_EXPIRES_IN, techo) },
     );
     return {
       token,
       refreshToken: nextRefresh.token,
-      sessionExpiresAt: new Date(techo).toISOString(),
+      ...(techo !== undefined ? { sessionExpiresAt: new Date(techo).toISOString() } : {}),
       organizationId: session.orgId,
       role: role?.code ?? "viewer",
     };

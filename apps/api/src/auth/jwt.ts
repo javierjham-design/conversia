@@ -35,6 +35,14 @@ export interface AppTokenClaims {
    * 365 días, que es una llave de API a propósito y no una sesión de panel.
    */
   sxp?: number;
+  /**
+   * SESIÓN DE APARATO (passkeys P3): `credentialId` del passkey que la sostiene. Lo llevan solo
+   * los access tokens de una sesión sin techo (nacida de un login por passkey). Viaja hasta el
+   * contexto para que `switchOrg` lo HEREDE: sin esto, cambiar de organización convertiría la
+   * sesión de aparato en una normal de 24 h. No es secreto (es un id de llave pública), y el
+   * cliente ya tiene el token; firmarlo evita que el cliente lo mueva.
+   */
+  dev?: string;
 }
 
 const ALGO: jwt.Algorithm = "HS256";
@@ -194,5 +202,7 @@ export function verifyAppToken(token: string): AppTokenClaims {
     ...(decoded.imp ? { imp: String(decoded.imp) } : {}),
     // Techo de la sesión: se propaga para que el middleware lo revise y `switchOrg` lo herede.
     ...(typeof decoded.sxp === "number" ? { sxp: decoded.sxp } : {}),
+    // Sesión de aparato: el `credentialId` se propaga para que `switchOrg` conserve la vida larga.
+    ...(decoded.dev ? { dev: String(decoded.dev) } : {}),
   };
 }

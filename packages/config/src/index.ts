@@ -59,6 +59,11 @@ const envSchema = z.object({
   // ya están abiertas (ver `techoDeLaSesion`), así que tocar este valor cierra sesiones vivas.
   // No puede quedar por debajo de JWT_EXPIRES_IN sin dejar al access token sin margen útil.
   JWT_REFRESH_ABSOLUTE_MAX: z.string().default("24h"),
+  // SESIÓN DE APARATO (passkeys P3): la sesión que nace de un login por passkey NO tiene techo
+  // absoluto (lo sostiene la biometría del aparato en cada refresh), pero sí una ventana
+  // DESLIZANTE: muere si no se usa en este plazo. Solo aplica a sesiones con `credentialId`
+  // (ver refresh-session.service `create`); las normales siguen rigiéndose por los dos de arriba.
+  JWT_DEVICE_REFRESH_EXPIRES_IN: z.string().default("30d"),
   JWT_ISSUER: z.string().default("conversia"),
   JWT_AUDIENCE: z.string().default("conversia-api"),
   CREDENTIALS_ENCRYPTION_KEY: z.string().length(64).default("0".repeat(64)),

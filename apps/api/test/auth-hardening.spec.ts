@@ -168,7 +168,7 @@ function makeAuth(opts: {
       return { token: "refresh-token", absoluteExpiresAt: Date.now() + 86_400_000 };
     },
   };
-  const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any);
+  const service = new AuthService(prisma, {} as any, refreshSessions, { capi: { add: async () => undefined } } as any, {} as any);
   return { service, user, secret, updates, refrescos };
 }
 

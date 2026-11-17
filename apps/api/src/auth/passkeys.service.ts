@@ -88,7 +88,7 @@ export class PasskeysService implements OnModuleDestroy {
     await this.redis.quit().catch(() => undefined);
   }
 
-  private claveDesafio(proposito: "reg" | "auth", quien: string, rpId: string) {
+  private claveDesafio(proposito: "reg" | "auth" | "refresh", quien: string, rpId: string) {
     return `pkch:${proposito}:${rpId}:${quien}`;
   }
 
@@ -312,7 +312,7 @@ export class PasskeysService implements OnModuleDestroy {
     brand: string | null | undefined,
     response: unknown,
     loginId: string,
-  ): Promise<{ userId: string }> {
+  ): Promise<{ userId: string; credentialId: string }> {
     const rp = rpDeLaMarca(brand);
     if (!loginId || typeof loginId !== "string") throw new BadRequestException("Falta el identificador del inicio de sesión.");
     const desafio = await this.consumirDesafio(this.claveDesafio("auth", loginId, rp.rpId));
@@ -356,7 +356,84 @@ export class PasskeysService implements OnModuleDestroy {
       .update({ where: { id: credencial.id }, data: { counter: verificacion.authenticationInfo.newCounter, lastUsedAt: new Date() } })
       .catch(() => undefined);
 
-    return { userId: credencial.userId };
+    // Devuelve también el `credentialId`: P3 lo usa para que la sesión nazca atada a ESTE passkey
+    // (sesión de aparato, sin techo), y el refresh exija su firma.
+    return { userId: credencial.userId, credentialId: credencial.credentialId };
+  }
+
+  // ------------------------- P3: el PORTÓN del refresh de una sesión de aparato -------------------------
+  //
+  // Una sesión que trae `credentialId` (nació de un login por passkey) solo se renueva con una
+  // aserción FRESCA de ese mismo passkey. Es la pieza que hace que esto sea seguridad y no decorado:
+  // un refresh token robado de `localStorage` no sirve de nada sin la cara/dedo del dueño en el
+  // aparato, y un script inyectado puede usar el access vivo pero NO renovarlo (no sabe firmar).
+
+  /**
+   * Paso 1 del refresh de aparato: desafío de autenticación acotado a ESA credencial. Si la
+   * credencial ya no existe (el dueño quitó el aparato) o es de otra marca → la sesión ya no vale.
+   */
+  async opcionesDeRefresh(
+    brand: string | null | undefined,
+    credentialId: string,
+  ): Promise<{ needsAssertion: true; loginId: string; opciones: Awaited<ReturnType<typeof generateAuthenticationOptions>> }> {
+    const rp = rpDeLaMarca(brand);
+    const credencial = await this.prisma.admin.webauthnCredential.findUnique({ where: { credentialId } });
+    if (!credencial || credencial.rpId !== rp.rpId) throw new UnauthorizedException("La sesión ya no es válida. Entra de nuevo.");
+    const opciones = await generateAuthenticationOptions({
+      rpID: rp.rpId,
+      userVerification: "required",
+      allowCredentials: [{ id: credencial.credentialId, transports: transportesDe(credencial.transports) }],
+    });
+    const loginId = randomUUID();
+    await this.guardarDesafio(this.claveDesafio("refresh", loginId, rp.rpId), opciones.challenge);
+    return { needsAssertion: true as const, loginId, opciones };
+  }
+
+  /**
+   * Paso 2 del refresh de aparato: verifica la firma contra ESE passkey (el de la sesión), no el
+   * que mande el cliente. Sin firma válida lanza — y el caller lo traduce a 401. Avanza el contador
+   * y `lastUsedAt` igual que el login.
+   */
+  async verificarRefreshAssertion(
+    brand: string | null | undefined,
+    credentialId: string,
+    response: unknown,
+    loginId: string,
+  ): Promise<void> {
+    const rp = rpDeLaMarca(brand);
+    if (!loginId || typeof loginId !== "string") throw new UnauthorizedException("No se pudo validar la sesión.");
+    // La aserción tiene que ser de la credencial de ESTA sesión, no de otra que el cliente elija.
+    const credId = typeof (response as { id?: unknown })?.id === "string" ? (response as { id: string }).id : "";
+    if (credId !== credentialId) throw new UnauthorizedException("No se pudo validar la sesión.");
+
+    const credencial = await this.prisma.admin.webauthnCredential.findUnique({ where: { credentialId } });
+    if (!credencial || credencial.rpId !== rp.rpId) throw new UnauthorizedException("La sesión ya no es válida. Entra de nuevo.");
+
+    const desafio = await this.consumirDesafio(this.claveDesafio("refresh", loginId, rp.rpId));
+    let verificacion: VerifiedAuthenticationResponse;
+    try {
+      verificacion = await verifyAuthenticationResponse({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- lo valida la librería
+        response: response as any,
+        expectedChallenge: desafio,
+        expectedOrigin: rp.origins,
+        expectedRPID: rp.rpId,
+        requireUserVerification: true,
+        credential: {
+          id: credencial.credentialId,
+          publicKey: new Uint8Array(Buffer.from(credencial.publicKey, "base64url")),
+          counter: credencial.counter,
+          transports: transportesDe(credencial.transports),
+        },
+      });
+    } catch {
+      throw new UnauthorizedException("No se pudo validar la sesión.");
+    }
+    if (!verificacion.verified) throw new UnauthorizedException("No se pudo validar la sesión.");
+
+    await this.prisma.admin.webauthnCredential
+      .update({ where: { id: credencial.id }, data: { counter: verificacion.authenticationInfo.newCounter, lastUsedAt: new Date() } })
+      .catch(() => undefined);
   }
 }
 
