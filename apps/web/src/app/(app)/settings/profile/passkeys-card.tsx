@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import { Check, Fingerprint, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { browserSupportsWebAuthn, platformAuthenticatorIsAvailable, startRegistration } from "@simplewebauthn/browser";
 import { api } from "@/lib/api";
+import { olvidarPasskeyEnEsteAparato, recordarPasskeyEnEsteAparato } from "@/lib/passkey-aparato";
 import { Button, IconButton, cn, useToast } from "@/components/ui";
 
 type Aparato = {
@@ -70,7 +71,12 @@ export function PasskeysCard() {
     const r = await api<{ aparatos: Aparato[] }>("/auth/passkeys").catch(() => null);
     // Defensa ante datos incompletos (el smoke e2e-robustez manda cuerpos vacíos/null): si no
     // viene `aparatos`, lista vacía — nunca un `.map` sobre `undefined`.
-    setAparatos(Array.isArray(r?.aparatos) ? r!.aparatos : []);
+    const lista = Array.isArray(r?.aparatos) ? r!.aparatos : [];
+    setAparatos(lista);
+    // P4 — si la cuenta quedó SIN aparatos, con seguridad este tampoco tiene: se borra la pista
+    // o el login seguiría ofreciendo Face ID como puerta principal para después fallar. Solo
+    // con respuesta BUENA del servidor (`r` no nulo): una caída de red no es "no hay ninguno".
+    if (r && lista.length === 0) olvidarPasskeyEnEsteAparato();
   }
 
   useEffect(() => {
@@ -95,6 +101,9 @@ export function PasskeysCard() {
       });
       const response = await startRegistration({ optionsJSON: opciones });
       await api("/auth/passkeys", { method: "POST", body: JSON.stringify({ response, label: nombreSugerido() }) });
+      // P4 — anota que ESTE aparato ya tiene passkey: el login lo pone de puerta principal y la
+      // sugerencia de la barra deja de aparecer.
+      recordarPasskeyEnEsteAparato();
       await cargar();
       toast.push("Listo. La próxima vez que entres, este aparato te va a pedir la cara o el dedo.", "ok");
     } catch (e) {

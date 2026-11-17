@@ -5,6 +5,7 @@ import { LogOut, MailWarning, MoreHorizontal, Sparkles, X } from "lucide-react";
 import { api, getToken, getRefreshToken, getSessionDeadline, plazoVencido, sessionActive, clearToken, logout } from "@/lib/api";
 import { SupportWidget } from "@/components/SupportWidget";
 import { PwaManager } from "@/components/PwaManager";
+import { SugerirPasskey } from "@/components/SugerirPasskey";
 import { openAssistant } from "@/lib/assistant";
 import { GRUPOS, PRIMARIOS, RESTO, esActiva } from "@/lib/nav";
 
@@ -159,6 +160,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* En el flujo y arriba, como el aviso de verificar el correo: flotando abajo tapaba
             la barra de pestañas (el menú entero) en teléfono, y subido tapaba el contenido. */}
         <PwaManager />
+        {/* P4 — en el flujo y arriba, por la misma razón que los dos de encima. */}
+        <SugerirPasskey />
         {children}
       </div>
 

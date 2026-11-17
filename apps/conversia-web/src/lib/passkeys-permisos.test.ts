@@ -114,3 +114,95 @@ describe("la pantalla de login ofrece entrar con passkey (P2)", () => {
     expect(login).toContain("Entrar con Face ID o huella");
   });
 });
+
+/**
+ * P4 — «que no parezca un login». Las tres cosas que lo rompen sin avisar:
+ *
+ * 1. **El token `webauthn` del `autocomplete`.** Es lo que hace que el passkey se ofrezca DENTRO
+ *    del campo de correo. Sin él, `startAuthentication({ useBrowserAutofill: true })` tira error
+ *    (`verifyBrowserAutofillInput`) y nosotros nos lo tragamos a propósito, porque una ceremonia
+ *    abortada es normal. Resultado de borrar el token: el autocompletado desaparece, la pantalla
+ *    se ve perfecta y no hay ningún error en ninguna parte.
+ * 2. **Un aviso FLOTANTE.** Ya pasó una vez en producción: un aviso `position: fixed` abajo se
+ *    apoyaba sobre la barra de pestañas, que en teléfono es el menú entero, y se comía el toque.
+ *    Un `toBeVisible` no lo ve, porque los dos elementos están visibles.
+ * 3. **Un componente que nadie renderiza.** Igual que la tarjeta de Ajustes: puede estar perfecto
+ *    y no existir para la persona.
+ */
+describe("P4 — el autocompletado del passkey en el login", () => {
+  const login = readFileSync(join(__dirname, "..", "app", "login", "page.tsx"), "utf8");
+  const autocompletados = [...login.matchAll(/autoComplete="([^"]+)"/g)].map((m) => m[1]);
+
+  it("se pudieron leer los autoComplete del formulario (si no, esto no prueba nada)", () => {
+    expect(autocompletados).toContain("current-password");
+  });
+
+  it("el campo de identidad declara el token `webauthn` AL FINAL", () => {
+    const conWebauthn = autocompletados.filter((v) => v.endsWith("webauthn"));
+    expect(conWebauthn, `autoComplete presentes: ${autocompletados.join(" · ")}`).toHaveLength(1);
+    // El orden importa: el token tiene que ser el último de la lista.
+    expect(conWebauthn[0]).toBe("username webauthn");
+  });
+
+  it("y ya no quedó un `email` suelto (sería el campo viejo, sin passkey)", () => {
+    expect(autocompletados).not.toContain("email");
+  });
+
+  it("arranca la ceremonia en modo autocompletado y la cancela al salir", () => {
+    expect(login).toContain("browserSupportsWebAuthnAutofill");
+    expect(login).toMatch(/useBrowserAutofill:\s*true/);
+    // Sin cancelar, la ceremonia queda viva tras dejar la pantalla y la siguiente falla.
+    expect(login).toContain("WebAuthnAbortService.cancelCeremony()");
+  });
+
+  it("recuerda el aparato al entrar, que es lo que cambia la pantalla la próxima vez", () => {
+    expect(login).toContain("recordarPasskeyEnEsteAparato");
+    expect(login).toContain("hayPasskeyEnEsteAparato");
+  });
+});
+
+describe("P4 — la sugerencia de activar Face ID no tapa la navegación", () => {
+  const aviso = readFileSync(join(__dirname, "..", "components", "SugerirPasskey.tsx"), "utf8");
+  const shell = readFileSync(join(__dirname, "..", "components", "AppShell.tsx"), "utf8");
+
+  /**
+   * Se miran los ESTILOS, no los comentarios: el propio componente explica por qué no va
+   * `position: fixed`, y buscar el texto a secas encontraría esa explicación y daría rojo.
+   */
+  const sinComentarios = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  it("el aviso NO flota: nada de position fixed ni anclado al borde de abajo", () => {
+    const codigo = sinComentarios(aviso);
+    expect(codigo).not.toMatch(/position:\s*["']?fixed/);
+    expect(codigo).not.toMatch(/\bbottom:/);
+    // `fixed` de Tailwind tampoco (este panel usa estilos en línea, pero por si cambia).
+    expect(codigo).not.toMatch(/className="[^"]*\bfixed\b/);
+  });
+
+  it("el detector sirve: en el AppShell SÍ encuentra elementos fijos", () => {
+    // Control positivo. Sin esto, las aserciones de arriba pasarían con una regex equivocada.
+    expect(sinComentarios(shell)).toMatch(/position:\s*["']?fixed/);
+  });
+
+  it("y el limpiador de comentarios no se come el código", () => {
+    // Si `sinComentarios` borrara de más, la prueba de arriba se volvería un adorno.
+    expect(sinComentarios(aviso)).toContain("platformAuthenticatorIsAvailable");
+    expect(sinComentarios("/* position: fixed */ const a = 1;")).not.toContain("fixed");
+  });
+
+  it("el AppShell lo importa y lo RENDERIZA", () => {
+    expect(shell).toContain('from "@/components/SugerirPasskey"');
+    expect(shell).toMatch(/<SugerirPasskey\s*\/>/);
+  });
+
+  it("acepta el «no» y no pregunta de nuevo en cada visita", () => {
+    expect(aviso).toContain("noOfrecerPasskeyEnEsteAparato");
+    // sessionStorage haría que el aviso volviera al abrir el navegador de nuevo.
+    expect(aviso).not.toContain("sessionStorage");
+  });
+
+  it("solo se ofrece donde hay lector de cara/huella", () => {
+    expect(aviso).toContain("platformAuthenticatorIsAvailable");
+    expect(aviso).toContain("browserSupportsWebAuthn");
+  });
+});

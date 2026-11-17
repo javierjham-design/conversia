@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Check, Fingerprint, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { browserSupportsWebAuthn, platformAuthenticatorIsAvailable, startRegistration } from "@simplewebauthn/browser";
 import { api } from "@/lib/api";
+import { olvidarPasskeyEnEsteAparato, recordarPasskeyEnEsteAparato } from "@/lib/passkey-aparato";
 
 /**
  * P1 — «Entrar con Face ID o huella»: inscribir, renombrar y quitar aparatos.
@@ -68,7 +69,12 @@ export function PasskeysSettings() {
 
   async function cargar() {
     const r = await api<{ aparatos: Aparato[] }>("/auth/passkeys").catch(() => null);
-    if (r) setAparatos(r.aparatos);
+    if (!r) return; // la petición falló: se deja la lista que ya estaba, no se concluye nada
+    setAparatos(r.aparatos);
+    // P4 — si la cuenta quedó SIN aparatos, con seguridad este tampoco tiene: se borra la pista
+    // o el login seguiría ofreciendo Face ID como puerta principal para después fallar.
+    // Solo con respuesta BUENA del servidor: una caída de red no significa "no hay ninguno".
+    if (r.aparatos.length === 0) olvidarPasskeyEnEsteAparato();
   }
 
   useEffect(() => {
@@ -98,6 +104,9 @@ export function PasskeysSettings() {
         method: "POST",
         body: JSON.stringify({ response, label: nombreSugerido() }),
       });
+      // P4 — anota que ESTE aparato ya tiene passkey: el login lo pone de puerta principal y la
+      // sugerencia de la barra deja de aparecer.
+      recordarPasskeyEnEsteAparato();
       await cargar();
       setMsg("Listo. La próxima vez que entres, este aparato te va a pedir la cara o el dedo.");
     } catch (e) {
