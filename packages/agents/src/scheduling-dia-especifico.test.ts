@@ -267,3 +267,59 @@ describe("diaDelMesPedido — distingue el día del mes de una hora", () => {
     expect(diaDelMesPedido("jueves 9 hrs")).toBeNull();
   });
 });
+
+// CASO REAL (Ricardo Heise, Digital-Dent, 26-nov-2026): pidió "después del 5 de enero". El bot solo
+// miraba 28 días adelante, DESCARTÓ el día pedido, consultó nov-dic y AFIRMÓ "no hay disponibilidad
+// en enero" → el paciente se fue a otra clínica HABIENDO cupos (la agenda estaba abierta hasta
+// agosto). Estos tests fijan que una fecha LEJANA se consulta de verdad y JAMÁS se niega a ciegas.
+describe("getAvailability — fecha LEJANA (más allá de 28 días): consultarla, nunca negarla (caso Ricardo)", () => {
+  afterEach(() => vi.useRealTimers());
+  const hoy26nov = () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-26T12:00:00-03:00")); // hoy = 26-nov-2026 (Chile)
+  };
+  const pedir = async (lastUserText: string, slotsByDay: Record<string, string[]>) =>
+    JSON.parse((await reg().execute("getAvailability", { professionalId: "p1" }, makeCtx(makeSched(slotsByDay), lastUserText))).content);
+
+  it("'después del 5 de enero' → ofrece ENERO (hay cupos), NO dice 'no hay'", async () => {
+    hoy26nov();
+    // Cupos reales en enero 2027 — justo lo que el bot NO veía por la ventana de 28 días.
+    const out = await pedir("después del 5 de enero", { "2027-01-05": ["13:00", "13:15"], "2027-01-07": ["14:00"] });
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.errorAgenda).toBeUndefined();
+    expect(out.horas.length).toBeGreaterThan(0);
+    expect(out.horas.every((h: any) => /^h\d{2}01-/.test(h.id))).toBe(true); // TODAS de enero (id hDDMM → mes 01)
+  });
+
+  it("'en febrero' (mes sin día) → ofrece FEBRERO, no niega", async () => {
+    hoy26nov();
+    const out = await pedir("quiero una hora en febrero", { "2027-02-10": ["13:00"], "2027-02-12": ["14:00"] });
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.horas.length).toBeGreaterThan(0);
+    expect(out.horas.every((h: any) => /^h\d{2}02-/.test(h.id))).toBe(true); // mes 02
+  });
+
+  it("si el día pedido (lejano) está lleno → ofrece el más cercano CON cupo DE ESE MES, no esta semana", async () => {
+    hoy26nov();
+    const out = await pedir("el 5 de enero", { "2026-11-27": ["13:00"], "2027-01-08": ["14:00"], "2027-01-09": ["15:00"] });
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.horas.length).toBeGreaterThan(0);
+    expect(out.horas.every((h: any) => /^h\d{2}01-/.test(h.id))).toBe(true); // enero, NUNCA noviembre
+  });
+
+  it("fecha a MÁS de ~5 meses → fechaLejana (deriva a una persona), NUNCA 'no hay'", async () => {
+    hoy26nov();
+    const out = await pedir("quiero el 5 de mayo", { "2027-05-05": ["13:00"] });
+    expect(out.fechaLejana).toBe(true);
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.nota).toMatch(/transferToHuman/);
+  });
+
+  it("un pedido CERCANO normal NO se rompe (sigue consultando los próximos días)", async () => {
+    hoy26nov();
+    const out = await pedir("¿tienen horas esta semana?", { "2026-11-27": ["13:00"], "2026-11-28": ["14:00"] });
+    expect(out.sinCupos).toBeUndefined();
+    expect(out.fechaLejana).toBeUndefined();
+    expect(out.horas.length).toBeGreaterThan(0);
+  });
+});
