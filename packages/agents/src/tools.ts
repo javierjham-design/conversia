@@ -337,7 +337,14 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         // se DICE y se ofrecen los más cercanos con cupo (sin saltar mudo a otra fecha).
         const MESMAP: Record<string, number> = { enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5, julio: 6, agosto: 7, septiembre: 8, setiembre: 8, octubre: 9, noviembre: 10, diciembre: 11 };
         const fmtDia = (ymd: string) => new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", weekday: "long", day: "numeric", month: "long" }).format(new Date(`${ymd}T12:00:00Z`));
-        const win28 = new Date(new Date(`${todayChile}T00:00:00Z`).getTime() + 28 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+        const addDays = (ymd: string, n: number) => new Date(new Date(`${ymd}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
+        const win28 = addDays(todayChile, 28);
+        // HORIZONTE máximo que SÍ consultamos cuando el paciente nombra una fecha LEJANA (la agenda
+        // de la clínica suele estar abierta meses). Caso Ricardo Heise (26-nov-2026): pidió "después
+        // del 5 de enero" (~6 semanas) y el bot, que solo miraba 28 días, DESCARTÓ el día pedido,
+        // consultó nov-dic, y el modelo afirmó "no hay en enero" → el paciente se fue a otra clínica
+        // HABIENDO cupos. Más allá de este horizonte no se niega: se deriva a una persona.
+        const winMax = addDays(todayChile, 150);
         const specificDay = (): { ymd: string; conflict: boolean } | null => {
           const t = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
           if (!t) return null;
@@ -359,7 +366,9 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           }
           if (day == null || day < 1 || day > 31) return null;
           const [ty, tm, td] = todayChile.split("-").map(Number);
-          for (let i = 0; i <= 62; i++) {
+          // Escaneo hasta ~6 meses: para que un día de un mes lejano ("5 de enero", "el 15 de marzo")
+          // también resuelva a su fecha real, no solo los próximos 2 meses.
+          for (let i = 0; i <= 185; i++) {
             const d = new Date(Date.UTC(ty, tm - 1, td + i));
             if (d.getUTCDate() === day && (month == null || d.getUTCMonth() === month)) {
               return { ymd: d.toISOString().slice(0, 10), conflict: wdWanted != null && d.getUTCDay() !== wdWanted };
@@ -372,15 +381,55 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
           // "lunes 9" pero el 9 cae otro día: no adivinar, aclarar.
           return { aclararFecha: true, nota: "El paciente nombró un día de la semana y un número de día que NO coinciden en el calendario (p.ej. 'lunes 9' cuando el 9 cae otro día). Con calidez, pregúntale a qué fecha exacta se refiere y recién entonces vuelve a consultar; no ofrezcas horas hasta aclararlo." };
         }
-        // Día pedido válido y dentro de la ventana consultable → GOBIERNA la consulta (ignora weekday).
-        const diaPedido = pedido && pedido.ymd >= todayChile && pedido.ymd <= win28 ? pedido.ymd : null;
-        const wantWD = !diaPedido && wdList.length ? new Set(wdList) : null;
-        const from = wantWD || diaPedido ? todayChile : input.fromDate && input.fromDate >= todayChile ? input.fromDate : todayChile;
-        const plus = (days: number) => new Date(new Date(`${from}T00:00:00Z`).getTime() + days * 24 * 3600 * 1000).toISOString().slice(0, 10);
-        // Ventana por defecto de 28 días: si el profesional está copado las próximas 2 semanas, con
-        // 14 devolvía vacío y el agente escalaba. Con 28 encuentra el cupo más próximo.
+        // MES nombrado SIN día concreto ("en enero", "para febrero", "a fines de marzo"): se ancla al
+        // 1.º de ese mes (o a hoy si es el mes en curso) y se trata como fecha pedida, para ofrecer
+        // horas DE ESE MES en vez de negar. Sin esto, "en febrero" caía al camino genérico (próximos
+        // 28 días) y el modelo volvía a decir "no hay en febrero".
+        const mesPedido = (): string | null => {
+          if (pedido) return null;
+          const t = (ctx.lastUserText ?? "").toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+          const mm = t.match(/\b(?:en|para|durante|a fines de|a fin de|a principios de|a mediados de|el mes de|mes de)\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/);
+          if (!mm) return null;
+          const mes = MESMAP[mm[1]];
+          const [ty, tm] = todayChile.split("-").map(Number);
+          const primEsteAnio = new Date(Date.UTC(ty, mes, 1)).toISOString().slice(0, 10);
+          if (primEsteAnio >= todayChile) return primEsteAnio; // este año, aún no empieza
+          if (mes === tm - 1) return todayChile; // mes EN CURSO → desde hoy
+          return new Date(Date.UTC(ty + 1, mes, 1)).toISOString().slice(0, 10); // ya pasó → el año que viene
+        };
+        // Día/mes que el paciente nombró (día concreto o 1.º del mes). Si cae a MÁS de ~5 meses, no
+        // mostramos grilla tan lejos pero TAMPOCO negamos: se reasegura y se deriva a una persona.
+        const diaAnclado = pedido?.ymd ?? mesPedido();
+        if (diaAnclado && diaAnclado > winMax) {
+          return {
+            fechaLejana: true,
+            nota: `El paciente pidió una fecha a varios meses (${fmtDia(diaAnclado)} o más adelante). SÍ agendamos tan adelante; solo que no puedo mostrarte la grilla tan lejos. NUNCA le digas que no hay disponibilidad ni que está lleno. Con calidez, dile que con gusto le reservamos para esa fecha y usa transferToHuman para que una persona coordine el día exacto. No lo dejes sin respuesta.`,
+          };
+        }
+        // Filtro de DÍA EXACTO: solo cuando nombró un día puntual (un mes entero va por rango, abanicando).
+        const diaExacto = pedido && pedido.ymd >= todayChile && pedido.ymd <= winMax ? pedido.ymd : null;
+        // ANCLA de la ventana: el día exacto o el 1.º del mes. Hasta `winMax`, no solo 28 días.
+        const ancla = diaAnclado && diaAnclado >= todayChile && diaAnclado <= winMax ? diaAnclado : null;
+        // ¿La fecha pedida es LEJANA (más allá de la ventana por defecto de 28)? Entonces la consulta
+        // se ANCLA alrededor de esa fecha, no desde hoy: así el proveedor devuelve ESE mes (no trae 5
+        // meses de cupos) y el "más cercano con cupo" ofrece fechas de ESE mes, no de esta semana.
+        const diaLejano = Boolean(ancla && ancla > win28);
+        const diaPedido = diaExacto; // el camino de "día exacto" (abajo) solo para un día puntual
+        const wantWD = !ancla && wdList.length ? new Set(wdList) : null;
+        const from = ancla
+          ? diaExacto && !diaLejano
+            ? todayChile // día puntual CERCANO: la ventana hoy..+28 ya lo cubre y el filtro lo extrae
+            : ancla // día puntual lejano, o un mes (cercano o lejano): se ancla en la fecha pedida
+          : wantWD
+            ? todayChile
+            : input.fromDate && input.fromDate >= todayChile
+              ? input.fromDate
+              : todayChile;
+        const plus = (days: number) => addDays(from, days);
+        // Ventana de 28 días DESDE `from`: si es una fecha lejana, barre ~4 semanas alrededor de ella;
+        // si no, los próximos 28 días (el profesional copado 2 semanas igual encuentra el cupo próximo).
         const wide = plus(28);
-        const to = wantWD || diaPedido ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
+        const to = wantWD || ancla ? wide : input.toDate && input.toDate >= from ? input.toDate : plus(28);
         const sched = services(ctx).scheduling;
         // RESOLUCIÓN DE PROFESIONAL: el modelo a veces manda el NOMBRE ("Javier Hernán Aedo Mella",
         // "Dr. Aedo") en professionalId en vez del id. Cláriva, al recibir un id que no reconoce,
@@ -595,6 +644,12 @@ export function buildCoreTools(): ToolDefinition<any, any>[] {
         }
         if (diaPedidoSinCupos) {
           notas.push(`IMPORTANTE: el día que pidió el paciente (${fmtDia(diaPedido!)}) NO tiene horas disponibles. Díselo con calidez y claridad, y ofrécele ESTAS, que son las más cercanas CON cupo — di la FECHA y la hora exactas de cada una. NO presentes ninguna como si fuera del día que pidió, ni insistas con ese día.`);
+        }
+        // MES / FECHA LEJANA (p.ej. "en enero", "después del 5 de febrero"): el paciente pidió un
+        // período más adelante y SÍ hay horas. Caso Ricardo: el bot negaba enero sin mirarlo. Estas
+        // horas son reales de ese período → ofrecerlas, JAMÁS decir "no hay en ese mes".
+        if (ancla && !diaExacto) {
+          notas.push(`El paciente pidió un MES/fecha más adelante (desde ${fmtDia(ancla)}): estas son las PRIMERAS horas REALES disponibles de ese período. Ofrécelas indicando la FECHA exacta de cada una. PROHIBIDO decir que no hay disponibilidad en ese mes.`);
         }
         if (hasHora && !tramoRelajado && !diaPedido) {
           const cond = minHora != null && maxHora != null ? `entre las ${minHora}:00 y las ${maxHora}:00` : minHora != null ? `desde las ${minHora}:00 en adelante` : `antes de las ${maxHora}:00`;
