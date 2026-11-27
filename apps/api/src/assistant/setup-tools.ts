@@ -120,7 +120,7 @@ export function setupToolSpecs(): { read: AIToolSpec[]; write: AIToolSpec[] } {
       {
         name: "estadoCanales",
         description:
-          "Estado de TODOS los canales del cliente (WhatsApp, Instagram y Messenger): cuáles están conectados, quién atiende cada uno, qué está pendiente y, en las redes, si Meta todavía está revisando la app. Úsalo cuando pregunten por Instagram, Messenger, «dónde me pueden escribir» o quieran conectar otra red.",
+          "Estado de TODOS los canales del cliente (WhatsApp, Instagram, Messenger) y de TikTok: cuáles están conectados, quién atiende cada uno, qué está pendiente y, en las redes, si Meta todavía está revisando la app. Úsalo cuando pregunten por Instagram, Messenger, TikTok, «dónde me pueden escribir» o quieran conectar otra red.",
         inputJsonSchema: { type: "object", properties: {} },
       },
       {
@@ -591,6 +591,12 @@ export async function runSetupTool(
       pendientes: r.checks.filter((c) => !c.ok && !c.unknown).map((c) => ({ que: c.label, explicacion: c.detail, comoSeArregla: c.fix ?? null })),
     }));
     const faltan = ["INSTAGRAM", "MESSENGER"].filter((t) => !reportes.some((r) => r.channelType === t)).map((t) => NOMBRE[t]);
+    // TikTok no es un canal de mensajería todavía, así que no sale de `reportesDeCanales`:
+    // se lee su conexión de medición aparte. Mezclarlo con los otros haría que Convi
+    // dijera «TikTok conectado» y el dueño entendería que ya le contestan los DM.
+    const tiktok = await prisma.withTenant(ctx.organizationId, (tx) =>
+      tx.integrationConnection.findFirst({ where: { provider: "tiktok" }, select: { status: true } }),
+    );
     return {
       content: JSON.stringify({
         canales,
@@ -600,7 +606,15 @@ export async function runSetupTool(
           Instagram: "Desde Canales, con un botón. Necesita una página de Facebook vinculada a su cuenta de Instagram profesional.",
           Messenger: "Desde Canales, con un botón. Tiene que ser administrador de la página.",
         },
-        nota: "El MISMO asistente atiende los tres y todo llega a la misma bandeja.",
+        tiktok: {
+          mensajesDirectos: "NO disponible todavía. TikTok entrega ese permiso solo a cuentas de empresa verificadas y después de su propia revisión de seguridad; no depende de nosotros ni el cliente puede apurarlo. No prometas fecha.",
+          loQueSiSePuedeHoy:
+            "Devolverle a TikTok las ventas y los leads que se cierran por WhatsApp, para que sus anuncios dejen de repartir el presupuesto hacia los videos que solo juntan clics.",
+          conectado: Boolean(tiktok),
+          dondeSeConecta: "En Canales, tarjeta TikTok: pide el identificador del origen de eventos y el Access Token, los dos salen de TikTok Events Manager.",
+          mientrasTanto: "Lo que funciona hoy para vender por TikTok es el enlace de la biografía hacia WhatsApp: ahí el asistente atiende igual.",
+        },
+        nota: "El MISMO asistente atiende WhatsApp, Instagram y Messenger, y todo llega a la misma bandeja.",
       }),
       actions: faltan.length || canales.length ? [{ type: "button", label: "Ir a Canales", kind: "interno", payload: "/canales" }] : [],
     };

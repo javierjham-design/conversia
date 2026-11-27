@@ -85,3 +85,16 @@ export function GoogleAnalyticsIcon({ size = 20, className }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * El logo de una red por su clave (`redes.ts`). Devuelve `null` para las que no tienen
+ * logo propio —hoy solo el canal de pruebas—: es mejor no pintar nada que inventar un
+ * icono genérico que el dueño tendría que descifrar.
+ */
+export function IconoDeRed({ clave, size = 14, className }: { clave: string; size?: number; className?: string }) {
+  if (clave === "whatsapp") return <WhatsAppIcon size={size} className={className} />;
+  if (clave === "instagram") return <InstagramIcon size={size} className={className} />;
+  if (clave === "messenger") return <MessengerIcon size={size} className={className} />;
+  if (clave === "tiktok") return <TikTokIcon size={size} className={className} />;
+  return null;
+}

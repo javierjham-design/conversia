@@ -49,6 +49,12 @@ export const COPILOT_TARGETS = [
   "profesionales", // equipo y recursos con su horario en /agenda/configurar
   "reglas-reserva", // bloque entre horas y anticipación en /agenda/configurar
   "conectar-whatsapp", // camino de conexión en /canales
+  // Las otras redes de /canales. Antes Convi sabía CONTAR que existían (`estadoCanales`)
+  // pero no podía señalarlas: decía «se conecta desde Canales» y el dueño quedaba
+  // buscando el botón en una pantalla con cuatro tarjetas.
+  "conectar-instagram", // tarjeta de Instagram en /canales
+  "conectar-messenger", // tarjeta de Messenger en /canales
+  "conectar-tiktok", // tarjeta de TikTok en /canales (hoy: medición de anuncios, no DM)
   "plan", // activar plan / cargar tarjeta en /cobros
   "comprar-creditos", // packs en /cobros
   // §5 — el copiloto tiene que poder señalar las dos piezas del cobro automático, que es

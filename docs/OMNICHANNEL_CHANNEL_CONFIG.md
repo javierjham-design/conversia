@@ -67,3 +67,36 @@ muestra el canal de WhatsApp; extender a todos los tipos.)
 - Íconos por red en la bandeja.
 - Diagnóstico: listar OTRAS apps suscritas a la página (detectar receptor
   principal competidor, caso Respond).
+
+---
+
+## ✅ HECHO (27-nov-2026): separar la bandeja por RED, y los logos reales
+
+Pedido del dueño: «poder filtrar las conversaciones por WhatsApp, TikTok, Instagram para
+separarlas, y también poder verlas todas juntas» + «pon los logos reales de las
+aplicaciones para que sea más fácil entender».
+
+**Red ≠ conexión.** Ya existía un filtro por `channelId`, que apunta a UNA conexión (un
+número). Quien tiene dos números de WhatsApp quiere ver «todo WhatsApp» junto, así que se
+agregó el concepto de RED: `GET /conversations?channel=whatsapp|instagram|messenger|tiktok`.
+El catálogo vive en `apps/api/src/conversations/canales-filtro.ts` y está espejado en
+`apps/{web,conversia-web}/src/lib/redes.ts`; `bandeja-canales.spec.ts` compara los tres y
+falla si se separan.
+
+**La regla que evita el peor error.** Una clave desconocida devuelve **400**, no «todas»; y
+una red real sin conexiones devuelve **cero**, no «todas». Filtrar de menos es peor que no
+filtrar: la lista trae cosas, parece que funcionó, y uno cree estar mirando una red mientras
+mira otra.
+
+**Dónde se ve.** Fila de pestañas sobre la lista (Bandeja Pro de TuBot y Conversaciones de
+Conversia), más el logo de la red en cada fila. Las dos cosas aparecen **solo si hay más de
+una red conectada**: a quien solo tiene WhatsApp, una pestaña única y un logo repetido en
+cada fila le quitan espacio sin distinguir nada. «Todas» —verlas juntas— es el estado
+normal.
+
+**TikTok figura en el catálogo** aunque su canal de mensajería no exista todavía. Es seguro:
+el tipo nunca se le manda a Postgres (el enum no lo conoce), se compara en memoria contra
+las conexiones del tenant. El día que el canal exista, la pestaña aparece sola.
+
+**Logos reales**: `apps/{web,conversia-web}/src/components/brand-icons.tsx` (Simple Icons,
+CC0). Reemplazan los iconos genéricos de lucide en Canales y en la bandeja.

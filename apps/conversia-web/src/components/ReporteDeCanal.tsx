@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { AlertTriangle, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MinusCircle, RefreshCw, Smartphone } from "lucide-react";
+import { WhatsAppIcon } from "./brand-icons";
 import { api } from "@/lib/api";
 import { openAssistant } from "@/lib/assistant";
 
@@ -254,7 +255,7 @@ export function ReporteDeCanal({
       {/* Encabezado: número, estado y quién atiende */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ width: 44, height: 44, borderRadius: 13, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          {icono ?? <MessageCircle size={22} />}
+          {icono ?? <WhatsAppIcon size={22} />}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>

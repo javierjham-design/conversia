@@ -8,6 +8,8 @@ import { api } from "@/lib/api";
 import { openRealtime, type RealtimeEvent } from "@/lib/sse";
 import type { MessageMedia } from "@/lib/message-media";
 import { MessageList } from "@/components/chat/MessageList";
+import { IconoDeRed } from "@/components/brand-icons";
+import { indiceDeConexiones, redesConectadas, type Red } from "@/lib/redes";
 
 type Contact = { id: string; firstName: string | null; lastName: string | null; profileName: string | null; phone: string | null; avatarUrl: string | null };
 type ConvItem = {
@@ -17,6 +19,8 @@ type ConvItem = {
   unreadCount: number;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
+  /** Por qué conexión entró: con eso se sabe de qué red viene (WhatsApp, Instagram…). */
+  channelConnectionId: string | null;
   // B1 — estado de operación que el backend ya expone por chat (pintado sin llamadas extra).
   activeAgentId: string | null;
   activeAgentName: string | null;
@@ -85,6 +89,10 @@ function composerChip(active: boolean): React.CSSProperties {
 
 export default function Conversaciones() {
   const [status, setStatus] = useState<(typeof STATUSES)[number]["key"]>("open");
+  // Red activa («» = todas juntas) y las que este negocio tiene conectadas.
+  const [canal, setCanal] = useState("");
+  const [redes, setRedes] = useState<Red[]>([]);
+  const [redPorConexion, setRedPorConexion] = useState<Map<string, Red>>(new Map());
   const [items, setItems] = useState<ConvItem[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [sel, setSel] = useState<string | null>(null);
@@ -139,14 +147,28 @@ export default function Conversaciones() {
 
   const loadList = useCallback(async () => {
     try {
-      const res = await api<{ items: ConvItem[] }>(`/conversations?status=${status}&order=recent`);
+      const res = await api<{ items: ConvItem[] }>(
+        `/conversations?status=${status}&order=recent${canal ? `&channel=${encodeURIComponent(canal)}` : ""}`,
+      );
       setItems(res.items);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoadingList(false);
     }
-  }, [status]);
+  }, [status, canal]);
+
+  // Las redes conectadas del negocio: deciden si vale la pena ofrecer el separador y qué
+  // logo lleva cada conversación. Se piden una vez; si falla, la bandeja sigue funcionando
+  // igual (sin separador), porque esto es ayuda visual, no un requisito para atender.
+  useEffect(() => {
+    api<{ id: string; type: string }[]>("/channels")
+      .then((cs) => {
+        setRedes(redesConectadas(cs));
+        setRedPorConexion(indiceDeConexiones(cs));
+      })
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setLoadingList(true);
@@ -392,6 +414,36 @@ export default function Conversaciones() {
                   </button>
                 ))}
               </div>
+              {/* Separar por red. Aparece solo con MÁS DE UNA conectada: con una sola, una
+                  fila de un botón ocupa espacio y no distingue nada. «Todas» —verlas
+                  juntas— es el estado normal. */}
+              {redes.length > 1 ? (
+                <div style={{ display: "flex", gap: 6, marginTop: 8, overflowX: "auto", paddingBottom: 2 }}>
+                  {[{ clave: "", etiqueta: "Todas", color: "" }, ...redes].map((r) => (
+                    <button
+                      key={r.clave || "todas"}
+                      onClick={() => setCanal(r.clave)}
+                      className={canal === r.clave ? "btn-accent" : ""}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        flexShrink: 0,
+                        padding: "5px 11px",
+                        fontSize: 12.5,
+                        borderRadius: 999,
+                        cursor: "pointer",
+                        border: canal === r.clave ? "none" : "1px solid var(--line)",
+                        background: canal === r.clave ? undefined : "transparent",
+                        color: canal === r.clave ? undefined : "var(--ink-dim)",
+                      }}
+                    >
+                      {r.clave ? <IconoDeRed clave={r.clave} size={11} /> : null}
+                      {r.etiqueta}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "0 10px 10px" }}>
               {loadingList ? (
@@ -421,7 +473,15 @@ export default function Conversaciones() {
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <b style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{displayName(c.contact)}</b>
+                        <b style={{ fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                          {/* De qué red viene. Solo con varias conectadas: con una sola el
+                              logo repetido es ruido. Sin esto, «todas juntas» es una lista
+                              donde no se sabe a quién se le está hablando. */}
+                          {redes.length > 1 && c.channelConnectionId && redPorConexion.get(c.channelConnectionId) ? (
+                            <IconoDeRed clave={redPorConexion.get(c.channelConnectionId)!.clave} size={12} style={{ color: redPorConexion.get(c.channelConnectionId)!.color, flexShrink: 0 }} />
+                          ) : null}
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayName(c.contact)}</span>
+                        </b>
                         <span className="text-dim" style={{ fontSize: 11, flexShrink: 0 }}>{shortTime(c.lastMessageAt)}</span>
                       </span>
                       <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginTop: 2 }}>

@@ -35,13 +35,15 @@ const base = (over: Partial<ReporteDeCanal>): ReporteDeCanal => ({
   ...over,
 });
 
-/** Prisma falso: solo se le piden los canales de la org. */
-function fakePrisma(canales: Array<{ id: string; type: string }>): PrismaService {
+/** Prisma falso: los canales de la org y, aparte, la conexión de medición de TikTok. */
+function fakePrisma(canales: Array<{ id: string; type: string }>, tiktokConectado = false): PrismaService {
   return {
     admin: {
       channelConnection: { findMany: async ({ where }: any) => canales.filter((c) => (where?.type?.in ?? [c.type]).includes(c.type)).map((c) => ({ id: c.id })), count: async () => canales.length },
       integrationEvent: { findFirst: async () => null },
     },
+    withTenant: (_org: string, fn: any) =>
+      fn({ integrationConnection: { findFirst: async () => (tiktokConectado ? { status: "active" } : null) } }),
   } as unknown as PrismaService;
 }
 
@@ -51,8 +53,8 @@ const ctxCon = (porId: Record<string, ReporteDeCanal>): SetupToolCtx => ({
   estado: { reporte: async (_o: string, id: string) => porId[id] },
 });
 
-const leer = async (canales: Array<{ id: string; type: string }>, porId: Record<string, ReporteDeCanal>) => {
-  const r = await runSetupTool(fakePrisma(canales), ctxCon(porId), "estadoCanales", {});
+const leer = async (canales: Array<{ id: string; type: string }>, porId: Record<string, ReporteDeCanal>, tiktokConectado = false) => {
+  const r = await runSetupTool(fakePrisma(canales, tiktokConectado), ctxCon(porId), "estadoCanales", {});
   return { r, datos: JSON.parse(r!.content) as Record<string, any> };
 };
 
@@ -87,6 +89,42 @@ describe("la herramienta estadoCanales", () => {
   it("en WhatsApp no inventa una revisión de Meta que no aplica", async () => {
     const { datos } = await leer([{ id: "wa", type: "WHATSAPP_CLOUD" }], { wa: base({ channelId: "wa" }) });
     expect(datos.canales[0].enRevisionDeMeta).toBeUndefined();
+  });
+
+  /**
+   * TIKTOK — la única mentira que importa acá es la cómoda: dejar que Convi diga «TikTok
+   * conectado» y que el dueño entienda que ya le contestan los DM. Lo que hoy se conecta
+   * es la MEDICIÓN de sus anuncios; los mensajes directos los bloquea un permiso de
+   * TikTok que no depende de nosotros (docs/TIKTOK.md §2).
+   */
+  it("TikTok viene aparte de los canales de mensajería, nunca mezclado", async () => {
+    const { datos } = await leer([{ id: "c1", type: "WHATSAPP_CLOUD" }], { c1: base({}) });
+    expect(datos.canales.map((c: any) => c.canal), "TikTok se coló como canal de mensajería").not.toContain("TikTok");
+    expect(datos.tiktok, "Convi no sabe nada de TikTok").toBeTruthy();
+  });
+
+  it("dice que los DM de TikTok NO se pueden atender, y que no depende de nosotros", async () => {
+    const { datos } = await leer([{ id: "c1", type: "WHATSAPP_CLOUD" }], { c1: base({}) });
+    expect(String(datos.tiktok.mensajesDirectos)).toMatch(/NO disponible/i);
+    expect(String(datos.tiktok.mensajesDirectos), "sin esto Convi promete algo que no existe").toMatch(/no depende de nosotros/i);
+  });
+
+  it("no promete fecha para los DM de TikTok", async () => {
+    const { datos } = await leer([{ id: "c1", type: "WHATSAPP_CLOUD" }], { c1: base({}) });
+    const texto = JSON.stringify(datos.tiktok).toLowerCase();
+    for (const promesa of ["pronto", "próximamente", "proximamente", "en unas semanas", "este mes"]) {
+      expect(texto, `prometió «${promesa}»`).not.toContain(promesa);
+    }
+  });
+
+  it("«conectado» en TikTok es la medición de anuncios, y se dice qué sí se puede hoy", async () => {
+    const sin = await leer([{ id: "c1", type: "WHATSAPP_CLOUD" }], { c1: base({}) });
+    expect(sin.datos.tiktok.conectado).toBe(false);
+    const con = await leer([{ id: "c1", type: "WHATSAPP_CLOUD" }], { c1: base({}) }, true);
+    expect(con.datos.tiktok.conectado).toBe(true);
+    // Y aun conectado, los DM siguen sin existir: lo uno no habilita lo otro.
+    expect(String(con.datos.tiktok.mensajesDirectos)).toMatch(/NO disponible/i);
+    expect(String(con.datos.tiktok.loQueSiSePuedeHoy)).toMatch(/anuncios/i);
   });
 
   it("explica cómo se conecta cada uno, con el requisito de Instagram por delante", async () => {

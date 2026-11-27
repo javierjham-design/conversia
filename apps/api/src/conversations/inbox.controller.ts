@@ -6,12 +6,15 @@ import type { AIChatMessage } from "@conversia/types";
 import { PrismaService } from "../prisma.service";
 import { requireContext } from "../tenancy/context";
 import { buildViewWhere, type InboxViewDefinition } from "./conversations.controller";
+import { REDES_BANDEJA, idsDeLaRed } from "./canales-filtro";
 
 const viewSchema = z.object({
   name: z.string().min(2).max(60),
   definition: z.object({
     status: z.enum(["open", "pending", "closed", "all"]).optional(),
     channelId: z.string().optional(),
+    /** Red entera, no una conexión. El enum evita guardar una vista que no filtra nada. */
+    channelType: z.enum(REDES_BANDEJA.map((r) => r.clave) as [string, ...string[]]).optional(),
     assigned: z.string().optional(),
     ai: z.enum(["on", "off"]).optional(),
     stageCode: z.string().optional(),
@@ -100,6 +103,13 @@ export class InboxController {
       const agentName = new Map(agents.map((a) => [a.id, a.name]));
       const teamName = new Map(teams.map((t) => [t.id, t.name]));
 
+      // Las conexiones hacen falta para contar una vista guardada por RED: sin resolver sus
+      // ids, `buildViewWhere` filtra por lista vacía y el sidebar mostraría 0 al lado de una
+      // lista con conversaciones.
+      const conexiones = views.some((v) => ((v.definition as InboxViewDefinition) ?? {}).channelType)
+        ? await tx.channelConnection.findMany({ select: { id: true, type: true } })
+        : [];
+
       // Bandejas guardadas: pocas por tenant (cap 30) → un count each es aceptable.
       const viewCounts = await Promise.all(
         views.map(async (v) => {
@@ -113,7 +123,12 @@ export class InboxController {
             });
             tagContactIds = [...new Set(asg.map((a) => a.entityId))];
           }
-          const where = buildViewWhere(def, ctx.userId, tagContactIds);
+          const where = buildViewWhere(
+            def,
+            ctx.userId,
+            tagContactIds,
+            def.channelType ? (idsDeLaRed(def.channelType, conexiones) ?? []) : undefined,
+          );
           const count = await tx.conversation.count({
             where: { ...(def.status ? {} : openWhere), ...(where as any) },
           });

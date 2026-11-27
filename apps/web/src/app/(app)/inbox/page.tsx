@@ -9,6 +9,8 @@ import { Bot, Megaphone, Search, SquarePen, User } from "lucide-react";
 import { api, getToken } from "@/lib/api";
 import { reportViewing } from "@/lib/push";
 import { Checkbox, EmptyState, Modal, Select, cn } from "@/components/ui";
+import { IconoDeRed } from "@/components/brand-icons";
+import { indiceDeConexiones, redesConectadas } from "@/lib/redes";
 import { ContactDrawer } from "../contacts/contact-drawer";
 import { ContactPanel } from "./contact-panel";
 import { NewMessageModal } from "./new-message";
@@ -47,6 +49,10 @@ export default function InboxPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [q, setQ] = useState("");
+  // Red activa («» = todas juntas). Va APARTE del clasificador de la izquierda a propósito:
+  // es otra dimensión. Si fuese una entrada más del sidebar no se podría pedir «mías, y solo
+  // las de Instagram», que es justo lo que uno quiere cuando atiende dos redes.
+  const [channel, setChannel] = useState("");
   const [order, setOrder] = useState("recent");
   const [onlyUnanswered, setOnlyUnanswered] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -69,6 +75,11 @@ export default function InboxPage() {
   const [fullContactId, setFullContactId] = useState<string | null>(null);
 
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  // Las redes salen de los canales que el negocio YA tiene conectados, no de una lista
+  // fija: así no se ofrece una pestaña que siempre saldría vacía, y el día que se conecte
+  // una nueva (TikTok, cuando su API de mensajes exista) aparece sin tocar esta pantalla.
+  const redes = useMemo(() => redesConectadas(channels), [channels]);
+  const redPorConexion = useMemo(() => indiceDeConexiones(channels), [channels]);
   const [users, setUsers] = useState<{ userId: string; name: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [agents, setAgents] = useState<{ id: string; name: string; slug: string }[]>([]);
@@ -96,6 +107,7 @@ export default function InboxPage() {
     async (cursor?: string | null) => {
       const params = new URLSearchParams(filterParams(filter));
       if (q.trim()) params.set("q", q.trim());
+      if (channel) params.set("channel", channel);
       if (order !== "recent") params.set("order", order);
       if (onlyUnanswered) params.set("unanswered", "1");
       if (cursor) params.set("cursor", cursor);
@@ -103,7 +115,7 @@ export default function InboxPage() {
       setItems((prev) => (cursor ? [...prev, ...res.items] : res.items));
       setNextCursor(res.nextCursor);
     },
-    [filter, q, order, onlyUnanswered],
+    [filter, q, channel, order, onlyUnanswered],
   );
 
   const loadMessages = useCallback(async (id: string, full?: boolean) => {
@@ -401,6 +413,36 @@ export default function InboxPage() {
               <Search size={13} className="pointer-events-none absolute left-2.5 top-2.5 text-ink-subtle" />
               <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar…  ( / )" className="w-full rounded-control border border-line-strong bg-panel py-1.5 pl-8 pr-3 text-sm text-ink placeholder:text-ink-subtle" />
             </div>
+            {/* Separar por red. Solo aparece cuando hay MÁS DE UNA conectada: a quien solo
+                tiene WhatsApp, una fila de pestañas con un único botón le quita espacio y
+                no le dice nada. «Todas» es el estado normal: verlas juntas. */}
+            {redes.length > 1 && (
+              <div className="-mx-0.5 flex gap-1 overflow-x-auto px-0.5 pb-0.5">
+                <button
+                  onClick={() => setChannel("")}
+                  className={cn(
+                    "shrink-0 rounded-full border px-2.5 py-1 text-2xs font-medium transition-colors",
+                    channel === "" ? "border-brand-500 bg-brand-soft text-brand-700 dark:text-brand-300" : "border-line-strong text-ink-muted hover:bg-app",
+                  )}
+                >
+                  Todas
+                </button>
+                {redes.map((r) => (
+                  <button
+                    key={r.clave}
+                    onClick={() => setChannel(r.clave)}
+                    title={`Ver solo ${r.etiqueta}`}
+                    className={cn(
+                      "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-2xs font-medium transition-colors",
+                      channel === r.clave ? "border-brand-500 bg-brand-soft text-brand-700 dark:text-brand-300" : "border-line-strong text-ink-muted hover:bg-app",
+                    )}
+                  >
+                    <IconoDeRed clave={r.clave} size={11} />
+                    {r.etiqueta}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex items-center gap-1.5 text-xs">
               <Select value={order} onChange={(e) => setOrder(e.target.value)} className="w-full flex-1">
                 <option value="recent">Más nuevas primero</option>
@@ -459,7 +501,17 @@ export default function InboxPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className={cn("truncate text-sm", c.unreadCount > 0 ? "font-semibold text-ink" : "font-medium text-ink")}>{displayName(c.contact)}</span>
+                      <span className={cn("flex min-w-0 items-center gap-1.5 text-sm", c.unreadCount > 0 ? "font-semibold text-ink" : "font-medium text-ink")}>
+                        {/* De qué red viene. Solo con varias conectadas: con una sola, el
+                            logo repetido en cada fila es ruido. Sin esto, «todas juntas»
+                            es una lista en la que no se sabe a quién se le está hablando. */}
+                        {redes.length > 1 && redPorConexion.get(c.channelConnectionId ?? "") && (
+                          <span className="shrink-0" style={{ color: redPorConexion.get(c.channelConnectionId ?? "")!.color }} title={redPorConexion.get(c.channelConnectionId ?? "")!.etiqueta}>
+                            <IconoDeRed clave={redPorConexion.get(c.channelConnectionId ?? "")!.clave} size={12} />
+                          </span>
+                        )}
+                        <span className="truncate">{displayName(c.contact)}</span>
+                      </span>
                       <span className="flex shrink-0 items-center gap-1 text-2xs tnum text-ink-subtle">
                         {c.unreadCount > 0 && c.lastMessageAt && Date.now() - new Date(c.lastMessageAt).getTime() > (counters?.firstResponseTargetMinutes ?? 15) * 60_000 && (
                           <span className="text-red-500" title="Supera el tiempo objetivo de primera respuesta">⏱</span>
