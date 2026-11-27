@@ -3,6 +3,7 @@ import { BadRequestException, UnauthorizedException } from "@nestjs/common";
 import type { NextFunction, Request, Response } from "express";
 import { allowedOriginsOf, baseHostOf, brandFromOrigin, getEnv } from "@conversia/config";
 import { PasskeysService, limpiarEtiqueta, rpDeLaMarca, transportesDe } from "../src/auth/passkeys.service";
+import { AuthController } from "../src/auth/auth.controller";
 import { TenancyMiddleware } from "../src/tenancy/tenancy.middleware";
 
 /**
@@ -256,5 +257,89 @@ describe("el Origin de Conversia resuelve a la marca Conversia", () => {
     const marca = brandFromOrigin(ORIGEN_CONVERSIA);
     expect(["tubot", "conversia"]).toContain(marca);
     if (getEnv().WEB_URL_CONVERSIA) expect(marca).toBe("conversia");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P4 — el cupo del desafío NO es el cupo del login
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Desde P4 la pantalla de login pide un desafío de passkey **sola, al cargar**, para poder
+ * ofrecer la llave dentro del campo de correo (mediación condicional). Eso multiplica las
+ * llamadas a `/auth/passkey-login/options` por cada visita a /login, de cualquiera.
+ *
+ * Si esas llamadas gastaran `loginByIp` —el cupo que comparten `/auth/login` y la
+ * verificación del passkey, 100 por 15 minutos POR IP— una clínica detrás de un NAT
+ * recargando la pantalla se quedaría sin poder entrar, con un «Demasiados intentos de inicio
+ * de sesión» que nadie provocó: no hubo ni un intento. Y el síntoma sería indistinguible de
+ * un ataque real.
+ *
+ * Acuñar un desafío no comprueba ninguna credencial ni delata si una cuenta existe, así que
+ * puede tener su propio cupo más laxo. Lo que NO puede cambiar es el cupo de los dos
+ * endpoints que sí comprueban algo. Eso es lo que fija este bloque.
+ */
+describe("P4 — pedir el desafío no gasta el cupo del login", () => {
+  /** Anota qué limitador tocó cada ruta. Todos permiten, para no cortar el flujo. */
+  function limitadorEspia() {
+    const usados: string[] = [];
+    const ok = { allowed: true, count: 1, retryAfterSeconds: 0 };
+    return {
+      usados,
+      servicio: {
+        loginByIp: async () => {
+          usados.push("loginByIp");
+          return ok;
+        },
+        passkeyChallengeByIp: async () => {
+          usados.push("passkeyChallengeByIp");
+          return ok;
+        },
+        login: async () => {
+          usados.push("login");
+          return ok;
+        },
+      } as any,
+    };
+  }
+
+  const peticion = () => ({ ip: "203.0.113.9", headers: { origin: ORIGEN_CONVERSIA }, socket: {} }) as unknown as Request;
+
+  it("pedir el desafío usa SU PROPIO cupo, no el del login", async () => {
+    const espia = limitadorEspia();
+    const passkeys: any = { opcionesDeLogin: async () => ({ loginId: "x", opciones: {} }) };
+    const controller = new AuthController({} as any, {} as any, espia.servicio, passkeys);
+
+    await controller.passkeyLoginOptions(peticion());
+
+    expect(espia.usados).toEqual(["passkeyChallengeByIp"]);
+    expect(espia.usados, "el desafío se está comiendo el cupo del login").not.toContain("loginByIp");
+  });
+
+  it("pero VERIFICAR la firma sigue gastando el cupo del login (ahí sí hay algo que frenar)", async () => {
+    const espia = limitadorEspia();
+    const passkeys: any = {
+      verificarLogin: async () => {
+        throw new UnauthorizedException("no importa: lo que se mide es el limitador");
+      },
+    };
+    const controller = new AuthController({} as any, {} as any, espia.servicio, passkeys);
+
+    await controller
+      .passkeyLogin(peticion(), { loginId: "x", response: { id: "abc" } })
+      .catch(() => undefined);
+
+    expect(espia.usados).toContain("loginByIp");
+  });
+
+  it("y el cupo propio está ACOTADO: no es barra libre para llenar Redis", async () => {
+    // Se lee del código del servicio en vez de pegarle a Redis: lo que importa es que haya
+    // un techo y una ventana, no el número exacto.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const fuente = readFileSync(join(__dirname, "..", "src", "common", "rate-limit.ts"), "utf8");
+    const cuerpo = /async passkeyChallengeByIp[\s\S]*?\n  }/.exec(fuente)?.[0] ?? "";
+    expect(cuerpo, "no se pudo leer el limitador (si no, este test no prueba nada)").toContain("rl:pkchal:ip:");
+    expect(cuerpo).toMatch(/LOGIN_MAX_PER_WINDOW\s*\*\s*\d+/);
+    expect(cuerpo).toContain("LOGIN_WINDOW_SECONDS");
   });
 });

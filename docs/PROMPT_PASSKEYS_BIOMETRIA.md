@@ -198,11 +198,61 @@ pierde el teléfono y no hay otra puerta, queda afuera de su propia cuenta.
 
 | PR | Qué entra | ¿Afloja la política? |
 |----|-----------|----------------------|
-| **P1** | Migración + modelo + `@simplewebauthn/server` + inscribir / listar / quitar + pantalla «Aparatos con acceso». No toca la sesión. | No |
-| **P2** | Login por passkey. Emite **la misma sesión de hoy** (techo 24 h). Ya se entra con la cara. | No |
-| **P3** | Sesión de aparato: `credentialId` en Redis, sin techo, **aserción obligatoria en el refresh**, herencia en `switch-org`, guardián ampliado. | **Sí** |
-| **P4** | Que no parezca un login: hoja de Face ID directa al volver, autocompletado `username webauthn`, inscripción sugerida tras el primer login en el teléfono. | No |
+| **P1 ✅** | Migración + modelo + `@simplewebauthn/server` + inscribir / listar / quitar + pantalla «Aparatos con acceso». No toca la sesión. | No |
+| **P2 ✅** | Login por passkey. Emite **la misma sesión de hoy** (techo 24 h). Ya se entra con la cara. | No |
+| **P3 ✅** | Sesión de aparato: `credentialId` en Redis, sin techo, **aserción obligatoria en el refresh**, herencia en `switch-org`, guardián ampliado. | **Sí** |
+| **P4 ✅** | Que no parezca un login: autocompletado `username webauthn` (la hoja modal al cargar se descartó, §11), el aparato se acuerda y la inscripción se sugiere una vez. | No |
 
 El orden es a propósito: **P1 y P2 entregan todo el valor que se siente y no aflojan nada.** P3 es el
 único que mueve la política de sesión, va solo, y entra con su guardián y con la verificación de que
 sin firma el refresh devuelve 401.
+
+---
+
+## 11. P4, lo que se construyó y lo que se descartó (17-nov-2026)
+
+P1, P2 y P3 ya están en producción en **las dos plataformas**. P4 cierra el plan y no toca la
+política de sesión: solo cambia cómo se presenta.
+
+### Lo que entró
+
+1. **Autocompletado del passkey en el campo de correo** (mediación condicional). El campo lleva
+   `autocomplete="username webauthn"` y la pantalla arranca
+   `startAuthentication({ useBrowserAutofill: true })` al montar. El passkey aparece dentro del
+   campo, como una contraseña guardada: no hay que tocar ningún botón.
+2. **El aparato se acuerda** (`src/lib/passkey-aparato.ts`, gemelo en los dos paneles). En el
+   aparato que ya entró con Face ID, el botón sube al primer lugar y acentuado, y el foco va al
+   campo de correo —que es lo que despliega la hoja del sistema en iPhone y Android—. Es una
+   **pista de presentación**, nunca una decisión de seguridad: si está mal, se cae al correo y
+   contraseña de siempre.
+3. **Sugerencia de activar**, una vez por aparato, EN EL FLUJO (nunca flotando) y con el «no»
+   aceptado para siempre. Aparece solo donde hay lector (`platformAuthenticatorIsAvailable`).
+
+### Lo que se descartó, y por qué
+
+**La «hoja de Face ID directa al volver» NO se hace abriendo el diálogo modal al cargar.**
+`navigator.credentials.get()` en modo modal exige un gesto de la persona en Safari/iOS:
+dispararlo desde un `useEffect` funciona en Android y tira `NotAllowedError` en iPhone. O sea, se
+rompería en la mitad de los teléfonos y sin dejar rastro, porque una ceremonia abortada es un
+caso normal que se traga. La mediación condicional + el foco en el campo logran lo mismo sin
+pelearse con la regla de activación de ningún navegador.
+
+### La trampa que apareció construyéndolo
+
+Pedir el desafío dejó de ser algo que pasa cuando alguien **aprieta un botón**: ahora pasa en
+**cada visita a /login**. Y `/auth/passkey-login/options` estaba gastando `loginByIp`, el cupo
+que comparte con `/auth/login` (20×5 = **100 por 15 minutos POR IP**). Una clínica detrás de un
+NAT recargando la pantalla se habría quedado sin poder entrar, con un «Demasiados intentos de
+inicio de sesión» que nadie provocó —no hubo ni un intento— e indistinguible de un ataque real.
+
+Se le dio **cupo propio** (`passkeyChallengeByIp`, ×20 en la misma ventana) porque acuñar un
+desafío no comprueba ninguna credencial ni delata si una cuenta existe. El freno al
+*password spraying* sigue íntegro donde sí se comprueba algo: `/auth/login` y
+`/auth/passkey-login`. Lo fija `apps/api/test/passkeys.spec.ts` con un limitador espía, y el
+test comprueba además que el cupo nuevo esté acotado.
+
+### Lo que sigue pendiente, y no es código
+
+**Probarlo en un teléfono real.** Desde esta sesión no se puede: WebAuthn necesita un aparato
+con biometría de verdad. Ajustes → Acceso (Conversia) o Ajustes → Mi perfil (TuBot) →
+«Activar en este dispositivo», y después salir y volver a entrar.
