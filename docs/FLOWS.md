@@ -23,7 +23,8 @@ Click-to-Chat (Meta; por anuncio o campaña) · Etapa del ciclo de vida
 cancelada/no-show (filtros servicio/profesional/sede) · Recordatorio de cita
 (X h antes, respeta horario) · Disparo manual · **Enlace / Código QR**
 (`link_scan`). **Próximamente** (no seleccionables): Llamada perdida, Anuncios
-TikTok.
+TikTok (el disparador necesita el CANAL de TikTok, que depende de la revisión
+DSPR de TikTok; el PASO «Evento TikTok» ya funciona y no depende de eso).
 
 **Enlace / Código QR (`link_scan`):** el editor genera un enlace `wa.me/<número>?text=…`
 (y su QR) con un mensaje predefinido que lleva un **código único** al final
@@ -53,7 +54,7 @@ la lista (no bloquea). La lógica de solape es `triggersMayOverlap` en
   paso, Disparar otro flujo, Terminar.
 - **IA**: Ejecutar agente, Cambiar agente, Agente con objetivo (cumplido/no).
 - **Integraciones**: Petición HTTP, Correo interno, Google Sheets.
-- **Marketing**: Evento CAPI (Meta), Evento GA4. Evento TikTok (Próximamente).
+- **Marketing**: Evento CAPI (Meta), Evento GA4, **Evento TikTok**.
 
 Reservados en el modelo pero **no ofrecidos** (no aparecen en el menú):
 `send_media`, `classify_intent`, `extract_data`, `summarize`,

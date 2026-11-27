@@ -41,7 +41,8 @@ Fases del brief (44) con estado real. ✅ hecho · 🔶 parcial · ⬜ pendiente
   - Triggers: click_to_chat (CTWA + referral guardado), lead_status_changed (origen→destino), appointment_created, appointment_upcoming (recordatorio programado)
   - Pasos: open_conversation, add_note, goto (anti-bucle), business_hours, send_capi (CAPI directo con ctwa_clid + reintentos), ai_objective (agente con objetivo + ramas), call_api (Petición HTTP con guard SSRF + gating por plan)
 - ✅ Pasos google_sheets_append (real, con OAuth Google por tenant), send_template (HSM), send_internal_email, send_ga4_event
-- 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok · paso send_tiktok_event
+- ✅ **TikTok Events API** (`send_tiktok_event`): las conversiones que se cierran por WhatsApp vuelven a TikTok (`event_source: crm`), con conexión por tenant en el Centro de Integraciones y botón **Probar** que hace una llamada REAL. Deduplicado por `runId:nodeId` para que un reintento de la cola no cuente la venta dos veces.
+- 🔶 **Próximamente** (estructura lista, brecha documentada): triggers cita cancelada/reprogramada, llamada perdida, anuncios TikTok (el disparador exige el canal de DM de TikTok — revisión DSPR pendiente, ver `docs/TIKTOK.md`)
 - ✅ Disparador etiqueta agregada (`tag_added`): panel (bulk), tool IA, nodo de flujo y Lead Ads (el import CSV NO dispara, a propósito)
 - ✅ ai_objective multi-turno (maxTurns + timeoutHours; respuestas del contacto re-evalúan y reanudan el run por rama; timeout → «unmet»)
 - ⬜ pregunta→variable, condición multi-campo · ⬜ Métricas por nodo

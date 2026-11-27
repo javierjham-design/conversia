@@ -396,6 +396,9 @@ function makeSimDeps(orgId: string, state: LiveSimState): EngineDeps {
     async sendInternalEmail(_ctx, config) {
       action("Correo interno al equipo", `${config.subject} → ${config.to.join(", ") || "(sin destinatarios)"}`);
     },
+    async sendTiktokEvent(_ctx, config) {
+      action("Evento TikTok", `${config.eventName}${config.value ? ` — $${config.value} ${config.currency ?? "CLP"}` : ""} (no se envía en la prueba)`);
+    },
     async sendGa4Event(_ctx, config) {
       action("Evento GA4", config.eventName);
     },

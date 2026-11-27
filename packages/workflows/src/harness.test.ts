@@ -11,7 +11,7 @@
  * Ver docs/FLOWS_TEST_MATRIX.md para el mapeo escenario → resultado.
  */
 import { describe, expect, it } from "vitest";
-import type { WorkflowDefinition } from "@conversia/types";
+import { NODE_TYPES, type WorkflowDefinition } from "@conversia/types";
 import { executeFrom, findStartNode, matchesTrigger, resumeAfterWait, resumeWithBranch, stepNode, triggersMayOverlap, validateWorkflowDefinition, type EngineDeps, type RunCtx } from "./index.js";
 
 /** Deps de grabación: apunta cada efecto y sus datos; configurable por escenario. */
@@ -38,6 +38,7 @@ function makeDeps(overrides: Partial<EngineDeps> & { objective?: "met" | "unmet"
     sendTemplate: async (_c, config) => void calls.push(`template:${(config as any).templateId ?? ""}`),
     sendInternalEmail: async (_c, config) => void calls.push(`email:${config.subject}->${config.to.join(",")}`),
     sendGa4Event: async (_c, config) => void calls.push(`ga4:${config.eventName}`),
+    sendTiktokEvent: async (_c, config) => void calls.push(`tiktok:${config.eventName}:${config.value ?? ""}:${config.nodeId}`),
     appendGoogleSheetRow: async (_c, config) => void calls.push(`sheets:${config.spreadsheetId}:${config.values.length}`),
     runAgentWithObjective: async (_c, _nodeId, cfg) => { calls.push(`objective:${(cfg as any).objective}`); return overrides.objective ?? "met"; },
     callApi: async (c, config) => { Object.assign((c as any).variables, overrides.httpVars ?? { __http_ok: "true", __http_status: "200" }); calls.push(`http:${(config as any).method ?? "GET"} ${(config as any).url ?? ""}`); },
@@ -117,6 +118,63 @@ describe("Bloque 1 — pasos: datos válidos / vacíos / inválidos", () => {
     await executeFrom(deps, c, flow, "a");
     expect(calls).toEqual(["http:GET https://api.x/saldo", "email:Lead Ana->eq@x.cl", "ga4:lead", "sheets:sheet1:2"]);
     expect(c.variables.saldo).toBe("999"); // la respuesta HTTP quedó como variable del flujo
+  });
+
+  /**
+   * EL GUARDIÁN QUE FALTABA. Cuando se suma un paso al motor y se olvida su doble en este
+   * arnés, las pruebas siguen TODAS EN VERDE: ninguna ejecuta el paso nuevo, así que nadie
+   * llama al método que no existe. Pasó de verdad con `send_tiktok_event` — 71 pruebas verdes
+   * sobre un motor que habría reventado con «deps.sendTiktokEvent is not a function» en el
+   * primer flujo real que lo usara.
+   *
+   * Acá se ejecuta CADA tipo de paso del catálogo. No se le exige a ninguno un resultado
+   * concreto (cada uno tiene el suyo): solo que el motor no se caiga por una dependencia
+   * ausente. Un paso puede fallar por su propia validación; lo que no puede es faltarle el
+   * método.
+   */
+  it("TODO paso del catálogo se puede ejecutar: ninguno le pide al motor un método que no existe", async () => {
+    const faltantes: string[] = [];
+    for (const type of NODE_TYPES) {
+      const d = makeDeps();
+      // OJO: `executeFrom` NO propaga el error, lo ATRAPA y devuelve `status: "failed"` con el
+      // mensaje (así un canal caído no tumba el worker). Un try/catch acá no vería nada: la
+      // primera versión de este guardián era justamente eso, un adorno que daba verde con la
+      // dependencia borrada. El error hay que leerlo del RESULTADO.
+      const r = (await executeFrom(d.deps, ctx(), linear([{ id: "n", type, config: {} }, { id: "z", type: "stop", config: {} }]), "n")) as {
+        status?: string;
+        error?: string;
+      };
+      const msg = r?.error ?? "";
+      // Esta es la firma exacta de la dependencia olvidada. Cualquier otro error es asunto del
+      // paso (validación, config vacía) y no de este guardián.
+      if (/is not a function/.test(msg)) faltantes.push(`${type} → ${msg}`);
+    }
+    expect(faltantes, `pasos cuyo método NO está implementado:\n${faltantes.join("\n")}`).toEqual([]);
+  });
+
+  it("y el catálogo de pasos no está vacío (si no, el guardián de arriba no prueba nada)", () => {
+    expect(NODE_TYPES.length).toBeGreaterThan(20);
+    expect(NODE_TYPES).toContain("send_tiktok_event");
+  });
+
+  it("send_tiktok_event manda el evento Y el nodeId (que es la clave de deduplicación)", async () => {
+    // El `nodeId` no es decorativo: el runtime arma con él el `event_id` que evita que un
+    // reintento de la cola le cuente a TikTok la misma venta dos veces. Si el motor dejara de
+    // pasarlo, el runtime generaría una clave distinta por intento y nadie lo notaría hasta
+    // ver conversiones infladas en el panel de anuncios.
+    const d = makeDeps();
+    await executeFrom(
+      d.deps,
+      ctx(),
+      linear([{ id: "tt", type: "send_tiktok_event", config: { eventName: "CompletePayment", value: 24990, currency: "CLP" } }, { id: "z", type: "stop", config: {} }]),
+      "tt",
+    );
+    expect(d.calls).toEqual(["tiktok:CompletePayment:24990:tt"]);
+
+    // Sin evento elegido cae al estándar, nunca a vacío (TikTok rechaza el nombre vacío).
+    const porDefecto = makeDeps();
+    await executeFrom(porDefecto.deps, ctx(), linear([{ id: "tt", type: "send_tiktok_event", config: {} }, { id: "z", type: "stop", config: {} }]), "tt");
+    expect(porDefecto.calls).toEqual(["tiktok:Contact::tt"]);
   });
 
   it("send_capi con y sin valor; send_template con y sin plantilla (el motor enruta, no valida)", async () => {

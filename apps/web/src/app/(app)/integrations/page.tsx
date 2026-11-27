@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   GoogleAnalyticsIcon,
+  TikTokIcon,
   HubSpotIcon,
   MakeIcon,
   ShopifyIcon,
@@ -40,7 +41,7 @@ import {
   useToast,
   type StatusKind,
 } from "@/components/ui";
-import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, HubspotDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type HubspotState, type WebhookRow } from "./drawers";
+import { ApiPresetsDrawer, AutomationDrawer, ClarivaDrawer, CustomSchedulingDrawer, DentalinkDrawer, EmailDrawer, EventsManagerDrawer, Ga4Drawer, GoogleDrawer, HubspotDrawer, TiktokDrawer, WebhooksDrawer, type AutomationState, type ClarivaState, type CustomSchedState, type DentalinkState, type EmailState, type Ga4State, type GoogleState, type HubspotState, type TiktokState, type WebhookRow } from "./drawers";
 import { CatalogDrawer } from "./catalog-drawer";
 
 interface CatalogItem {
@@ -69,6 +70,7 @@ interface Overview {
   platformEmailReady: boolean;
   apiPresets: { count: number; status: string | null };
   ga4: Ga4State | null;
+  tiktok: TiktokState | null;
   customScheduling: CustomSchedState | null;
   dentalink: DentalinkState | null;
   google: GoogleState | null;
@@ -108,6 +110,7 @@ const CATALOG_ICONS: Record<string, React.ReactNode> = {
   make: <MakeIcon size={20} />,
   hubspot: <HubSpotIcon size={20} />,
   ga4: <GoogleAnalyticsIcon size={20} />,
+  tiktok: <TikTokIcon size={20} />,
   woocommerce: <WooCommerceIcon size={20} />,
   shopify: <ShopifyIcon size={20} />,
   jumpseller: <ShoppingBag size={20} />,
@@ -128,6 +131,7 @@ export default function IntegrationsPage() {
   const [emailOpen, setEmailOpen] = useState(false);
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [ga4Open, setGa4Open] = useState(false);
+  const [tiktokOpen, setTiktokOpen] = useState(false);
   const [emOpen, setEmOpen] = useState(false);
   const [customSchedOpen, setCustomSchedOpen] = useState(false);
   const [googleOpen, setGoogleOpen] = useState(false);
@@ -384,6 +388,18 @@ export default function IntegrationsPage() {
         onManage: () => setGa4Open(true),
       });
     }
+    if (data.tiktok) {
+      rows.push({
+        key: "tiktok",
+        name: "TikTok",
+        category: "CRM y analítica",
+        icon: <TikTokIcon size={22} />,
+        status: data.tiktok.status === "error" ? "attention" : "connected",
+        detail: `${data.tiktok.eventSourceId ?? ""}${data.tiktok.hasTestEventCode ? " · con código de prueba" : ""}`,
+        health: data.tiktok.status === "error" ? "warn" : "ok",
+        onManage: () => setTiktokOpen(true),
+      });
+    }
     if (data.email) {
       const uses = [
         data.email.escalation?.enabled ? "escalamientos" : null,
@@ -460,6 +476,8 @@ export default function IntegrationsPage() {
         return setPresetsOpen(true);
       case "ga4":
         return setGa4Open(true);
+      case "tiktok":
+        return setTiktokOpen(true);
       case "events_manager":
         return setEmOpen(true);
       case "custom_scheduling":
@@ -698,6 +716,7 @@ export default function IntegrationsPage() {
       />
       <ApiPresetsDrawer open={presetsOpen} onClose={() => setPresetsOpen(false)} onChanged={() => void load()} />
       <Ga4Drawer open={ga4Open} onClose={() => setGa4Open(false)} state={data?.ga4 ?? null} onChanged={() => void load()} />
+      <TiktokDrawer open={tiktokOpen} onClose={() => setTiktokOpen(false)} state={data?.tiktok ?? null} onChanged={() => void load()} />
       <EventsManagerDrawer open={emOpen} onClose={() => setEmOpen(false)} />
       <CustomSchedulingDrawer open={customSchedOpen} onClose={() => setCustomSchedOpen(false)} state={data?.customScheduling ?? null} onChanged={() => void load()} />
       <GoogleDrawer open={googleOpen} onClose={() => setGoogleOpen(false)} state={data?.google ?? null} platformReady={data?.platformGoogleReady ?? false} onChanged={() => void load()} />

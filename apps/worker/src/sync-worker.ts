@@ -1,4 +1,5 @@
 import type { SyncJob } from "@conversia/types";
+import type { EventoTiktok } from "./tiktok";
 import { sendGa4Event } from "./ga4";
 
 /**
@@ -10,6 +11,10 @@ export async function processSyncJob(job: SyncJob): Promise<void> {
   switch (job.kind) {
     case "ga4_event":
       return sendGa4Event(job.organizationId, job.payload as { name: string; params?: Record<string, unknown>; clientId?: string });
+    case "tiktok_event": {
+      const { sendTiktokEvent } = await import("./tiktok.js");
+      return sendTiktokEvent(job.organizationId, job.payload as unknown as EventoTiktok);
+    }
     case "calendar_sync": {
       const { syncAppointmentToGoogle } = await import("./google-calendar.js");
       return syncAppointmentToGoogle(job.organizationId, job.payload as { appointmentId: string; action: "upsert" | "cancel" });

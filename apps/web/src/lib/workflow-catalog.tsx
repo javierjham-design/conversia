@@ -66,7 +66,7 @@ export const NODE_DEFS: NodeDef[] = [
   // Marketing
   { type: "send_capi", label: "Enviar evento CAPI (Meta)", description: "Envía un evento de conversión a Meta (Lead, Schedule, Purchase…)", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "Lead", value: "", currency: "CLP" } },
   { type: "send_ga4_event", label: "Enviar evento GA4", description: "Envía un evento a Google Analytics con parámetros y variables", category: "Marketing", icon: <Target size={15} />, defaultConfig: { eventName: "", params: {} } },
-  { type: "send_tiktok_event", label: "Enviar evento TikTok", description: "Evento a TikTok Events API", category: "Marketing", icon: <Megaphone size={15} />, defaultConfig: {}, soon: true },
+  { type: "send_tiktok_event", label: "Enviar evento TikTok", description: "Devuelve la venta o el lead a TikTok para que sus anuncios dejen de optimizar a ciegas", category: "Marketing", icon: <Megaphone size={15} />, defaultConfig: { eventName: "Contact", value: "", currency: "CLP" } },
   // IA
   { type: "run_agent", label: "Ejecutar agente IA", description: "El agente elegido responde la conversación", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
   { type: "switch_agent", label: "Cambiar agente IA", description: "Otro agente IA toma el control", category: "IA", icon: <Bot size={15} />, defaultConfig: { agentSlug: "" } },
