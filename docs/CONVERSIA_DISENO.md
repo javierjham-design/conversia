@@ -12,6 +12,8 @@
 
 - **Tipografía**: Fraunces (serif display; pesos 500–700 + itálica — marca, saludos con cursiva, titulares, cifras grandes) + Inter (400–800 — cuerpo, tablas, números con `font-variant-numeric: tabular-nums`). Google Fonts.
 - **Radios**: tarjetas 16px · botones/chips 9–11px · píldoras 999px. Iconografía: SVG stroke 1.8, estilo Lucide, un solo set.
+- **Excepción: las marcas ajenas van con SU logo y SU color.** WhatsApp, Instagram, Messenger y TikTok no son iconos nuestros: son logos, y un logo repintado con el acento del panel deja de cumplir su único trabajo —que lo reconozcas sin leer la etiqueta de al lado—. Viven en `src/components/brand-icons.tsx` (bloque idéntico en `apps/web` y `apps/conversia-web`, con guardián `apps/api/test/logos-redes.spec.ts`) y se pintan solos: el degradado real de Instagram, el verde de WhatsApp, el glitch cian/rojo de TikTok. Nunca se les pasa un `color`. Lo único que acepta el color de alrededor es el glifo `mono`, que es el que va EN BLANCO sobre el cuadrito de marca (`FONDO_DE_RED`), tal como está hecho el icono de la app de verdad. El resto de la iconografía sigue siendo Lucide, un solo set.
+  > **Corrección del dueño (27-nov-2026).** *"no me aparecen los logos con los colores de instagram … deja los logos reales no con los colores de la pagina el logo tal cual es"*. Los logos estaban dibujados con `fill="currentColor"`: salían todos del color del acento, así que había que leer el texto para saber qué red era.
 - **Luz ambiental** (solo decorativa): 2–3 blobs blur(80px) con el color del acento a opacidad .10–.13 (oscuro) / .12–.16 (claro), deriva lenta 16–24s, **se apaga con `prefers-reduced-motion`**.
 
 ## 2. Tokens por modo
