@@ -629,6 +629,36 @@ function makeDeps(): EngineDeps {
       );
     },
 
+    async sendTiktokEvent(ctx, config) {
+      if (!config.eventName) return;
+      const contact = ctx.contactId
+        ? await withTenant(ctx.organizationId, (tx) =>
+            tx.contact.findUnique({ where: { id: ctx.contactId! }, select: { phone: true, email: true } }),
+          )
+        : null;
+      await getSyncQueue().add(
+        "tiktok",
+        {
+          organizationId: ctx.organizationId,
+          kind: "tiktok_event",
+          payload: {
+            eventName: config.eventName,
+            value: config.value ?? null,
+            currency: config.currency ?? null,
+            phone: contact?.phone ?? null,
+            email: contact?.email ?? null,
+            externalId: ctx.contactId ?? null,
+            // DEDUPLICACION: la clave es el HECHO (este paso, de este run), no el intento. Si
+            // fuera aleatoria, un timeout que en realidad llego le contaria a TikTok dos
+            // conversiones por una y le ensenaria que el anuncio rinde el doble.
+            eventId: `${ctx.runId}:${config.nodeId}`,
+            occurredAt: new Date().toISOString(),
+          },
+        },
+        { attempts: 4, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    },
+
     async appendGoogleSheetRow(ctx, config) {
       if (!config.spreadsheetId || !config.values.length) return;
       await getSyncQueue().add(

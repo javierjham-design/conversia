@@ -993,6 +993,147 @@ export function ApiPresetsDrawer({ open, onClose, onChanged }: { open: boolean; 
   );
 }
 
+// --------------------------- TikTok (Events API) ---------------------------
+
+export interface TiktokState {
+  status: string;
+  eventSourceId: string | null;
+  eventSource: string;
+  hasTestEventCode: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+/**
+ * TikTok Events API. Lo que resuelve, dicho sin jerga: TikTok ve el clic en tu anuncio pero no
+ * ve la venta —esa pasa en WhatsApp—, así que reparte el presupuesto hacia los videos que
+ * generan clics y no hacia los que generan clientes. Esto le devuelve el resultado.
+ *
+ * El botón **Probar** hace una llamada REAL: TikTok no tiene endpoint de validación, y responde
+ * 200 incluso cuando rechaza el evento, así que es la única manera de saber que el token sirve.
+ */
+export function TiktokDrawer({ open, onClose, state, onChanged }: { open: boolean; onClose: () => void; state: TiktokState | null; onChanged: () => void }) {
+  const toast = useToast();
+  const connected = Boolean(state);
+  const [busy, setBusy] = useState(false);
+  const [testDetail, setTestDetail] = useState<string | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [form, setForm] = useState({ eventSourceId: "", accessToken: "", eventSource: "crm", testEventCode: "" });
+
+  useEffect(() => {
+    if (open) {
+      setTestDetail(null);
+      setForm({
+        eventSourceId: state?.eventSourceId ?? "",
+        accessToken: "",
+        eventSource: state?.eventSource ?? "crm",
+        testEventCode: "",
+      });
+    }
+  }, [open, state]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/integrations/tiktok", {
+        method: "POST",
+        body: JSON.stringify({
+          eventSourceId: form.eventSourceId.trim(),
+          eventSource: form.eventSource,
+          accessToken: form.accessToken || undefined,
+          testEventCode: form.testEventCode.trim() || undefined,
+        }),
+      });
+      toast.push("TikTok conectado — prueba la conexión", "ok");
+      onChanged();
+    } catch (err) {
+      toast.push((err as Error).message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setTestDetail("Enviando un evento de prueba a TikTok…");
+    try {
+      const r = await api<{ ok: boolean; detail: string }>("/integrations/tiktok/test", { method: "POST" });
+      setTestDetail(`${r.ok ? "✔" : "✖"} ${r.detail}`);
+      onChanged();
+    } catch (err) {
+      setTestDetail(`✖ ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    await api("/integrations/tiktok", { method: "DELETE" });
+    toast.push("TikTok desconectado — el paso «Enviar evento TikTok» dejará de enviar", "info");
+    onChanged();
+    onClose();
+  }
+
+  return (
+    <Drawer open={open} onClose={onClose} title="TikTok — conversiones de vuelta">
+      <p className="mb-3 text-xs text-ink-muted">
+        TikTok ve el clic en tu anuncio, pero la venta ocurre en WhatsApp y no la ve: por eso premia
+        los videos que generan clics y no los que generan clientes. Esto le devuelve el resultado.
+        En <b>TikTok Events Manager → tu pixel o conjunto de eventos → Configurar API de eventos</b>
+        saca el <b>ID</b> y genera el <b>Access Token</b>.
+      </p>
+      <div className="space-y-2">
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">ID del origen de eventos (pixel o conjunto)</span>
+          <input value={form.eventSourceId} onChange={(e) => setForm({ ...form, eventSourceId: e.target.value.trim() })} placeholder="C1A2B3..." className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">Access Token {connected ? "(vacío = conservar)" : ""}</span>
+          <input type="password" value={form.accessToken} onChange={(e) => setForm({ ...form, accessToken: e.target.value })} className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">Tipo de origen</span>
+          <Select value={form.eventSource} onChange={(e) => setForm({ ...form, eventSource: e.target.value })} className="mt-1 w-full">
+            <option value="crm">CRM — la conversión pasó en la conversación (lo normal acá)</option>
+            <option value="offline">Offline — conjunto de eventos presenciales</option>
+            <option value="web">Web — pixel de tu sitio</option>
+          </Select>
+        </label>
+        <label className="block text-sm">
+          <span className="text-xs text-ink-muted">Código de prueba (opcional, de «Probar eventos»)</span>
+          <input value={form.testEventCode} onChange={(e) => setForm({ ...form, testEventCode: e.target.value.trim() })} placeholder="TEST12345" className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 font-mono text-sm" />
+        </label>
+        <p className="text-[11px] text-ink-subtle">
+          Sin código de prueba, el evento que manda <b>Probar conexión</b> entra como una conversión
+          <b> real</b> en tu pixel. Con código, TikTok lo deja aparte y no te ensucia los datos.
+        </p>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <Button onClick={() => void save()} disabled={busy || !form.eventSourceId}>{connected ? "Guardar" : "Conectar"}</Button>
+        {connected && <Button variant="secondary" onClick={() => void test()} disabled={busy}>Probar conexión</Button>}
+        {connected && <Button variant="ghost" onClick={() => setConfirmDisconnect(true)}>Desconectar</Button>}
+      </div>
+      {testDetail && <p className="mt-2 text-xs text-ink-muted">{testDetail}</p>}
+      {state?.lastError && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-500/10 dark:text-red-300">Último error: {state.lastError}</p>}
+      <p className="mt-3 text-[11px] text-ink-subtle">
+        Nota honesta sobre el calce: cuando el tráfico pasa por WhatsApp, TikTok <b>no</b> entrega un
+        identificador del clic (Meta sí, con su <code>ctwa_clid</code>). El calce lo hace TikTok con el
+        teléfono y el correo de la persona, cifrados en origen. Funciona —es lo que se usa para
+        conversiones offline— pero no es atribución exacta anuncio por anuncio.
+      </p>
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        onConfirm={() => void disconnect()}
+        title="¿Desconectar TikTok?"
+        description="El paso «Enviar evento TikTok» de los flujos dejará de enviar, y sus anuncios volverán a optimizar sin ver las ventas."
+        confirmLabel="Desconectar"
+        danger
+      />
+    </Drawer>
+  );
+}
+
 // --------------------------- Google Analytics (GA4) ---------------------------
 
 export interface Ga4State {

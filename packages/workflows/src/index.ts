@@ -44,6 +44,11 @@ export interface EngineDeps {
   sendInternalEmail(ctx: RunCtx, config: { to: string[]; subject: string; body: string }): Promise<void>;
   /** Evento GA4 vía Measurement Protocol; params ya renderizados. */
   sendGa4Event(ctx: RunCtx, config: { eventName: string; params: Record<string, string> }): Promise<void>;
+  /**
+   * Evento de conversiÃ³n a TikTok (Events API). `nodeId` entra en la clave de deduplicaciÃ³n:
+   * el mismo paso del mismo run es el MISMO hecho, por muchas veces que la cola lo reintente.
+   */
+  sendTiktokEvent(ctx: RunCtx, config: { eventName: string; value?: number; currency?: string; nodeId: string }): Promise<void>;
   /** Horario de atención del negocio (Configuración → Horario) como default del nodo «Fecha y hora». */
   getBusinessHoursDefault?(ctx: RunCtx): Promise<Record<string, unknown> | null>;
   /** Agrega una fila a Google Sheets (valores ya renderizados). */
@@ -596,7 +601,12 @@ async function executeNode(
       return {};
     }
     case "send_tiktok_event":
-      // "Próximamente": sin integración aún. No-op registrado (no se finge).
+      await deps.sendTiktokEvent(ctx, {
+        eventName: String(cfg.eventName ?? "Contact"),
+        value: cfg.value != null && cfg.value !== "" ? Number(cfg.value) : undefined,
+        currency: cfg.currency ? String(cfg.currency) : undefined,
+        nodeId: node.id,
+      });
       return {};
     case "wait":
       return { wait: computeWaitDue(cfg, deps.now()) };

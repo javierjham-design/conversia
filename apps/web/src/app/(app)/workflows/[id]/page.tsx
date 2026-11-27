@@ -292,7 +292,7 @@ function nodeSummary(type: string, config: Record<string, any>): string {
     case "goto": return config.targetNodeId ? "Salta a otro paso del flujo" : "(elige el paso destino)";
     case "business_hours": return "Ramifica: dentro / fuera de horario";
     case "send_capi": return `CAPI: ${config.eventName ?? "Lead"}${config.value ? ` ($${config.value} ${config.currency ?? "CLP"})` : ""}`;
-    case "send_tiktok_event": return "(Próximamente)";
+    case "send_tiktok_event": return `TikTok: ${config.eventName ?? "Contact"}${config.value ? ` ($${config.value} ${config.currency ?? "CLP"})` : ""}`;
     case "ai_objective": return config.objective ? `Objetivo: ${String(config.objective).slice(0, 40)}` : "(define el objetivo)";
     case "send_template": return config.templateName ? `📄 ${config.templateName}` : "(elige la plantilla)";
     case "send_internal_email": return config.subject ? `✉ ${String(config.subject).slice(0, 40)}` : "(configura el correo)";
@@ -1981,9 +1981,7 @@ function NodePanel({
 
       {type === "send_capi" && <CapiForm config={config} onChange={onChange} />}
 
-      {type === "send_tiktok_event" && (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">Próximamente: requiere integrar TikTok Events API. Puedes dejar el paso, pero aún no envía.</p>
-      )}
+      {type === "send_tiktok_event" && <TiktokForm config={config} onChange={onChange} />}
 
       {type === "ai_objective" && (
         <div className="space-y-2">
@@ -2291,6 +2289,10 @@ function NodePanel({
 }
 
 const CAPI_EVENTS = ["Lead", "Schedule", "Purchase", "CompleteRegistration", "Contact", "SubmitApplication", "StartTrial"];
+// Eventos estándar de TikTok. NO son los mismos nombres que los de Meta: TikTok no conoce
+// "Schedule" ni "Purchase" — usa "PlaceAnOrder" y "CompletePayment". Mandarle un nombre de Meta
+// se acepta como evento personalizado y deja de servir para optimizar, que es todo el punto.
+const TIKTOK_EVENTS = ["Contact", "SubmitForm", "Lead", "CompleteRegistration", "Subscribe", "PlaceAnOrder", "CompletePayment"];
 
 function CapiForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
   return (
@@ -2312,6 +2314,34 @@ function CapiForm({ config, onChange }: { config: Record<string, any>; onChange:
         </label>
       </div>
       <p className="text-[10px] text-ink-subtle">Usa el <span className="font-mono">ctwa_clid</span> del contacto (del disparador Click-to-Chat) + el dataset/token del <b>Centro Meta</b>. Se envía con reintentos automáticos.</p>
+    </div>
+  );
+}
+
+function TiktokForm({ config, onChange }: { config: Record<string, any>; onChange: (patch: Record<string, unknown>) => void }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <label className="block">
+        <span className="text-xs text-ink-muted">Evento estándar de TikTok</span>
+        <Select value={config.eventName ?? "Contact"} onChange={(e) => onChange({ eventName: e.target.value })} className="mt-1 block w-full">
+          {TIKTOK_EVENTS.map((ev) => (<option key={ev} value={ev}>{ev}</option>))}
+        </Select>
+      </label>
+      <div className="flex gap-2">
+        <label className="flex-1">
+          <span className="text-xs text-ink-muted">Valor (opcional)</span>
+          <input type="number" min={0} value={config.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+        </label>
+        <label className="w-24">
+          <span className="text-xs text-ink-muted">Moneda</span>
+          <input value={config.currency ?? "CLP"} onChange={(e) => onChange({ currency: e.target.value })} className="mt-1 block w-full rounded-lg border border-line-strong px-2 py-1.5 text-sm" />
+        </label>
+      </div>
+      <p className="text-[10px] text-ink-subtle">
+        Necesita <b>TikTok</b> conectado en <b>Integraciones</b>. TikTok calza el evento con el
+        teléfono o el correo del contacto (cifrados antes de salir): sin ninguno de los dos, el
+        evento no se manda y queda anotado en la actividad de la integración.
+      </p>
     </div>
   );
 }

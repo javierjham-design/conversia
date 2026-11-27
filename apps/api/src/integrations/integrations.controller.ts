@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { ClarivaSchedulingProvider, CustomSchedulingProvider, DentalinkSchedulingProvider } from "@conversia/scheduling";
 import { PLATFORM_PUBLIC_EVENTS } from "@conversia/types";
@@ -132,6 +132,7 @@ export class IntegrationsController {
       const presetsConn = await tx.integrationConnection.findFirst({ where: { provider: "api_presets" } });
       const presetCount = (((presetsConn?.config as any)?.presets ?? []) as any[]).length;
       const ga4Conn = await tx.integrationConnection.findFirst({ where: { provider: "ga4" } });
+      const tiktokConn = await tx.integrationConnection.findFirst({ where: { provider: "tiktok" } });
       const googleConn = await tx.integrationConnection.findFirst({ where: { provider: "google" } });
       // Qué app de Google corresponde a esta org (Conversia tiene la suya si está cargada) y
       // si esas credenciales están realmente puestas en el servicio.
@@ -145,13 +146,14 @@ export class IntegrationsController {
       await this.notifyInterested(
         tx,
         ctx.organizationId,
-        ["email", "custom_api", "ga4", "events_manager", "custom_scheduling", "zapier", "make", "dentalink", ...(platformGoogleReady ? ["google_calendar", "sheets"] : []), ...(platformHubspotReady ? ["hubspot"] : [])],
+        ["email", "custom_api", "ga4", "tiktok", "events_manager", "custom_scheduling", "zapier", "make", "dentalink", ...(platformGoogleReady ? ["google_calendar", "sheets"] : []), ...(platformHubspotReady ? ["hubspot"] : [])],
         {
           dentalink: "Dentalink",
           hubspot: "HubSpot",
           email: "Correo electrónico",
           custom_api: "API personalizada",
           ga4: "Google Analytics",
+          tiktok: "TikTok",
           events_manager: "Meta Events Manager",
           custom_scheduling: "Agenda personalizada",
           zapier: "Zapier",
@@ -223,6 +225,17 @@ export class IntegrationsController {
         apiPresets: { count: presetCount, status: presetsConn?.status ?? null },
         ga4: ga4Conn
           ? { status: ga4Conn.status, measurementId: (ga4Conn.config as any)?.measurementId ?? null, mirrorCapi: Boolean((ga4Conn.config as any)?.mirrorCapi), lastError: ga4Conn.lastError }
+          : null,
+        // El token NUNCA viaja al navegador; sí el destino y si hay código de prueba cargado.
+        tiktok: tiktokConn
+          ? {
+              status: tiktokConn.status,
+              eventSourceId: (tiktokConn.config as any)?.eventSourceId ?? null,
+              eventSource: (tiktokConn.config as any)?.eventSource ?? "crm",
+              hasTestEventCode: Boolean((tiktokConn.config as any)?.testEventCode),
+              lastSyncAt: tiktokConn.lastSyncAt,
+              lastError: tiktokConn.lastError,
+            }
           : null,
         customScheduling: customSched
           ? { status: customSched.status, baseUrl: (customSched.config as any)?.baseUrl ?? null, lastSyncAt: customSched.lastSyncAt, lastError: customSched.lastError }
@@ -323,6 +336,7 @@ export class IntegrationsController {
           { key: "hubspot", name: "HubSpot", category: "crm", status: platformHubspotReady ? "disponible" : "config_pendiente", description: `Sincroniza tus contactos de ${marca} a HubSpot (unidireccional, sin duplicados, con mapeo de campos).`, capabilities: ["OAuth", "Contactos", "Backfill", "Sin duplicados"] },
           { key: "events_manager", name: "Meta Events Manager", category: "crm", status: "disponible", description: "Métricas de los eventos CAPI: envíos por día y por tipo, tasa de éxito y últimos rechazos de Meta.", capabilities: ["Métricas", "Errores", "Link directo"] },
           { key: "ga4", name: "Google Analytics", category: "crm", status: "disponible", description: "Eventos GA4 desde los flujos y espejo automático de las conversiones CAPI (Measurement Protocol, sin OAuth).", capabilities: ["Paso de workflow", "Espejo CAPI", "Prueba con validación"] },
+          { key: "tiktok", name: "TikTok", category: "crm", status: "disponible", description: "Devuelve a TikTok las ventas y los leads que se cierran por WhatsApp (Events API), para que sus anuncios dejen de optimizar a ciegas.", capabilities: ["Paso de workflow", "Conversiones offline", "Prueba real"] },
           // Catálogo comercial: el bot vende con productos/precios/stock reales de la tienda o el menú.
           { key: "woocommerce", name: "WooCommerce", category: "comercio", status: "beta", description: "Sincroniza los productos, precios y stock reales de tu tienda WooCommerce para que el bot venda con datos vivos.", capabilities: ["Productos", "Precios", "Stock", "Búsqueda por IA"] },
           { key: "shopify", name: "Shopify", category: "comercio", status: "beta", description: "Catálogo de tu tienda Shopify (productos, variantes, precios y stock) para vender por WhatsApp.", capabilities: ["Productos", "Variantes", "Stock"] },
@@ -1210,6 +1224,147 @@ export class IntegrationsController {
       await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "ga4" } });
       await tx.auditLog.create({
         data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.ga4_disconnect", entityType: "integration_connection" },
+      });
+      return { ok: true };
+    });
+  }
+
+  // ------------------------ TikTok (Events API) ------------------------
+
+  /**
+   * Conecta TikTok Events API: `event_source_id` (pixel o conjunto de eventos) + token cifrado.
+   *
+   * El token es de la cuenta de TikTok Business DEL TENANT, no nuestro: cada negocio manda sus
+   * conversiones a su propio pixel. Nunca vuelve al navegador (igual que el api_secret de GA4).
+   */
+  @Post("tiktok")
+  saveTiktok(@Body() body: unknown) {
+    const ctx = requirePermission("integrations:write");
+    const input = parse(
+      z.object({
+        // Un pixel code de TikTok es alfanumérico; no se fija un largo exacto porque TikTok
+        // usa formatos distintos para pixel web y para conjunto de eventos offline/CRM.
+        eventSourceId: z.string().trim().min(6).max(64).regex(/^[A-Za-z0-9_-]+$/, "Solo letras, números, guion y guion bajo"),
+        eventSource: z.enum(["crm", "web", "offline"]).default("crm"),
+        accessToken: z.string().trim().min(10).max(400).optional(),
+        /** Código de prueba de Events Manager: con él, el evento de Probar NO cuenta como real. */
+        testEventCode: z.string().trim().max(64).optional(),
+      }),
+      body,
+    );
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const existing = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "tiktok" } },
+      });
+      let credentialId = existing?.credentialId ?? null;
+      if (input.accessToken) {
+        const credential = await tx.integrationCredential.create({
+          data: { organizationId: ctx.organizationId, provider: "tiktok", label: "TikTok Access Token", ciphertext: encryptSecret(input.accessToken) },
+        });
+        credentialId = credential.id;
+      }
+      if (!credentialId) throw new BadRequestException("Falta el Access Token (TikTok Events Manager → Configurar API de eventos)");
+      const config = { eventSourceId: input.eventSourceId, eventSource: input.eventSource, testEventCode: input.testEventCode || null } as object;
+      if (existing) {
+        await tx.integrationConnection.update({ where: { id: existing.id }, data: { config, credentialId, status: "active", lastError: null } });
+      } else {
+        await tx.integrationConnection.create({ data: { organizationId: ctx.organizationId, provider: "tiktok", config, credentialId } });
+      }
+      await tx.auditLog.create({
+        data: {
+          organizationId: ctx.organizationId,
+          actorType: "user",
+          actorId: ctx.userId,
+          action: "integration.tiktok_save",
+          entityType: "integration_connection",
+          // El token NO se audita (es un secreto); sí el destino, que es lo revisable.
+          after: { eventSourceId: input.eventSourceId, eventSource: input.eventSource, conCodigoDePrueba: Boolean(input.testEventCode) },
+        },
+      });
+      return { ok: true };
+    });
+  }
+
+  /**
+   * Prueba REAL contra TikTok. Es la única forma de saber si el token y el pixel sirven:
+   * TikTok no publica un endpoint de validación, y —la trampa— responde **HTTP 200 con `code`
+   * distinto de 0** cuando rechaza el evento. Mirar `res.ok` daría por bueno lo que se rechazó.
+   */
+  @Post("tiktok/test")
+  async testTiktok() {
+    const ctx = requirePermission("integrations:write");
+    const data = await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      const conn = await tx.integrationConnection.findUnique({
+        where: { organizationId_provider: { organizationId: ctx.organizationId, provider: "tiktok" } },
+      });
+      if (!conn?.credentialId) throw new BadRequestException("TikTok no está conectado");
+      const cred = await tx.integrationCredential.findUnique({ where: { id: conn.credentialId } });
+      const cfg = (conn.config as any) ?? {};
+      return {
+        conn,
+        eventSourceId: String(cfg.eventSourceId ?? ""),
+        eventSource: String(cfg.eventSource ?? "crm"),
+        testEventCode: cfg.testEventCode ? String(cfg.testEventCode) : null,
+        accessToken: cred ? decryptSecret(cred.ciphertext) : "",
+      };
+    });
+    let ok = false;
+    let detail = "";
+    try {
+      const res = await fetch("https://business-api.tiktok.com/open_api/v1.3/event/track/", {
+        method: "POST",
+        headers: { "Access-Token": data.accessToken, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_source: data.eventSource,
+          event_source_id: data.eventSourceId,
+          ...(data.testEventCode ? { test_event_code: data.testEventCode } : {}),
+          data: [
+            {
+              event: "Contact",
+              event_time: Math.floor(Date.now() / 1000),
+              event_id: `prueba-${ctx.organizationId}-${Date.now()}`,
+              // Identificador sintético y evidente: no es de ninguna persona real.
+              user: { external_id: [createHash("sha256").update(`prueba-conexion:${ctx.organizationId}`).digest("hex")] },
+              properties: {},
+              limited_data_use: false,
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const json: any = await res.json().catch(() => null);
+      const code = typeof json?.code === "number" ? json.code : Number(json?.code);
+      const mensaje = typeof json?.message === "string" ? json.message : "";
+      ok = res.ok && code === 0;
+      detail = ok
+        ? data.testEventCode
+          ? "TikTok aceptó el evento de prueba (lo verás en Events Manager → Probar eventos; no cuenta como conversión)"
+          : "TikTok aceptó el evento de prueba. OJO: sin código de prueba, ese evento CUENTA como real en tu pixel"
+        : res.ok
+          ? `TikTok rechazó el evento${Number.isFinite(code) ? ` (code ${code})` : ""}${mensaje ? `: ${mensaje}` : ""}`
+          : `TikTok respondió HTTP ${res.status}${mensaje ? `: ${mensaje}` : ""}`;
+    } catch (err) {
+      detail = (err as Error).message.slice(0, 200);
+    }
+    await this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.integrationConnection.update({
+        where: { id: data.conn.id },
+        data: { lastSyncAt: new Date(), status: ok ? "active" : "error", lastError: ok ? null : detail },
+      });
+      await tx.integrationEvent.create({
+        data: { organizationId: ctx.organizationId, provider: "tiktok", type: ok ? "tiktok.test_ok" : "tiktok.test_error", status: ok ? "ok" : "error", message: detail },
+      });
+    });
+    return { ok, detail };
+  }
+
+  @Delete("tiktok")
+  disconnectTiktok() {
+    const ctx = requirePermission("integrations:write");
+    return this.prisma.withTenant(ctx.organizationId, async (tx) => {
+      await tx.integrationConnection.deleteMany({ where: { organizationId: ctx.organizationId, provider: "tiktok" } });
+      await tx.auditLog.create({
+        data: { organizationId: ctx.organizationId, actorType: "user", actorId: ctx.userId, action: "integration.tiktok_disconnect", entityType: "integration_connection" },
       });
       return { ok: true };
     });

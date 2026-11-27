@@ -149,6 +149,10 @@ export function simulateWorkflow(
         label = "Enviar evento CAPI (Meta)";
         detail = `Enviaría el evento “${cfg.eventName ?? "Lead"}”${cfg.value ? ` por $${cfg.value} ${cfg.currency ?? "CLP"}` : ""} (simulado)`;
         break;
+      case "send_tiktok_event":
+        label = "Enviar evento TikTok";
+        detail = `Enviaría el evento “${cfg.eventName ?? "Contact"}”${cfg.value ? ` por $${cfg.value} ${cfg.currency ?? "CLP"}` : ""} a TikTok (simulado)`;
+        break;
       case "ai_objective":
         label = "Agente IA con objetivo";
         branch = "met"; // en la prueba asumimos objetivo cumplido
