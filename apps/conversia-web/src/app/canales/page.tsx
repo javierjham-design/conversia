@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowRight, Check, CheckCircle2, HelpCircle, Loader2, Qr
 import { AppShell } from "@/components/AppShell";
 import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { ReporteDeCanal } from "@/components/ReporteDeCanal";
-import { COLOR_DE_RED, InstagramIcon, MessengerIcon, TikTokIcon, WhatsAppIcon } from "@/components/brand-icons";
+import { FONDO_DE_RED, type IconProps, InstagramIcon, MessengerIcon, WhatsAppIcon } from "@/components/brand-icons";
 import { TarjetaTikTok } from "@/components/TarjetaTikTok";
 import { api } from "@/lib/api";
 import { openAssistant } from "@/lib/assistant";
@@ -173,15 +173,16 @@ export default function Canales() {
     label,
     accion,
     Icon,
-    color,
+    fondo,
     canal,
     desc,
     requisito,
   }: {
     label: "Instagram" | "Messenger";
     accion: string;
-    Icon: (p: { size?: number; style?: React.CSSProperties }) => React.ReactElement;
-    color: string;
+    Icon: (p: IconProps) => React.ReactElement;
+    /** Fondo del cuadrito: el degradado REAL de la red (`FONDO_DE_RED`). */
+    fondo: string;
     canal: Channel | null | undefined;
     desc: string;
     requisito: string;
@@ -191,7 +192,7 @@ export default function Canales() {
         <ReporteDeCanal
           channelId={canal.id}
           titulo={label}
-          icono={<Icon size={22} style={{ color }} />}
+          icono={<Icon size={22} />}
           onCambio={() => void load()}
           onDesconectar={() => void desconectarCanal(canal.id)}
         />
@@ -199,8 +200,10 @@ export default function Canales() {
     }
     return (
       <div className="card" style={{ padding: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ width: 40, height: 40, borderRadius: 12, background: color, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
-          <Icon size={21} />
+        {/* El cuadrito es el icono de la app tal cual: su fondo real y el glifo en blanco
+            encima (`mono`), que es como está hecho el de verdad. */}
+        <span style={{ width: 40, height: 40, borderRadius: 12, background: fondo, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Icon size={21} mono />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{label}</p>
@@ -443,7 +446,7 @@ export default function Canales() {
         ) : (
           <div className="card" style={{ padding: 20, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 44, height: 44, borderRadius: 13, background: COLOR_DE_RED.whatsapp, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}><WhatsAppIcon size={23} /></span>
+              <span style={{ width: 44, height: 44, borderRadius: 13, background: FONDO_DE_RED.whatsapp, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}><WhatsAppIcon size={23} mono /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>WhatsApp</p>
                 <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 13 }}>Tu asistente atiende por tu número de WhatsApp Business.</p>
@@ -458,7 +461,7 @@ export default function Canales() {
                     coexistencia automáticamente (sin selector de "cuenta existente"). */}
                 <div data-copilot="conectar-whatsapp" style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <WhatsAppIcon size={17} style={{ color: COLOR_DE_RED.whatsapp }} />
+                    <WhatsAppIcon size={17} />
                     <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
                     <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
                   </div>
@@ -466,7 +469,7 @@ export default function Canales() {
                     Ingresa tu número en la ventana de Meta. Si ya lo usas en la app de <strong>WhatsApp Business</strong>, lo conectamos tal cual: sigues respondiendo desde tu teléfono con tus chats de siempre y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
                   </p>
                   <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
-                    <WhatsAppIcon size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
+                    <WhatsAppIcon size={16} mono /> Conectar mi WhatsApp <ArrowRight size={15} />
                   </button>
                 </div>
 
@@ -580,7 +583,7 @@ export default function Canales() {
             label: "Instagram",
             accion: "ig",
             Icon: InstagramIcon,
-            color: COLOR_DE_RED.instagram,
+            fondo: FONDO_DE_RED.instagram,
             canal: igCanal,
             desc: "Responde los DM de tu Instagram con el mismo asistente.",
             requisito: "Necesitas una página de Facebook vinculada a tu cuenta de Instagram profesional.",
@@ -591,7 +594,7 @@ export default function Canales() {
             label: "Messenger",
             accion: "msj",
             Icon: MessengerIcon,
-            color: COLOR_DE_RED.messenger,
+            fondo: FONDO_DE_RED.messenger,
             canal: msgrCanal,
             desc: "Atiende los mensajes de tu página de Facebook desde la misma bandeja.",
             requisito: "Necesitas ser administrador de la página.",

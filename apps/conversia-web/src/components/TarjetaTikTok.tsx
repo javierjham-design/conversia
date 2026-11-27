@@ -20,7 +20,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { COLOR_DE_RED, TikTokIcon } from "./brand-icons";
+import { FONDO_DE_RED, TikTokIcon } from "./brand-icons";
 
 type EstadoTikTok = {
   status: string;
@@ -122,7 +122,7 @@ export function TarjetaTikTok() {
     <div data-copilot="conectar-tiktok" className="card" style={{ padding: 18, marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <span
-          style={{ width: 40, height: 40, borderRadius: 12, background: COLOR_DE_RED.tiktok, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}
+          style={{ width: 40, height: 40, borderRadius: 12, background: FONDO_DE_RED.tiktok, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}
         >
           <TikTokIcon size={21} />
         </span>

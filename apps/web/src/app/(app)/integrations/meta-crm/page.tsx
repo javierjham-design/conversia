@@ -374,14 +374,14 @@ function MessagingTab({ data, onConnect, onChanged }: { data: CrmStatus; onConne
     {
       type: "INSTAGRAM",
       label: "Instagram",
-      icon: <InstagramIcon size={20} />,
-      chipClass: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white",
+      icon: <InstagramIcon size={20} mono />,
+      chipClass: "bg-gradient-to-tr from-[#FFD600] via-[#FF0069] to-[#7638FA] text-white",
     },
     {
       type: "MESSENGER",
       label: "Messenger",
-      icon: <MessengerIcon size={20} />,
-      chipClass: "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white",
+      icon: <MessengerIcon size={20} mono />,
+      chipClass: "bg-gradient-to-br from-[#0099FF] via-[#A033FF] to-[#FF7061] text-white",
     },
   ];
 

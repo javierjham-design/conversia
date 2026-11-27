@@ -478,7 +478,7 @@ export default function Conversaciones() {
                               logo repetido es ruido. Sin esto, «todas juntas» es una lista
                               donde no se sabe a quién se le está hablando. */}
                           {redes.length > 1 && c.channelConnectionId && redPorConexion.get(c.channelConnectionId) ? (
-                            <IconoDeRed clave={redPorConexion.get(c.channelConnectionId)!.clave} size={12} style={{ color: redPorConexion.get(c.channelConnectionId)!.color, flexShrink: 0 }} />
+                            <IconoDeRed clave={redPorConexion.get(c.channelConnectionId)!.clave} size={12} style={{ flexShrink: 0 }} />
                           ) : null}
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayName(c.contact)}</span>
                         </b>

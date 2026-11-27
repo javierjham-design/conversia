@@ -331,7 +331,7 @@ export default function ChannelsPage() {
       key: "whatsapp",
       label: "WhatsApp",
       desc: "Meta Cloud API",
-      icon: <WhatsAppIcon size={20} />,
+      icon: <WhatsAppIcon size={20} mono />,
       chip: "bg-[#25D366] text-white",
       connected: hasActive("WHATSAPP_CLOUD"),
       count: countOf("WHATSAPP_CLOUD"),
@@ -341,8 +341,8 @@ export default function ChannelsPage() {
       key: "instagram",
       label: "Instagram",
       desc: "DMs de tu cuenta profesional",
-      icon: <InstagramIcon size={20} />,
-      chip: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white",
+      icon: <InstagramIcon size={20} mono />,
+      chip: "bg-gradient-to-tr from-[#FFD600] via-[#FF0069] to-[#7638FA] text-white",
       connected: hasActive("INSTAGRAM"),
       count: countOf("INSTAGRAM"),
       action: { label: hasActive("INSTAGRAM") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
@@ -351,8 +351,8 @@ export default function ChannelsPage() {
       key: "messenger",
       label: "Messenger",
       desc: "Mensajes de tu página de Facebook",
-      icon: <MessengerIcon size={20} />,
-      chip: "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white",
+      icon: <MessengerIcon size={20} mono />,
+      chip: "bg-gradient-to-br from-[#0099FF] via-[#A033FF] to-[#FF7061] text-white",
       connected: hasActive("MESSENGER"),
       count: countOf("MESSENGER"),
       action: { label: hasActive("MESSENGER") ? "Configurar" : "Conectar", href: "/integrations/meta-crm?tab=mensajeria" },
@@ -362,7 +362,7 @@ export default function ChannelsPage() {
       label: "TikTok",
       desc: "Business Messaging",
       icon: <TikTokIcon size={20} />,
-      chip: "bg-black text-white",
+      chip: "bg-[#010101] text-white",
       connected: false,
       count: 0,
       action: null, // próximamente
@@ -510,11 +510,11 @@ export default function ChannelsPage() {
                     <span
                       className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-panel ${
                         c.type === "MESSENGER"
-                          ? "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white"
-                          : "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          ? "bg-gradient-to-br from-[#0099FF] via-[#A033FF] to-[#FF7061] text-white"
+                          : "bg-gradient-to-tr from-[#FFD600] via-[#FF0069] to-[#7638FA] text-white"
                       }`}
                     >
-                      {c.type === "MESSENGER" ? <MessengerIcon size={11} /> : <InstagramIcon size={11} />}
+                      {c.type === "MESSENGER" ? <MessengerIcon size={11} mono /> : <InstagramIcon size={11} mono />}
                     </span>
                   </div>
                 ) : (
@@ -523,18 +523,18 @@ export default function ChannelsPage() {
                     c.type === "WHATSAPP_CLOUD"
                       ? "bg-[#25D366] text-white"
                       : c.type === "MESSENGER"
-                        ? "bg-gradient-to-tr from-[#00B2FF] to-[#006AFF] text-white"
+                        ? "bg-gradient-to-br from-[#0099FF] via-[#A033FF] to-[#FF7061] text-white"
                         : c.type === "INSTAGRAM"
-                          ? "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          ? "bg-gradient-to-tr from-[#FFD600] via-[#FF0069] to-[#7638FA] text-white"
                           : "bg-app text-lg"
                   }`}
                 >
                   {c.type === "WHATSAPP_CLOUD" ? (
-                    <WhatsAppIcon size={20} />
+                    <WhatsAppIcon size={20} mono />
                   ) : c.type === "MESSENGER" ? (
-                    <MessengerIcon size={20} />
+                    <MessengerIcon size={20} mono />
                   ) : c.type === "INSTAGRAM" ? (
-                    <InstagramIcon size={20} />
+                    <InstagramIcon size={20} mono />
                   ) : (
                     "🧪"
                   )}
