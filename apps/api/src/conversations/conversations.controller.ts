@@ -19,6 +19,7 @@ import { getEnv, withAppSecretProof } from "@conversia/config";
 import { CACHE_DE_MEDIA, LIMITES_BYTES, descargarMediaDeMeta } from "./media-proxy";
 import { derivarMedia } from "./message-media";
 import { guardarMedio, leerGuardado, type KindDeMedio } from "./media-store";
+import { REDES_BANDEJA, idsDeLaRed } from "./canales-filtro";
 import { PrismaService } from "../prisma.service";
 import { QueueService } from "../queues";
 import { RealtimeService } from "../common/realtime.service";
@@ -92,6 +93,12 @@ const sendMessageSchema = z.object({
 export interface InboxViewDefinition {
   status?: "open" | "pending" | "closed" | "all";
   channelId?: string;
+  /**
+   * RED entera (whatsapp/instagram/messenger/…), no una conexión. Un negocio con dos
+   * números de WhatsApp quiere «todo WhatsApp», que `channelId` no sabe expresar.
+   * Los ids se resuelven afuera (ver `idsDeLaRed`), porque hacen falta de la base.
+   */
+  channelType?: string;
   assigned?: "me" | "unassigned" | string; // userId concreto
   ai?: "on" | "off";
   stageCode?: string; // etapa del ciclo de vida (leads)
@@ -99,8 +106,18 @@ export interface InboxViewDefinition {
   hasAd?: boolean; // conversaciones nacidas de anuncio (CTWA)
 }
 
-/** where de Prisma para conversaciones según una definición de bandeja (puro; testeado). */
-export function buildViewWhere(def: InboxViewDefinition, meUserId: string, tagContactIds?: string[]): Record<string, unknown> {
+/**
+ * where de Prisma para conversaciones según una definición de bandeja (puro; testeado).
+ *
+ * `idsDeLaRedDeLaVista` son las conexiones que corresponden a `def.channelType`, ya
+ * resueltas por el llamador (requieren la base; esta función no la toca).
+ */
+export function buildViewWhere(
+  def: InboxViewDefinition,
+  meUserId: string,
+  tagContactIds?: string[],
+  idsDeLaRedDeLaVista?: string[],
+): Record<string, unknown> {
   const contactAnd: Record<string, unknown>[] = [];
   if (def.hasAd === true) contactAnd.push({ OR: [{ ctwaClid: { not: null } }, { adId: { not: null } }] });
   if (def.hasAd === false) contactAnd.push({ ctwaClid: null, adId: null });
@@ -109,9 +126,19 @@ export function buildViewWhere(def: InboxViewDefinition, meUserId: string, tagCo
   if (def.stageCode) contactAnd.push({ leads: { some: { status: { code: def.stageCode } } } });
   if (def.tags?.length && tagContactIds) contactAnd.push({ id: { in: tagContactIds } });
 
+  // El canal puede venir por conexión CONCRETA (`channelId`) y/o por RED (`channelType`).
+  // Las dos caen sobre el MISMO campo, así que van a un AND: en un spread ganaría la última
+  // y la otra desaparecería sin dejar rastro.
+  const canalAnd: Record<string, unknown>[] = [];
+  if (def.channelId) canalAnd.push({ channelConnectionId: def.channelId });
+  // Si la vista pide una red y nadie resolvió sus ids, es un olvido del llamador: se filtra
+  // por lista VACÍA —cero resultados, que se ven— en vez de borrar el filtro y devolver las
+  // otras redes como si la vista no dijera nada.
+  if (def.channelType) canalAnd.push({ channelConnectionId: { in: idsDeLaRedDeLaVista ?? [] } });
+
   return {
     ...(def.status && def.status !== "all" ? { status: def.status.toUpperCase() } : {}),
-    ...(def.channelId ? { channelConnectionId: def.channelId } : {}),
+    ...(canalAnd.length ? { AND: canalAnd } : {}),
     ...(def.ai === "on" ? { aiEnabled: true } : def.ai === "off" ? { aiEnabled: false } : {}),
     ...(def.assigned === "me"
       ? { assignedUserId: meUserId }
@@ -147,6 +174,8 @@ export class ConversationsController {
     @Query("stage") stage?: string,
     @Query("unanswered") unanswered?: string,
     @Query("blocked") blocked?: string,
+    /** RED (whatsapp/instagram/messenger/…). Vacío = todas juntas. */
+    @Query("channel") channel?: string,
     @Query("view") viewId?: string,
     @Query("order") order?: string,
     @Query("cursor") cursor?: string,
@@ -169,8 +198,31 @@ export class ConversationsController {
         tagContactIds = [...new Set(asg.map((a) => a.entityId))];
       }
 
+      // Separar la bandeja por RED (WhatsApp / Instagram / …). Las conexiones del tenant son
+      // un puñado, y solo se piden si alguien está filtrando por red.
+      const conexiones =
+        channel || viewDef.channelType ? await tx.channelConnection.findMany({ select: { id: true, type: true } }) : [];
+      let idsRed: string[] | undefined;
+      if (channel) {
+        const ids = idsDeLaRed(channel, conexiones);
+        // Clave desconocida = 400. Ignorarla devolvería TODAS las conversaciones a quien
+        // pidió una sola red: el peor resultado posible, porque parece que funcionó.
+        if (ids === null) throw new BadRequestException(`Canal no reconocido. Válidos: ${REDES_BANDEJA.map((r) => r.clave).join(", ")}`);
+        idsRed = ids;
+      }
+      const viewWhere = buildViewWhere(
+        viewDef,
+        ctx.userId,
+        tagContactIds,
+        viewDef.channelType ? (idsDeLaRed(viewDef.channelType, conexiones) ?? []) : undefined,
+      );
+      // El AND se arrastra y se suma: la vista guardada puede traer el suyo y el filtro de
+      // red agrega otra condición sobre el mismo campo.
+      const and: Record<string, unknown>[] = Array.isArray(viewWhere.AND) ? [...(viewWhere.AND as Record<string, unknown>[])] : [];
+      if (idsRed !== undefined) and.push({ channelConnectionId: { in: idsRed } });
+
       const where: Record<string, unknown> = {
-        ...buildViewWhere(viewDef, ctx.userId, tagContactIds),
+        ...viewWhere,
         ...(status && status !== "all" && !viewDef.status ? { status: status.toUpperCase() as any } : {}),
         ...(ai === "on" ? { aiEnabled: true } : ai === "off" ? { aiEnabled: false } : {}),
         ...(assigned === "me"
@@ -198,6 +250,7 @@ export class ConversationsController {
               },
             }
           : {}),
+        ...(and.length ? { AND: and } : {}),
       };
 
       const orderBy =

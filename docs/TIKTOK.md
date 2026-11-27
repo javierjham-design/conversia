@@ -13,10 +13,18 @@ clic, pero la venta ocurre en la conversación y **no la ve**. Entonces optimiza
 conoce: reparte el presupuesto hacia los videos que generan muchos clics, que no son los mismos
 que generan clientes. Devolverle la conversión es lo que le permite aprender.
 
-**Cómo se usa.** Integraciones → **TikTok** → pegar el ID del origen de eventos y el Access
-Token (los dos salen de *TikTok Events Manager → tu pixel o conjunto de eventos → Configurar API
-de eventos*) → **Probar conexión**. Después, en cualquier flujo, el paso **«Enviar evento
-TikTok»**.
+**Cómo se usa.** Hay DOS puertas, según la marca:
+
+- **TuBot**: Integraciones → **TikTok**.
+- **Conversia**: **Canales** → tarjeta **TikTok** (27-nov-2026). Conversia no tiene centro de
+  Integraciones, y el dueño busca TikTok donde están sus otras redes. La tarjeta separa a la
+  vista lo que funciona hoy (devolverle las ventas a los anuncios) de lo que depende de un
+  permiso de TikTok (los DM), para que nadie entienda «TikTok conectado» como «ya me
+  contestan los mensajes».
+
+En las dos: pegar el ID del origen de eventos y el Access Token (los dos salen de *TikTok
+Events Manager → tu pixel o conjunto de eventos → Configurar API de eventos*) → **Probar
+conexión**. Después, en cualquier flujo, el paso **«Enviar evento TikTok»**.
 
 **Contrato** (`apps/worker/src/tiktok.ts`):
 
@@ -104,6 +112,14 @@ Un negocio que vende por TikTok no necesita los DM para operar con el bot: el ca
 disparador **Enlace / Código QR** (`link_scan`) genera un `wa.me` con un mensaje predefinido que
 lleva un código único, así que se puede tener un enlace por campaña y saber por cuál entró cada
 persona. Con el paso «Evento TikTok» al final del flujo, el círculo se cierra.
+
+**Convi lo sabe** (27-nov-2026): su herramienta `estadoCanales` devuelve TikTok en un bloque
+**aparte** de los canales de mensajería, con los DM marcados como no disponibles y sin fecha
+prometida. Guardianes en `apps/api/test/convi-canales-redes.spec.ts`: la mentira cómoda sería
+decir «TikTok conectado» y que el dueño entienda que ya le contestan los mensajes.
+
+**La bandeja ya separa por red** (ver `docs/OMNICHANNEL_CHANNEL_CONFIG.md`): cuando exista el
+canal de DM, TikTok aparece como una pestaña más sin tocar esa pantalla.
 
 ## 4. Fuera de alcance, anotado para no perderlo
 

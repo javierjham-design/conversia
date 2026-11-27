@@ -1,9 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Camera, Check, CheckCircle2, HelpCircle, Loader2, MessageCircle, MessageSquare, QrCode, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CheckCircle2, HelpCircle, Loader2, QrCode, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { EncabezadoSeccion } from "@/components/EncabezadoSeccion";
 import { ReporteDeCanal } from "@/components/ReporteDeCanal";
+import { COLOR_DE_RED, InstagramIcon, MessengerIcon, TikTokIcon, WhatsAppIcon } from "@/components/brand-icons";
+import { TarjetaTikTok } from "@/components/TarjetaTikTok";
 import { api } from "@/lib/api";
 import { openAssistant } from "@/lib/assistant";
 
@@ -160,6 +162,57 @@ export default function Canales() {
     } catch (e) {
       setErrorPagina((e as Error).message);
     }
+  }
+
+  /**
+   * La tarjeta de una red (Instagram / Messenger): el reporte completo si ya está
+   * conectada, o la invitación a conectarla si no. Cada red la invoca por separado para
+   * que su `data-copilot` quede ESCRITO en el código y Convi pueda señalarla.
+   */
+  function tarjetaDeRed({
+    label,
+    accion,
+    Icon,
+    color,
+    canal,
+    desc,
+    requisito,
+  }: {
+    label: "Instagram" | "Messenger";
+    accion: string;
+    Icon: (p: { size?: number; style?: React.CSSProperties }) => React.ReactElement;
+    color: string;
+    canal: Channel | null | undefined;
+    desc: string;
+    requisito: string;
+  }) {
+    if (canal) {
+      return (
+        <ReporteDeCanal
+          channelId={canal.id}
+          titulo={label}
+          icono={<Icon size={22} style={{ color }} />}
+          onCambio={() => void load()}
+          onDesconectar={() => void desconectarCanal(canal.id)}
+        />
+      );
+    }
+    return (
+      <div className="card" style={{ padding: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ width: 40, height: 40, borderRadius: 12, background: color, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <Icon size={21} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{label}</p>
+          <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5, lineHeight: 1.45 }}>
+            {desc} {requisito}
+          </p>
+        </div>
+        <button onClick={() => void conectarRed(label)} data-accion={`conectar-${accion}`} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "7px 13px", whiteSpace: "nowrap" }}>
+          Conectar {label}
+        </button>
+      </div>
+    );
   }
 
   useEffect(() => {
@@ -390,7 +443,7 @@ export default function Canales() {
         ) : (
           <div className="card" style={{ padding: 20, marginBottom: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 44, height: 44, borderRadius: 13, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><MessageCircle size={22} /></span>
+              <span style={{ width: 44, height: 44, borderRadius: 13, background: COLOR_DE_RED.whatsapp, color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}><WhatsAppIcon size={23} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: 16 }}>WhatsApp</p>
                 <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 13 }}>Tu asistente atiende por tu número de WhatsApp Business.</p>
@@ -405,7 +458,7 @@ export default function Canales() {
                     coexistencia automáticamente (sin selector de "cuenta existente"). */}
                 <div data-copilot="conectar-whatsapp" style={{ padding: 15, borderRadius: 13, border: "1px solid var(--acc)", background: "var(--acc-dim)" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <MessageCircle size={17} style={{ color: "var(--acc-deep)" }} />
+                    <WhatsAppIcon size={17} style={{ color: COLOR_DE_RED.whatsapp }} />
                     <span style={{ fontWeight: 600, fontSize: 14.5 }}>Conecta tu WhatsApp</span>
                     <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--acc-deep)", color: "#fff" }}>Recomendado</span>
                   </div>
@@ -413,7 +466,7 @@ export default function Canales() {
                     Ingresa tu número en la ventana de Meta. Si ya lo usas en la app de <strong>WhatsApp Business</strong>, lo conectamos tal cual: sigues respondiendo desde tu teléfono con tus chats de siempre y tu asistente atiende en paralelo. <strong>No necesitas página web ni cuenta de Facebook.</strong>
                   </p>
                   <button onClick={() => connect("coexistence")} disabled={!canConnect} className="btn-accent" style={{ border: "none", cursor: canConnect ? "pointer" : "not-allowed", fontSize: 14, padding: "10px 18px", display: "inline-flex", alignItems: "center", gap: 8, opacity: canConnect ? 1 : 0.6 }}>
-                    <MessageCircle size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
+                    <WhatsAppIcon size={16} /> Conectar mi WhatsApp <ArrowRight size={15} />
                   </button>
                 </div>
 
@@ -519,34 +572,37 @@ export default function Canales() {
           </div>
         ) : null}
 
-        {([
-          { key: "ig", label: "Instagram" as const, Icon: Camera, canal: igCanal, desc: "Responde los DM de tu Instagram con el mismo asistente.", requisito: "Necesitas una página de Facebook vinculada a tu cuenta de Instagram profesional." },
-          { key: "msj", label: "Messenger" as const, Icon: MessageSquare, canal: msgrCanal, desc: "Atiende los mensajes de tu página de Facebook desde la misma bandeja.", requisito: "Necesitas ser administrador de la página." },
-        ]).map(({ key, label, Icon, canal, desc, requisito }) =>
-          canal ? (
-            <ReporteDeCanal
-              key={key}
-              channelId={canal.id}
-              titulo={label}
-              icono={<Icon size={22} />}
-              onCambio={() => void load()}
-              onDesconectar={() => void desconectarCanal(canal.id)}
-            />
-          ) : (
-            <div key={key} className="card" style={{ padding: 18, marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ width: 40, height: 40, borderRadius: 12, background: "var(--acc-dim)", color: "var(--acc-deep)", display: "grid", placeItems: "center", flexShrink: 0 }}><Icon size={20} /></span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: 600, fontSize: 15 }}>{label}</p>
-                <p className="text-dim" style={{ margin: "2px 0 0", fontSize: 12.5, lineHeight: 1.45 }}>
-                  {desc} {requisito}
-                </p>
-              </div>
-              <button onClick={() => void conectarRed(label)} data-accion={`conectar-${key}`} className="btn-accent" style={{ border: "none", cursor: "pointer", fontSize: 12.5, padding: "7px 13px", whiteSpace: "nowrap" }}>
-                Conectar {label}
-              </button>
-            </div>
-          ),
-        )}
+        {/* Instagram y Messenger. Los `data-copilot` van ESCRITOS tal cual, no calculados:
+            el guardián del copiloto los busca como texto en el código y un `{variable}` lo
+            deja ciego — Convi diría «mira acá» y no se resaltaría nada. */}
+        <div data-copilot="conectar-instagram">
+          {tarjetaDeRed({
+            label: "Instagram",
+            accion: "ig",
+            Icon: InstagramIcon,
+            color: COLOR_DE_RED.instagram,
+            canal: igCanal,
+            desc: "Responde los DM de tu Instagram con el mismo asistente.",
+            requisito: "Necesitas una página de Facebook vinculada a tu cuenta de Instagram profesional.",
+          })}
+        </div>
+        <div data-copilot="conectar-messenger">
+          {tarjetaDeRed({
+            label: "Messenger",
+            accion: "msj",
+            Icon: MessengerIcon,
+            color: COLOR_DE_RED.messenger,
+            canal: msgrCanal,
+            desc: "Atiende los mensajes de tu página de Facebook desde la misma bandeja.",
+            requisito: "Necesitas ser administrador de la página.",
+          })}
+        </div>
+
+        {/* ---------- TikTok ----------
+            Va acá, con las otras redes, porque es donde el dueño lo busca. La tarjeta
+            separa lo que funciona hoy (devolverle las ventas a sus anuncios) de lo que
+            depende de un permiso de TikTok (los DM). */}
+        <TarjetaTikTok />
 
         {/* ---------- Checklist: conectar número ----------
             A2.d — tres estados, no dos. La clave `whatsapp` del checklist NO cambia (la usan
